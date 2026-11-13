@@ -2,15 +2,15 @@ use super::*;
 
 /// Position-weighted value from typed fZ2 labels.
 fn fz2_typed_fill(
-    sectors: &symtn::typed::BlockFusionTrees<symtn::sector::Z2Irrep>,
+    sectors: &symtn::typed::BlockFusionTrees<symtn::sector::FermionParityIrrep>,
     indices: &[usize],
 ) -> f64 {
-    let mut value = f64::from(sectors.coupled().parity()) * 1000.0;
+    let mut value = f64::from(sectors.coupled().is_odd() as u8) * 1000.0;
     for (position, label) in sectors.codomain_uncoupled().iter().enumerate() {
-        value += f64::from(label.parity()) * 100.0 * (position + 1) as f64;
+        value += f64::from(label.is_odd() as u8) * 100.0 * (position + 1) as f64;
     }
     for (position, label) in sectors.domain_uncoupled().iter().enumerate() {
-        value += f64::from(label.parity()) * 10.0 * (position + 1) as f64;
+        value += f64::from(label.is_odd() as u8) * 10.0 * (position + 1) as f64;
     }
     value
         + indices
@@ -29,16 +29,16 @@ fn fz2_typed_fill(
 /// each (side, duality) combination off one fixture.
 fn fz2_index(runtime: &Runtime) -> TensorMap<symtn::sector::FermionParityFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(symtn::sector::FermionParityFusionRule);
+    let provider = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let leg = |pairs: &[(u8, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&provider),
             pairs.iter().map(|&(parity, degeneracy)| {
                 (
                     if parity == 0 {
-                        symtn::sector::Z2Irrep::EVEN
+                        symtn::sector::FermionParityIrrep::EVEN
                     } else {
-                        symtn::sector::Z2Irrep::ODD
+                        symtn::sector::FermionParityIrrep::ODD
                     },
                     degeneracy,
                 )
@@ -55,17 +55,17 @@ fn fz2_index(runtime: &Runtime) -> TensorMap<symtn::sector::FermionParityFusionR
 /// The typed flip-doctest fixture: fZ2 `V <- V`, even block 2.0, odd block 3.0.
 fn typed_fz2_doctest(runtime: &Runtime) -> TensorMap<symtn::sector::FermionParityFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(symtn::sector::FermionParityFusionRule);
+    let provider = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 1),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .unwrap();
     TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |sectors, _| {
-        if sectors.coupled() == &symtn::sector::Z2Irrep::EVEN {
+        if sectors.coupled() == &symtn::sector::FermionParityIrrep::EVEN {
             2.0
         } else {
             3.0
@@ -79,18 +79,18 @@ fn typed_fz2_two_block(
     dual: bool,
 ) -> TensorMap<symtn::sector::FermionParityFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(symtn::sector::FermionParityFusionRule);
+    let provider = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let leg = GradedSpace::try_new(
         provider,
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 1),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .unwrap();
     let leg = if dual { leg.try_dual().unwrap() } else { leg };
     TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |sectors, _| {
-        if sectors.coupled() == &symtn::sector::Z2Irrep::EVEN {
+        if sectors.coupled() == &symtn::sector::FermionParityIrrep::EVEN {
             2.0
         } else {
             3.0
@@ -757,7 +757,7 @@ fn cu1_typed_rank_three_permutation_pins_the_gauge_contract_and_recoupling_value
     // What: CU(1) does not certify a trivial associator gauge, and this
     // rank-three charged fixture independently pins its recoupled payload.
     let runtime = runtime();
-    let rule = Arc::new(CU1FusionRule);
+    let rule = Arc::new(CU1FusionRule::new());
     assert!(!rule.has_trivial_associator_gauge());
     let q = CU1Irrep::from_twice_charge(1);
     let leg = GradedSpace::try_new(Arc::clone(&rule), [(q, 1)]).unwrap();

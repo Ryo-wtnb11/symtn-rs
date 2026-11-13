@@ -50,7 +50,7 @@ fn checked_generic_polar_covers_scalar_maps() {
 fn polar_rejects_wrong_rectangular_direction_before_dense_execution() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: invalid left/right directions are rejected before any sector SVD starts.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     for (operation, rows, cols) in [("left_polar", 2, 3), ("right_polar", 3, 2)] {
         let tensor = rectangular_svd_tensor(rows, cols);
         let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
@@ -58,14 +58,14 @@ fn polar_rejects_wrong_rectangular_direction_before_dense_execution() {
             left_polar(
                 engine,
                 &mut dense,
-                &bound_tensor_ref!(Arc::new(rule), &tensor),
+                &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
             )
             .map(drop)
         } else {
             right_polar(
                 engine,
                 &mut dense,
-                &bound_tensor_ref!(Arc::new(rule), &tensor),
+                &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
             )
             .map(drop)
         };
@@ -264,12 +264,12 @@ fn polar_second_sector_failure_leaves_the_source_unchanged() {
 fn polar_valid_direct_and_fallback_layouts_agree() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: valid fallback matricizations preserve the direct polar factors in both directions.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     for (operation, source_rows, source_cols) in [("left_polar", 2, 3), ("right_polar", 3, 2)] {
         let source = rectangular_svd_tensor(source_rows, source_cols);
         let transposed = transposed_rectangular_tensor(&source, source_rows, source_cols);
-        let source_bound = bound_tensor(Arc::new(rule), &source);
-        let direct_bound = bound_tensor(Arc::new(rule), &transposed);
+        let source_bound = bound_tensor(Arc::new(rule.clone()), &source);
+        let direct_bound = bound_tensor(Arc::new(rule.clone()), &transposed);
         let fallback_space = source_bound.space().adjoint_view().unwrap();
         let fallback_input =
             BoundDynamicTensorRef::try_new(&fallback_space, source_bound.data()).unwrap();
@@ -612,9 +612,9 @@ fn polar_factors_are_isometric_and_hermitian_positive_on_both_sides() {
 fn polar_validates_every_sector_before_direct_or_fallback_svd_execution() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a later invalid sector prevents SVD of an earlier valid sector on both layouts.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let direct = mixed_rectangular_tensor((4, 2), (1, 3));
-    let direct_bound = bound_tensor(Arc::new(rule), &direct);
+    let direct_bound = bound_tensor(Arc::new(rule.clone()), &direct);
     assert!(
         crate::factorize::compact_factor_plan_for_test(direct_bound.space())
             .unwrap()

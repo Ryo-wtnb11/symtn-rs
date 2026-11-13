@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 
 use symtn_sectors::{
     product_sector, BraidingStyleKind, CU1FusionRule, CU1Irrep, CheckedFusionAlgebra,
-    FermionParityFusionRule, FusionAlgebraError, FusionRule, FusionStyleKind, Fz2SectorLayout,
-    PackedProductCodec, ProductFusionRule, ProductSector, ProductSectorCodecError, RuleIdentity,
-    SU2FusionRule, SU2Irrep, SectorCodec, SectorId, SectorVec, TableRule, TableSector,
-    U1FusionRule, U1Irrep, U1SectorLayout, Z2FusionRule, Z2Irrep, CU1_MAX_TWICE_CHARGE,
+    FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError, FusionRule, FusionStyleKind,
+    Fz2SectorLayout, PackedProductCodec, ProductFusionRule, ProductSector, ProductSectorCodecError,
+    RuleIdentity, SU2FusionRule, SU2Irrep, SectorCodec, SectorId, SectorVec, TableRule,
+    TableSector, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule, ZNIrrep,
     SU2_MAX_DOUBLED_SPIN,
 };
 
@@ -13,12 +13,12 @@ use symtn_sectors::{
 fn product_sector_is_usable_as_a_btree_key() {
     // What: the label order is the left component first, the right component
     // only as a tie-break, and equal labels deduplicate in ordered containers.
-    let labels: BTreeSet<ProductSector<U1Irrep, Z2Irrep>> = [
-        product_sector(U1Irrep::new(1), Z2Irrep::ODD),
-        product_sector(U1Irrep::new(0), Z2Irrep::ODD),
-        product_sector(U1Irrep::new(0), Z2Irrep::EVEN),
-        product_sector(U1Irrep::new(1), Z2Irrep::EVEN),
-        product_sector(U1Irrep::new(0), Z2Irrep::EVEN),
+    let labels: BTreeSet<ProductSector<U1Irrep, FermionParityIrrep>> = [
+        product_sector(U1Irrep::new(1), FermionParityIrrep::ODD),
+        product_sector(U1Irrep::new(0), FermionParityIrrep::ODD),
+        product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
+        product_sector(U1Irrep::new(1), FermionParityIrrep::EVEN),
+        product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
     ]
     .into_iter()
     .collect();
@@ -26,10 +26,10 @@ fn product_sector_is_usable_as_a_btree_key() {
     assert_eq!(
         labels.into_iter().collect::<Vec<_>>(),
         vec![
-            product_sector(U1Irrep::new(0), Z2Irrep::EVEN),
-            product_sector(U1Irrep::new(0), Z2Irrep::ODD),
-            product_sector(U1Irrep::new(1), Z2Irrep::EVEN),
-            product_sector(U1Irrep::new(1), Z2Irrep::ODD),
+            product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(0), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(1), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(1), FermionParityIrrep::ODD),
         ]
     );
 }
@@ -129,8 +129,16 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
         [-2, 3, i32::MIN + 1, i32::MAX - 1].map(U1Irrep::new),
         2,
     );
-    assert_decode_total(&Z2FusionRule, [Z2Irrep::ODD], 2);
-    assert_decode_total(&FermionParityFusionRule, [Z2Irrep::ODD], 2);
+    assert_decode_total(
+        &ZNFusionRule::new(2).unwrap(),
+        [ZNIrrep::new(1, 2).unwrap()],
+        2,
+    );
+    assert_decode_total(
+        &FermionParityFusionRule::new(),
+        [FermionParityIrrep::ODD],
+        2,
+    );
     assert_decode_total(&TableRule::fibonacci(), [TableSector::new(2)], 2);
     assert_decode_total(&TableRule::ising(), [TableSector::new(3)], 2);
     assert_decode_total(
@@ -139,22 +147,22 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
         2,
     );
     assert_decode_total(
-        &CU1FusionRule,
+        &CU1FusionRule::new(),
         [
             CU1Irrep::VACUUM,
             CU1Irrep::PSEUDOSCALAR,
             CU1Irrep::from_twice_charge(1),
-            CU1Irrep::from_twice_charge(CU1_MAX_TWICE_CHARGE),
+            CU1Irrep::from_twice_charge(u32::MAX),
         ],
         2,
     );
     assert_decode_total(
-        &U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        &U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap(),
         [
-            product_sector(U1Irrep::new(1), Z2Irrep::ODD),
-            product_sector(U1Irrep::new(-2), Z2Irrep::EVEN),
-            product_sector(U1Irrep::new(i32::MAX - 1), Z2Irrep::ODD),
-            product_sector(U1Irrep::new(i32::MIN + 1), Z2Irrep::EVEN),
+            product_sector(U1Irrep::new(1), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(-2), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(i32::MAX - 1), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(i32::MIN + 1), FermionParityIrrep::EVEN),
         ],
         2,
     );
@@ -166,19 +174,19 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
 
 #[test]
 fn cu1_codec_and_checked_overflow_preserve_the_tensor_kit_boundary() {
-    let rule = CU1FusionRule;
+    let rule = CU1FusionRule::new();
     assert_round_trip(
         &rule,
         [
             CU1Irrep::VACUUM,
             CU1Irrep::PSEUDOSCALAR,
             CU1Irrep::from_twice_charge(1),
-            CU1Irrep::from_twice_charge(CU1_MAX_TWICE_CHARGE),
+            CU1Irrep::from_twice_charge(u32::MAX),
         ],
     );
-    assert!(CU1Irrep::try_from_twice_charge(0).is_none());
-    assert!(CU1Irrep::try_from_twice_charge(u32::MAX).is_none());
-    let edge: SectorId = CU1Irrep::from_twice_charge(CU1_MAX_TWICE_CHARGE).into();
+    let edge = rule
+        .encode_sector(&CU1Irrep::from_twice_charge(u32::MAX))
+        .unwrap();
     assert_eq!(
         rule.try_fusion_channels(edge, edge),
         Err(FusionAlgebraError::FusionNotRepresentable {
@@ -188,28 +196,27 @@ fn cu1_codec_and_checked_overflow_preserve_the_tensor_kit_boundary() {
     );
     #[cfg(target_pointer_width = "64")]
     assert!(matches!(
-        rule.decode_sector(SectorId::new(u32::MAX as usize + 1)),
+        rule.decode_sector(SectorId::new(u32::MAX as usize + 2)),
         Err(FusionAlgebraError::InvalidSector { .. })
     ));
 }
 
 #[cfg(target_pointer_width = "64")]
 #[test]
-fn cu1_checked_validation_preserves_the_shared_error_precedence() {
-    // What: checked fusion validates left then right; checked nsymbol first
-    // validates the requested coupled sector, then left then right. This
-    // mirrors the SU(2) checked-provider contract and makes diagnostics
+fn cu1_checked_validation_follows_argument_order() {
+    // What: checked fusion and checked nsymbol validate their inputs in
+    // argument order, the enumerated codec's order, so diagnostics are
     // deterministic when more than one input is invalid.
-    let rule = CU1FusionRule;
-    let invalid = SectorId::new(u32::MAX as usize + 1);
-    let later_invalid = SectorId::new(u32::MAX as usize + 2);
-    let op: SectorId = CU1Irrep::VACUUM.into();
+    let rule = CU1FusionRule::new();
+    let invalid = SectorId::new(u32::MAX as usize + 2);
+    let later_invalid = SectorId::new(u32::MAX as usize + 3);
+    let op = rule.vacuum();
     assert_eq!(
         rule.try_fusion_channels(invalid, later_invalid),
         Err(FusionAlgebraError::InvalidSector { sector: invalid })
     );
     assert_eq!(
-        rule.try_nsymbol(invalid, op, later_invalid),
+        rule.try_nsymbol(op, later_invalid, invalid),
         Err(FusionAlgebraError::InvalidSector {
             sector: later_invalid
         })
@@ -244,18 +251,24 @@ fn u1_codec_rejects_ids_outside_the_zigzag_domain() {
 
 #[test]
 fn parity_codecs_round_trip_and_reject_non_parity_ids() {
-    // What: both Z2-labelled rules share the parity label domain and both
-    // reject an id above it.
-    assert_round_trip(&Z2FusionRule, [Z2Irrep::EVEN, Z2Irrep::ODD]);
-    assert_round_trip(&FermionParityFusionRule, [Z2Irrep::EVEN, Z2Irrep::ODD]);
+    // What: Z_2 and fermion parity both number the two parities 0 and 1 and
+    // both reject an id above them.
+    assert_round_trip(
+        &ZNFusionRule::new(2).unwrap(),
+        [0, 1].map(|p| ZNIrrep::new(p, 2).unwrap()),
+    );
+    assert_round_trip(
+        &FermionParityFusionRule::new(),
+        [FermionParityIrrep::EVEN, FermionParityIrrep::ODD],
+    );
 
     let sector = SectorId::new(2);
     assert_eq!(
-        SectorCodec::decode_sector(&Z2FusionRule, sector),
+        SectorCodec::decode_sector(&ZNFusionRule::new(2).unwrap(), sector),
         Err(FusionAlgebraError::InvalidSector { sector })
     );
     assert_eq!(
-        SectorCodec::decode_sector(&FermionParityFusionRule, sector),
+        SectorCodec::decode_sector(&FermionParityFusionRule::new(), sector),
         Err(FusionAlgebraError::InvalidSector { sector })
     );
 }
@@ -282,13 +295,13 @@ type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule, U1Fz2C
 fn product_codec_round_trips_component_labels() {
     // What: the product label is decoded back component-wise, so the pair
     // survives the packed id, not just the id itself.
-    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
+    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
     assert_round_trip(
         &rule,
         [
-            product_sector(U1Irrep::new(0), Z2Irrep::EVEN),
-            product_sector(U1Irrep::new(-5), Z2Irrep::ODD),
-            product_sector(U1Irrep::new(i32::MAX), Z2Irrep::ODD),
+            product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(-5), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(i32::MAX), FermionParityIrrep::ODD),
         ],
     );
 }
@@ -300,7 +313,7 @@ fn product_codec_round_trips_component_labels() {
 fn product_codec_reports_the_packing_failure_it_hit() {
     // What: the packed layout's own diagnosis survives to the caller instead
     // of being flattened into a generic label rejection.
-    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
+    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
     let sector = SectorId::new(1usize << 33);
     assert_eq!(
         SectorCodec::decode_sector(&rule, sector),

@@ -504,16 +504,16 @@ fn typed_block_fill_preserves_tree_and_storage_order() {
     // that drove its fill closure, without borrowing the retired facade as an
     // oracle.
     let runtime = runtime();
-    let provider = Arc::new(symtn::sector::Z2FusionRule);
+    let provider = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let leg = GradedSpace::try_new(
         provider,
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
-    let typed: TensorMap<symtn::sector::Z2FusionRule, f64> =
+    let typed: TensorMap<symtn::sector::ZNFusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], typed_fill_value)
             .unwrap();
 
@@ -763,14 +763,14 @@ fn typed_scalar_reads_a_complex_full_contraction() {
     let runtime = runtime();
     let complex = |value: f64| Complex64::new(value, 1.0 + value % 5.0);
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
-    let typed: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
+    let typed: TensorMap<symtn::sector::ZNFusionRule, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |sectors, indices| {
             complex(typed_fill_value(sectors, indices))
         })
@@ -807,7 +807,7 @@ fn typed_to_c64_widens_dense_and_compact_values_exactly() {
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
-    let typed_wide: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
+    let typed_wide: TensorMap<symtn::sector::ZNFusionRule, Complex64> =
         typed.convert::<Complex64>(engine).unwrap();
     assert!(typed_wide
         .dense_data()
@@ -816,9 +816,9 @@ fn typed_to_c64_widens_dense_and_compact_values_exactly() {
         .zip(typed.dense_data().unwrap())
         .all(|(&wide, &real)| wide == Complex64::new(real, 0.0)));
 
-    let typed_s: TensorMap<symtn::sector::Z2FusionRule, f64> =
+    let typed_s: TensorMap<symtn::sector::ZNFusionRule, f64> =
         typed.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
-    let typed_s_wide: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
+    let typed_s_wide: TensorMap<symtn::sector::ZNFusionRule, Complex64> =
         typed_s.convert::<Complex64>(engine).unwrap();
     assert!(typed_s_wide
         .materialize(engine)
@@ -841,11 +841,11 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
     let runtime = runtime();
     let complex_typed = z2_complex_tensor(&runtime);
 
-    let real_part: TensorMap<symtn::sector::Z2FusionRule, f64> = complex_typed.re(engine).unwrap();
-    let imag_part: TensorMap<symtn::sector::Z2FusionRule, f64> = complex_typed.im(engine).unwrap();
+    let real_part: TensorMap<symtn::sector::ZNFusionRule, f64> = complex_typed.re(engine).unwrap();
+    let imag_part: TensorMap<symtn::sector::ZNFusionRule, f64> = complex_typed.im(engine).unwrap();
     let operand = Complex64::new(0.0, 1.0);
     let imag_part_c64 = imag_part.convert::<Complex64>(engine).unwrap();
-    let rebuilt: TensorMap<symtn::sector::Z2FusionRule, Complex64> = real_part
+    let rebuilt: TensorMap<symtn::sector::ZNFusionRule, Complex64> = real_part
         .convert::<Complex64>(engine)
         .unwrap()
         .axpby(engine, Complex64::new(1.0, 0.0), &imag_part_c64, operand)
@@ -856,7 +856,7 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
     );
 
     let real_typed = z2_tensor(&runtime);
-    let round_trip: TensorMap<symtn::sector::Z2FusionRule, f64> = real_typed
+    let round_trip: TensorMap<symtn::sector::ZNFusionRule, f64> = real_typed
         .convert::<Complex64>(engine)
         .unwrap()
         .re(engine)
@@ -865,7 +865,7 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
         round_trip.dense_data().unwrap(),
         real_typed.dense_data().unwrap()
     );
-    let vanished: TensorMap<symtn::sector::Z2FusionRule, f64> = real_typed
+    let vanished: TensorMap<symtn::sector::ZNFusionRule, f64> = real_typed
         .convert::<Complex64>(engine)
         .unwrap()
         .im(engine)
@@ -885,15 +885,15 @@ fn typed_re_im_keep_a_compact_spectrum_on_its_bond_space() {
     // materialized payloads.
     let runtime = runtime();
     let complex_typed = z2_complex_tensor(&runtime);
-    let s: TensorMap<symtn::sector::Z2FusionRule, Complex64> =
+    let s: TensorMap<symtn::sector::ZNFusionRule, Complex64> =
         complex_typed.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
 
-    let real_part: TensorMap<symtn::sector::Z2FusionRule, f64> = s.re(engine).unwrap();
-    let imag_part: TensorMap<symtn::sector::Z2FusionRule, f64> = s.im(engine).unwrap();
+    let real_part: TensorMap<symtn::sector::ZNFusionRule, f64> = s.re(engine).unwrap();
+    let imag_part: TensorMap<symtn::sector::ZNFusionRule, f64> = s.im(engine).unwrap();
     assert_same_legs(&real_part.codomain(), &s.codomain());
     let operand = Complex64::new(0.0, 1.0);
     let imag_part_c64 = imag_part.convert::<Complex64>(engine).unwrap();
-    let rebuilt: TensorMap<symtn::sector::Z2FusionRule, Complex64> = real_part
+    let rebuilt: TensorMap<symtn::sector::ZNFusionRule, Complex64> = real_part
         .convert::<Complex64>(engine)
         .unwrap()
         .axpby(engine, Complex64::new(1.0, 0.0), &imag_part_c64, operand)
@@ -913,17 +913,17 @@ fn typed_leg_dims_route_each_axis_to_its_own_leg() {
     // the last codomain axis) still passes them. Three pairwise-distinct
     // dimensions in a 2 <- 1 split make any misrouting visible, per axis.
     let runtime = runtime();
-    let provider = Arc::new(symtn::sector::Z2FusionRule);
+    let provider = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let z2_pairs = |even: usize, odd: usize| {
         [
-            (symtn::sector::Z2Irrep::EVEN, even),
-            (symtn::sector::Z2Irrep::ODD, odd),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), even),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), odd),
         ]
     };
     let a = GradedSpace::try_new(Arc::clone(&provider), z2_pairs(2, 3)).unwrap();
     let b = GradedSpace::try_new(Arc::clone(&provider), z2_pairs(1, 1)).unwrap();
     let c = GradedSpace::try_new(Arc::clone(&provider), z2_pairs(3, 4)).unwrap();
-    let typed: TensorMap<symtn::sector::Z2FusionRule, f64> =
+    let typed: TensorMap<symtn::sector::ZNFusionRule, f64> =
         TensorMap::zeros(engine, &runtime, [&a, &b], [&c]).unwrap();
     assert_eq!(typed.leg_dims().unwrap(), vec![5, 2, 7]);
 }
@@ -959,13 +959,13 @@ fn id_writes_the_nonuniform_fused_diagonal() {
     // from leg to leg — the case where the
     // diagonal offsets inside a coupled-sector block are not all the same.
     let runtime = runtime();
-    let z2 = Arc::new(symtn::sector::Z2FusionRule);
+    let z2 = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let typed_leg = |even, odd| {
         GradedSpace::try_new(
             Arc::clone(&z2),
             [
-                (symtn::sector::Z2Irrep::EVEN, even),
-                (symtn::sector::Z2Irrep::ODD, odd),
+                (symtn::sector::ZNIrrep::new(0, 2).unwrap(), even),
+                (symtn::sector::ZNIrrep::new(1, 2).unwrap(), odd),
             ],
         )
         .unwrap()

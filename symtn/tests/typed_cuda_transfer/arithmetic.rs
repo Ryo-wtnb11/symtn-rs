@@ -1,4 +1,5 @@
 use super::*;
+use symtn::sector::ZNIrrep;
 
 #[test]
 #[ignore = "requires a real CUDA device"]
@@ -350,8 +351,16 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
     );
 
     let zn3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
-    let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 1)]).unwrap();
+    let charge0 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(0, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let charge1 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(1, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let empty: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&charge0], [&charge1], |_, _| f64::NAN)
             .unwrap();

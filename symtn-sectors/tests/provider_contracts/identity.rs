@@ -9,9 +9,6 @@
 //! - Product identity keeps child order, codec and stateful children:
 //!   `tests/rule_identity.rs`.
 
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-
 use symtn_sectors::*;
 
 use super::table_identity;
@@ -19,20 +16,8 @@ use super::table_identity;
 #[test]
 fn stateless_rules_are_identified_by_their_type() {
     assert_eq!(
-        Z2FusionRule.rule_identity(),
-        RuleIdentity::of_type::<Z2FusionRule>()
-    );
-    assert_eq!(
-        FermionParityFusionRule.rule_identity(),
-        RuleIdentity::of_type::<FermionParityFusionRule>()
-    );
-    assert_eq!(
         U1FusionRule.rule_identity(),
         RuleIdentity::of_type::<U1FusionRule>()
-    );
-    assert_eq!(
-        CU1FusionRule.rule_identity(),
-        RuleIdentity::of_type::<CU1FusionRule>()
     );
     assert_eq!(
         SU2FusionRule.rule_identity(),
@@ -41,28 +26,30 @@ fn stateless_rules_are_identified_by_their_type() {
 }
 
 #[test]
-fn zn_identity_is_the_little_endian_modulus_under_its_type() {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    5u32.hash(&mut hasher);
+fn enumerated_rules_are_identified_by_their_category_value() {
+    let z2 = ZNFusionRule::new(2).unwrap();
+    let fz2 = FermionParityFusionRule::new();
+    let cu1 = CU1FusionRule::new();
     assert_eq!(
-        ZNFusionRule::new(5).unwrap().rule_identity(),
-        RuleIdentity::from_canonical_bytes::<ZNFusionRule>(
-            hasher.finish(),
-            Arc::from([5u8, 0, 0, 0].as_slice())
-        )
+        z2.rule_identity(),
+        ZNFusionRule::new(2).unwrap().rule_identity()
     );
+    assert_ne!(
+        z2.rule_identity(),
+        ZNFusionRule::new(3).unwrap().rule_identity()
+    );
+    assert_eq!(
+        fz2.rule_identity(),
+        FermionParityFusionRule::new().rule_identity()
+    );
+    assert_eq!(cu1.rule_identity(), CU1FusionRule::new().rule_identity());
+    // Equal groups under different categories stay distinct.
+    assert_ne!(z2.rule_identity(), fz2.rule_identity());
+    assert_ne!(z2.rule_identity(), U1FusionRule.rule_identity());
 }
 
 #[test]
-fn equal_groups_under_different_rules_stay_distinct() {
-    let z2 = Z2FusionRule.rule_identity();
-    let fz2 = FermionParityFusionRule.rule_identity();
-    let zn2 = ZNFusionRule::new(2).unwrap().rule_identity();
-    assert_ne!(z2, fz2);
-    assert_ne!(z2, zn2);
-    assert_ne!(fz2, zn2);
-    assert_eq!(zn2, ZNFusionRule::new(2).unwrap().rule_identity());
-    assert_ne!(zn2, ZNFusionRule::new(3).unwrap().rule_identity());
+fn table_identities_follow_the_table() {
     assert_ne!(
         TableRule::fibonacci().rule_identity(),
         TableRule::ising().rule_identity()
@@ -95,58 +82,72 @@ fn lie_group_su2_and_compact_su2_are_different_rules() {
 
 #[test]
 fn product_identity_composes_factor_identities_under_the_codec() {
+    let z2 = ZNFusionRule::new(2).unwrap();
     let z2_u1 =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, U1FusionRule).unwrap();
-    // The factor identities are the independent type-tag literals; the
-    // composition itself has no byte form, so this pins the construction
-    // rule (codec tag over ordered children), not a serialized value.
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(z2.clone(), U1FusionRule).unwrap();
+    // The composition itself has no byte form, so this pins the
+    // construction rule (codec tag over ordered children), not a serialized
+    // value.
     assert_eq!(
         z2_u1.rule_identity(),
         RuleIdentity::compose_with_codec::<TensorKitProductCodec>(
-            RuleIdentity::of_type::<Z2FusionRule>(),
+            z2.rule_identity(),
             RuleIdentity::of_type::<U1FusionRule>()
         )
     );
     assert_eq!(z2_u1.typed_rule_identity(), z2_u1.rule_identity());
     assert_eq!(
         z2_u1.rule_identity(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, U1FusionRule)
-            .unwrap()
-            .rule_identity()
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            ZNFusionRule::new(2).unwrap(),
+            U1FusionRule
+        )
+        .unwrap()
+        .rule_identity()
     );
 
     // Factor order.
     assert_ne!(
         z2_u1.rule_identity(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule)
-            .unwrap()
-            .rule_identity()
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            ZNFusionRule::new(2).unwrap()
+        )
+        .unwrap()
+        .rule_identity()
     );
     // Factor rule, not only factor group.
     assert_ne!(
         z2_u1.rule_identity(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap()
-            .rule_identity()
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule
+        )
+        .unwrap()
+        .rule_identity()
     );
     // Codec.
     let packed = ProductFusionRule::<
-        Z2FusionRule,
+        ZNFusionRule,
         U1FusionRule,
         PackedProductCodec<Fz2SectorLayout, U1SectorLayout>,
-    >::try_new(Z2FusionRule, U1FusionRule)
+    >::try_new(ZNFusionRule::new(2).unwrap(), U1FusionRule)
     .unwrap();
     assert_ne!(z2_u1.rule_identity(), packed.rule_identity());
     // Association.
     assert_ne!(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
-            symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, U1FusionRule).unwrap(),
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                ZNFusionRule::new(2).unwrap(),
+                U1FusionRule
+            )
+            .unwrap(),
             SU2FusionRule
         )
         .unwrap()
         .rule_identity(),
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
-            Z2FusionRule,
+            ZNFusionRule::new(2).unwrap(),
             symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap()
         )
         .unwrap()
@@ -156,13 +157,13 @@ fn product_identity_composes_factor_identities_under_the_codec() {
     assert_ne!(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             ZNFusionRule::new(3).unwrap(),
-            Z2FusionRule
+            ZNFusionRule::new(2).unwrap()
         )
         .unwrap()
         .rule_identity(),
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             ZNFusionRule::new(4).unwrap(),
-            Z2FusionRule
+            ZNFusionRule::new(2).unwrap()
         )
         .unwrap()
         .rule_identity()

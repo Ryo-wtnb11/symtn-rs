@@ -11,8 +11,8 @@
 use std::sync::Arc;
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::Engine;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -210,7 +210,7 @@ fn fermion_u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
     let _serial = serial();
     let leg = |sectors: &[(i32, usize)]| {
         let rule = ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
-            FermionParityFusionRule,
+            FermionParityFusionRule::new(),
             U1FusionRule,
         )
         .unwrap();
@@ -218,9 +218,9 @@ fn fermion_u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
             Arc::new(rule),
             sectors.iter().map(|&(q, d)| {
                 let parity = if q.rem_euclid(2) == 0 {
-                    Z2Irrep::EVEN
+                    FermionParityIrrep::EVEN
                 } else {
-                    Z2Irrep::ODD
+                    FermionParityIrrep::ODD
                 };
                 (ProductSector::new(parity, U1Irrep::new(q)), d)
             }),

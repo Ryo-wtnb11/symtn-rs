@@ -85,7 +85,7 @@ fn braided_fusion_tree_key_carries_a_fresh_hash() {
         },
     ];
     let (braided, _) =
-        execute_unique_tree_braid_steps(&FermionParityFusionRule, &tree, steps).unwrap();
+        execute_unique_tree_braid_steps(&FermionParityFusionRule::new(), &tree, steps).unwrap();
     assert_ne!(braided, tree);
     let recomputed = fusion_tree_key_hash(
         braided.uncoupled(),
@@ -186,8 +186,8 @@ fn checked_sector_leg_dual_rejects_a_malformed_id_transactionally() {
 
     #[cfg(target_pointer_width = "64")]
     {
-        type Rule = ProductFusionRule<U1FusionRule, Z2FusionRule, TensorKitProductCodec>;
-        let rule = Rule::try_new(U1FusionRule, Z2FusionRule).unwrap();
+        type Rule = ProductFusionRule<U1FusionRule, ZNFusionRule, TensorKitProductCodec>;
+        let rule = Rule::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap();
         let min = TensorKitProductCodec::encode(excluded_u1_id(), z2_odd());
         let product = SectorLeg::new([(min, 1)], false);
         assert_eq!(

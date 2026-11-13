@@ -1,6 +1,6 @@
 //! `FusionTreeKey` identity hash/eq canary for a multiplicity-free
 //! provider. Vertex labels remain part of exact identity; the benchmark uses
-//! the categorical label one required by `Z2FusionRule`. No timing assertion
+//! the categorical label one required by `ZNFusionRule`. No timing assertion
 //! is used because shared CI runners are too noisy for a pass/fail latency
 //! gate. The gate is this bench compiling and running plus the `size_of`
 //! canary in `src/tests.rs`.
@@ -9,11 +9,11 @@ use std::hash::{Hash, Hasher};
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rustc_hash::FxHasher;
-use symtn_core::{FusionTreeKey, MultiplicityIndex, SectorId, Z2FusionRule};
+use symtn_core::{FusionTreeKey, MultiplicityIndex, SectorId, ZNFusionRule};
 
 fn mult_free_key() -> FusionTreeKey {
     FusionTreeKey::try_new_for_rule(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         [SectorId::new(0); 4],
         SectorId::new(0),
         [false; 4],

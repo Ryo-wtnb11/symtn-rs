@@ -8,8 +8,8 @@ use symtn_core::{
     FermionParityFusionRule, FusionAlgebraError, FusionProductSpace, FusionTreePairKey,
     Fz2SectorLayout, InfallibleGeneric, PackedProductCodec, ProductFusionRule, ProductSectorCodec,
     ProductSectorLayout, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec,
-    StructureCacheKind, Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout, Z2FusionRule,
-    Z2Irrep,
+    StructureCacheKind, Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule,
+    ZNIrrep,
 };
 
 type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
@@ -20,22 +20,30 @@ type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
 
 fn lowered_product_rule() -> TripleRule {
     TripleRule::try_new(
-        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap()
 }
 
 fn matrix_space() -> DynamicFusionMapSpace {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
     DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap()
 }
 
 fn z2_matrix_space() -> DynamicFusionMapSpace {
-    let leg = || SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false);
+    let leg = || {
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 1),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
+            false,
+        )
+    };
     DynamicFusionMapSpace::from_final_homspace(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
@@ -282,7 +290,7 @@ fn checked_generic_bound_guards_preserve_typed_errors_before_commit() {
     .unwrap();
 
     let mut wrong_identity = FailAtCallRule::with_identity(identity.clone());
-    wrong_identity.identity = RuleIdentity::of_type::<Z2FusionRule>();
+    wrong_identity.identity = RuleIdentity::of_type::<ZNFusionRule>();
     let error = source
         .prepare_final_homspace_generic_with_checked(&wrong_identity, homspace())
         .err()
@@ -336,7 +344,7 @@ fn checked_generic_bound_guards_preserve_typed_errors_before_commit() {
     let mut prepared = source
         .prepare_final_homspace_generic_with_checked(&checker, homspace())
         .unwrap();
-    prepared.identity = RuleIdentity::of_type::<Z2FusionRule>();
+    prepared.identity = RuleIdentity::of_type::<ZNFusionRule>();
     let error = source
         .commit_final_homspace_generic_bound_checked(prepared)
         .unwrap_err();
@@ -547,7 +555,7 @@ fn checked_generic_bound_space_commits_the_staged_layout_without_reenumeration()
 
     for (identity, style) in [
         (
-            RuleIdentity::of_type::<Z2FusionRule>(),
+            RuleIdentity::of_type::<ZNFusionRule>(),
             FusionStyleKind::Generic,
         ),
         (
@@ -662,7 +670,7 @@ fn checked_generic_bound_space_commits_the_staged_layout_without_reenumeration()
     let mut corrupted = source
         .prepare_final_homspace_generic_checked(&spy, final_hom())
         .unwrap();
-    corrupted.identity = RuleIdentity::of_type::<Z2FusionRule>();
+    corrupted.identity = RuleIdentity::of_type::<ZNFusionRule>();
     let before_rejected_commit = snapshots();
     let error = source
         .commit_final_homspace_generic_checked(corrupted)
@@ -685,9 +693,11 @@ fn bind_revalidates_complete_without_replacing_layout() {
     let raw = z2_matrix_space();
     let structure = Arc::clone(raw.structure());
 
-    let bound =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free_lowered(raw, Arc::new(Z2FusionRule))
-            .unwrap();
+    let bound = BoundDynamicFusionMapSpace::bind_multiplicity_free_lowered(
+        raw,
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+    )
+    .unwrap();
 
     assert!(matches!(
         bound.space().admission(),
@@ -696,7 +706,10 @@ fn bind_revalidates_complete_without_replacing_layout() {
     assert!(Arc::ptr_eq(&structure, &bound.space.subblock_structure));
 
     let rule = lowered_product_rule();
-    let pair = Fz2U1Codec::encode(Z2Irrep::ODD.sector_id(), U1Irrep::new(2).sector_id());
+    let pair = Fz2U1Codec::encode(
+        SectorId::from(ZNIrrep::new(1, 2).unwrap()),
+        U1Irrep::new(2).sector_id(),
+    );
     let sector = TripleCodec::encode(pair, SU2Irrep::from_twice_spin(1).sector_id());
     let layout = DynamicFusionMapSpace::from_final_homspace(
         &rule,
@@ -760,7 +773,8 @@ fn lowered_bind_failure_publishes_no_layout_or_admission() {
 
     clear_structure_caches();
     let mut mismatched = base.clone();
-    mismatched.admission = FusionSpaceAdmission::Subset(Z2FusionRule.rule_identity());
+    mismatched.admission =
+        FusionSpaceAdmission::Subset(ZNFusionRule::new(2).unwrap().rule_identity());
     assert!(matches!(
         BoundDynamicFusionMapSpace::bind_multiplicity_free_lowered(
             mismatched,
@@ -855,7 +869,7 @@ fn bound_space_rejects_incoherent_axis_split() {
 
     let corrupted = BoundDynamicFusionMapSpace {
         space: raw.clone(),
-        provider: Arc::new(Z2FusionRule),
+        provider: Arc::new(ZNFusionRule::new(2).unwrap()),
         layout_build: LayoutBuildCapability::encoded(),
     };
     assert!(matches!(
@@ -865,8 +879,11 @@ fn bound_space_rejects_incoherent_axis_split() {
         ))
     ));
 
-    let error = BoundDynamicFusionMapSpace::bind_multiplicity_free(raw, Arc::new(Z2FusionRule))
-        .unwrap_err();
+    let error = BoundDynamicFusionMapSpace::bind_multiplicity_free(
+        raw,
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+    )
+    .unwrap_err();
 
     assert!(matches!(
         error,
@@ -893,7 +910,7 @@ fn bound_space_rejects_incoherent_structure_rank() {
 
     let corrupted = BoundDynamicFusionMapSpace {
         space: raw.clone(),
-        provider: Arc::new(Z2FusionRule),
+        provider: Arc::new(ZNFusionRule::new(2).unwrap()),
         layout_build: LayoutBuildCapability::encoded(),
     };
     assert!(matches!(
@@ -903,8 +920,11 @@ fn bound_space_rejects_incoherent_structure_rank() {
         ))
     ));
 
-    let error = BoundDynamicFusionMapSpace::bind_multiplicity_free(raw, Arc::new(Z2FusionRule))
-        .unwrap_err();
+    let error = BoundDynamicFusionMapSpace::bind_multiplicity_free(
+        raw,
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+    )
+    .unwrap_err();
 
     assert!(matches!(
         error,
@@ -918,7 +938,7 @@ fn direct_bound_builders_keep_coherent_split_and_rank() {
     // invariants, and the final-HomSpace Generic layout of a genuine outer
     // multiplicity is TensorKit's coupled block by hand: both vertex-labelled
     // codomain trees (2 x 3 rows each) stack over one 4-column domain tree.
-    let provider = Arc::new(Z2FusionRule);
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let homspace = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]);
     let multiplicity_free = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::clone(&provider),
@@ -991,9 +1011,11 @@ fn generic_completeness_requires_every_vertex_label() {
 fn generic_adjoint_rejects_multiplicity_free_before_final_layout_build() {
     // What: a Generic adjoint rejects a multiplicity-free provider before
     // constructing its target layout.
-    let source =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(matrix_space(), Arc::new(Z2FusionRule))
-            .unwrap();
+    let source = BoundDynamicFusionMapSpace::bind_multiplicity_free(
+        matrix_space(),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+    )
+    .unwrap();
     let final_result_layout_builds_rec = probe::record();
 
     let error = crate::adjoint::adjoint_bound_space_dyn_generic(&source).unwrap_err();

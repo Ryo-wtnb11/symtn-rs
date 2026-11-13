@@ -6,8 +6,8 @@ use symtn::typed::Engine;
 
 use symtn::expert::TensorStorage;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -466,8 +466,11 @@ fn u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
 fn fermion_u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let make_space = |provider: &Arc<_>, spec: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -476,9 +479,9 @@ fn fermion_u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
                 (
                     product_sector(
                         if charge.rem_euclid(2) == 0 {
-                            Z2Irrep::EVEN
+                            FermionParityIrrep::EVEN
                         } else {
-                            Z2Irrep::ODD
+                            FermionParityIrrep::ODD
                         },
                         U1Irrep::new(charge),
                     ),
@@ -488,9 +491,9 @@ fn fermion_u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
         )
         .unwrap()
     };
-    let sector_tag = |sector: &symtn::sector::ProductSector<Z2Irrep, U1Irrep>| {
+    let sector_tag = |sector: &symtn::sector::ProductSector<FermionParityIrrep, U1Irrep>| {
         f64::from(sector.right().charge())
-            + if *sector.left() == Z2Irrep::ODD {
+            + if *sector.left() == FermionParityIrrep::ODD {
                 0.5
             } else {
                 0.0
@@ -523,22 +526,25 @@ fn provider_and_dtype_matrix_matches_direct_contract() {
     pair_case::<_, Complex64>(engine, &su2);
 
     let fz2 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     pair_case::<_, f64>(engine, &fz2);
     pair_case::<_, Complex64>(engine, &fz2);
 
     let product_rule = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let product = GradedSpace::try_new(
         product_rule,
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 1),
         ],
     )
     .unwrap();
@@ -614,34 +620,40 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     run(&runtime, &x0, &x1, &y, &z0, &z1, 748_001);
 
     let product_rule = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let product_x0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1)],
+        [(product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1)],
     )
     .unwrap();
     let product_x1 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(-1)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 2)],
     )
     .unwrap()
     .try_dual()
     .unwrap();
     let product_y = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2)],
     )
     .unwrap();
     let product_z0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::EVEN, U1Irrep::new(-2)), 1)],
+        [(
+            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(-2)),
+            1,
+        )],
     )
     .unwrap();
     let product_z1 = GradedSpace::try_new(
         product_rule,
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 1)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 1)],
     )
     .unwrap();
     run(
@@ -973,8 +985,8 @@ fn fermionic_greedy_chain_keeps_intermediate_on_the_expression_left() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let space = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 2)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 2)],
     )
     .unwrap();
     let tensors = (0..3)
@@ -1042,9 +1054,10 @@ fn fermionic_greedy_chain_keeps_intermediate_on_the_expression_left() {
 fn fermionic_interleaved_subtrees_keep_expression_order_and_signs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule);
-    let large = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 3)]).unwrap();
-    let small = GradedSpace::try_new(provider, [(Z2Irrep::ODD, 2)]).unwrap();
+    let provider = Arc::new(FermionParityFusionRule::new());
+    let large =
+        GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 3)]).unwrap();
+    let small = GradedSpace::try_new(provider, [(FermionParityIrrep::ODD, 2)]).unwrap();
     let a =
         TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&large], [&large], 750_400).unwrap();
     let b =

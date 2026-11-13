@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -218,14 +218,21 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
     let su2 =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 2)]).unwrap();
     cuda_pair(engine, cuda, &runtime, &su2, 748_110);
-    let fz2 = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 2)]).unwrap();
+    let fz2 = GradedSpace::try_new(
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::ODD, 2)],
+    )
+    .unwrap();
     cuda_pair(engine, cuda, &runtime, &fz2, 748_120);
     let product = GradedSpace::try_new(
         Arc::new(
-            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-                .unwrap(),
+            symtn_core::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule::new(),
+                U1FusionRule,
+            )
+            .unwrap(),
         ),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();
     cuda_pair(engine, cuda, &runtime, &product, 748_130);
@@ -998,14 +1005,21 @@ fn warm_cuda_destination_reuse_matches_the_returning_chain_for_every_provider() 
     let su2 =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 2)]).unwrap();
     cuda_chain_reuse_matches_returning(engine, cuda, &runtime, &su2, 761_110);
-    let fz2 = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 2)]).unwrap();
+    let fz2 = GradedSpace::try_new(
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::ODD, 2)],
+    )
+    .unwrap();
     cuda_chain_reuse_matches_returning(engine, cuda, &runtime, &fz2, 761_120);
     let product = GradedSpace::try_new(
         Arc::new(
-            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-                .unwrap(),
+            symtn_core::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule::new(),
+                U1FusionRule,
+            )
+            .unwrap(),
         ),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();
     cuda_chain_reuse_matches_returning(engine, cuda, &runtime, &product, 761_130);
@@ -2178,8 +2192,11 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
     );
 
     let fz2_u1 = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let fermion_u1 = |sectors: &[(bool, i32, usize)]| {
         GradedSpace::try_new(
@@ -2187,7 +2204,11 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
             sectors.iter().map(|&(odd, charge, degeneracy)| {
                 (
                     product_sector(
-                        if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+                        if odd {
+                            FermionParityIrrep::ODD
+                        } else {
+                            FermionParityIrrep::EVEN
+                        },
                         U1Irrep::new(charge),
                     ),
                     degeneracy,
@@ -2221,8 +2242,11 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
     );
 
     let fz2_su2 = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let fermion_su2 = |sectors: &[(bool, usize, usize)]| {
         GradedSpace::try_new(
@@ -2230,7 +2254,11 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
             sectors.iter().map(|&(odd, twice, degeneracy)| {
                 (
                     product_sector(
-                        if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+                        if odd {
+                            FermionParityIrrep::ODD
+                        } else {
+                            FermionParityIrrep::EVEN
+                        },
                         SU2Irrep::from_twice_spin(twice),
                     ),
                     degeneracy,
@@ -2392,8 +2420,11 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
     warm::<_, f64>(engine, cuda, &runtime, [&v, &w, &p], 795_000, "U(1) f64");
     warm::<_, Complex64>(engine, cuda, &runtime, [&v, &w, &p], 795_100, "U(1) c64");
     let fz2_u1 = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let space = |sectors: &[(bool, i32, usize)]| {
         GradedSpace::try_new(
@@ -2401,7 +2432,11 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
             sectors.iter().map(|&(odd, charge, degeneracy)| {
                 (
                     product_sector(
-                        if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+                        if odd {
+                            FermionParityIrrep::ODD
+                        } else {
+                            FermionParityIrrep::EVEN
+                        },
                         U1Irrep::new(charge),
                     ),
                     degeneracy,

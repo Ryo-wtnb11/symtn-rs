@@ -722,9 +722,9 @@ fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
 fn nested_fz2_u1_su2_first_pair_braid_preserves_product_phases_in_singles() {
     // What: direct lowering preserves the product rule's fermionic sign times
     // the SU(2) channel phase instead of synthesizing a diagonal coefficient.
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -1403,7 +1403,7 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
     // unit coefficient, while a cyclic split change retains recoupling.
     let fz2_source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &FermionParityFusionRule,
+            &FermionParityFusionRule::new(),
             [SectorId::new(1), SectorId::new(0)],
             SectorId::new(1),
             [false, true],
@@ -1412,7 +1412,7 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
         )
         .unwrap(),
         FusionTreeKey::try_new_for_rule(
-            &FermionParityFusionRule,
+            &FermionParityFusionRule::new(),
             [SectorId::new(1)],
             SectorId::new(1),
             [true],
@@ -1425,7 +1425,7 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
     let fz2_structure = packed_fixture_structure(3, [(fz2_key.clone(), vec![1, 1, 1])]).unwrap();
     let exact = TreeTransformOperation::transpose([0, 1], [2]);
     let fz2_plan = build_tree_pair_transform_group_plan(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         exact.clone(),
         &fz2_structure,
     )

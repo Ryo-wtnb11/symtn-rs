@@ -357,18 +357,18 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
     // Built-in TensorKit-equivalent FermionParity semantics: complex payload
     // multiplication is sign-free because otimes performs no leg crossing.
     let runtime = runtime();
-    let rule = Arc::new(symtn::sector::FermionParityFusionRule);
+    let rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 1),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .unwrap();
     let lhs: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |sectors, _| {
-            if *sectors.coupled() == symtn::sector::Z2Irrep::EVEN {
+            if *sectors.coupled() == symtn::sector::FermionParityIrrep::EVEN {
                 Complex64::new(2.0, 1.0)
             } else {
                 Complex64::new(-3.0, 2.0)
@@ -377,7 +377,7 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
         .unwrap();
     let rhs: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |sectors, _| {
-            if *sectors.coupled() == symtn::sector::Z2Irrep::EVEN {
+            if *sectors.coupled() == symtn::sector::FermionParityIrrep::EVEN {
                 Complex64::new(5.0, -1.0)
             } else {
                 Complex64::new(1.0, 4.0)
@@ -395,12 +395,12 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
             if codomain != domain {
                 return Complex64::new(0.0, 0.0);
             }
-            let lhs = if codomain[0] == symtn::sector::Z2Irrep::EVEN {
+            let lhs = if codomain[0] == symtn::sector::FermionParityIrrep::EVEN {
                 Complex64::new(2.0, 1.0)
             } else {
                 Complex64::new(-3.0, 2.0)
             };
-            let rhs = if codomain[1] == symtn::sector::Z2Irrep::EVEN {
+            let rhs = if codomain[1] == symtn::sector::FermionParityIrrep::EVEN {
                 Complex64::new(5.0, -1.0)
             } else {
                 Complex64::new(1.0, 4.0)
@@ -422,11 +422,14 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
-    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
+    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let charge =
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(1), 1)]).unwrap();
-    let parity =
-        GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
+    let parity = GradedSpace::try_new(
+        Arc::clone(&fz2_rule),
+        [(symtn::sector::FermionParityIrrep::ODD, 1)],
+    )
+    .unwrap();
     let lhs =
         TensorMap::from_subblock_fn(engine, &runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
     let rhs =
@@ -434,7 +437,7 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
     );
@@ -448,14 +451,14 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
         codomain[0].sectors().unwrap(),
         [symtn::sector::product_sector(
             symtn::sector::U1Irrep::new(1),
-            symtn::sector::Z2Irrep::EVEN
+            symtn::sector::FermionParityIrrep::EVEN
         )]
     );
     assert_eq!(
         codomain[1].sectors().unwrap(),
         [symtn::sector::product_sector(
             symtn::sector::U1Irrep::new(0),
-            symtn::sector::Z2Irrep::ODD
+            symtn::sector::FermionParityIrrep::ODD
         )]
     );
 }
@@ -548,7 +551,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
-    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
+    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let charge_cod = GradedSpace::try_new(
         Arc::clone(&u1_rule),
         [
@@ -569,8 +572,8 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
     let parity_cod = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 1),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .and_then(|space| space.try_dual())
@@ -578,8 +581,8 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
     let parity_dom = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 1),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .unwrap();
@@ -597,7 +600,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
         [&parity_cod],
         [&parity_dom],
         |sectors, _| {
-            if *sectors.coupled() == symtn::sector::Z2Irrep::EVEN {
+            if *sectors.coupled() == symtn::sector::FermionParityIrrep::EVEN {
                 Complex64::new(3.0, -1.0)
             } else {
                 Complex64::new(-2.0, 4.0)
@@ -608,7 +611,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
     );
@@ -626,7 +629,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
             let domain = sectors.domain_uncoupled();
             if codomain[0].left() == domain[0].left() && codomain[1].right() == domain[1].right() {
                 let lhs = Complex64::new(codomain[0].left().charge() as f64, 2.0);
-                let rhs = if *codomain[1].right() == symtn::sector::Z2Irrep::EVEN {
+                let rhs = if *codomain[1].right() == symtn::sector::FermionParityIrrep::EVEN {
                     Complex64::new(3.0, -1.0)
                 } else {
                     Complex64::new(-2.0, 4.0)
@@ -661,11 +664,14 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
     >;
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
-    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
+    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let charge =
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(2), 1)]).unwrap();
-    let parity =
-        GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
+    let parity = GradedSpace::try_new(
+        Arc::clone(&fz2_rule),
+        [(symtn::sector::FermionParityIrrep::ODD, 1)],
+    )
+    .unwrap();
     let lhs =
         TensorMap::from_subblock_fn(engine, &runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
     let rhs =
@@ -673,7 +679,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
     let product = Arc::new(
         symtn::sector::ProductFusionRule::<_, _, Codec>::try_new(
             symtn::sector::U1FusionRule,
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
     );
@@ -685,7 +691,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
         result.codomain()[0].sectors().unwrap(),
         [symtn::sector::product_sector(
             symtn::sector::U1Irrep::new(2),
-            symtn::sector::Z2Irrep::EVEN
+            symtn::sector::FermionParityIrrep::EVEN
         )]
     );
 }
@@ -696,7 +702,7 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
-    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule);
+    let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let charges = [1, 2, 3].map(|charge| {
         GradedSpace::try_new(
             Arc::clone(&u1_rule),
@@ -706,8 +712,11 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
     });
     let charge_total =
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(6), 1)]).unwrap();
-    let odd =
-        GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
+    let odd = GradedSpace::try_new(
+        Arc::clone(&fz2_rule),
+        [(symtn::sector::FermionParityIrrep::ODD, 1)],
+    )
+    .unwrap();
     let lhs =
         TensorMap::from_subblock_fn(engine, &runtime, charges.iter(), [&charge_total], |_, _| {
             2.0
@@ -718,7 +727,7 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
     );
@@ -732,19 +741,19 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
         [
             symtn::sector::product_sector(
                 symtn::sector::U1Irrep::new(3),
-                symtn::sector::Z2Irrep::EVEN
+                symtn::sector::FermionParityIrrep::EVEN
             ),
             symtn::sector::product_sector(
                 symtn::sector::U1Irrep::new(6),
-                symtn::sector::Z2Irrep::EVEN
+                symtn::sector::FermionParityIrrep::EVEN
             ),
             symtn::sector::product_sector(
                 symtn::sector::U1Irrep::new(6),
-                symtn::sector::Z2Irrep::ODD
+                symtn::sector::FermionParityIrrep::ODD
             ),
             symtn::sector::product_sector(
                 symtn::sector::U1Irrep::new(6),
-                symtn::sector::Z2Irrep::EVEN
+                symtn::sector::FermionParityIrrep::EVEN
             ),
         ]
     );
@@ -910,17 +919,17 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     let runtime = runtime();
     let typed_fixture = |engine: &mut dyn Engine, runtime: &Runtime| {
         let leg = GradedSpace::try_new(
-            Arc::new(symtn::sector::Z2FusionRule),
+            Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
             [
-                (symtn::sector::Z2Irrep::EVEN, 2),
-                (symtn::sector::Z2Irrep::ODD, 3),
+                (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+                (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
             ],
         )
         .unwrap();
         TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], typed_fill_value)
             .unwrap()
     };
-    let typed: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(engine, &runtime);
+    let typed: TensorMap<symtn::sector::ZNFusionRule, f64> = typed_fixture(engine, &runtime);
 
     use symtn::typed::{CoreError, OperationError};
     fn axis_count(error: &OperationError) -> bool {
@@ -970,14 +979,14 @@ fn contract_error_classes_and_their_both_defect_precedence() {
 
     // Mismatched contracted legs retain the expert layer's class.
     let narrow_leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 2),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 2),
         ],
     )
     .unwrap();
-    let typed_narrow: TensorMap<symtn::sector::Z2FusionRule, f64> = TensorMap::from_subblock_fn(
+    let typed_narrow: TensorMap<symtn::sector::ZNFusionRule, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
         [&narrow_leg, &narrow_leg],
@@ -1024,7 +1033,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     );
 
     // Runtime mismatch stays a facade-level error.
-    let typed_second: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(engine, &second);
+    let typed_second: TensorMap<symtn::sector::ZNFusionRule, f64> = typed_fixture(engine, &second);
     assert!(matches!(
         typed
             .contract(

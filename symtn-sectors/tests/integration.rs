@@ -11,6 +11,7 @@ mod abelian_cu1_values;
 mod builtin_rules;
 mod category_rule;
 mod downstream_contracts;
+mod enumerated_rule_equivalence;
 mod fibonacci_providers;
 mod infallible_matches_checked_domain;
 mod infallible_tier_gate;

@@ -26,7 +26,7 @@ fn hermitian_region_validation_rejects_short_storage_without_panicking() {
 fn compact_factor_plan_does_not_retain_provider() {
     // What: plan construction does not retain the input space's provider.
     let tensor = rectangular_svd_tensor(19, 11);
-    let provider = Arc::new(Z2FusionRule);
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let weak = Arc::downgrade(&provider);
     let bound = bound_tensor(Arc::clone(&provider), &tensor);
     let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
@@ -129,9 +129,9 @@ fn compact_factor_routes_agree_between_sorted_and_unsorted_region_tables() {
 #[test]
 fn compact_factor_plan_rejects_duplicate_missing_mismatched_and_extra_routes() {
     // What: every nonzero source sector has one shape-correct left/right route and no extras.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = rectangular_svd_tensor(17, 13);
-    let bound = bound_tensor(Arc::new(rule), &tensor);
+    let bound = bound_tensor(Arc::new(rule.clone()), &tensor);
     let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
         .unwrap()
         .unwrap();

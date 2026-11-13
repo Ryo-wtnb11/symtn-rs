@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn_core::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 
 use super::probe::{self, Event};
@@ -309,13 +309,17 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
         GradedSpace::try_new(
             Arc::new(
                 symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                    FermionParityFusionRule,
+                    FermionParityFusionRule::new(),
                     U1FusionRule,
                 )
                 .unwrap(),
             ),
             pairs.iter().map(|&(odd, q, d)| {
-                let parity = if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN };
+                let parity = if odd {
+                    FermionParityIrrep::ODD
+                } else {
+                    FermionParityIrrep::EVEN
+                };
                 (product_sector(parity, U1Irrep::new(q)), d)
             }),
         )
@@ -589,13 +593,17 @@ mod cuda {
             GradedSpace::try_new(
                 Arc::new(
                     symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                        FermionParityFusionRule,
+                        FermionParityFusionRule::new(),
                         U1FusionRule,
                     )
                     .unwrap(),
                 ),
                 pairs.iter().map(|&(odd, q, d)| {
-                    let parity = if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN };
+                    let parity = if odd {
+                        FermionParityIrrep::ODD
+                    } else {
+                        FermionParityIrrep::EVEN
+                    };
                     (product_sector(parity, U1Irrep::new(q)), d)
                 }),
             )

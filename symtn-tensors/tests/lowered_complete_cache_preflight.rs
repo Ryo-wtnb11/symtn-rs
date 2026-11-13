@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
+use symtn_core::SectorId;
 use symtn_core::{
-    structure_cache_info, CoreError, FermionParityFusionRule, FusionProductSpace,
-    FusionTreeHomSpace, SectorLeg, StructureCacheKind, U1FusionRule, U1Irrep, Z2Irrep,
+    structure_cache_info, CoreError, FermionParityFusionRule, FermionParityIrrep,
+    FusionProductSpace, FusionTreeHomSpace, SectorLeg, StructureCacheKind, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{BoundDynamicFusionMapSpace, OperationError};
 
@@ -32,8 +33,8 @@ fn lowered_complete_cache_preflight_preserves_statistics_and_hits() {
         before
     );
 
-    let provider = Arc::new(FermionParityFusionRule);
-    let odd = Z2Irrep::ODD.sector_id();
+    let provider = Arc::new(FermionParityFusionRule::new());
+    let odd = SectorId::from(FermionParityIrrep::ODD);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]),

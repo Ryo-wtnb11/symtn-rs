@@ -59,7 +59,9 @@ fn left_factor_publication_borrows_real_geometry_for_complex_output() {
         std::iter::empty::<usize>(),
     )
     .unwrap();
-    source_key.validate_for_rule(&Z2FusionRule).unwrap();
+    source_key
+        .validate_for_rule(&ZNFusionRule::new(2).unwrap())
+        .unwrap();
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new([(x, 2)], false),
@@ -69,7 +71,7 @@ fn left_factor_publication_borrows_real_geometry_for_complex_output() {
         FusionProductSpace::new([SectorLeg::new([(x, 1)], false)]),
     );
     let authority = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
         homspace.clone(),
     )
     .unwrap();
@@ -151,7 +153,7 @@ fn mf_one_sided_placement_uses_direct_and_adjoint_source_sides() {
     matrix.col_trees[0].1 = 2;
     matrix.data = Vec::new();
     let authority = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
         homspace.clone(),
     )
     .unwrap();
@@ -256,7 +258,7 @@ fn mf_one_sided_placement_uses_direct_and_adjoint_source_sides() {
 fn mf_one_sided_pair_errors_precede_tree_traversal() {
     let (homspace, mut matrix) = z2_single_sector_matrix(1, 1);
     let authority = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
         homspace.clone(),
     )
     .unwrap();
@@ -423,7 +425,7 @@ fn mf_one_sided_duplicate_source_trees_publish_the_first_entry() {
     fn run<D: FactorScalar + fmt::Debug>(values: impl Fn(usize) -> D) {
         let (homspace, mut matrix) = z2_single_sector_matrix(2, 3);
         let authority = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::new(Z2FusionRule),
+            Arc::new(ZNFusionRule::new(2).unwrap()),
             homspace.clone(),
         )
         .unwrap();
@@ -652,13 +654,13 @@ where
 }
 
 fn z2_two_sector_geometry<D: FactorScalar>() -> (
-    BoundDynamicFusionMapSpace<Z2FusionRule>,
+    BoundDynamicFusionMapSpace<ZNFusionRule>,
     Vec<SectorMatricization<D>>,
 ) {
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     two_leg_geometry(
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
         [
             vec![(even, 2), (odd, 1)],
             vec![(even, 1), (odd, 3)],
@@ -1387,7 +1389,7 @@ where
         let selected = factor.clone();
 
         let authority = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::new(Z2FusionRule),
+            Arc::new(ZNFusionRule::new(2).unwrap()),
             homspace.clone(),
         )
         .unwrap();

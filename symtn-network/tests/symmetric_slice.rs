@@ -1,7 +1,7 @@
 use symtn::expert::SectorLeg;
 use symtn::sector::FusionRule;
 use symtn::sector::{
-    FermionParityFusionRule, SectorId, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SectorId, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn_network::{
     DegeneracyRange, NetworkIR, SectorSlice, SliceError, SliceKind, SymmetricSlicePlan,
@@ -320,7 +320,7 @@ fn canonical_effective_occurrence_owns_non_self_dual_sector_identity() {
 
 #[test]
 fn rule_identity_seals_numeric_sector_meaning_without_coefficients() {
-    let odd: SectorId = Z2Irrep::ODD.into();
+    let odd: SectorId = FermionParityIrrep::ODD.into();
     let charge_minus_one: SectorId = U1Irrep::new(-1).into();
     assert_eq!(
         odd, charge_minus_one,
@@ -335,17 +335,20 @@ fn rule_identity_seals_numeric_sector_meaning_without_coefficients() {
             vec![SectorSlice::new(odd, range(0, 1))],
         )]
     };
-    let bosonic =
-        SymmetricSlicePlan::try_new(&ir, Z2FusionRule.rule_identity(), shared_spec()).unwrap();
-    let fermionic =
-        SymmetricSlicePlan::try_new(&ir, FermionParityFusionRule.rule_identity(), shared_spec())
-            .unwrap();
+    let z2 = ZNFusionRule::new(2).unwrap();
+    let bosonic = SymmetricSlicePlan::try_new(&ir, z2.rule_identity(), shared_spec()).unwrap();
+    let fermionic = SymmetricSlicePlan::try_new(
+        &ir,
+        FermionParityFusionRule::new().rule_identity(),
+        shared_spec(),
+    )
+    .unwrap();
 
     assert_ne!(bosonic, fermionic);
-    assert_eq!(bosonic.rule_identity(), &Z2FusionRule.rule_identity());
+    assert_eq!(bosonic.rule_identity(), &z2.rule_identity());
     assert_eq!(
         fermionic.rule_identity(),
-        &FermionParityFusionRule.rule_identity()
+        &FermionParityFusionRule::new().rule_identity()
     );
     // Both plans enumerate the same coordinate piece. The identity seal is the
     // only categorical distinction: no sign or fusion-tree field is introduced.

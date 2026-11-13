@@ -86,7 +86,7 @@ fn frozen_fusion_tree_identity_and_group_projection_are_content_based() {
 
 #[test]
 fn tree_pair_axis_validation_remains_linear_above_inline_bitset_capacity() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let rank = 129;
     let codomain = FusionTreeKey::try_new_for_rule(
         &rule,

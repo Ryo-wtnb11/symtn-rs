@@ -173,7 +173,7 @@ pub fn su2_space(legs: &[usize], inners: &[Vec<usize>], degeneracy: usize) -> Ar
 pub type FermionicSu2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
 
 pub fn fermionic_su2_rule() -> FermionicSu2Rule {
-    symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+    symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
         .unwrap()
 }
 
@@ -259,10 +259,10 @@ pub fn six_leg_channels() -> Vec<Vec<usize>> {
 /// evidence needs [`fermionic_f_move_structure`] instead.
 pub fn fermion_parity_structure(degeneracy: usize) -> Arc<BlockStructure> {
     let odd = SectorId::new(1);
-    let even = FermionParityFusionRule.vacuum();
+    let even = FermionParityFusionRule::new().vacuum();
     let keys = [BlockKey::from(FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &FermionParityFusionRule,
+            &FermionParityFusionRule::new(),
             [odd; 4],
             even,
             [false; 4],
@@ -270,7 +270,8 @@ pub fn fermion_parity_structure(degeneracy: usize) -> Arc<BlockStructure> {
             [MultiplicityIndex::ONE; 3],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&FermionParityFusionRule, [], even, [], [], []).unwrap(),
+        FusionTreeKey::try_new_for_rule(&FermionParityFusionRule::new(), [], even, [], [], [])
+            .unwrap(),
     ))];
     Arc::new(
         BlockStructure::from_parts(

@@ -5,8 +5,8 @@
 use num_complex::Complex64;
 
 pub use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 pub use symtn::sector::{Fz2SectorLayout, PackedProductCodec, U1SectorLayout};
 
@@ -110,9 +110,9 @@ macro_rules! for_each_symmetry {
             .unwrap()
         });
         $check!($($extra,)* $engine, "fZ2xU1", |variant: usize| {
-            let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
-            let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
-            let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
+            let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
+            let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
+            let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
             GradedSpace::try_new(rule, [(even(0), 3), (odd(1), 1 + variant), (odd(-1), 2)]).unwrap()
         });
         #[cfg(feature = "cgc-gen")]

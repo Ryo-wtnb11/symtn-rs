@@ -1,4 +1,5 @@
 use super::*;
+use symtn::sector::ZNIrrep;
 
 /// [`HostSvdTrunc`] for the Hermitian eigendecomposition.
 struct HostEighTrunc<R: SectorCodec, D> {
@@ -271,10 +272,10 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     .unwrap();
     assert_reduction_parity(engine, cuda, &su2_rank5_lhs, &su2_rank5_rhs);
 
-    let fz2_provider = Arc::new(FermionParityFusionRule);
+    let fz2_provider = Arc::new(FermionParityFusionRule::new());
     let fz2_leg = GradedSpace::try_new(
         Arc::clone(&fz2_provider),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     let fz2_lhs =
@@ -290,14 +291,17 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     assert_reduction_parity(engine, cuda, &fz2_lhs, &fz2_rhs);
 
     let product_provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap(),
     );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();
@@ -390,8 +394,16 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     );
 
     let zn3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
-    let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 1)]).unwrap();
+    let charge0 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(0, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let charge1 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(1, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let empty: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
     assert!(empty.dense_data().unwrap().is_empty());
@@ -476,14 +488,17 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     assert_typed_cuda_qr_matches_host(engine, cuda, &su2_tensor);
 
     let product = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap(),
     );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();
@@ -647,8 +662,16 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     assert_finite_r_diagonal_nonnegative(&tiny_right);
 
     let zn3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 2)]).unwrap();
-    let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 3)]).unwrap();
+    let charge0 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(0, zn3.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
+    let charge1 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(1, zn3.category().modulus()).unwrap(), 3)],
+    )
+    .unwrap();
     let empty: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
     assert!(empty.dense_data().unwrap().is_empty());

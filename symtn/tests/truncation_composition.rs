@@ -39,7 +39,7 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     Eigh, GradedSpace, LegSelection, SectorSpectrum, SpectrumMagnitude, Svd, TruncatedSelection,
@@ -459,23 +459,26 @@ fn fermionic_svd_composition_matches_the_oracle_for_every_policy() {
 fn fermionic_u1_product_svd_composition_matches_the_oracle_for_every_policy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 3),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 2),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 3),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 2),
         ],
     )
     .unwrap();
     let target = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 1),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
         ],
     )
     .unwrap();

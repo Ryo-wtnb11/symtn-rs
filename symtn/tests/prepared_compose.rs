@@ -26,8 +26,8 @@ use std::sync::Arc;
 
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 use symtn::sector::{
-    product_sector, CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec, U1Irrep,
-    Z2Irrep,
+    product_sector, CheckedFusionAlgebra, FermionParityIrrep, MultiplicityFreeRigidSymbols,
+    SectorCodec, U1Irrep,
 };
 use symtn::typed::Error;
 use symtn::typed::{
@@ -417,13 +417,13 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
     let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(
         Fz2U1Rule::try_new(
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
             symtn::sector::U1FusionRule,
         )
         .unwrap(),
     );
-    let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
-    let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
+    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
+    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
     let v =
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 2), (odd(-1), 1)]).unwrap();
     let wd = GradedSpace::try_new(rule, [(even(0), 2), (odd(1), 2)])

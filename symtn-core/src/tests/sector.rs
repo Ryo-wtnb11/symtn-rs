@@ -26,8 +26,8 @@ fn sector_leg_treats_zero_degeneracy_as_an_absent_sector() {
         )
     };
     assert_eq!(
-        hom(explicit_zero).fusion_tree_keys(&Z2FusionRule),
-        hom(omitted).fusion_tree_keys(&Z2FusionRule)
+        hom(explicit_zero).fusion_tree_keys(&ZNFusionRule::new(2).unwrap()),
+        hom(omitted).fusion_tree_keys(&ZNFusionRule::new(2).unwrap())
     );
 }
 
@@ -239,7 +239,7 @@ fn checked_tensorcontract_matches_all_closed_rules_and_leg_orientations() {
         &[(z2_even(), 1), (z2_odd(), 3)],
     );
     assert_checked_contract_all_orientations(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         z2,
         z2_bad,
         SectorLeg::new([(z2_even(), 1)], false),
@@ -249,7 +249,7 @@ fn checked_tensorcontract_matches_all_closed_rules_and_leg_orientations() {
         &[(z2_even(), 3), (z2_odd(), 1)],
     );
     assert_checked_contract_all_orientations(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         fz2,
         fz2_bad,
         SectorLeg::new([(z2_even(), 1)], false),
@@ -283,8 +283,8 @@ fn checked_tensorcontract_matches_all_closed_rules_and_leg_orientations() {
 
     #[cfg(target_pointer_width = "64")]
     {
-        type Rule = ProductFusionRule<U1FusionRule, Z2FusionRule, TensorKitProductCodec>;
-        let rule = Rule::try_new(U1FusionRule, Z2FusionRule).unwrap();
+        type Rule = ProductFusionRule<U1FusionRule, ZNFusionRule, TensorKitProductCodec>;
+        let rule = Rule::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap();
         let first = TensorKitProductCodec::encode(u1(-2), z2_even());
         let second = TensorKitProductCodec::encode(u1(1), z2_odd());
         let vacuum = TensorKitProductCodec::encode(u1(0), z2_even());
@@ -380,8 +380,14 @@ fn direct_leg_degeneracy_layout_matches_reference_for_supported_rules() {
     assert_coupled_grid_layout_matches_key_reconstruction(&U1FusionRule, &u1_hom);
 
     let parity_hom = build(&[(SectorId::new(0), 3), (SectorId::new(1), 2)]);
-    assert_direct_leg_degeneracy_structure_matches_reference(&FermionParityFusionRule, &parity_hom);
-    assert_coupled_grid_layout_matches_key_reconstruction(&FermionParityFusionRule, &parity_hom);
+    assert_direct_leg_degeneracy_structure_matches_reference(
+        &FermionParityFusionRule::new(),
+        &parity_hom,
+    );
+    assert_coupled_grid_layout_matches_key_reconstruction(
+        &FermionParityFusionRule::new(),
+        &parity_hom,
+    );
 
     let su2_hom = build(&[
         (SU2Irrep::from_twice_spin(0).sector_id(), 2),
@@ -390,9 +396,11 @@ fn direct_leg_degeneracy_layout_matches_reference_for_supported_rules() {
     assert_direct_leg_degeneracy_structure_matches_reference(&SU2FusionRule, &su2_hom);
     assert_coupled_grid_layout_matches_key_reconstruction(&SU2FusionRule, &su2_hom);
 
-    let product_rule =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let product_rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let product_hom = build(&[
         (
             product_rule.encode_component_ids(SectorId::new(0), u1(-1)),
@@ -451,23 +459,26 @@ fn direct_leg_degeneracy_layout_matches_reference_for_supported_rules() {
 fn external_sector_lookup_rejects_a_short_sector_tuple() {
     // What: both the all-keys and the unique-key lookup reject a sector tuple
     // whose length is not the hom space's leg count.
-    let sectors = [Z2Irrep::EVEN.sector_id()];
+    let sectors = [SectorId::from(ZNIrrep::new(0, 2).unwrap())];
     let metadata_error = CoreError::DimensionMismatch {
         expected: 2,
         actual: 1,
     };
 
-    let homspace = FusionTreeHomSpace::from_sectors([(Z2Irrep::EVEN, 1)], [(Z2Irrep::EVEN, 1)]);
+    let homspace = FusionTreeHomSpace::from_sectors(
+        [(ZNIrrep::new(0, 2).unwrap(), 1)],
+        [(ZNIrrep::new(0, 2).unwrap(), 1)],
+    );
 
     assert_eq!(
         homspace
-            .fusion_tree_keys_from_external_sectors(&Z2FusionRule, &sectors)
+            .fusion_tree_keys_from_external_sectors(&ZNFusionRule::new(2).unwrap(), &sectors)
             .unwrap_err(),
         metadata_error
     );
     assert_eq!(
         homspace
-            .unique_fusion_tree_key_from_external_sectors(&Z2FusionRule, &sectors)
+            .unique_fusion_tree_key_from_external_sectors(&ZNFusionRule::new(2).unwrap(), &sectors)
             .unwrap_err(),
         metadata_error
     );
@@ -556,7 +567,7 @@ fn sector_leg_dual_is_shared_for_non_self_dual_self_dual_and_product_rules() {
         assert_shared_dual(&SU2FusionRule, &su2_leg, &su2_expected);
 
         type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-        let product = Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+        let product = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
         let sector = |parity, charge| product.encode_component_ids(parity, u1(charge));
         let product_leg = SectorLeg::new(
             [

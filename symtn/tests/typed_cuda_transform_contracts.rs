@@ -45,6 +45,7 @@ use symtn::typed::Error;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::legs::u1_leg_2_1_2;
+use symtn::sector::ZNIrrep;
 
 /// Orders the local process-global cache probes; Runtime-local probes run concurrently.
 static CACHE_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
@@ -354,8 +355,16 @@ fn device_into_rejections_happen_before_any_device_work() {
     // Z3, exactly as the Host unit test builds it.
     let z2 = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(symtn::sector::ZNFusionRule::new(3).unwrap());
-    let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 2)]).unwrap();
-    let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 2)]).unwrap();
+    let z2_leg = GradedSpace::try_new(
+        Arc::clone(&z2),
+        [(ZNIrrep::new(0, z2.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
+    let z3_leg = GradedSpace::try_new(
+        Arc::clone(&z3),
+        [(ZNIrrep::new(0, z3.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
     let zn_fill = |_: &_, indices: &[usize]| indices.iter().map(|&i| i as f64 + 1.0).sum::<f64>();
     let z2_host =
         TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], zn_fill).unwrap();
@@ -571,10 +580,10 @@ fn fermionic_fixture(
     runtime: &Runtime,
 ) -> TensorMap<symtn::sector::FermionParityFusionRule, f64> {
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::FermionParityFusionRule),
+        Arc::new(symtn::sector::FermionParityFusionRule::new()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 2),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .unwrap();

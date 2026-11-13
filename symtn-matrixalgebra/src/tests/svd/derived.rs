@@ -80,7 +80,7 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
 fn single_precision_svd_and_eig_work_end_to_end() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex32;
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let sectors = [SectorId::new(0), SectorId::new(1)];
     let degeneracy = 2usize;
     let leg = || SectorLeg::new(sectors.iter().map(|&sector| (sector, degeneracy)), false);
@@ -108,7 +108,7 @@ fn single_precision_svd_and_eig_work_end_to_end() {
     let svd = svd_compact(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor_f32),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor_f32),
     )
     .unwrap();
 

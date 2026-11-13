@@ -103,7 +103,7 @@ fn checked_products_preserve_child_u1_errors_and_distinguish_codec_errors() {
     type TripleLayout = ProductSectorLayout<Fz2U1Layout, Su2SectorLayout>;
     type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
 
-    let pair = Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let pair = Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let pair_min = pair
         .try_encode_component_ids(z2_odd(), excluded_u1_id())
         .unwrap();
@@ -149,8 +149,8 @@ fn checked_fusion_algebra_is_object_safe_and_matches_closed_builtins() {
     let checked: &dyn CheckedFusionAlgebra = &U1FusionRule;
     assert_eq!(checked.try_dual_sector(u1(7)), Ok(u1(-7)));
     for rule in [
-        &Z2FusionRule as &dyn CheckedFusionAlgebra,
-        &FermionParityFusionRule,
+        &ZNFusionRule::new(2).unwrap() as &dyn CheckedFusionAlgebra,
+        &FermionParityFusionRule::new(),
         &SU2FusionRule,
     ] {
         let left = rule.vacuum();

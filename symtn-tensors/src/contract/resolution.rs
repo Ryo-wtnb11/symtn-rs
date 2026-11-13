@@ -964,7 +964,7 @@ mod tests {
 
     #[test]
     fn rhs_twist_requirement_uses_external_domain_dual_and_product_parity() {
-        let fermion = FermionParityFusionRule;
+        let fermion = FermionParityFusionRule::new();
         let odd = SectorId::new(1);
         let cases = [
             (false, false, 0, false),
@@ -985,7 +985,8 @@ mod tests {
         }
 
         let fp_u1 =
-            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
+                .unwrap();
         let odd_charge = fp_u1.encode_component_ids(odd, U1Irrep::new(0).sector_id());
         let product = ProductFusionRule::<_, _>::try_new(fp_u1, SU2FusionRule).unwrap();
         let odd_product =

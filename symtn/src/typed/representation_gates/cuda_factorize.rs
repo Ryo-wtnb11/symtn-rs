@@ -627,8 +627,16 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     assert_eq!(qr_counts(&recording), (0, 0, 0, 0, 0, 0, 0));
 
     let zn3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
-    let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 1)]).unwrap();
+    let charge0 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(0, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let charge1 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(1, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let empty: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
     let recording = probe::record();
@@ -1377,14 +1385,14 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
     assert_device_svd_diagonal_every_dtype(&runtime, &[&su2_leg, &su2_leg, &su2_leg], &[&su2_leg]);
 
     let fermion = Arc::new(
-        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap(),
     );
     let fermion_leg = GradedSpace::try_new(
         Arc::clone(&fermion),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 2),
-            (product_sector(U1Irrep::new(-1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 2),
+            (product_sector(U1Irrep::new(-1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();

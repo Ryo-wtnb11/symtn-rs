@@ -51,7 +51,7 @@ order:
 | Rule | Semantic comparison order |
 | --- | --- |
 | U(1) | `0, +1, -1, +2, -2, …`; storage IDs instead begin `0, -1, +1, …` |
-| Z2, Z_N, fermion parity | Ascending label |
+| Z_N, fermion parity | Ascending label |
 | SU(2) | Ascending twice-spin |
 | CU(1) | Charge magnitude, with `0+` before `0-` |
 | TableRule | AnyonWiki object order; Ising is `1, ψ, σ`, unlike TensorKit |

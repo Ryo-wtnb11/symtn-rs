@@ -127,7 +127,7 @@ fn tree_pair_operation_key_uses_tensorkit_global_source_axes() {
     let src_structure = packed_fixture_structure(3, [(src_key, vec![1, 1, 1])]).unwrap();
 
     let local_domain_identity = build_tree_pair_transform_group_plan(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         TreeTransformOperation::permute([1, 0], [0]),
         &src_structure,
     )
@@ -141,7 +141,7 @@ fn tree_pair_operation_key_uses_tensorkit_global_source_axes() {
     );
 
     build_tree_pair_transform_group_plan(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         TreeTransformOperation::permute([1, 0], [2]),
         &src_structure,
     )
@@ -167,7 +167,7 @@ fn unique_tree_pair_reuses_completed_transformers_with_complete_storage_keys() {
     // The cache API requires the built-in rule-key marker and rigid symbols;
     // use the production Z2 rule, whose semantics match the local UniqueZ2
     // oracle while satisfying both bounds without adding test-only adapters.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     assert_eq!(rule.fusion_style(), FusionStyleKind::Unique);
     let src_tree = expect_tree_key(&src_key);
     let operation = TreeTransformOperation::permute([0, 2], [1]);
@@ -227,7 +227,7 @@ fn unique_tree_pair_reuses_completed_transformers_with_complete_storage_keys() {
 
 #[test]
 fn fermionic_storage_conjugation_uses_distinct_reusable_structures() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let odd = SectorId::new(1);
     let tree = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(&rule, [odd], odd, [false], [], []).unwrap(),
@@ -352,7 +352,7 @@ fn tree_pair_transform_public_helper_executes_split_changing_permute() {
     let src_tree = expect_tree_key(&src_key);
     let operation = TreeTransformOperation::permute([0, 2], [1]);
     let (dst_tree, coefficient) =
-        single_permuted_tree_pair(&Z2FusionRule, &src_tree, &[0, 2], &[1]);
+        single_permuted_tree_pair(&ZNFusionRule::new(2).unwrap(), &src_tree, &[0, 2], &[1]);
     let dst_key = BlockKey::from(dst_tree);
     let src_structure = packed_fixture_structure(3, [(src_key, vec![1, 1, 1])]).unwrap();
     let dst_structure = packed_fixture_structure(3, [(dst_key.clone(), vec![1, 1, 1])]).unwrap();
@@ -363,7 +363,15 @@ fn tree_pair_transform_public_helper_executes_split_changing_permute() {
     let mut dst =
         TestTensor::<f64>::from_vec_with_structure(vec![2.0], dst_space, dst_structure).unwrap();
 
-    eager_tree_transform_into(&Z2FusionRule, operation, &mut dst, &src, 3.0, 5.0).unwrap();
+    eager_tree_transform_into(
+        &ZNFusionRule::new(2).unwrap(),
+        operation,
+        &mut dst,
+        &src,
+        3.0,
+        5.0,
+    )
+    .unwrap();
 
     assert_eq!(dst.structure().block(0).unwrap().key(), &dst_key);
     assert_eq!(dst.data(), &[3.0 * coefficient * 7.0 + 5.0 * 2.0]);
@@ -387,7 +395,8 @@ fn tree_pair_transform_public_helper_compiles_against_actual_destination_structu
     );
     let src_tree = expect_tree_key(&src_key);
     let operation = TreeTransformOperation::permute([0, 2], [1]);
-    let (dst_tree, _) = single_permuted_tree_pair(&Z2FusionRule, &src_tree, &[0, 2], &[1]);
+    let (dst_tree, _) =
+        single_permuted_tree_pair(&ZNFusionRule::new(2).unwrap(), &src_tree, &[0, 2], &[1]);
     let expected_missing = BlockKey::from(dst_tree);
     let src_structure = packed_fixture_structure(3, [(src_key.clone(), vec![1, 1, 1])]).unwrap();
     let wrong_dst_structure = packed_fixture_structure(3, [(src_key, vec![1, 1, 1])]).unwrap();
@@ -398,7 +407,8 @@ fn tree_pair_transform_public_helper_compiles_against_actual_destination_structu
     let dst = TestTensor::<f64>::from_vec_with_structure(vec![0.0], dst_space, wrong_dst_structure)
         .unwrap();
 
-    let err = uncached_tree_pair_structure(&Z2FusionRule, operation, &dst, &src).unwrap_err();
+    let err = uncached_tree_pair_structure(&ZNFusionRule::new(2).unwrap(), operation, &dst, &src)
+        .unwrap_err();
 
     assert_eq!(
         err,
@@ -1374,7 +1384,7 @@ fn product_resolution_compiles_distinct_degeneracy_shapes() {
 fn tree_transform_execution_context_replays_product_tree_pair_transforms() {
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
     let equivalent_rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();

@@ -4,7 +4,8 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
@@ -23,14 +24,14 @@ fn u1_leg(charges: i32) -> GradedSpace<U1FusionRule> {
 fn fz2u1_leg(charges: i32) -> GradedSpace<Fz2U1> {
     let sector = |q: i32| {
         let parity = if q.rem_euclid(2) == 0 {
-            Z2Irrep::EVEN
+            FermionParityIrrep::EVEN
         } else {
-            Z2Irrep::ODD
+            FermionParityIrrep::ODD
         };
         ProductSector::new(parity, U1Irrep::new(q))
     };
     GradedSpace::try_new(
-        Arc::new(Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap()),
+        Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),
         (-charges..=charges).map(|q| (sector(q), 2)),
     )
     .unwrap()

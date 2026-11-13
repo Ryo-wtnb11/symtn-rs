@@ -9,7 +9,7 @@ use crate::legs::{su2_leg_2_2_1, u1_leg_2_1_2};
 use crate::numerics::{self, Numeric};
 use num_complex::Complex64;
 use std::sync::Arc;
-use symtn::sector::{FermionParityFusionRule, Z2Irrep};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep};
 use symtn::typed::{GradedSpace, Runtime};
 
 /// Terms per physical entry: a rank-4 SU(2) tensor with spins up to 1 sums
@@ -108,8 +108,8 @@ fn fz2_rank_three(
     runtime: &Runtime,
 ) -> TensorMap<FermionParityFusionRule, f64> {
     let leg = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     let mut next = 0.0;

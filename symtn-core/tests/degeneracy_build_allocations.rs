@@ -5,7 +5,7 @@
 
 use std::hint::black_box;
 
-use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, Z2FusionRule, Z2Irrep};
+use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, ZNFusionRule, ZNIrrep};
 
 use crate::counting_alloc;
 
@@ -15,9 +15,9 @@ use crate::counting_alloc;
 /// sector.
 fn homspace(rank: usize, even_only: usize, degeneracy: usize) -> FusionTreeHomSpace {
     let leg = |axis: usize| {
-        let odd = (axis >= even_only).then_some((Z2Irrep::ODD, degeneracy + 1));
+        let odd = (axis >= even_only).then_some((ZNIrrep::new(1, 2).unwrap(), degeneracy + 1));
         SectorLeg::new(
-            std::iter::once((Z2Irrep::EVEN, degeneracy)).chain(odd),
+            std::iter::once((ZNIrrep::new(0, 2).unwrap(), degeneracy)).chain(odd),
             false,
         )
     };
@@ -34,7 +34,7 @@ fn homspace(rank: usize, even_only: usize, degeneracy: usize) -> FusionTreeHomSp
 /// excludes cache-internal growth that depends on what was admitted before.
 fn cold_degeneracy_build_calls(rank: usize, even_only: usize) -> (usize, u64) {
     let fresh = homspace(rank, even_only, 2);
-    let layout = fresh.prepare_fusion_tree_layout(&Z2FusionRule);
+    let layout = fresh.prepare_fusion_tree_layout(&ZNFusionRule::new(2).unwrap());
     let (structure, allocs) = counting_alloc::measure(|| {
         layout
             .build_from_leg_degeneracies(black_box(&fresh))

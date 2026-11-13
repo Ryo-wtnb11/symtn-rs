@@ -75,8 +75,8 @@ use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRule,
-    U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, TableRule, TableSector,
+    U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     BlockFusionTrees, Complex64, ContractSpec, GradedSpace, SectorSpectrum, TensorMap,
@@ -576,10 +576,18 @@ fn fz2_legs() -> (
     GradedSpace<FermionParityFusionRule>,
     GradedSpace<FermionParityFusionRule>,
 ) {
-    let rule = Arc::new(FermionParityFusionRule);
+    let rule = Arc::new(FermionParityFusionRule::new());
     (
-        GradedSpace::try_new(Arc::clone(&rule), [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)]).unwrap(),
-        GradedSpace::try_new(rule, [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 2)]).unwrap(),
+        GradedSpace::try_new(
+            Arc::clone(&rule),
+            [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
+        )
+        .unwrap(),
+        GradedSpace::try_new(
+            rule,
+            [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 2)],
+        )
+        .unwrap(),
     )
 }
 
@@ -648,7 +656,7 @@ fn multiplicity_free_real_symbol_transform_into_is_alpha_eager_plus_beta_destina
     let (v, w) = u1_legs();
     both_lanes!(engine, &runtime, v, w, debug_key::<U1Irrep>);
     let (v, w) = fz2_legs();
-    both_lanes!(engine, &runtime, v, w, debug_key::<Z2Irrep>);
+    both_lanes!(engine, &runtime, v, w, debug_key::<FermionParityIrrep>);
     let v = su2_leg();
     both_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| {
         twice(t, su2_spin)
@@ -680,9 +688,9 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
         engine,
         &runtime,
         v.try_dual().unwrap(),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
-        |s: &Z2Irrep| format!("{s:?}"),
-        debug_key::<Z2Irrep>
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
+        |s: &FermionParityIrrep| format!("{s:?}"),
+        debug_key::<FermionParityIrrep>
     );
     let v = su2_leg();
     bond_lanes!(
@@ -1149,9 +1157,9 @@ fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_desti
         &runtime,
         v,
         w,
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
-        |s: &Z2Irrep| format!("{s:?}"),
-        debug_key::<Z2Irrep>
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
+        |s: &FermionParityIrrep| format!("{s:?}"),
+        debug_key::<FermionParityIrrep>
     );
     let v = su2_leg();
     trace_lanes!(
@@ -1701,16 +1709,16 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
         debug_key::<U1Irrep>
     );
     let (v, w) = fz2_legs();
-    contract_lanes!(engine, &runtime, v, w, debug_key::<Z2Irrep>);
+    contract_lanes!(engine, &runtime, v, w, debug_key::<FermionParityIrrep>);
     compact_contract_lanes!(
         engine,
         &runtime,
         v,
         w,
         w,
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 2)],
-        |s: &Z2Irrep| format!("{s:?}"),
-        debug_key::<Z2Irrep>
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 2)],
+        |s: &FermionParityIrrep| format!("{s:?}"),
+        debug_key::<FermionParityIrrep>
     );
     // A bond on a dual leg: the fermionic twist on the contracted leg makes
     // every arm decline to the dense route (TensorKit's `copyA`/`copyB`).
@@ -1721,9 +1729,9 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
         v,
         w,
         dual,
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 2)],
-        |s: &Z2Irrep| format!("{s:?}"),
-        debug_key::<Z2Irrep>
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 2)],
+        |s: &FermionParityIrrep| format!("{s:?}"),
+        debug_key::<FermionParityIrrep>
     );
     let v = su2_leg();
     contract_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| {

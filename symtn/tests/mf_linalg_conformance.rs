@@ -11,8 +11,8 @@ use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{
     MultiplicityFreeRigidSymbols, PackedProductCodec, ProductSectorLayout, SectorCodec,
@@ -31,6 +31,7 @@ type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, Fz2U1Su2Codec>;
 use crate::fixtures;
 
 use fixtures::host_runtime;
+use symtn::sector::ZNIrrep;
 
 macro_rules! assert_close {
     ($engine:ident, $actual:expr, $expected:expr) => {{
@@ -375,12 +376,15 @@ fn public_multiplicity_free_linalg_conformance() {
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]
     );
     let z3 = ZNFusionRule::new(3).unwrap();
-    let z3_pairs = [(z3.irrep(0), 2), (z3.irrep(1), 2)];
+    let z3_pairs = [
+        (ZNIrrep::new(0, z3.category().modulus()).unwrap(), 2),
+        (ZNIrrep::new(1, z3.category().modulus()).unwrap(), 2),
+    ];
     factor_conformance!(engine, "Z3", z3, z3_pairs);
     factor_conformance!(
         engine,
         "CU1 vacuum/pseudo/charged",
-        symtn::sector::CU1FusionRule,
+        symtn::sector::CU1FusionRule::new(),
         [
             (symtn::sector::CU1Irrep::VACUUM, 2),
             (symtn::sector::CU1Irrep::PSEUDOSCALAR, 2),
@@ -390,8 +394,8 @@ fn public_multiplicity_free_linalg_conformance() {
     factor_conformance!(
         engine,
         "fZ2 odd",
-        FermionParityFusionRule,
-        [(Z2Irrep::ODD, 2)]
+        FermionParityFusionRule::new(),
+        [(FermionParityIrrep::ODD, 2)]
     );
     factor_conformance!(
         engine,
@@ -402,23 +406,23 @@ fn public_multiplicity_free_linalg_conformance() {
     factor_conformance!(
         engine,
         "fZ2xU1",
-        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         [
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
         ]
     );
     factor_conformance!(
         engine,
         "fZ2xU1xSU2",
         Fz2U1Su2Rule::try_new(
-            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap(),
         [(
             product_sector(
-                product_sector(Z2Irrep::ODD, U1Irrep::new(1)),
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
                 SU2Irrep::from_twice_spin(1),
             ),
             2,

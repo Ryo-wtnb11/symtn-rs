@@ -65,8 +65,8 @@ use std::sync::Arc;
 use num_complex::Complex64;
 use symtn::sector::CheckedFusionAlgebra;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::sector::{MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{GradedSpace, TensorMap};
@@ -260,8 +260,8 @@ fn u1_leg(charges: &[(i32, usize)], dual: bool) -> GradedSpace<U1FusionRule> {
 
 fn fz2_leg() -> GradedSpace<FermionParityFusionRule> {
     GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap()
 }
@@ -475,15 +475,18 @@ fn device_product_providers_match_the_host_for_signs_and_recoupling() {
 
     // fZ2 x U(1): fermionic signs on top of a charge grading.
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
         ],
     )
     .unwrap();
@@ -518,22 +521,25 @@ fn device_product_providers_match_the_host_for_signs_and_recoupling() {
 
     // fZ2 (x) SU(2): fermionic signs *and* recoupling in one provider.
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
                 2,
             ),
             (
-                product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(1)),
+                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
                 1,
             ),
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(2)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
                 1,
             ),
         ],
@@ -1095,15 +1101,18 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
 
     // fZ2 x U(1): fermionic signs on a charge grading.
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
         ],
     )
     .unwrap();
@@ -1149,22 +1158,25 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
 
     // fZ2 (x) SU(2): fermionic signs *and* recoupling, complex payload.
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
                 2,
             ),
             (
-                product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(1)),
+                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
                 1,
             ),
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(2)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
                 1,
             ),
         ],

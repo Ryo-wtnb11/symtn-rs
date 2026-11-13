@@ -11,7 +11,7 @@ use std::sync::Arc;
 use symtn::sector::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion,
     CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
-    SectorId, SectorVec, TypedSectorAdmission, Z2FusionRule, Z2Irrep,
+    SectorId, SectorVec, TypedSectorAdmission, ZNFusionRule, ZNIrrep,
 };
 use symtn::typed::{
     Complex64, GenericTensorError, GradedSpace, OperationError, Runtime, SectorSpectrum, TensorMap,
@@ -25,21 +25,21 @@ include!("../common/checked_only_toy.rs");
 struct Mf;
 
 impl Mf {
-    fn provider() -> Arc<Z2FusionRule> {
-        Arc::new(Z2FusionRule)
+    fn provider() -> Arc<ZNFusionRule> {
+        Arc::new(ZNFusionRule::new(2).unwrap())
     }
-    fn unit() -> Z2Irrep {
-        Z2Irrep::EVEN
+    fn unit() -> ZNIrrep {
+        ZNIrrep::new(0, 2).unwrap()
     }
-    fn charged() -> Z2Irrep {
-        Z2Irrep::ODD
+    fn charged() -> ZNIrrep {
+        ZNIrrep::new(1, 2).unwrap()
     }
     /// A built-in rule has no query counter; the checked mode observes the
     /// "before provider work" half of a cell.
-    fn reset_queries(_: &Z2FusionRule) {}
-    fn assert_no_queries(_: &Z2FusionRule) {}
+    fn reset_queries(_: &ZNFusionRule) {}
+    fn assert_no_queries(_: &ZNFusionRule) {}
     /// Every Z2 sector has quantum dimension 1.
-    fn dim(_: Z2Irrep) -> f64 {
+    fn dim(_: ZNIrrep) -> f64 {
         1.0
     }
     /// Left null dimensions of `[l, l] <- [l]`, `l = unit ⊕ charged`, per

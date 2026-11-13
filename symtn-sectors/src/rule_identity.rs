@@ -33,22 +33,46 @@ struct ProductRuleIdentity {
 /// Equality is the value's full `Eq`, never its hash: a hash collision must
 /// not merge two categories.
 ///
-/// Why the value is held weakly: a cache key is charged by
+/// Why a category with drop glue is held weakly: a cache key is charged by
 /// [`RuleIdentity::charged_retained_bytes`], and an erased category has no
 /// size query, so a key that owned the category could keep unbounded memory
 /// alive (a table's derived data, a Lie group's generated catalog) beyond its
 /// charge. The rule owns the category; the identity only refers to it. Once
 /// every clone of the rule is dropped, the identity can no longer equal any
 /// other identity, so entries keyed on it are unreachable and leave the cache
-/// through its ordinary eviction. That loses sharing with a later rule over
-/// an equal category, never correctness.
+/// through its ordinary eviction.
+///
+/// Known limitation (#2540): this is not only a loss of cache sharing. A
+/// structure, key or plan that recorded the identity of a dropped rule no
+/// longer matches a later rule over an equal category, so binding or
+/// rebinding it to that rule fails with `FusionRuleMismatch` for table
+/// categories and Lie groups.
+///
+/// A category without drop glue (Z_N, fermion parity, CU(1)) owns nothing
+/// beyond its `size_of`, which is the charge a `Weak` already pays, so the
+/// identity holds it and equal values stay equal for as long as they exist.
 struct ValueRuleIdentity {
     rule_type: std::any::TypeId,
     prehash: u64,
-    /// `size_of` the category: a `Weak` keeps the allocation, not the value.
+    /// `size_of` the category: the allocation either reference keeps.
     value_bytes: usize,
-    value: std::sync::Weak<dyn std::any::Any + Send + Sync>,
+    value: CategoryRef,
     equals: fn(&dyn std::any::Any, &dyn std::any::Any) -> bool,
+}
+
+/// The category a value identity refers to: weakly when it has drop glue.
+enum CategoryRef {
+    Weak(std::sync::Weak<dyn std::any::Any + Send + Sync>),
+    Owned(Arc<dyn std::any::Any + Send + Sync>),
+}
+
+impl CategoryRef {
+    fn get(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+        match self {
+            Self::Weak(value) => value.upgrade(),
+            Self::Owned(value) => Some(Arc::clone(value)),
+        }
+    }
 }
 
 /// A codec's request for a value identity, resolved against the `Arc` the
@@ -123,7 +147,7 @@ impl PartialEq for RuleIdentityNode {
                     return false;
                 }
                 // A dropped category equals nothing; see `ValueRuleIdentity`.
-                match (left.value.upgrade(), right.value.upgrade()) {
+                match (left.value.get(), right.value.get()) {
                     (Some(left_value), Some(right_value)) => {
                         Arc::ptr_eq(&left_value, &right_value)
                             || (left.equals)(&*left_value, &*right_value)
@@ -210,7 +234,12 @@ impl RuleIdentity {
             use std::hash::BuildHasher;
 
             let value = owner.downcast_ref::<Arc<V>>()?;
-            let weak: std::sync::Weak<V> = Arc::downgrade(value);
+            let value_ref = if std::mem::needs_drop::<V>() {
+                let weak: std::sync::Weak<V> = Arc::downgrade(value);
+                CategoryRef::Weak(weak)
+            } else {
+                CategoryRef::Owned(Arc::clone(value) as Arc<dyn std::any::Any + Send + Sync>)
+            };
             Some(
                 ValueRuleIdentity {
                     rule_type,
@@ -219,7 +248,7 @@ impl RuleIdentity {
                     >::default()
                     .hash_one(&**value),
                     value_bytes: std::mem::size_of::<V>(),
-                    value: weak,
+                    value: value_ref,
                     equals: equals::<V>,
                 },
             )
@@ -272,9 +301,9 @@ impl RuleIdentity {
                 .saturating_add(std::mem::size_of::<ProductRuleIdentity>())
                 .saturating_add(identity.left.charged_retained_bytes())
                 .saturating_add(identity.right.charged_retained_bytes()),
-            // The category is held weakly and owned by the rule: the key
-            // retains the node and, through the `Weak`, the category's
-            // allocation, whose contents drop with the last rule.
+            // The key retains the node and the category's allocation; a
+            // category with drop glue is held weakly, so its contents drop
+            // with the last rule.
             RuleIdentityNode::Value(identity) => ARC_HEADER_BYTES
                 .saturating_add(std::mem::size_of::<ValueRuleIdentity>())
                 .saturating_add(ARC_HEADER_BYTES)

@@ -37,8 +37,8 @@ use num_complex::{Complex32, Complex64};
 
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -152,18 +152,21 @@ type FermionSu2 = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
 /// `fZ2 ⊠ SU(2)`: fermionic signs *and* non-Abelian recoupling in one provider.
 fn fz2_su2_leg() -> GradedSpace<FermionSu2> {
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     GradedSpace::try_new(
         rule,
         [
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
                 2,
             ),
             (
-                product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(2)),
+                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(2)),
                 1,
             ),
         ],
@@ -624,15 +627,15 @@ fn fz2_u1_leg() -> GradedSpace<FermionU1> {
     GradedSpace::try_new(
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
         ),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 2),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 2),
         ],
     )
     .unwrap()
@@ -1155,8 +1158,9 @@ fn device_fermionic_signs_are_exact_at_every_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let provider = Arc::new(FermionParityFusionRule);
-    let odd = || GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 1)]).unwrap();
+    let provider = Arc::new(FermionParityFusionRule::new());
+    let odd =
+        || GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)]).unwrap();
     let odd_dual = || odd().try_dual().unwrap();
 
     fn run<D: DevicePayload>(

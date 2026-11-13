@@ -187,7 +187,7 @@ fn checked_generic_disjoint_null_is_identity_without_dense_calls() {
 #[test]
 fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let sectors = [SectorId::new(0), SectorId::new(1)];
     let degeneracy = 2usize;
     let leg = || SectorLeg::new(sectors.iter().map(|&sector| (sector, degeneracy)), false);
@@ -208,7 +208,7 @@ fn null_spaces_are_orthonormal_and_annihilate_the_tensor() {
     let null = left_null(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tall),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tall),
     )
     .unwrap();
 
@@ -295,14 +295,14 @@ fn square_null_spaces_are_empty_whatever_the_rank() {
     // alone (MatrixAlgebraKit `qr_null!`/`lq_null!`), so square sectors,
     // including zero and rank-one ones, have no null directions and run no
     // dense work.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
     for matrix in [
         one_sector_matrix(vec![0.0; 4]),
         one_sector_matrix(vec![1.0, 2.0, 1.0, 2.0]),
         one_sector_matrix(vec![1.0, 0.0, 0.0, 1.0e-300]),
     ] {
-        let input = bound_tensor(Arc::new(rule), &matrix);
+        let input = bound_tensor(Arc::new(rule.clone()), &matrix);
         let left = left_null(engine, &mut dense, &input.as_ref()).unwrap();
         let right = right_null(engine, &mut dense, &input.as_ref()).unwrap();
         assert_eq!(left.structure().block_count(), 0);
@@ -321,10 +321,10 @@ fn assert_rectangular_null_spaces_ignore_rank<D: FactorScalar>(
     tol: f64,
 ) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
     let tall = one_sector_rectangular_matrix(tall, 3, 2);
-    let input = bound_tensor(Arc::new(rule), &tall);
+    let input = bound_tensor(Arc::new(rule.clone()), &tall);
     let n = left_null(engine, &mut dense, &input.as_ref()).unwrap();
     assert_eq!(n.structure().block(0).unwrap().shape(), &[3, 1]);
     let norm: f64 = n.data().iter().map(|v| v.widen_complex().norm_sqr()).sum();
@@ -477,7 +477,7 @@ fn disjoint_null_spaces_keep_all_structural_directions_without_dense_work() {
 fn null_zero_only_input_normalizes_to_empty_without_dense_work() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(0, 0);
-    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
 
     let left = left_null(engine, &mut dense, &input.as_ref()).unwrap();
@@ -638,9 +638,11 @@ where
 fn multiplicity_free_full_null_eigen_ops_borrow_canonical_input() {
     let u1 = [-1, 0, 1].map(|charge| U1Irrep::new(charge).sector_id());
     let su2 = [0, 1].map(|twice| SU2Irrep::from_twice_spin(twice).sector_id());
-    let product =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let product = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let product_sectors = [
         product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -843,7 +845,7 @@ fn mf_null_factor_space_is_staged_once_per_side_and_cached() {
     // exactly once, and a repeated call reuses the cached layout (the same
     // structure `Arc`).
     let tensor = rectangular_svd_tensor(5, 2);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let layout = bound.as_ref();
     let input = layout.dynamic();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();

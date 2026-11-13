@@ -1561,7 +1561,7 @@ fn invalid_unique_source_does_not_count_eager_compile_misses() {
     let error = cache
         .resolve_tree_pair(
             engine,
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             &TreeTransformOperation::permute([0, 1], []),
             dst.structure(),
             src.structure(),

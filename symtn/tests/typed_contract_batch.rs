@@ -1080,17 +1080,19 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
         symtn::typed::Complex64,
         fermion_su2()
     );
-    use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
+    use symtn::sector::{
+        product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    };
     let odd_only = || {
         GradedSpace::try_new(
             Arc::new(
                 symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                    FermionParityFusionRule,
+                    FermionParityFusionRule::new(),
                     U1FusionRule,
                 )
                 .unwrap(),
             ),
-            [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
+            [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
         )
         .unwrap()
     };

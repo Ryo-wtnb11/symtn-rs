@@ -165,7 +165,7 @@ fn fusion_tree_homspace_generates_innerline_paths_for_simple_fusion() {
 
 #[test]
 fn fusion_tree_homspace_matches_tensorkit_z2_fusiontreelist_order() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),
@@ -247,8 +247,14 @@ fn fusion_layout_identity_hashes_inner_semantics_not_arc_address() {
         ]),
         FusionProductSpace::new([SectorLeg::new([(z2_odd(), 1)], false)]),
     );
-    let first = Arc::new(FusionTreeHomSpaceCacheKey::new(&Z2FusionRule, &hom));
-    let second = Arc::new(FusionTreeHomSpaceCacheKey::new(&Z2FusionRule, &hom));
+    let first = Arc::new(FusionTreeHomSpaceCacheKey::new(
+        &ZNFusionRule::new(2).unwrap(),
+        &hom,
+    ));
+    let second = Arc::new(FusionTreeHomSpaceCacheKey::new(
+        &ZNFusionRule::new(2).unwrap(),
+        &hom,
+    ));
     assert!(!Arc::ptr_eq(&first, &second));
     assert_eq!(first, second);
 
@@ -259,7 +265,7 @@ fn fusion_layout_identity_hashes_inner_semantics_not_arc_address() {
     assert_eq!(first_hash.finish(), second_hash.finish());
 
     let fermionic = Arc::new(FusionTreeHomSpaceCacheKey::new(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &hom,
     ));
     assert_ne!(first, fermionic);
@@ -272,7 +278,7 @@ fn fusion_layout_identity_hashes_inner_semantics_not_arc_address() {
         ]),
     );
     let repartitioned = Arc::new(FusionTreeHomSpaceCacheKey::new(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         &repartitioned,
     ));
     assert_ne!(first, repartitioned);

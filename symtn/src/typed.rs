@@ -27,17 +27,17 @@
 //! ```
 //! use std::sync::Arc;
 //! use symtn::sector::{
-//!     product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, Z2Irrep,
+//!     product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, FermionParityIrrep,
 //! };
 //! use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 //!
 //! # fn main() -> Result<(), Error> {
 //! let engine = &mut symtn::typed::CpuEngine::serial();
 //! let runtime = Runtime::builder().build()?;
-//! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+//! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
 //!
-//! let even = product_sector(Z2Irrep::EVEN, U1Irrep::new(0));
-//! let odd = product_sector(Z2Irrep::ODD, U1Irrep::new(1));
+//! let even = product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0));
+//! let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1));
 //! let v = GradedSpace::try_new(Arc::new(rule), [(even, 2), (odd, 1)])?;
 //!
 //! let t: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
@@ -51,7 +51,7 @@
 //! itself a provider. The spelling
 //!
 //! ```text
-//! ProductFusionRule::try_new(ProductFusionRule::try_new(FermionParityFusionRule, U1FusionRule)?, SU2FusionRule)?
+//! ProductFusionRule::try_new(ProductFusionRule::try_new(FermionParityFusionRule::new(), U1FusionRule)?, SU2FusionRule)?
 //! ```
 //!
 //! is the left-associated `(fZ2 ⊠ U(1)) ⊠ SU(2)`, whose labels are

@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, Fz2SectorLayout, PackedProductCodec,
-    ProductFusionRule, U1FusionRule, U1Irrep, U1SectorLayout, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, Fz2SectorLayout,
+    PackedProductCodec, ProductFusionRule, U1FusionRule, U1Irrep, U1SectorLayout,
 };
 use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
@@ -111,9 +111,9 @@ fn fz2_u1() -> Vec<<Fz2U1Rule as symtn::sector::TypedSectorAdmission>::Sector> {
         .map(|k| {
             product_sector(
                 if k % 2 == 0 {
-                    Z2Irrep::EVEN
+                    FermionParityIrrep::EVEN
                 } else {
-                    Z2Irrep::ODD
+                    FermionParityIrrep::ODD
                 },
                 U1Irrep::new(k * 5),
             )
@@ -137,14 +137,14 @@ pin!(
 );
 pin!(
     product_f64,
-    Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+    Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
     fz2_u1(),
     f64,
     |re: f64, _im: f64| re
 );
 pin!(
     product_c64,
-    Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+    Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
     fz2_u1(),
     Complex64,
     Complex64::new

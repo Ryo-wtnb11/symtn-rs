@@ -12,10 +12,11 @@ fn categorical_adjoint_view_swaps_homspace_and_block_layout_without_dualizing() 
         FusionProductSpace::new([SectorLeg::new([(sector, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(sector, 3)], false)]),
     );
-    let space = DynamicFusionMapSpace::from_final_homspace(&Z2FusionRule, hom).unwrap();
+    let space =
+        DynamicFusionMapSpace::from_final_homspace(&ZNFusionRule::new(2).unwrap(), hom).unwrap();
 
     let adjoint = space
-        .validate_rule(&Z2FusionRule)
+        .validate_rule(&ZNFusionRule::new(2).unwrap())
         .and_then(|()| space.adjoint_view())
         .unwrap();
 

@@ -5,7 +5,7 @@ fn full_svd_late_error_preserves_input_and_publishes_no_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the adjoint-oriented full-SVD engine finishes every sector before
     // allocating any returned factor.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -26,7 +26,7 @@ fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
     // What: the production full SVD (direct and adjoint engines) admits U and
     // Vh layouts that the packed per-sector factors already occupy, so both
     // factor buffers move whole instead of being zero-filled and scattered.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -57,7 +57,7 @@ fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
 fn full_svd_adjoint_builds_only_the_final_factor_buffers() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = one_sector_rectangular_matrix(vec![1.0, 2.0, 3.0, 4.0, 5.0, 7.0], 2, 3);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let buffer_builds_rec = crate::probe::record();
@@ -73,7 +73,7 @@ fn full_svd_adjoint_builds_only_the_final_factor_buffers() {
 fn full_svd_adjoint_completion_reconstructs_rectangular_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = one_sector_rectangular_matrix(vec![1.0, 2.0, 3.0, 4.0, 5.0, 7.0], 2, 3);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
     let output = svd_full_adjoint_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
     assert_eq!(dense.counts().svd, 1);
@@ -98,7 +98,10 @@ fn full_svd_adjoint_completion_reconstructs_rectangular_input() {
 
 #[test]
 fn svd_full_rejects_a_different_provider_before_dense_execution() {
-    let tensor = tsvd_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let tensor = tsvd_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
 
     let _backend = ScriptedExecutor::new(RejectExecutorCalls);
     let error = match BoundTensorMap::try_new(Arc::new(U1FusionRule), tensor) {
@@ -115,13 +118,13 @@ fn svd_full_rejects_a_different_provider_before_dense_execution() {
 #[test]
 fn svd_full_gives_square_unitaries_and_reconstructs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let full = svd_full(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
 
@@ -169,7 +172,7 @@ fn svd_full_gives_square_unitaries_and_reconstructs() {
 fn svd_full_uses_native_owned_full_svd_without_orthonormal_completion() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(2, 3);
-    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let Some(mut dense) = NativeFullSvdSpy::new() else {
         return;
     };
@@ -193,7 +196,7 @@ fn svd_full_completion_solves_the_compact_factors_through_svd_into() {
     // is unavailable still factors.
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(2, 3);
-    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
 
     let mut failing = ScriptedExecutor::<FailingSvdInto>::default();
     let result = svd_full_dyn(engine, &mut failing, &input.as_ref().dynamic());
@@ -234,7 +237,7 @@ fn svd_full_submits_one_destination_batch_of_square_factors_in_both_orientations
     // executor), and no per-matrix SVD or completion call.
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = mixed_rectangular_c32_tensor();
-    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let shapes = tensor
         .structure()
         .coupled_sector_regions(1)
@@ -278,7 +281,7 @@ fn assert_native_full_svd_uses_builtin_owned_dtype<D: FactorScalar>() {
         source.fusion_space().clone(),
     )
     .unwrap();
-    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let Some(mut dense) = NativeFullSvdSpy::new() else {
         return;
     };
@@ -319,7 +322,7 @@ fn native_full_svd_reconstructs_complex_mixed_rectangular_sectors() {
         source.fusion_space().clone(),
     )
     .unwrap();
-    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let Some(mut dense) = NativeFullSvdSpy::new() else {
         return;
     };
@@ -514,7 +517,7 @@ fn assert_native_full_svd_oracle<D: FactorScalar>(tol: f64) {
                 .sum::<f64>()
                 .sqrt();
             let tensor = one_sector_rectangular_matrix(data, rows, cols);
-            let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+            let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
             let Some(mut dense) = NativeFullSvdSpy::new() else {
                 return;
             };
@@ -627,7 +630,7 @@ fn native_full_svd_late_failure_does_not_publish_or_retry_compatibility() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = mixed_rectangular_c32_tensor();
     let before = tensor.data().to_vec();
-    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let Some(mut dense) = FailSecondOwnedFullSvd::new() else {
         return;
     };
@@ -659,7 +662,7 @@ fn native_full_svd_reconstructs_complex_square_input() {
         2,
         2,
     );
-    let input = bound_tensor(Arc::new(Z2FusionRule), &square);
+    let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &square);
     let Some(mut dense) = NativeFullSvdSpy::new() else {
         return;
     };
@@ -684,7 +687,7 @@ fn native_full_svd_reconstructs_complex_square_input() {
 fn rectangular_full_svd_has_square_outer_factors_and_reconstructs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: full SVD returns U(m,m), S(m,n), Vh(n,n) and recomposes tall and wide inputs.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     for (rows, cols) in [(2, 3), (3, 2)] {
         let matrix = one_sector_rectangular_matrix(
@@ -694,7 +697,7 @@ fn rectangular_full_svd_has_square_outer_factors_and_reconstructs() {
             rows,
             cols,
         );
-        let input = bound_tensor(Arc::new(rule), &matrix);
+        let input = bound_tensor(Arc::new(rule.clone()), &matrix);
         let full = svd_full(engine, &mut dense, &input.as_ref()).unwrap();
         assert_factor_layout_matches_per_tree_shapes(full.u.space());
         assert_factor_layout_matches_per_tree_shapes(full.s.space());

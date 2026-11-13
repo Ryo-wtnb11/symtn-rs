@@ -1,9 +1,9 @@
 //! `sector_order_key`: TensorKit `findindex - 1` positions per factor.
 
 use symtn_sectors::{
-    product_sector, CU1FusionRule, FermionParityFusionRule, FusionRule, Fz2SectorLayout,
-    PackedProductCodec, ProductFusionRule, SU2FusionRule, SU2Irrep, SectorCodec, SectorOrderKey,
-    TableRule, U1FusionRule, U1Irrep, U1SectorLayout, Z2FusionRule, Z2Irrep, ZNFusionRule,
+    product_sector, CU1FusionRule, FermionParityFusionRule, FermionParityIrrep, FusionRule,
+    Fz2SectorLayout, PackedProductCodec, ProductFusionRule, SU2FusionRule, SU2Irrep, SectorCodec,
+    SectorOrderKey, TableRule, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule,
 };
 
 use super::s;
@@ -29,9 +29,12 @@ fn single_factor_rules_order_by_id() {
     let z5 = ZNFusionRule::new(5).unwrap();
     let fib = TableRule::fibonacci();
     for id in [0, 1] {
-        assert_eq!(positions(Z2FusionRule.sector_order_key(s(id))), [id as u64]);
         assert_eq!(
-            positions(FermionParityFusionRule.sector_order_key(s(id))),
+            positions(ZNFusionRule::new(2).unwrap().sector_order_key(s(id))),
+            [id as u64]
+        );
+        assert_eq!(
+            positions(FermionParityFusionRule::new().sector_order_key(s(id))),
             [id as u64]
         );
         assert_eq!(positions(fib.sector_order_key(s(id))), [id as u64]);
@@ -42,7 +45,7 @@ fn single_factor_rules_order_by_id() {
     // CU(1): 0+, 0-, 1/2, 1, ... is TensorKit's `values(CU1Irrep)` order.
     for id in [0, 1, 2, 7] {
         assert_eq!(
-            positions(CU1FusionRule.sector_order_key(s(id))),
+            positions(CU1FusionRule::new().sector_order_key(s(id))),
             [id as u64]
         );
     }
@@ -352,20 +355,23 @@ mod lie {
 
 #[test]
 fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
-    let cantor =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap();
+    let cantor = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        U1FusionRule,
+        FermionParityFusionRule::new(),
+    )
+    .unwrap();
     let packed = ProductFusionRule::<
         U1FusionRule,
-        Z2FusionRule,
+        FermionParityFusionRule,
         PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
-    >::try_new(U1FusionRule, Z2FusionRule)
+    >::try_new(U1FusionRule, FermionParityFusionRule::new())
     .unwrap();
     let labels = [
-        (-1, Z2Irrep::EVEN),
-        (1, Z2Irrep::ODD),
-        (1, Z2Irrep::EVEN),
-        (0, Z2Irrep::ODD),
-        (0, Z2Irrep::EVEN),
+        (-1, FermionParityIrrep::EVEN),
+        (1, FermionParityIrrep::ODD),
+        (1, FermionParityIrrep::EVEN),
+        (0, FermionParityIrrep::ODD),
+        (0, FermionParityIrrep::EVEN),
     ];
     let expected_keys = [[4, 0], [3, 1], [3, 0], [0, 1], [0, 0]];
     for ((charge, parity), key) in labels.into_iter().zip(expected_keys) {
@@ -389,21 +395,25 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
     assert_eq!(
         sorted,
         [
-            (0, Z2Irrep::EVEN),
-            (0, Z2Irrep::ODD),
-            (1, Z2Irrep::EVEN),
-            (1, Z2Irrep::ODD),
-            (-1, Z2Irrep::EVEN),
+            (0, FermionParityIrrep::EVEN),
+            (0, FermionParityIrrep::ODD),
+            (1, FermionParityIrrep::EVEN),
+            (1, FermionParityIrrep::ODD),
+            (-1, FermionParityIrrep::EVEN),
         ]
     );
 
     let nested = symtn_sectors::ProductFusionRule::<_, _>::try_new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap(),
         SU2FusionRule,
     )
     .unwrap();
     let label = product_sector(
-        product_sector(U1Irrep::new(-1), Z2Irrep::ODD),
+        product_sector(U1Irrep::new(-1), FermionParityIrrep::ODD),
         SU2Irrep::from_twice_spin(3),
     );
     assert_eq!(

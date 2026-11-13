@@ -641,7 +641,7 @@ use symtn_core::{
     FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey, GenericFArray, GenericFusionSymbols,
     GenericRMatrix, GenericRigidSymbols, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
     MultiplicityFreeRigidSymbols, MultiplicityIndex, Placement, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, SectorId, SectorLeg, SectorStructure, SectorVec, U1FusionRule, U1Irrep, Z2FusionRule,
+    SU2Irrep, SectorId, SectorLeg, SectorStructure, SectorVec, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn_dense::{DenseDotConfig, DenseError, DenseExecutor, DenseRead, DenseWrite, MatrixOp};
 
@@ -735,7 +735,7 @@ fn empty_fusion_tree() -> FusionTreeKey {
 
 fn empty_fusion_tree_with_coupled(coupled: usize) -> FusionTreeKey {
     FusionTreeKey::try_new_for_rule(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         Vec::<SectorId>::new(),
         SectorId::new(coupled),
         Vec::<bool>::new(),
@@ -758,7 +758,7 @@ fn all_codomain_fusion_tree_test_key<
     codomain_vertices: [usize; COD_VERTICES],
 ) -> FusionTreePairKey {
     all_codomain_fusion_tree_test_key_for_rule(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         codomain,
         coupled,
         codomain_is_dual,
@@ -817,9 +817,9 @@ fn fz2_u1_su2_tree_pair_fixture() -> (
     DynamicFusionMapSpace,
     [SectorId; 2],
 ) {
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();

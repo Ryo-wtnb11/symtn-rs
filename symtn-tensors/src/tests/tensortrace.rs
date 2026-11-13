@@ -1,6 +1,7 @@
 use super::*;
 use crate::probe::{self, Event};
 use std::sync::Arc;
+use symtn_core::FermionParityIrrep;
 
 /// Its answers follow `TRACE_TEST_WRONG_STYLE` (admission) and
 /// `TRACE_TEST_FAIL_TWIST` (lowering only, never cached), so its identity
@@ -264,7 +265,7 @@ fn public_dynamic_fz2_trace_validates_exact_extents_before_mutation() {
         expected_dst: Vec<f64>,
     }
 
-    let provider = std::sync::Arc::new(FermionParityFusionRule);
+    let provider = std::sync::Arc::new(FermionParityFusionRule::new());
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let traced_leg = || SectorLeg::new([(even, 1), (odd, 1)], false);
@@ -399,7 +400,7 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
         TensorTraceAxisSpec::new(&[], &[0], &[1]),
     );
 
-    let fz2_provider = std::sync::Arc::new(FermionParityFusionRule);
+    let fz2_provider = std::sync::Arc::new(FermionParityFusionRule::new());
     let fz2_leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], false);
     let fz2_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([fz2_leg()]),
@@ -417,10 +418,10 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
         TensorTraceAxisSpec::new(&[], &[0], &[1]),
     );
 
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let product_provider = std::sync::Arc::new(
         FpU1Su2Rule::try_new(
-            FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap(),
@@ -454,7 +455,7 @@ fn fz2_identity_trace_space() -> DynamicFusionMapSpace {
         FusionProductSpace::new([SectorLeg::new([(even, 2), (odd, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]),
     );
-    DynamicFusionMapSpace::from_final_homspace(&FermionParityFusionRule, homspace).unwrap()
+    DynamicFusionMapSpace::from_final_homspace(&FermionParityFusionRule::new(), homspace).unwrap()
 }
 
 #[test]
@@ -467,7 +468,7 @@ fn fz2_trace_raw_entry_validates_host_slice_extents_before_mutation() {
         actual: usize,
     }
 
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let space = fz2_identity_trace_space();
     let (dst_space, src_space) = (&space, &space);
     let exact = vec![10.0, 20.0, 30.0, 40.0];
@@ -536,8 +537,8 @@ fn fz2_trace_raw_entry_validates_host_slice_extents_before_mutation() {
 fn fz2_lowered_dynamic_trace_matches_encoded_data_oracle() {
     // What: the closed fZ2 trace produces byte-for-byte identical reduced data
     // through encoded and lowered bindings.
-    let provider = std::sync::Arc::new(symtn_core::FermionParityFusionRule);
-    let odd = symtn_core::Z2Irrep::ODD.sector_id();
+    let provider = std::sync::Arc::new(symtn_core::FermionParityFusionRule::new());
+    let odd = symtn_core::SectorId::from(FermionParityIrrep::ODD);
     let leg = || FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]);
     let src_homspace = FusionTreeHomSpace::new(leg(), leg());
     let encoded_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
@@ -590,7 +591,7 @@ fn fz2_lowered_dynamic_trace_matches_encoded_data_oracle() {
 
 #[test]
 fn tensortrace_fusion_rejects_invalid_axis_sets_at_compile_time() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let parity = [(SectorId::new(0), 1), (SectorId::new(1), 1)];
     let src_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
@@ -646,7 +647,7 @@ fn tensortrace_fusion_fermion_parity_matches_tensorkit_supertrace() {
         return;
     }
     symtn_core::clear_structure_caches();
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let src_hom = FusionTreeHomSpace::new(
@@ -688,7 +689,7 @@ fn tensortrace_fusion_fermion_parity_matches_tensorkit_supertrace() {
 
 #[test]
 fn tensortrace_fusion_fermion_supertrace_uses_degeneracy_diagonals() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let src_hom = FusionTreeHomSpace::new(
@@ -728,7 +729,7 @@ fn tensortrace_fusion_fermion_supertrace_uses_degeneracy_diagonals() {
 
 #[test]
 fn tensortrace_fusion_with_conjugation_lowers_lazy_adjoint_supertrace() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let src_hom = FusionTreeHomSpace::new(
@@ -769,7 +770,7 @@ fn tensortrace_fusion_with_conjugation_lowers_lazy_adjoint_supertrace() {
 
 #[test]
 fn tensortrace_fusion_rank_zero_adjoint_keeps_parent_structure() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
@@ -1067,7 +1068,7 @@ fn dynamic_u1_nonconjugating_trace_keeps_parent_axis_geometry() {
 
 #[test]
 fn tensortrace_fusion_scales_destination_once_for_multiple_source_terms() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let src_hom = FusionTreeHomSpace::new(
@@ -1102,7 +1103,7 @@ fn tensortrace_fusion_scales_destination_once_for_multiple_source_terms() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensortrace!`.
 #[test]
 fn tensortrace_fusion_fermion_open_output_matches_tensorkit_oracle() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let leg = || SectorLeg::new([(even, 1), (odd, 1)], false);
@@ -1142,7 +1143,7 @@ fn tensortrace_fusion_fermion_open_output_matches_tensorkit_oracle() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensortrace!`.
 #[test]
 fn tensortrace_fusion_fermion_two_trace_pairs_match_tensorkit_oracle() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let leg = || SectorLeg::new([(even, 1), (odd, 1)], false);
@@ -1470,9 +1471,9 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
 
 #[test]
 fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -1571,7 +1572,7 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
     );
     let provider = std::sync::Arc::new(
         FpU1Su2Rule::try_new(
-            FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap(),

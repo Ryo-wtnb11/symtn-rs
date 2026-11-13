@@ -43,8 +43,8 @@ use symtn::typed::Engine;
 
 use symtn::sector::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
-    CheckedGenericRigidSymbols, FermionParityFusionRule, FusionStyleKind, GenericFArray,
-    GenericRMatrix, RuleIdentity, SectorId, SectorVec, TypedSectorAdmission, Z2Irrep,
+    CheckedGenericRigidSymbols, FermionParityFusionRule, FermionParityIrrep, FusionStyleKind,
+    GenericFArray, GenericRMatrix, RuleIdentity, SectorId, SectorVec, TypedSectorAdmission,
 };
 use symtn::typed::{
     BlockFusionTrees, Complex64, ContractSpec, Direction, GradedSpace, Runtime, SectorSpectrum,
@@ -261,7 +261,7 @@ impl CheckedGenericPivotal for CheckedZ2 {
 }
 
 impl TypedSectorAdmission for CheckedZ2 {
-    type Sector = Z2Irrep;
+    type Sector = FermionParityIrrep;
     type Error = InvalidSector;
     type Mode = CheckedGenericAdmissionMode;
 
@@ -269,16 +269,41 @@ impl TypedSectorAdmission for CheckedZ2 {
         CheckedGenericFusion::rule_identity(self)
     }
 
-    fn try_encode_label(&self, sector: &Z2Irrep) -> Result<SectorId, Self::Error> {
-        Ok(SectorId::new(usize::from(sector.parity())))
+    fn try_encode_label(&self, sector: &FermionParityIrrep) -> Result<SectorId, Self::Error> {
+        Ok(SectorId::new(usize::from(sector.is_odd() as u8)))
     }
 
-    fn try_decode_label(&self, sector: SectorId) -> Result<Z2Irrep, Self::Error> {
-        Ok(Z2Irrep::new(checked_z2(sector)?.id() as u8))
+    fn try_decode_label(&self, sector: SectorId) -> Result<FermionParityIrrep, Self::Error> {
+        Ok(FermionParityIrrep::new(checked_z2(sector)?.id() == 1))
     }
 
     fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
         checked_z2(sector)
+    }
+}
+
+/// The two labels of a Z2-graded rule: Z_2's charges or fermion parity.
+trait Parity: Copy {
+    fn of(parity: u8) -> Self;
+    fn parity(&self) -> u8;
+}
+
+impl Parity for FermionParityIrrep {
+    fn of(parity: u8) -> Self {
+        Self::new(parity == 1)
+    }
+    fn parity(&self) -> u8 {
+        u8::from(self.is_odd())
+    }
+}
+
+impl Parity for symtn::sector::ZNIrrep {
+    fn of(parity: u8) -> Self {
+        Self::new(parity.into(), 2).unwrap()
+    }
+    fn parity(&self) -> u8 {
+        // A Z_2 charge is 0 or 1.
+        self.charge() as u8
     }
 }
 
@@ -306,13 +331,13 @@ macro_rules! twist_rows {
         let odd_twist: f64 = $odd_twist;
         let leg = GradedSpace::try_new(
             Arc::new($rule),
-            SECTORS.iter().map(|&(p, k)| (Z2Irrep::new(p), k)),
+            SECTORS.iter().map(|&(p, k)| (Parity::of(p), k)),
         )
         .unwrap();
         let spectrum = SECTORS
             .iter()
             .map(|&(p, k)| SectorSpectrum {
-                sector: Z2Irrep::new(p),
+                sector: Parity::of(p),
                 values: (0..k).map(|i| conv(value(p, i))).collect::<Vec<$D>>(),
             })
             .collect::<Vec<_>>();
@@ -332,7 +357,7 @@ macro_rules! twist_rows {
                 let got = twisted.diagview($engine).unwrap();
                 assert_eq!(got.len(), SECTORS.len());
                 for (entry, &(p, k)) in got.iter().zip(&SECTORS) {
-                    assert_eq!(entry.sector, Z2Irrep::new(p));
+                    assert_eq!(entry.sector, Parity::of(p));
                     let theta = if p == 1 { odd_twist } else { 1.0 };
                     let factor = theta.powi(power);
                     for i in 0..k {
@@ -368,7 +393,7 @@ fn compact_twist_stays_compact_and_agrees_across_modes() {
     // including the checked Generic fZ2 twin, keep the spectrum and give
     // identical values.
     let real = |x: f64| x;
-    let mf = twist_rows!(engine, FermionParityFusionRule, -1.0, f64, real);
+    let mf = twist_rows!(engine, FermionParityFusionRule::new(), -1.0, f64, real);
     let checked = twist_rows!(
         engine,
         CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0),
@@ -379,7 +404,13 @@ fn compact_twist_stays_compact_and_agrees_across_modes() {
     assert_eq!(mf, checked);
 
     let complex = |x: f64| Complex64::new(x, 0.5 * x - 0.25);
-    let mf = twist_rows!(engine, FermionParityFusionRule, -1.0, Complex64, complex);
+    let mf = twist_rows!(
+        engine,
+        FermionParityFusionRule::new(),
+        -1.0,
+        Complex64,
+        complex
+    );
     let checked = twist_rows!(
         engine,
         CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0),
@@ -425,13 +456,13 @@ fn checked_compact_twist_queries_the_provider_like_the_dense_route() {
     let rule = Arc::new(CheckedZ2::new(BraidingStyleKind::Anyonic, 0.6));
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
-        SECTORS.iter().map(|&(p, k)| (Z2Irrep::new(p), k)),
+        SECTORS.iter().map(|&(p, k)| (Parity::of(p), k)),
     )
     .unwrap();
     let spectrum = SECTORS
         .iter()
         .map(|&(p, k)| SectorSpectrum {
-            sector: Z2Irrep::new(p),
+            sector: Parity::of(p),
             values: (0..k).map(|i| value(p, i)).collect::<Vec<f64>>(),
         })
         .collect::<Vec<_>>();
@@ -522,18 +553,18 @@ const K: usize = 128;
 
 fn odd_diagonal<R>(rule: R, k: usize) -> TensorMap<R, f64>
 where
-    R: TypedSectorAdmission<Sector = Z2Irrep>,
+    R: TypedSectorAdmission<Sector: Parity>,
     R::Mode: symtn::typed::TypedTensorConstructionDispatch<R, f64>,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let leg = GradedSpace::try_new(Arc::new(rule), [(Z2Irrep::ODD, k)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::new(rule), [(R::Sector::of(1), k)]).unwrap();
     TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: Z2Irrep::ODD,
+            sector: R::Sector::of(1),
             values: (0..k).map(|i| 1.0 + i as f64).collect(),
         }],
     )
@@ -565,8 +596,8 @@ fn compact_twist_allocates_linear_in_the_spectrum_in_both_modes() {
     let rows = [
         (
             "multiplicity-free",
-            warmed_twist_bytes(&odd_diagonal(FermionParityFusionRule, K)),
-            warmed_twist_bytes(&odd_diagonal(FermionParityFusionRule, 2 * K)),
+            warmed_twist_bytes(&odd_diagonal(FermionParityFusionRule::new(), K)),
+            warmed_twist_bytes(&odd_diagonal(FermionParityFusionRule::new(), 2 * K)),
         ),
         (
             "checked",
@@ -888,17 +919,17 @@ fn assert_rows_close(mf: &[Option<Vec<Complex64>>], checked: &[Option<Vec<Comple
 
 fn z2_leg<R>(rule: R) -> GradedSpace<R>
 where
-    R: TypedSectorAdmission<Sector = Z2Irrep>,
+    R: TypedSectorAdmission<Sector: Parity>,
     R::Mode: TypedTensorModeDispatch<R>,
 {
     GradedSpace::try_new(
         Arc::new(rule),
-        SECTORS.iter().map(|&(p, k)| (Z2Irrep::new(p), k)),
+        SECTORS.iter().map(|&(p, k)| (Parity::of(p), k)),
     )
     .unwrap()
 }
 
-fn parity(sector: &Z2Irrep) -> f64 {
+fn parity<L: Parity>(sector: &L) -> f64 {
     f64::from(sector.parity())
 }
 
@@ -908,12 +939,15 @@ fn compact_compose_and_contract_agree_across_modes() {
     // What: compose and one-leg contract against a compact diagonal are one
     // mode-free arm: both modes give the same storage form and values, equal to
     // the dense route, for f64 and Complex64 and for every output order.
-    use symtn::sector::Z2FusionRule;
+    use symtn::sector::ZNFusionRule;
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
     let real = |x: f64| x;
     let complex = |x: f64| Complex64::new(x, 0.5 * x - 0.25);
     assert_rows_close(
-        &bond_rows(&bond_fixture(&z2_leg(Z2FusionRule), parity, real), &cases),
+        &bond_rows(
+            &bond_fixture(&z2_leg(ZNFusionRule::new(2).unwrap()), parity, real),
+            &cases,
+        ),
         &bond_rows(
             &bond_fixture(
                 &z2_leg(CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0)),
@@ -925,7 +959,7 @@ fn compact_compose_and_contract_agree_across_modes() {
     );
     assert_rows_close(
         &bond_rows(
-            &bond_fixture(&z2_leg(Z2FusionRule), parity, complex),
+            &bond_fixture(&z2_leg(ZNFusionRule::new(2).unwrap()), parity, complex),
             &cases,
         ),
         &bond_rows(
@@ -957,7 +991,7 @@ fn fermionic_compact_compose_and_contract_agree_across_modes() {
             }
         };
         let mf = bond_rows(
-            &bond_fixture(&z2_leg(FermionParityFusionRule), parity, conv),
+            &bond_fixture(&z2_leg(FermionParityFusionRule::new()), parity, conv),
             &cases,
         );
         let checked = bond_rows(
@@ -1123,7 +1157,7 @@ fn declined_compact_arms_report_the_dense_route_error() {
     for (mode, errors) in [
         (
             "multiplicity-free",
-            non_composable_errors(|| FermionParityFusionRule),
+            non_composable_errors(FermionParityFusionRule::new),
         ),
         (
             "checked",
@@ -1140,13 +1174,13 @@ fn declined_compact_arms_report_the_dense_route_error() {
 /// on materialized `D`: `[(compact, dense); 2]` error messages.
 fn non_composable_errors<R>(rule: impl Fn() -> R) -> [(String, String); 2]
 where
-    R: TypedSectorAdmission<Sector = Z2Irrep>,
+    R: TypedSectorAdmission<Sector: Parity>,
     R::Mode: TypedTensorContractDispatch<R, f64> + TypedTensorConstructionDispatch<R, f64>,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let other = GradedSpace::try_new(
         Arc::new(rule()),
-        [(Z2Irrep::new(0), 1), (Z2Irrep::new(1), 4)],
+        [(R::Sector::of(0), 1), (R::Sector::of(1), 4)],
     )
     .unwrap();
     let t = TensorMap::<_, f64>::from_subblock_fn(
@@ -1304,8 +1338,8 @@ fn compact_square_allocates_linear_in_the_spectrum_in_both_modes() {
     let rows = [
         (
             "multiplicity-free",
-            warmed_square_bytes(&odd_diagonal(FermionParityFusionRule, K)),
-            warmed_square_bytes(&odd_diagonal(FermionParityFusionRule, 2 * K)),
+            warmed_square_bytes(&odd_diagonal(FermionParityFusionRule::new(), K)),
+            warmed_square_bytes(&odd_diagonal(FermionParityFusionRule::new(), 2 * K)),
         ),
         (
             "checked",
@@ -1341,7 +1375,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
     fn fixture<R>(leg: GradedSpace<R>) -> BondFixture<R, Complex64>
     where
-        R: TypedSectorAdmission<Sector = Z2Irrep>,
+        R: TypedSectorAdmission<Sector: Parity>,
         R::Mode: TypedTensorConstructionDispatch<R, Complex64>,
     {
         let open = leg.try_dual().unwrap();
@@ -1349,7 +1383,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
             Complex64::new(x, 0.25 - x)
         })
     }
-    let mf = bond_rows(&fixture(z2_leg(FermionParityFusionRule)), &cases);
+    let mf = bond_rows(&fixture(z2_leg(FermionParityFusionRule::new())), &cases);
     let checked = bond_rows(
         &fixture(z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0))),
         &cases,
@@ -1452,7 +1486,7 @@ where
 /// TensorKit coefficient: `-1` only on the odd sector of a fermionic permute.
 fn assert_z2_swap_spectrum<R, D>(d: &TensorMap<R, D>, fermionic: bool)
 where
-    R: TypedSectorAdmission<Sector = Z2Irrep>,
+    R: TypedSectorAdmission<Sector: Parity>,
     R::Mode: TypedTensorTransformDispatch<R, D> + TypedTensorRootDispatch<R>,
     <R::Mode as TypedTensorModeDispatch<R>>::FacadeError: std::fmt::Debug,
     D: TensorScalar + std::fmt::Debug,
@@ -1484,7 +1518,7 @@ where
 
 fn z2_diagonal<R, D>(rule: R, conv: impl Fn(f64) -> D) -> (TensorMap<R, D>, GradedSpace<R>)
 where
-    R: TypedSectorAdmission<Sector = Z2Irrep>,
+    R: TypedSectorAdmission<Sector: Parity>,
     R::Mode: TypedTensorConstructionDispatch<R, D>,
     D: TensorScalar,
 {
@@ -1495,7 +1529,7 @@ where
         &host_runtime(),
         &leg,
         SECTORS.iter().map(|&(p, k)| SectorSpectrum {
-            sector: Z2Irrep::new(p),
+            sector: Parity::of(p),
             values: (0..k).map(|i| conv(value(p, i))).collect(),
         }),
     )
@@ -1511,7 +1545,7 @@ fn compact_swap_and_braid_agree_across_modes() {
     // mode-free arm: both modes keep it compact on
     // `dual(domain)` with TensorKit's coefficient, and both read the braid's
     // dense result from the spectrum, equal to the dense route.
-    use symtn::sector::Z2FusionRule;
+    use symtn::sector::ZNFusionRule;
     macro_rules! rows {
         ($fermionic:expr, $mf:expr, $checked:expr, $conv:expr) => {{
             let (mf, mf_leg) = z2_diagonal($mf, $conv);
@@ -1530,8 +1564,8 @@ fn compact_swap_and_braid_agree_across_modes() {
     let bosonic = || CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0);
     let fermionic = || CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0);
     for checked in [
-        rows!(false, Z2FusionRule, bosonic(), real),
-        rows!(true, FermionParityFusionRule, fermionic(), real),
+        rows!(false, ZNFusionRule::new(2).unwrap(), bosonic(), real),
+        rows!(true, FermionParityFusionRule::new(), fermionic(), real),
     ] {
         let swapped = checked.permute(engine, &[1], &[0]).unwrap();
         let root = swapped
@@ -1539,8 +1573,8 @@ fn compact_swap_and_braid_agree_across_modes() {
             .unwrap();
         assert!(root.dense_data().is_err());
     }
-    rows!(false, Z2FusionRule, bosonic(), complex);
-    rows!(true, FermionParityFusionRule, fermionic(), complex);
+    rows!(false, ZNFusionRule::new(2).unwrap(), bosonic(), complex);
+    rows!(true, FermionParityFusionRule::new(), fermionic(), complex);
 }
 
 #[test]
@@ -1856,8 +1890,8 @@ fn compact_swap_allocates_linear_in_the_spectrum_in_both_modes() {
     let rows = [
         (
             "multiplicity-free",
-            warmed_swap_bytes(&odd_diagonal(FermionParityFusionRule, K)),
-            warmed_swap_bytes(&odd_diagonal(FermionParityFusionRule, 2 * K)),
+            warmed_swap_bytes(&odd_diagonal(FermionParityFusionRule::new(), K)),
+            warmed_swap_bytes(&odd_diagonal(FermionParityFusionRule::new(), 2 * K)),
         ),
         (
             "checked",
@@ -1915,7 +1949,7 @@ fn compact_full_trace_agrees_across_modes() {
     // modes read the spectrum with the
     // dense route's compiled coefficients and agree with it, with each other
     // and with the hand supertrace (θ(odd) = -1 for fZ2).
-    use symtn::sector::Z2FusionRule;
+    use symtn::sector::ZNFusionRule;
     macro_rules! rows {
         ($mf:expr, $checked:expr, $odd:expr, $conv:expr) => {{
             let conv = $conv;
@@ -1958,10 +1992,10 @@ fn compact_full_trace_agrees_across_modes() {
     let complex = |x: f64| Complex64::new(x, 0.5 * x - 0.25);
     let bosonic = || CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0);
     let fermionic = || CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0);
-    rows!(Z2FusionRule, bosonic(), 1.0, real);
-    rows!(FermionParityFusionRule, fermionic(), -1.0, real);
-    rows!(Z2FusionRule, bosonic(), 1.0, complex);
-    rows!(FermionParityFusionRule, fermionic(), -1.0, complex);
+    rows!(ZNFusionRule::new(2).unwrap(), bosonic(), 1.0, real);
+    rows!(FermionParityFusionRule::new(), fermionic(), -1.0, real);
+    rows!(ZNFusionRule::new(2).unwrap(), bosonic(), 1.0, complex);
+    rows!(FermionParityFusionRule::new(), fermionic(), -1.0, complex);
 }
 
 #[test]
@@ -2175,8 +2209,8 @@ fn compact_full_trace_allocates_no_spectrum_sized_buffer_in_both_modes() {
     let rows = [
         (
             "multiplicity-free",
-            warmed_trace_bytes(&odd_diagonal(FermionParityFusionRule, K)),
-            warmed_trace_bytes(&odd_diagonal(FermionParityFusionRule, 2 * K)),
+            warmed_trace_bytes(&odd_diagonal(FermionParityFusionRule::new(), K)),
+            warmed_trace_bytes(&odd_diagonal(FermionParityFusionRule::new(), 2 * K)),
         ),
         (
             "checked",
@@ -2214,7 +2248,7 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::{U1FusionRule, U1Irrep, Z2FusionRule};
+    use symtn::sector::{U1FusionRule, U1Irrep, ZNFusionRule};
     fn assert_same<D: TensorScalar + Copy>(
         engine: &mut dyn symtn::typed::Engine,
         what: &str,
@@ -2316,10 +2350,30 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
         .unwrap()
     };
     let charge = |sector: &U1Irrep| f64::from(sector.charge());
-    cuda_rows!("Z2 f64", z2_leg(Z2FusionRule), parity, real);
-    cuda_rows!("Z2 c64", z2_leg(Z2FusionRule), parity, complex);
-    cuda_rows!("fZ2 f64", z2_leg(FermionParityFusionRule), parity, real);
-    cuda_rows!("fZ2 c64", z2_leg(FermionParityFusionRule), parity, complex);
+    cuda_rows!(
+        "Z2 f64",
+        z2_leg(ZNFusionRule::new(2).unwrap()),
+        parity,
+        real
+    );
+    cuda_rows!(
+        "Z2 c64",
+        z2_leg(ZNFusionRule::new(2).unwrap()),
+        parity,
+        complex
+    );
+    cuda_rows!(
+        "fZ2 f64",
+        z2_leg(FermionParityFusionRule::new()),
+        parity,
+        real
+    );
+    cuda_rows!(
+        "fZ2 c64",
+        z2_leg(FermionParityFusionRule::new()),
+        parity,
+        complex
+    );
     cuda_rows!("U(1) f64", u1(), charge, real);
     cuda_rows!("U(1) c64", u1(), charge, complex);
 }
@@ -2473,7 +2527,7 @@ fn compact_transform_into_allocates_no_dense_source_in_both_modes() {
     // structure into the caller's destination: no allocation as large as the
     // `k²` dense image the decline route would build, in either mode.
     let dense_payload = K * K * std::mem::size_of::<f64>();
-    let mf = odd_diagonal(FermionParityFusionRule, K);
+    let mf = odd_diagonal(FermionParityFusionRule::new(), K);
     let checked = odd_diagonal(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0), K);
     for op in BOND_INTO_OPS {
         for (mode, allocs) in [
@@ -2507,13 +2561,13 @@ fn compact_braid_into_decline_replays_the_densified_source() {
         let rule = CheckedZ2::new(BraidingStyleKind::Anyonic, 1.0)
             .with_odd_r(odd_r)
             .with_salt(salt);
-        let leg = GradedSpace::try_new(Arc::new(rule), [(Z2Irrep::ODD, K)]).unwrap();
+        let leg = GradedSpace::try_new(Arc::new(rule), [(FermionParityIrrep::ODD, K)]).unwrap();
         let compact = TensorMap::<_, f32>::diagonal(
             engine,
             &host_runtime(),
             &leg,
             [SectorSpectrum {
-                sector: Z2Irrep::ODD,
+                sector: FermionParityIrrep::ODD,
                 values: (0..K).map(|i| 1.0 + i as f32).collect(),
             }],
         )
@@ -3076,20 +3130,23 @@ fn compact_contract_into_is_alpha_eager_plus_beta_destination_in_every_mode() {
     // What: eager and `_into` take one route on every arm pattern, reordered
     // `D . D` included, so `_into` is eager's value with `α`/`β` in the
     // multiplicity-free and checked modes, bosonic and fermionic.
-    use symtn::sector::Z2FusionRule;
+    use symtn::sector::ZNFusionRule;
     let complex = |x: f64| Complex64::new(x, 0.5 * x - 0.25);
     let alpha = Complex64::new(1.5, -0.5);
     contract_into_rows(
-        &bond_fixture(&z2_leg(Z2FusionRule), parity, |x: f64| x),
-        1.5,
-    );
-    contract_into_rows(&bond_fixture(&z2_leg(Z2FusionRule), parity, complex), alpha);
-    contract_into_rows(
-        &bond_fixture(&z2_leg(FermionParityFusionRule), parity, |x: f64| x),
+        &bond_fixture(&z2_leg(ZNFusionRule::new(2).unwrap()), parity, |x: f64| x),
         1.5,
     );
     contract_into_rows(
-        &bond_fixture(&z2_leg(FermionParityFusionRule), parity, complex),
+        &bond_fixture(&z2_leg(ZNFusionRule::new(2).unwrap()), parity, complex),
+        alpha,
+    );
+    contract_into_rows(
+        &bond_fixture(&z2_leg(FermionParityFusionRule::new()), parity, |x: f64| x),
+        1.5,
+    );
+    contract_into_rows(
+        &bond_fixture(&z2_leg(FermionParityFusionRule::new()), parity, complex),
         alpha,
     );
     for braiding in [BraidingStyleKind::Bosonic, BraidingStyleKind::Fermionic] {
@@ -3149,7 +3206,7 @@ fn trace_into_destination(runtime: &Runtime, salt: u8, kind: &str) -> TensorMap<
     if kind == "compact" {
         let leg = GradedSpace::try_new(
             Arc::new(checked_fermionic(salt)),
-            [(Z2Irrep::new(0), 1), (Z2Irrep::new(1), 1)],
+            [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)],
         )
         .unwrap();
         return TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, _| 1.0)

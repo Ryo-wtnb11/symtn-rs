@@ -20,7 +20,7 @@ use symtn_core::{
     BlockKey, BlockStructure, BraidingStyleKind, CoreError, FusionProductSpace, FusionRule,
     FusionStyleKind, FusionTreeGroupKey, FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey,
     FusionTreeRef, RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorStructure,
-    SectorVec, StructureCacheEquivalent, TableRule, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep,
+    SectorVec, StructureCacheEquivalent, TableRule, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 fn fx<T: Hash + ?Sized>(value: &T) -> u64 {
@@ -458,7 +458,10 @@ fn hom(codomain: &[Leg], domain: &[Leg]) -> FusionTreeHomSpace {
 fn real_structures() -> Vec<(&'static str, Arc<BlockStructure>)> {
     let u1 = |charge: i32| U1Irrep::new(charge).sector_id();
     let su2 = |twice: usize| SU2Irrep::from_twice_spin(twice).sector_id();
-    let z2 = vec![(Z2Irrep::EVEN.into(), 1), (Z2Irrep::ODD.into(), 2)];
+    let z2 = vec![
+        (ZNIrrep::new(0, 2).unwrap().into(), 1),
+        (ZNIrrep::new(1, 2).unwrap().into(), 2),
+    ];
     let u1_leg: Vec<_> = (-1..=1).map(|charge| (u1(charge), 2)).collect();
     let su2_leg: Vec<_> = (0..=2).map(|twice| (su2(twice), 1)).collect();
     let fib = vec![(SectorId::new(0), 1), (SectorId::new(1), 2)];
@@ -489,7 +492,7 @@ fn real_structures() -> Vec<(&'static str, Arc<BlockStructure>)> {
                 &[leg(&z2, false), leg(&z2, true), leg(&z2, false)],
                 &[leg(&z2, false), leg(&z2, true)],
             )
-            .coupled_subblock_structure_from_leg_degeneracies(&Z2FusionRule)
+            .coupled_subblock_structure_from_leg_degeneracies(&ZNFusionRule::new(2).unwrap())
             .unwrap(),
         ),
         // Identical codomain and domain legs: swapped pairs built from the

@@ -1,14 +1,13 @@
 pub mod symtn_sectors
+pub use symtn_sectors::CU1Irrep
+pub use symtn_sectors::FermionParityIrrep
+pub use symtn_sectors::ZNIrrep
 pub mod symtn_sectors::testing
 pub trait symtn_sectors::testing::Provider
-impl symtn_sectors::testing::Provider for symtn_sectors::CU1FusionRule
-impl symtn_sectors::testing::Provider for symtn_sectors::FermionParityFusionRule
 impl symtn_sectors::testing::Provider for symtn_sectors::LieGroupFusionRule
 impl symtn_sectors::testing::Provider for symtn_sectors::SU2FusionRule
 impl symtn_sectors::testing::Provider for symtn_sectors::TableRule
 impl symtn_sectors::testing::Provider for symtn_sectors::U1FusionRule
-impl symtn_sectors::testing::Provider for symtn_sectors::Z2FusionRule
-impl symtn_sectors::testing::Provider for symtn_sectors::ZNFusionRule
 impl<C, K> symtn_sectors::testing::Provider for symtn_sectors::CategoryRule<C, K>
 impl<L, R, P> symtn_sectors::testing::Provider for symtn_sectors::ProductFusionRule<L, R, P> where L: symtn_sectors::CategoryProvider, R: symtn_sectors::CategoryProvider, (<L as symtn_sectors::TypedSectorAdmission>::Mode, <R as symtn_sectors::TypedSectorAdmission>::Mode): symtn_sectors::ProductAdmission<<L as symtn_sectors::TypedSectorAdmission>::Error, <R as symtn_sectors::TypedSectorAdmission>::Error>, fusion_symbols::product::Product<(<L as symtn_sectors::CategoryProvider>::Category, <R as symtn_sectors::CategoryProvider>::Category)>: fusion_symbols::category::FusionCategory<Object = (<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object), Error = fusion_symbols::product::ProductError<<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error>>, P: symtn_sectors::ProductSectorCodec + 'static
 impl<R> symtn_sectors::testing::Provider for symtn_sectors::InfallibleGeneric<'_, R>
@@ -298,105 +297,6 @@ impl core::fmt::Debug for symtn_sectors::ProductSectorComponent
 pub fn symtn_sectors::ProductSectorComponent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for symtn_sectors::ProductSectorComponent
 impl core::marker::StructuralPartialEq for symtn_sectors::ProductSectorComponent
-pub struct symtn_sectors::CU1FusionRule
-impl core::clone::Clone for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::clone(&self) -> symtn_sectors::CU1FusionRule
-impl core::clone::TrivialClone for symtn_sectors::CU1FusionRule
-impl core::cmp::Eq for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::assert_fields_are_eq(&self)
-impl core::cmp::PartialEq for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::eq(&self, &symtn_sectors::CU1FusionRule) -> bool
-impl core::default::Default for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::default() -> symtn_sectors::CU1FusionRule
-impl core::fmt::Debug for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for symtn_sectors::CU1FusionRule
-impl core::marker::StructuralPartialEq for symtn_sectors::CU1FusionRule
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::CU1FusionRule
-impl symtn_sectors::CategoryProvider for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Category = fusion_symbols::lie::cu1::CU1
-pub fn symtn_sectors::CU1FusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::CU1FusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::CU1FusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::CU1FusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::CU1FusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::CU1FusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::CU1FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::CU1FusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::CU1FusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::CU1FusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::FusionRule for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::CU1FusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::CU1FusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::CU1FusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::CU1FusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::CU1FusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::CU1FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::CU1FusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::CU1FusionRule
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Scalar = f64
-pub fn symtn_sectors::CU1FusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::CU1FusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::SectorCodec for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Sector = symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1FusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::CU1Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::encode_sector(&self, &symtn_sectors::CU1Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::CU1FusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::CU1FusionRule::Sector = symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1FusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::CU1Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_encode_label(&self, &symtn_sectors::CU1Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::testing::Provider for symtn_sectors::CU1FusionRule
-pub struct symtn_sectors::CU1Irrep(_)
-impl symtn_sectors::CU1Irrep
-pub const symtn_sectors::CU1Irrep::PSEUDOSCALAR: Self
-pub const symtn_sectors::CU1Irrep::VACUUM: Self
-pub const fn symtn_sectors::CU1Irrep::conjugation_sector(self) -> u8
-pub const fn symtn_sectors::CU1Irrep::from_twice_charge(u32) -> Self
-pub const fn symtn_sectors::CU1Irrep::sector_id(self) -> symtn_sectors::SectorId
-pub fn symtn_sectors::CU1Irrep::try_from_sector_id(symtn_sectors::SectorId) -> core::option::Option<Self>
-pub const fn symtn_sectors::CU1Irrep::try_from_twice_charge(u32) -> core::option::Option<Self>
-pub const fn symtn_sectors::CU1Irrep::twice_charge(self) -> u32
-impl core::clone::Clone for symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1Irrep::clone(&self) -> symtn_sectors::CU1Irrep
-impl core::clone::TrivialClone for symtn_sectors::CU1Irrep
-impl core::cmp::Eq for symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1Irrep::assert_fields_are_eq(&self)
-impl core::cmp::Ord for symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1Irrep::cmp(&self, &symtn_sectors::CU1Irrep) -> core::cmp::Ordering
-impl core::cmp::PartialEq for symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1Irrep::eq(&self, &symtn_sectors::CU1Irrep) -> bool
-impl core::cmp::PartialOrd for symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1Irrep::partial_cmp(&self, &symtn_sectors::CU1Irrep) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::From<symtn_sectors::CU1Irrep> for symtn_sectors::SectorId
-pub fn symtn_sectors::SectorId::from(symtn_sectors::CU1Irrep) -> Self
-impl core::fmt::Debug for symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1Irrep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1Irrep::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for symtn_sectors::CU1Irrep
-impl core::marker::StructuralPartialEq for symtn_sectors::CU1Irrep
 pub struct symtn_sectors::CanonicalUnitAdmission
 pub struct symtn_sectors::CategoryFailure(_)
 impl symtn_sectors::CategoryFailure
@@ -413,6 +313,12 @@ pub fn symtn_sectors::CategoryFailure::fmt(&self, &mut core::fmt::Formatter<'_>)
 impl core::fmt::Display for symtn_sectors::CategoryFailure
 pub fn symtn_sectors::CategoryFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct symtn_sectors::CategoryRule<C, K>
+impl symtn_sectors::CategoryRule<fusion_symbols::fermion::FermionParity, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>
+pub fn symtn_sectors::CategoryRule<fusion_symbols::fermion::FermionParity, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>::new() -> Self
+impl symtn_sectors::CategoryRule<fusion_symbols::finite::ZN, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>
+pub fn symtn_sectors::CategoryRule<fusion_symbols::finite::ZN, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>::new(u32) -> core::result::Result<Self, symtn_sectors::FusionAlgebraError>
+impl symtn_sectors::CategoryRule<fusion_symbols::lie::cu1::CU1, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>
+pub fn symtn_sectors::CategoryRule<fusion_symbols::lie::cu1::CU1, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>::new() -> Self
 impl<C, K> symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C>, <K as symtn_sectors::CategoryCodec>::Mode: symtn_sectors::category_rule::private::AdmissionMode<<K as symtn_sectors::CategoryCodec>::Error>, <K as symtn_sectors::CategoryCodec>::Unit: symtn_sectors::category_rule::private::UnitAdmission
 pub fn symtn_sectors::CategoryRule<C, K>::try_new(C, K) -> core::result::Result<Self, symtn_sectors::CategoryAdmissionError<<K as symtn_sectors::CategoryCodec>::Error>>
 impl<C, K> symtn_sectors::CategoryRule<C, K>
@@ -535,76 +441,6 @@ pub fn symtn_sectors::EnumeratedCodec<M, U>::clone(&self) -> Self
 impl<M, U> core::fmt::Debug for symtn_sectors::EnumeratedCodec<M, U>
 pub fn symtn_sectors::EnumeratedCodec<M, U>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<M, U> core::marker::Copy for symtn_sectors::EnumeratedCodec<M, U>
-pub struct symtn_sectors::FermionParityFusionRule
-impl core::clone::Clone for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::clone(&self) -> symtn_sectors::FermionParityFusionRule
-impl core::clone::TrivialClone for symtn_sectors::FermionParityFusionRule
-impl core::cmp::Eq for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::assert_fields_are_eq(&self)
-impl core::cmp::PartialEq for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::eq(&self, &symtn_sectors::FermionParityFusionRule) -> bool
-impl core::default::Default for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::default() -> symtn_sectors::FermionParityFusionRule
-impl core::fmt::Debug for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for symtn_sectors::FermionParityFusionRule
-impl core::marker::StructuralPartialEq for symtn_sectors::FermionParityFusionRule
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::FermionParityFusionRule
-impl symtn_sectors::CategoryProvider for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Category = fusion_symbols::fermion::FermionParity
-pub fn symtn_sectors::FermionParityFusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::FermionParityFusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::FermionParityFusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::FermionParityFusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::FermionParityFusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::FermionParityFusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::FusionRule for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::FermionParityFusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::FermionParityFusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::FermionParityFusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::FermionParityFusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::FermionParityFusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::FermionParityFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::FermionParityFusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::FermionParityFusionRule
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Scalar = f64
-pub fn symtn_sectors::FermionParityFusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::FermionParityFusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::SectorCodec for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::FermionParityFusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::encode_sector(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::FermionParityFusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::FermionParityFusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::FermionParityFusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_encode_label(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::testing::Provider for symtn_sectors::FermionParityFusionRule
 pub struct symtn_sectors::Fz2SectorLayout
 impl core::clone::Clone for symtn_sectors::Fz2SectorLayout
 pub fn symtn_sectors::Fz2SectorLayout::clone(&self) -> symtn_sectors::Fz2SectorLayout
@@ -1021,16 +857,14 @@ impl core::cmp::PartialEq for symtn_sectors::SectorId
 pub fn symtn_sectors::SectorId::eq(&self, &symtn_sectors::SectorId) -> bool
 impl core::cmp::PartialOrd for symtn_sectors::SectorId
 pub fn symtn_sectors::SectorId::partial_cmp(&self, &symtn_sectors::SectorId) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::From<symtn_sectors::CU1Irrep> for symtn_sectors::SectorId
-pub fn symtn_sectors::SectorId::from(symtn_sectors::CU1Irrep) -> Self
+impl core::convert::From<fusion_symbols::fermion::FermionParityIrrep> for symtn_sectors::SectorId
+pub fn symtn_sectors::SectorId::from(fusion_symbols::fermion::FermionParityIrrep) -> Self
+impl core::convert::From<fusion_symbols::finite::ZNIrrep> for symtn_sectors::SectorId
+pub fn symtn_sectors::SectorId::from(fusion_symbols::finite::ZNIrrep) -> Self
 impl core::convert::From<symtn_sectors::SU2Irrep> for symtn_sectors::SectorId
 pub fn symtn_sectors::SectorId::from(symtn_sectors::SU2Irrep) -> Self
 impl core::convert::From<symtn_sectors::U1Irrep> for symtn_sectors::SectorId
 pub fn symtn_sectors::SectorId::from(symtn_sectors::U1Irrep) -> Self
-impl core::convert::From<symtn_sectors::Z2Irrep> for symtn_sectors::SectorId
-pub fn symtn_sectors::SectorId::from(symtn_sectors::Z2Irrep) -> Self
-impl core::convert::From<symtn_sectors::ZNIrrep> for symtn_sectors::SectorId
-pub fn symtn_sectors::SectorId::from(symtn_sectors::ZNIrrep) -> Self
 impl core::convert::From<usize> for symtn_sectors::SectorId
 pub fn symtn_sectors::SectorId::from(usize) -> Self
 impl core::fmt::Debug for symtn_sectors::SectorId
@@ -1337,204 +1171,11 @@ impl symtn_sectors::PackedSectorLayout for symtn_sectors::U1SectorLayout
 pub const symtn_sectors::U1SectorLayout::BITS: u32
 pub fn symtn_sectors::U1SectorLayout::validate(symtn_sectors::SectorId) -> core::result::Result<(), symtn_sectors::ProductSectorCodecError>
 pub struct symtn_sectors::UncertifiedUnitAdmission
-pub struct symtn_sectors::Z2FusionRule
-impl core::clone::Clone for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::clone(&self) -> symtn_sectors::Z2FusionRule
-impl core::clone::TrivialClone for symtn_sectors::Z2FusionRule
-impl core::cmp::Eq for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::assert_fields_are_eq(&self)
-impl core::cmp::PartialEq for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::eq(&self, &symtn_sectors::Z2FusionRule) -> bool
-impl core::default::Default for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::default() -> symtn_sectors::Z2FusionRule
-impl core::fmt::Debug for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for symtn_sectors::Z2FusionRule
-impl core::marker::StructuralPartialEq for symtn_sectors::Z2FusionRule
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::Z2FusionRule
-impl symtn_sectors::CategoryProvider for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Category = fusion_symbols::finite::ZN
-pub fn symtn_sectors::Z2FusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::Z2FusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::Z2FusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::Z2FusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::Z2FusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::Z2FusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::Z2FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::Z2FusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::Z2FusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::Z2FusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::FusionRule for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::Z2FusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::Z2FusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::Z2FusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::Z2FusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::Z2FusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::Z2FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::Z2FusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::Z2FusionRule
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Scalar = f64
-pub fn symtn_sectors::Z2FusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::Z2FusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::SectorCodec for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2FusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::encode_sector(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::Z2FusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::Z2FusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2FusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_encode_label(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::testing::Provider for symtn_sectors::Z2FusionRule
-pub struct symtn_sectors::Z2Irrep
-impl symtn_sectors::Z2Irrep
-pub const symtn_sectors::Z2Irrep::EVEN: Self
-pub const symtn_sectors::Z2Irrep::ODD: Self
-pub const fn symtn_sectors::Z2Irrep::from_sector_id(symtn_sectors::SectorId) -> core::option::Option<Self>
-pub const fn symtn_sectors::Z2Irrep::new(u8) -> Self
-pub const fn symtn_sectors::Z2Irrep::parity(self) -> u8
-pub const fn symtn_sectors::Z2Irrep::sector_id(self) -> symtn_sectors::SectorId
-impl core::clone::Clone for symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2Irrep::clone(&self) -> symtn_sectors::Z2Irrep
-impl core::clone::TrivialClone for symtn_sectors::Z2Irrep
-impl core::cmp::Eq for symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2Irrep::assert_fields_are_eq(&self)
-impl core::cmp::Ord for symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2Irrep::cmp(&self, &symtn_sectors::Z2Irrep) -> core::cmp::Ordering
-impl core::cmp::PartialEq for symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2Irrep::eq(&self, &symtn_sectors::Z2Irrep) -> bool
-impl core::cmp::PartialOrd for symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2Irrep::partial_cmp(&self, &symtn_sectors::Z2Irrep) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::From<symtn_sectors::Z2Irrep> for symtn_sectors::SectorId
-pub fn symtn_sectors::SectorId::from(symtn_sectors::Z2Irrep) -> Self
-impl core::fmt::Debug for symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2Irrep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2Irrep::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for symtn_sectors::Z2Irrep
-impl core::marker::StructuralPartialEq for symtn_sectors::Z2Irrep
-pub struct symtn_sectors::ZNFusionRule
-impl symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::irrep(&self, i64) -> symtn_sectors::ZNIrrep
-pub const fn symtn_sectors::ZNFusionRule::modulus(&self) -> u32
-pub fn symtn_sectors::ZNFusionRule::new(u32) -> core::result::Result<Self, symtn_sectors::FusionAlgebraError>
-impl core::clone::Clone for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::clone(&self) -> symtn_sectors::ZNFusionRule
-impl core::cmp::Eq for symtn_sectors::ZNFusionRule
-impl core::cmp::PartialEq for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::eq(&self, &Self) -> bool
-impl core::fmt::Debug for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::hash<H: core::hash::Hasher>(&self, &mut H)
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::ZNFusionRule
-impl symtn_sectors::CategoryProvider for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Category = fusion_symbols::finite::ZN
-pub fn symtn_sectors::ZNFusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::ZNFusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::ZNFusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::ZNFusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::ZNFusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::ZNFusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::ZNFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::ZNFusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::ZNFusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::ZNFusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::FusionRule for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::ZNFusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::ZNFusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::ZNFusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::ZNFusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::ZNFusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::ZNFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::ZNFusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::ZNFusionRule
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Scalar = f64
-pub fn symtn_sectors::ZNFusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::ZNFusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::SectorCodec for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Sector = symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNFusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::ZNIrrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::encode_sector(&self, &symtn_sectors::ZNIrrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::ZNFusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::ZNFusionRule::Sector = symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNFusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::ZNIrrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_encode_label(&self, &symtn_sectors::ZNIrrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::testing::Provider for symtn_sectors::ZNFusionRule
-pub struct symtn_sectors::ZNIrrep
-impl symtn_sectors::ZNIrrep
-pub const fn symtn_sectors::ZNIrrep::charge(self) -> u32
-pub const fn symtn_sectors::ZNIrrep::sector_id(self) -> symtn_sectors::SectorId
-impl core::clone::Clone for symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNIrrep::clone(&self) -> symtn_sectors::ZNIrrep
-impl core::clone::TrivialClone for symtn_sectors::ZNIrrep
-impl core::cmp::Eq for symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNIrrep::assert_fields_are_eq(&self)
-impl core::cmp::Ord for symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNIrrep::cmp(&self, &symtn_sectors::ZNIrrep) -> core::cmp::Ordering
-impl core::cmp::PartialEq for symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNIrrep::eq(&self, &symtn_sectors::ZNIrrep) -> bool
-impl core::cmp::PartialOrd for symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNIrrep::partial_cmp(&self, &symtn_sectors::ZNIrrep) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::From<symtn_sectors::ZNIrrep> for symtn_sectors::SectorId
-pub fn symtn_sectors::SectorId::from(symtn_sectors::ZNIrrep) -> Self
-impl core::fmt::Debug for symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNIrrep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNIrrep::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for symtn_sectors::ZNIrrep
-impl core::marker::StructuralPartialEq for symtn_sectors::ZNIrrep
-pub const symtn_sectors::CU1_MAX_TWICE_CHARGE: u32
 pub const symtn_sectors::SU2_MAX_DOUBLED_SPIN: usize
 pub trait symtn_sectors::CanonicalUnitFusionRule: symtn_sectors::FusionRule
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::CU1FusionRule
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::FermionParityFusionRule
 impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::SU2FusionRule
 impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::TableRule
 impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::U1FusionRule
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::Z2FusionRule
-impl symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::ZNFusionRule
 impl<C, K> symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError, Unit = symtn_sectors::CanonicalUnitAdmission>
 impl<L, R, P> symtn_sectors::CanonicalUnitFusionRule for symtn_sectors::ProductFusionRule<L, R, P> where L: symtn_sectors::CategoryProvider, R: symtn_sectors::CategoryProvider, (<L as symtn_sectors::TypedSectorAdmission>::Mode, <R as symtn_sectors::TypedSectorAdmission>::Mode): symtn_sectors::ProductAdmission<<L as symtn_sectors::TypedSectorAdmission>::Error, <R as symtn_sectors::TypedSectorAdmission>::Error, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>, fusion_symbols::product::Product<(<L as symtn_sectors::CategoryProvider>::Category, <R as symtn_sectors::CategoryProvider>::Category)>: fusion_symbols::category::FusionCategory<Object = (<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object), Error = fusion_symbols::product::ProductError<<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error>>, P: symtn_sectors::ProductSectorCodec + 'static
 pub trait symtn_sectors::CategoricalScalar: core::clone::Clone + core::ops::arith::Add<Output = Self> + core::ops::arith::Mul<Output = Self> + core::ops::arith::Div<Output = Self>
@@ -1591,24 +1232,6 @@ pub fn symtn_sectors::CategoryProvider::map_error(&self, &[symtn_sectors::Sector
 pub fn symtn_sectors::CategoryProvider::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
 pub fn symtn_sectors::CategoryProvider::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::CategoryProvider::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CategoryProvider for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Category = fusion_symbols::lie::cu1::CU1
-pub fn symtn_sectors::CU1FusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::CU1FusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::CU1FusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::CU1FusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::CU1FusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::CU1FusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::CU1FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CategoryProvider for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Category = fusion_symbols::fermion::FermionParity
-pub fn symtn_sectors::FermionParityFusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::FermionParityFusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::FermionParityFusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::FermionParityFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
 impl symtn_sectors::CategoryProvider for symtn_sectors::LieGroupFusionRule
 pub type symtn_sectors::LieGroupFusionRule::Category = fusion_symbols::lie::LieGroup
 pub fn symtn_sectors::LieGroupFusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
@@ -1645,24 +1268,6 @@ pub fn symtn_sectors::U1FusionRule::map_error(&self, &[symtn_sectors::SectorId],
 pub fn symtn_sectors::U1FusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
 pub fn symtn_sectors::U1FusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::U1FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CategoryProvider for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Category = fusion_symbols::finite::ZN
-pub fn symtn_sectors::Z2FusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::Z2FusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::Z2FusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::Z2FusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::Z2FusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::Z2FusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::Z2FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-impl symtn_sectors::CategoryProvider for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Category = fusion_symbols::finite::ZN
-pub fn symtn_sectors::ZNFusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
-pub fn symtn_sectors::ZNFusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
-pub fn symtn_sectors::ZNFusionRule::category(&self) -> &Self::Category
-pub fn symtn_sectors::ZNFusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
-pub fn symtn_sectors::ZNFusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
-pub fn symtn_sectors::ZNFusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
-pub fn symtn_sectors::ZNFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
 impl<C, K> symtn_sectors::CategoryProvider for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C>
 pub type symtn_sectors::CategoryRule<C, K>::Category = C
 pub fn symtn_sectors::CategoryRule<C, K>::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<C as fusion_symbols::category::FusionCategory>::Object; N], <K as symtn_sectors::CategoryCodec>::Error>
@@ -1692,20 +1297,6 @@ pub fn symtn_sectors::CheckedFusionAlgebra::nsymbol_or_panic(&self, symtn_sector
 pub fn symtn_sectors::CheckedFusionAlgebra::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::CheckedFusionAlgebra::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::CheckedFusionAlgebra::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::CU1FusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::CU1FusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::CU1FusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::FermionParityFusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::FermionParityFusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::FermionParityFusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
 impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::SU2FusionRule
 pub fn symtn_sectors::SU2FusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
 pub fn symtn_sectors::SU2FusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
@@ -1727,20 +1318,6 @@ pub fn symtn_sectors::U1FusionRule::nsymbol_or_panic(&self, symtn_sectors::Secto
 pub fn symtn_sectors::U1FusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::U1FusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::U1FusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::Z2FusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::Z2FusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::Z2FusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::CheckedFusionAlgebra for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::ZNFusionRule::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::ZNFusionRule::nsymbol_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::ZNFusionRule::try_dual_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn_sectors::FusionAlgebraError>
 impl<C, K> symtn_sectors::CheckedFusionAlgebra for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::CategoryRule<C, K>::dual_or_panic(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
 pub fn symtn_sectors::CategoryRule<C, K>::fusion_channels_or_panic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
@@ -1882,24 +1459,6 @@ pub fn symtn_sectors::FusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_
 pub fn symtn_sectors::FusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
 pub fn symtn_sectors::FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
 pub fn symtn_sectors::FusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::FusionRule for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::CU1FusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::CU1FusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::CU1FusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::CU1FusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::CU1FusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::CU1FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::CU1FusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::FusionRule for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::FermionParityFusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::FermionParityFusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::FermionParityFusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::FermionParityFusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::FermionParityFusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::FermionParityFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::FermionParityFusionRule::vacuum(&self) -> symtn_sectors::SectorId
 impl symtn_sectors::FusionRule for symtn_sectors::SU2FusionRule
 pub fn symtn_sectors::SU2FusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
 pub fn symtn_sectors::SU2FusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
@@ -1927,24 +1486,6 @@ pub fn symtn_sectors::U1FusionRule::nsymbol(&self, symtn_sectors::SectorId, symt
 pub fn symtn_sectors::U1FusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
 pub fn symtn_sectors::U1FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
 pub fn symtn_sectors::U1FusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::FusionRule for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::Z2FusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::Z2FusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::Z2FusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::Z2FusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::Z2FusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::Z2FusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::Z2FusionRule::vacuum(&self) -> symtn_sectors::SectorId
-impl symtn_sectors::FusionRule for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::ZNFusionRule::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
-pub fn symtn_sectors::ZNFusionRule::fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorVec
-pub fn symtn_sectors::ZNFusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::ZNFusionRule::nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> usize
-pub fn symtn_sectors::ZNFusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub fn symtn_sectors::ZNFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
-pub fn symtn_sectors::ZNFusionRule::vacuum(&self) -> symtn_sectors::SectorId
 impl<C, K> symtn_sectors::FusionRule for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::CategoryRule<C, K>::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
 pub fn symtn_sectors::CategoryRule<C, K>::dual(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorId
@@ -1973,13 +1514,9 @@ pub fn symtn_sectors::GenericRigidSymbols::frobenius_schur_phase_scalar(&self, s
 pub fn symtn_sectors::GenericRigidSymbols::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> Self::Scalar
 pub fn symtn_sectors::GenericRigidSymbols::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> Self::Scalar
 pub trait symtn_sectors::MultiplicityFreeFusionRule: symtn_sectors::FusionRule
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::CU1FusionRule
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::FermionParityFusionRule
 impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::SU2FusionRule
 impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::TableRule
 impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::U1FusionRule
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::Z2FusionRule
-impl symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::ZNFusionRule
 impl<C, K> symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>
 impl<L, R, P> symtn_sectors::MultiplicityFreeFusionRule for symtn_sectors::ProductFusionRule<L, R, P> where L: symtn_sectors::CategoryProvider, R: symtn_sectors::CategoryProvider, (<L as symtn_sectors::TypedSectorAdmission>::Mode, <R as symtn_sectors::TypedSectorAdmission>::Mode): symtn_sectors::ProductAdmission<<L as symtn_sectors::TypedSectorAdmission>::Error, <R as symtn_sectors::TypedSectorAdmission>::Error, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>, fusion_symbols::product::Product<(<L as symtn_sectors::CategoryProvider>::Category, <R as symtn_sectors::CategoryProvider>::Category)>: fusion_symbols::category::FusionCategory<Object = (<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object), Error = fusion_symbols::product::ProductError<<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error>>, P: symtn_sectors::ProductSectorCodec + 'static
 pub trait symtn_sectors::MultiplicityFreeFusionSymbols: symtn_sectors::MultiplicityFreeFusionRule
@@ -1987,16 +1524,6 @@ pub type symtn_sectors::MultiplicityFreeFusionSymbols::Scalar: symtn_sectors::Ca
 pub fn symtn_sectors::MultiplicityFreeFusionSymbols::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> Self::Scalar
 pub fn symtn_sectors::MultiplicityFreeFusionSymbols::has_trivial_associator_gauge(&self) -> bool
 pub fn symtn_sectors::MultiplicityFreeFusionSymbols::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> Self::Scalar
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Scalar = f64
-pub fn symtn_sectors::CU1FusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::CU1FusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Scalar = f64
-pub fn symtn_sectors::FermionParityFusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::FermionParityFusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
 impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::SU2FusionRule
 pub type symtn_sectors::SU2FusionRule::Scalar = f64
 pub fn symtn_sectors::SU2FusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
@@ -2012,16 +1539,6 @@ pub type symtn_sectors::U1FusionRule::Scalar = f64
 pub fn symtn_sectors::U1FusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::U1FusionRule::has_trivial_associator_gauge(&self) -> bool
 pub fn symtn_sectors::U1FusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Scalar = f64
-pub fn symtn_sectors::Z2FusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::Z2FusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Scalar = f64
-pub fn symtn_sectors::ZNFusionRule::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::has_trivial_associator_gauge(&self) -> bool
-pub fn symtn_sectors::ZNFusionRule::r_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
 impl<C, K> symtn_sectors::MultiplicityFreeFusionSymbols for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, <C as fusion_symbols::category::FusionCategory>::Scalar: symtn_sectors::CategoricalScalar + core::marker::Send + core::marker::Sync, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>
 pub type symtn_sectors::CategoryRule<C, K>::Scalar = <C as fusion_symbols::category::FusionCategory>::Scalar
 pub fn symtn_sectors::CategoryRule<C, K>::f_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> Self::Scalar
@@ -2041,24 +1558,6 @@ pub fn symtn_sectors::MultiplicityFreeRigidSymbols::inv_dim_scalar(&self, symtn_
 pub fn symtn_sectors::MultiplicityFreeRigidSymbols::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> Self::Scalar
 pub fn symtn_sectors::MultiplicityFreeRigidSymbols::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> Self::Scalar
 pub fn symtn_sectors::MultiplicityFreeRigidSymbols::twist_scalar(&self, symtn_sectors::SectorId) -> Self::Scalar
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::CU1FusionRule
-pub fn symtn_sectors::CU1FusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::CU1FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::FermionParityFusionRule
-pub fn symtn_sectors::FermionParityFusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::FermionParityFusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
 impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::SU2FusionRule
 pub fn symtn_sectors::SU2FusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::SU2FusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
@@ -2086,24 +1585,6 @@ pub fn symtn_sectors::U1FusionRule::inv_dim_scalar(&self, symtn_sectors::SectorI
 pub fn symtn_sectors::U1FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::U1FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::U1FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::Z2FusionRule
-pub fn symtn_sectors::Z2FusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::Z2FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
-impl symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::ZNFusionRule
-pub fn symtn_sectors::ZNFusionRule::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::inv_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
-pub fn symtn_sectors::ZNFusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
 impl<C, K> symtn_sectors::MultiplicityFreeRigidSymbols for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + core::marker::Send + core::marker::Sync + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: core::marker::Sync + symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>, <C as fusion_symbols::category::FusionCategory>::Scalar: symtn_sectors::CategoricalScalar + core::marker::Send + core::marker::Sync
 pub fn symtn_sectors::CategoryRule<C, K>::a_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> Self::Scalar where Self::Scalar: core::ops::arith::Mul<Output = Self::Scalar>
 pub fn symtn_sectors::CategoryRule<C, K>::b_symbol_scalar(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> Self::Scalar where Self::Scalar: core::ops::arith::Mul<Output = Self::Scalar>
@@ -2214,14 +1695,6 @@ pub trait symtn_sectors::SectorCodec: symtn_sectors::FusionRule
 pub type symtn_sectors::SectorCodec::Sector: core::clone::Clone + core::cmp::Eq + core::cmp::Ord + core::hash::Hash + core::fmt::Debug
 pub fn symtn_sectors::SectorCodec::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Sector, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::SectorCodec::encode_sector(&self, &Self::Sector) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::SectorCodec for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Sector = symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1FusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::CU1Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::encode_sector(&self, &symtn_sectors::CU1Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::SectorCodec for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::FermionParityFusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::encode_sector(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 impl symtn_sectors::SectorCodec for symtn_sectors::SU2FusionRule
 pub type symtn_sectors::SU2FusionRule::Sector = symtn_sectors::SU2Irrep
 pub fn symtn_sectors::SU2FusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SU2Irrep, symtn_sectors::FusionAlgebraError>
@@ -2234,14 +1707,6 @@ impl symtn_sectors::SectorCodec for symtn_sectors::U1FusionRule
 pub type symtn_sectors::U1FusionRule::Sector = symtn_sectors::U1Irrep
 pub fn symtn_sectors::U1FusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::U1Irrep, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::U1FusionRule::encode_sector(&self, &symtn_sectors::U1Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::SectorCodec for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2FusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::encode_sector(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-impl symtn_sectors::SectorCodec for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Sector = symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNFusionRule::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::ZNIrrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::encode_sector(&self, &symtn_sectors::ZNIrrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 impl<C, K> symtn_sectors::SectorCodec for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::MultiplicityFreeAdmissionMode, Error = symtn_sectors::FusionAlgebraError>
 pub type symtn_sectors::CategoryRule<C, K>::Sector = <K as symtn_sectors::CategoryCodec<C>>::Sector
 pub fn symtn_sectors::CategoryRule<C, K>::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Sector, symtn_sectors::FusionAlgebraError>
@@ -2258,22 +1723,6 @@ pub fn symtn_sectors::TypedSectorAdmission::try_decode_label(&self, symtn_sector
 pub fn symtn_sectors::TypedSectorAdmission::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::TypedSectorAdmission::try_encode_label(&self, &Self::Sector) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::TypedSectorAdmission::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::CU1FusionRule
-pub type symtn_sectors::CU1FusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::CU1FusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::CU1FusionRule::Sector = symtn_sectors::CU1Irrep
-pub fn symtn_sectors::CU1FusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::CU1Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::try_encode_label(&self, &symtn_sectors::CU1Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::CU1FusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::FermionParityFusionRule
-pub type symtn_sectors::FermionParityFusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::FermionParityFusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::FermionParityFusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::FermionParityFusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::try_encode_label(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::FermionParityFusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
 impl symtn_sectors::TypedSectorAdmission for symtn_sectors::LieGroupFusionRule
 pub type symtn_sectors::LieGroupFusionRule::Error = symtn_sectors::LieGroupFusionRuleError
 pub type symtn_sectors::LieGroupFusionRule::Mode = symtn_sectors::CheckedGenericAdmissionMode
@@ -2306,22 +1755,6 @@ pub fn symtn_sectors::U1FusionRule::try_decode_label(&self, symtn_sectors::Secto
 pub fn symtn_sectors::U1FusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::U1FusionRule::try_encode_label(&self, &symtn_sectors::U1Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::U1FusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::Z2FusionRule
-pub type symtn_sectors::Z2FusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::Z2FusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::Z2FusionRule::Sector = symtn_sectors::Z2Irrep
-pub fn symtn_sectors::Z2FusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::Z2Irrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::try_encode_label(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::Z2FusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-impl symtn_sectors::TypedSectorAdmission for symtn_sectors::ZNFusionRule
-pub type symtn_sectors::ZNFusionRule::Error = symtn_sectors::FusionAlgebraError
-pub type symtn_sectors::ZNFusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode
-pub type symtn_sectors::ZNFusionRule::Sector = symtn_sectors::ZNIrrep
-pub fn symtn_sectors::ZNFusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::ZNIrrep, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::try_encode_label(&self, &symtn_sectors::ZNIrrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
-pub fn symtn_sectors::ZNFusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
 impl<C, K> symtn_sectors::TypedSectorAdmission for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C>
 pub type symtn_sectors::CategoryRule<C, K>::Error = <K as symtn_sectors::CategoryCodec<C>>::Error
 pub type symtn_sectors::CategoryRule<C, K>::Mode = <K as symtn_sectors::CategoryCodec<C>>::Mode
@@ -2339,4 +1772,7 @@ pub fn symtn_sectors::ProductFusionRule<L, R, P>::try_dual_id(&self, symtn_secto
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::try_encode_label(&self, &Self::Sector) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
 pub const fn symtn_sectors::product_sector<Left, Right>(Left, Right) -> symtn_sectors::ProductSector<Left, Right>
+pub type symtn_sectors::CU1FusionRule = symtn_sectors::CategoryRule<fusion_symbols::lie::cu1::CU1, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>
+pub type symtn_sectors::FermionParityFusionRule = symtn_sectors::CategoryRule<fusion_symbols::fermion::FermionParity, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>
 pub type symtn_sectors::SectorVec = smallvec::SmallVec<[symtn_sectors::SectorId; 8]>
+pub type symtn_sectors::ZNFusionRule = symtn_sectors::CategoryRule<fusion_symbols::finite::ZN, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>

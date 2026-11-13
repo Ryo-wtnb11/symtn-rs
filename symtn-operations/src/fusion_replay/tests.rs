@@ -7,7 +7,7 @@ use num_complex::Complex64;
 use num_traits::Zero;
 use symtn_core::{
     FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeFusionSymbols, SectorCodec, SectorLeg,
-    TableRule, TableSector, Z2FusionRule, Z2Irrep,
+    TableRule, TableSector, ZNFusionRule, ZNIrrep,
 };
 
 fn direct_group(rows: usize, cols: usize, offset: Option<usize>) -> FusionBlockMatrixGroup {
@@ -1025,8 +1025,16 @@ fn direct_batch_ignores_empty_destination_ranges() {
 
 #[test]
 fn canonical_direct_plan_rejects_equal_dimension_tree_basis_mismatch() {
-    let rule = Z2FusionRule;
-    let leg = || SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false);
+    let rule = ZNFusionRule::new(2).unwrap();
+    let leg = || {
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 1),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
+            false,
+        )
+    };
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
@@ -1197,12 +1205,20 @@ impl Rank2Gemm<f64> for CountingBatchGemm {
 #[test]
 fn direct_replay_uses_one_batched_gemm_call() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let leg = || SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false);
+    let leg = || {
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 1),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
+            false,
+        )
+    };
     let space = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg()]),
         FusionProductSpace::new([leg()]),
     )
-    .coupled_subblock_structure(&Z2FusionRule, 1, [vec![1, 1], vec![1, 1]])
+    .coupled_subblock_structure(&ZNFusionRule::new(2).unwrap(), 1, [vec![1, 1], vec![1, 1]])
     .unwrap();
     let structure = Arc::clone(&space);
     let plan = FusionBlockContractPlan::<f64>::try_from_canonical_coupled_regions_with_ops(
@@ -1386,12 +1402,20 @@ impl StorageGemm<Complex64, Vec<Complex64>, Vec<Complex64>, Vec<Complex64>>
 
 #[test]
 fn scaled_storage_jobs_keep_canonical_coefficients_aligned_and_convert_payload() {
-    let leg = || SectorLeg::new([(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)], false);
+    let leg = || {
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 2),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
+            false,
+        )
+    };
     let space = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg()]),
         FusionProductSpace::new([leg()]),
     )
-    .coupled_subblock_structure(&Z2FusionRule, 1, [vec![2, 2], vec![1, 1]])
+    .coupled_subblock_structure(&ZNFusionRule::new(2).unwrap(), 1, [vec![2, 2], vec![1, 1]])
     .unwrap();
     let structure = Arc::clone(&space);
     let plan = FusionBlockContractPlan::try_from_canonical_coupled_regions_with_ops_and_alpha(
@@ -1469,15 +1493,21 @@ fn scaled_storage_jobs_keep_canonical_coefficients_aligned_and_convert_payload()
 
     let unit_first_space = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new(
-            [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 1),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
             false,
         )]),
         FusionProductSpace::new([SectorLeg::new(
-            [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 1),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
             false,
         )]),
     )
-    .coupled_subblock_structure(&Z2FusionRule, 1, [vec![1, 1], vec![1, 1]])
+    .coupled_subblock_structure(&ZNFusionRule::new(2).unwrap(), 1, [vec![1, 1], vec![1, 1]])
     .unwrap();
     let unit_first_structure = Arc::clone(&unit_first_space);
     let unit_first_plan =
@@ -1759,15 +1789,23 @@ fn canonical_plan_zeroed_replay_skips_the_inactive_coupled_range() {
     // What: a canonical coupled-layout plan whose contracted leg carries
     // only the even sector leaves the odd destination range untouched
     // under `Zeroed` and assigns it under `Axpby(0)`.
-    let both = || SectorLeg::new([(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)], false);
-    let even = || SectorLeg::new([(Z2Irrep::EVEN, 2)], false);
+    let both = || {
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 2),
+                (ZNIrrep::new(1, 2).unwrap(), 3),
+            ],
+            false,
+        )
+    };
+    let even = || SectorLeg::new([(ZNIrrep::new(0, 2).unwrap(), 2)], false);
     // `shapes` holds one `[rows, cols]` per coupled tree pair.
     let space = |codomain: SectorLeg, domain: SectorLeg, shapes: Vec<Vec<usize>>| {
         FusionTreeHomSpace::new(
             FusionProductSpace::new([codomain]),
             FusionProductSpace::new([domain]),
         )
-        .coupled_subblock_structure(&Z2FusionRule, 1, shapes)
+        .coupled_subblock_structure(&ZNFusionRule::new(2).unwrap(), 1, shapes)
         .unwrap()
     };
     let dst = space(both(), both(), vec![vec![2, 2], vec![3, 3]]);
@@ -2090,12 +2128,20 @@ fn componentwise_pack_matches_promoted_product_on_finite_values() {
 /// `-1` (odd block, offset 4), and operands whose products are
 /// `[1, 2, 3, 4]` and `[10]`.
 fn signed_z2_storage_plan() -> (FusionBlockContractPlan<f64>, Vec<Complex64>, Vec<Complex64>) {
-    let leg = || SectorLeg::new([(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)], false);
+    let leg = || {
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 2),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
+            false,
+        )
+    };
     let space = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg()]),
         FusionProductSpace::new([leg()]),
     )
-    .coupled_subblock_structure(&Z2FusionRule, 1, [vec![2, 2], vec![1, 1]])
+    .coupled_subblock_structure(&ZNFusionRule::new(2).unwrap(), 1, [vec![2, 2], vec![1, 1]])
     .unwrap();
     let structure = Arc::clone(&space);
     let plan = FusionBlockContractPlan::try_from_canonical_coupled_regions_with_ops_and_alpha(

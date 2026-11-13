@@ -11,11 +11,11 @@ impl FusionProductSpace {
     /// # Examples
     ///
     /// ```
-    /// use symtn_core::{FusionProductSpace, SectorLeg, Z2Irrep};
+    /// use symtn_core::{FusionProductSpace, SectorLeg, FermionParityIrrep};
     ///
     /// let space = FusionProductSpace::new([
-    ///     SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false),
-    ///     SectorLeg::new([(Z2Irrep::EVEN, 1)], true),
+    ///     SectorLeg::new([(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)], false),
+    ///     SectorLeg::new([(FermionParityIrrep::EVEN, 1)], true),
     /// ]);
     /// assert_eq!(space.len(), 2);
     /// ```

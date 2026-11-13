@@ -27,8 +27,8 @@ pub use symtn_sectors::{
     CategoryCodec, CategoryFailure, CategoryOperation, CategoryProvider, CategoryRule,
     CheckedCanonicalUnitFusionRule, CheckedFusionAlgebra, CheckedGenericFusion,
     CheckedGenericPivotal, CheckedGenericRigidSymbols, CoupledSectorFold, CoupledSectorFoldBuilder,
-    EnumeratedCodec, FermionParityFusionRule, FusionAlgebraError, FusionRule, FusionStyleKind,
-    Fz2SectorLayout, GenericFArray, GenericRMatrix, InfallibleGeneric,
+    EnumeratedCodec, FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError, FusionRule,
+    FusionStyleKind, Fz2SectorLayout, GenericFArray, GenericRMatrix, InfallibleGeneric,
     MultiplicityFreeAdmissionMode, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
     MultiplicityFreeRigidSymbols, PackedProductCodec, PackedSectorLayout, PhysicalBasisError,
     PhysicalFusionBasis, ProductAdmission, ProductFusionRule, ProductFusionRuleError,
@@ -36,8 +36,7 @@ pub use symtn_sectors::{
     ProductSectorLayout, RuleIdentity, SU2FusionRule, SU2Irrep, SectorCodec, SectorId,
     SectorOrderKey, SectorVec, Su2SectorLayout, SymbolShapeError, TableRule, TableRuleError,
     TableSector, TensorKitProductCodec, TypedSectorAdmission, U1FusionRule, U1Irrep,
-    U1SectorLayout, UncertifiedUnitAdmission, Z2FusionRule, Z2Irrep, ZNFusionRule, ZNIrrep,
-    CU1_MAX_TWICE_CHARGE, SU2_MAX_DOUBLED_SPIN,
+    U1SectorLayout, UncertifiedUnitAdmission, ZNFusionRule, ZNIrrep, SU2_MAX_DOUBLED_SPIN,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use symtn_sectors::{GenericFusionSymbols, GenericRigidSymbols};

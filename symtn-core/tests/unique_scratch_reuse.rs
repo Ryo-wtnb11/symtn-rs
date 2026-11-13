@@ -4,7 +4,7 @@
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols,
     PreparedTreePairOperation, SectorId, SectorLeg, U1FusionRule, U1Irrep, UniqueTreePairScratch,
-    Z2FusionRule,
+    ZNFusionRule,
 };
 
 /// Every case of one HomSpace with codomain duals `codomain` and domain duals
@@ -87,14 +87,14 @@ fn reused_unique_scratch_matches_the_key_form() {
     let mut compared = 0;
     compared += compare(&U1FusionRule, &u1, &[false, true], &[true], &mut scratch);
     compared += compare(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &z2,
         &[true, false, true],
         &[false, false, true],
         &mut scratch,
     );
     compared += compare(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         &z2,
         &[false, true, true, false],
         &[true, false, false, true],
@@ -108,7 +108,7 @@ fn reused_unique_scratch_matches_the_key_form() {
         &mut scratch,
     );
     compared += compare(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &z2,
         &[false],
         &[true, true],

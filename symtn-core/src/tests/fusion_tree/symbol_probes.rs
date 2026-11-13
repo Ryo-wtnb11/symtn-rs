@@ -225,27 +225,27 @@ impl FusionRule for UniqueFAdmissibilityProbe {
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
-        Z2FusionRule.fusion_style()
+        ZNFusionRule::new(2).unwrap().fusion_style()
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        Z2FusionRule.braiding_style()
+        ZNFusionRule::new(2).unwrap().braiding_style()
     }
 
     fn vacuum(&self) -> SectorId {
-        Z2FusionRule.vacuum()
+        ZNFusionRule::new(2).unwrap().vacuum()
     }
 
     fn dual(&self, sector: SectorId) -> SectorId {
-        Z2FusionRule.dual(sector)
+        ZNFusionRule::new(2).unwrap().dual(sector)
     }
 
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        Z2FusionRule.fusion_channels(left, right)
+        ZNFusionRule::new(2).unwrap().fusion_channels(left, right)
     }
 
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        Z2FusionRule.nsymbol(left, right, coupled)
+        ZNFusionRule::new(2).unwrap().nsymbol(left, right, coupled)
     }
 }
 
@@ -267,45 +267,68 @@ impl MultiplicityFreeFusionSymbols for UniqueFAdmissibilityProbe {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push([left, middle, right, coupled, left_coupled, right_coupled]);
-        let admissible = Z2FusionRule.nsymbol(left, middle, left_coupled) != 0
-            && Z2FusionRule.nsymbol(left_coupled, right, coupled) != 0
-            && Z2FusionRule.nsymbol(middle, right, right_coupled) != 0
-            && Z2FusionRule.nsymbol(left, right_coupled, coupled) != 0;
+        let admissible = ZNFusionRule::new(2)
+            .unwrap()
+            .nsymbol(left, middle, left_coupled)
+            != 0
+            && ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left_coupled, right, coupled)
+                != 0
+            && ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(middle, right, right_coupled)
+                != 0
+            && ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left, right_coupled, coupled)
+                != 0;
         if admissible {
-            Z2FusionRule.f_symbol_scalar(left, middle, right, coupled, left_coupled, right_coupled)
+            ZNFusionRule::new(2).unwrap().f_symbol_scalar(
+                left,
+                middle,
+                right,
+                coupled,
+                left_coupled,
+                right_coupled,
+            )
         } else {
             997.0
         }
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
-        Z2FusionRule.r_symbol_scalar(left, right, coupled)
+        ZNFusionRule::new(2)
+            .unwrap()
+            .r_symbol_scalar(left, right, coupled)
     }
 }
 
 impl MultiplicityFreeRigidSymbols for UniqueFAdmissibilityProbe {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Z2FusionRule.dim_scalar(sector)
+        ZNFusionRule::new(2).unwrap().dim_scalar(sector)
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Z2FusionRule.inv_dim_scalar(sector)
+        ZNFusionRule::new(2).unwrap().inv_dim_scalar(sector)
     }
 
     fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Z2FusionRule.sqrt_dim_scalar(sector)
+        ZNFusionRule::new(2).unwrap().sqrt_dim_scalar(sector)
     }
 
     fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Z2FusionRule.inv_sqrt_dim_scalar(sector)
+        ZNFusionRule::new(2).unwrap().inv_sqrt_dim_scalar(sector)
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Z2FusionRule.twist_scalar(sector)
+        ZNFusionRule::new(2).unwrap().twist_scalar(sector)
     }
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-        Z2FusionRule.frobenius_schur_phase_scalar(sector)
+        ZNFusionRule::new(2)
+            .unwrap()
+            .frobenius_schur_phase_scalar(sector)
     }
 }
 
@@ -333,28 +356,73 @@ fn unique_multi_fmove_callers_preserve_admissible_z2_results() {
     // retain exact output trees, coefficients, and conjugation direction.
     assert_eq!(
         multi_fmove_surgery(&UniqueK(&rule), &long),
-        multi_fmove_surgery(&UniqueK(&Z2FusionRule), &long)
+        multi_fmove_surgery(&UniqueK(&ZNFusionRule::new(2).unwrap()), &long)
     );
     let calls = rule.take_calls();
     assert!(!calls.is_empty());
     for &[left, middle, right, coupled, left_coupled, right_coupled] in &calls {
-        assert_ne!(Z2FusionRule.nsymbol(left, middle, left_coupled), 0);
-        assert_ne!(Z2FusionRule.nsymbol(left_coupled, right, coupled), 0);
-        assert_ne!(Z2FusionRule.nsymbol(middle, right, right_coupled), 0);
-        assert_ne!(Z2FusionRule.nsymbol(left, right_coupled, coupled), 0);
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left, middle, left_coupled),
+            0
+        );
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left_coupled, right, coupled),
+            0
+        );
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(middle, right, right_coupled),
+            0
+        );
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left, right_coupled, coupled),
+            0
+        );
     }
 
     assert_eq!(
         multi_fmove_inv_surgery(&UniqueK(&rule), &(odd, false), even, &short),
-        multi_fmove_inv_surgery(&UniqueK(&Z2FusionRule), &(odd, false), even, &short)
+        multi_fmove_inv_surgery(
+            &UniqueK(&ZNFusionRule::new(2).unwrap()),
+            &(odd, false),
+            even,
+            &short
+        )
     );
     let calls = rule.take_calls();
     assert!(!calls.is_empty());
     for &[left, middle, right, coupled, left_coupled, right_coupled] in &calls {
-        assert_ne!(Z2FusionRule.nsymbol(left, middle, left_coupled), 0);
-        assert_ne!(Z2FusionRule.nsymbol(left_coupled, right, coupled), 0);
-        assert_ne!(Z2FusionRule.nsymbol(middle, right, right_coupled), 0);
-        assert_ne!(Z2FusionRule.nsymbol(left, right_coupled, coupled), 0);
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left, middle, left_coupled),
+            0
+        );
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left_coupled, right, coupled),
+            0
+        );
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(middle, right, right_coupled),
+            0
+        );
+        assert_ne!(
+            ZNFusionRule::new(2)
+                .unwrap()
+                .nsymbol(left, right_coupled, coupled),
+            0
+        );
     }
 }
 

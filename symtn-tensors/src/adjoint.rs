@@ -598,9 +598,10 @@ mod cache_tests {
     use std::cell::Cell;
     use std::ops::{Add, Mul};
     use symtn_core::{
-        FermionParityFusionRule, FusionProductSpace, Fz2SectorLayout, PackedProductCodec,
-        ProductFusionRule, ProductSectorCodec, ProductSectorLayout, SU2FusionRule, SU2Irrep,
-        SectorId, SectorLeg, Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout, Z2Irrep,
+        FermionParityFusionRule, FermionParityIrrep, FusionProductSpace, Fz2SectorLayout,
+        PackedProductCodec, ProductFusionRule, ProductSectorCodec, ProductSectorLayout,
+        SU2FusionRule, SU2Irrep, SectorId, SectorLeg, Su2SectorLayout, U1FusionRule, U1Irrep,
+        U1SectorLayout,
     };
 
     type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
@@ -663,7 +664,7 @@ mod cache_tests {
 
     fn triple_rule() -> TripleRule {
         TripleRule::try_new(
-            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap()
@@ -672,7 +673,7 @@ mod cache_tests {
     fn triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
         TripleCodec::encode(
             Fz2U1Codec::encode(
-                Z2Irrep::new(parity).sector_id(),
+                SectorId::from(FermionParityIrrep::new(parity == 1)),
                 U1Irrep::new(charge).sector_id(),
             ),
             SU2Irrep::from_twice_spin(twice_spin).sector_id(),
@@ -890,8 +891,8 @@ mod cache_tests {
             true,
         );
         assert_rank_one_final_layout(
-            &FermionParityFusionRule,
-            Z2Irrep::ODD.sector_id(),
+            &FermionParityFusionRule::new(),
+            SectorId::from(FermionParityIrrep::ODD),
             2,
             3,
             true,

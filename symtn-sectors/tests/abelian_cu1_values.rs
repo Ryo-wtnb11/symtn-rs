@@ -6,11 +6,12 @@
 //!
 //! The checked fusion algebra keeps symtn's error contract: U(1) or CU(1)
 //! fusion leaving the label range is an `Err`, never a wrapped label.
+//! CU(1)'s `N` is the exact category value even there.
 
 use symtn_sectors::{
-    CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FusionAlgebraError,
-    FusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, SectorId,
-    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule, CU1_MAX_TWICE_CHARGE,
+    CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FermionParityIrrep,
+    FusionAlgebraError, FusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
+    SectorCodec, SectorId, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 use crate::numerics;
@@ -18,7 +19,7 @@ use crate::numerics;
 trait Rule: FusionRule + CheckedFusionAlgebra + MultiplicityFreeRigidSymbols<Scalar = f64> {}
 impl<R: FusionRule + CheckedFusionAlgebra + MultiplicityFreeRigidSymbols<Scalar = f64>> Rule for R {}
 
-/// `N`, with symtn's checked fusion overflow (U(1)/CU(1) sums leaving the
+/// `N`, with symtn's checked U(1) fusion overflow (sums leaving the
 /// label range) read as the exact `0`.
 fn n<R: Rule>(rule: &R, a: SectorId, b: SectorId, c: SectorId) -> bool {
     rule.try_nsymbol(a, b, c) == Ok(1)
@@ -93,10 +94,25 @@ fn check_abelian<R: Rule>(
 
 #[test]
 fn abelian_values_are_the_tensorkitsectors_closed_forms() {
-    let parity = |p: i64| Z2Irrep::new(p as u8).sector_id();
+    let z2 = |p: i64| ZNIrrep::new(p, 2).unwrap().into();
+    let parity = |p: i64| FermionParityIrrep::new(p == 1).into();
     let xor = |a: i64, b: i64| a ^ b;
-    check_abelian(&Z2FusionRule, &[0, 1], parity, xor, |a| a, false);
-    check_abelian(&FermionParityFusionRule, &[0, 1], parity, xor, |a| a, true);
+    check_abelian(
+        &ZNFusionRule::new(2).unwrap(),
+        &[0, 1],
+        z2,
+        xor,
+        |a| a,
+        false,
+    );
+    check_abelian(
+        &FermionParityFusionRule::new(),
+        &[0, 1],
+        parity,
+        xor,
+        |a| a,
+        true,
+    );
     for modulus in 1..=4 {
         let rule = ZNFusionRule::new(modulus).unwrap();
         let m = i64::from(modulus);
@@ -104,7 +120,7 @@ fn abelian_values_are_the_tensorkitsectors_closed_forms() {
         check_abelian(
             &rule,
             &labels,
-            |q| rule.irrep(q).into(),
+            |q| ZNIrrep::new(q, modulus).unwrap().into(),
             |a, b| (a + b) % m,
             |a| (m - a) % m,
             false,
@@ -181,7 +197,7 @@ fn fusion_tensor(a: CU1Irrep, b: CU1Irrep, c: CU1Irrep) -> [[[f64; 2]; 2]; 2] {
     );
     let r = std::f64::consts::FRAC_1_SQRT_2;
     let sign = |x: CU1Irrep| {
-        if x.conjugation_sector() == 1 {
+        if x.s() == 1 {
             -1.0
         } else {
             1.0
@@ -189,7 +205,7 @@ fn fusion_tensor(a: CU1Irrep, b: CU1Irrep, c: CU1Irrep) -> [[[f64; 2]; 2]; 2] {
     };
     if qc == 0 {
         if qa == 0 && qb == 0 {
-            if a.conjugation_sector() ^ b.conjugation_sector() == c.conjugation_sector() {
+            if a.s() ^ b.s() == c.s() {
                 t[0][0][0] = 1.0;
             }
         } else if qa == qb {
@@ -261,9 +277,9 @@ fn dense_r(a: CU1Irrep, b: CU1Irrep, c: CU1Irrep) -> f64 {
 
 #[test]
 fn cu1_f_and_r_are_the_fusion_tensor_recouplings() {
-    let rule = CU1FusionRule;
+    let rule = CU1FusionRule::new();
     let all = cu1_labels();
-    let id = |x: CU1Irrep| x.sector_id();
+    let id = |x: CU1Irrep| rule.encode_sector(&x).unwrap();
     let mut nonzero = (0, 0);
     for &a in &all {
         for &b in &all {
@@ -292,11 +308,11 @@ fn cu1_f_and_r_are_the_fusion_tensor_recouplings() {
 
 #[test]
 fn cu1_unary_data_and_fusion_order_follow_tensorkitsectors() {
-    let rule = CU1FusionRule;
-    let id = |x: CU1Irrep| x.sector_id();
+    let rule = CU1FusionRule::new();
+    let id = |x: CU1Irrep| rule.encode_sector(&x).unwrap();
     // `dim = 1` for `0±`, `2` when charged; self-dual; FS phase and twist 1,
     // up to the largest representable charge.
-    let wide = [j(1 << 31), j(CU1_MAX_TWICE_CHARGE)];
+    let wide = [j(1 << 31), j(u32::MAX)];
     for a in cu1_labels().into_iter().chain(wide) {
         let dim = cu1_dim(a) as f64;
         assert_eq!(rule.vacuum(), id(OP));
@@ -315,7 +331,7 @@ fn cu1_unary_data_and_fusion_order_follow_tensorkitsectors() {
         for &b in &all {
             let (qa, qb) = (a.twice_charge(), b.twice_charge());
             let want = match (qa, qb) {
-                (0, 0) if a.conjugation_sector() == b.conjugation_sector() => vec![OP],
+                (0, 0) if a.s() == b.s() => vec![OP],
                 (0, 0) => vec![OM],
                 (0, _) => vec![b],
                 (_, 0) => vec![a],
@@ -337,24 +353,32 @@ fn cu1_unary_data_and_fusion_order_follow_tensorkitsectors() {
 
 #[test]
 fn cu1_fusion_leaving_the_charge_range_is_an_error() {
-    let rule = CU1FusionRule;
-    let id = |x: CU1Irrep| x.sector_id();
-    let max = CU1_MAX_TWICE_CHARGE;
+    // What: a fusion channel past fusion-symbols' `u32` twice charge is
+    // `FusionNotRepresentable`, while `N` stays the exact category value.
+    let rule = CU1FusionRule::new();
+    let id = |x: CU1Irrep| rule.encode_sector(&x).unwrap();
+    let max = u32::MAX;
     let half = max / 2;
     assert_eq!(
         rule.try_fusion_channels(id(j(half)), id(j(half)))
             .unwrap()
             .as_slice(),
-        &[id(OP), id(OM), id(j(max))]
+        &[id(OP), id(OM), id(j(max - 1))]
     );
     for (a, b) in [(1, max), (max, 1), (half + 1, half + 1), (max, max)] {
-        assert!(
-            matches!(rule.try_fusion_channels(id(j(a)), id(j(b))), Err(FusionAlgebraError::FusionNotRepresentable { left, .. }) if left == id(j(a))),
+        assert_eq!(
+            rule.try_fusion_channels(id(j(a)), id(j(b))),
+            Err(FusionAlgebraError::FusionNotRepresentable {
+                left: id(j(a)),
+                right: id(j(b))
+            }),
             "{a} ⊗ {b}"
         );
         for c in [OP, OM, j(1), j(max)] {
-            assert!(
-                matches!(rule.try_nsymbol(id(j(a)), id(j(b)), id(c)), Err(FusionAlgebraError::FusionNotRepresentable { left, .. }) if left == id(j(a))),
+            let exact = usize::from(a == b && c.twice_charge() == 0);
+            assert_eq!(
+                rule.try_nsymbol(id(j(a)), id(j(b)), id(c)),
+                Ok(exact),
                 "N {a} {b} {c:?}"
             );
         }
@@ -391,7 +415,7 @@ fn inadmissible_f_and_r_are_zero_at_the_label_boundaries() {
         let rule = ZNFusionRule::new(modulus).unwrap();
         let ids: Vec<SectorId> = [0, 1, i64::from(u32::MAX) - 1]
             .into_iter()
-            .map(|q| rule.irrep(q).into())
+            .map(|q| ZNIrrep::new(q, modulus).unwrap().into())
             .collect();
         assert_off_shell_zero(&rule, &ids);
     }
@@ -400,7 +424,8 @@ fn inadmissible_f_and_r_are_zero_at_the_label_boundaries() {
         .map(|q| U1Irrep::new(q).sector_id())
         .collect();
     assert_off_shell_zero(&U1FusionRule, &u1);
-    let parity = [Z2Irrep::EVEN.sector_id(), Z2Irrep::ODD.sector_id()];
-    assert_off_shell_zero(&Z2FusionRule, &parity);
-    assert_off_shell_zero(&FermionParityFusionRule, &parity);
+    let parity = [FermionParityIrrep::EVEN, FermionParityIrrep::ODD].map(SectorId::from);
+    assert_off_shell_zero(&FermionParityFusionRule::new(), &parity);
+    let z2 = [0, 1].map(|p| SectorId::from(ZNIrrep::new(p, 2).unwrap()));
+    assert_off_shell_zero(&ZNFusionRule::new(2).unwrap(), &z2);
 }

@@ -531,16 +531,17 @@ fn runtime() -> Runtime {
 // ---------------------------------------------------------------------------
 
 /// The same value computed from the typed labels the facade hands the closure.
-fn typed_fill_value(
-    sectors: &symtn::typed::BlockFusionTrees<symtn::sector::Z2Irrep>,
+fn typed_fill_value<L: Copy + Into<SectorId>>(
+    sectors: &symtn::typed::BlockFusionTrees<L>,
     indices: &[usize],
 ) -> f64 {
-    let mut value = f64::from(sectors.coupled().parity()) * 1000.0;
-    for (position, label) in sectors.codomain_uncoupled().iter().enumerate() {
-        value += f64::from(label.parity()) * 100.0 * (position + 1) as f64;
+    let parity = |label: L| label.into().id() as f64;
+    let mut value = parity(*sectors.coupled()) * 1000.0;
+    for (position, &label) in sectors.codomain_uncoupled().iter().enumerate() {
+        value += parity(label) * 100.0 * (position + 1) as f64;
     }
-    for (position, label) in sectors.domain_uncoupled().iter().enumerate() {
-        value += f64::from(label.parity()) * 10.0 * (position + 1) as f64;
+    for (position, &label) in sectors.domain_uncoupled().iter().enumerate() {
+        value += parity(label) * 10.0 * (position + 1) as f64;
     }
     value
         + indices
@@ -593,7 +594,7 @@ fn z3_rank_four(
 }
 
 /// One built-in Z2 layout filled from typed fusion-tree labels.
-fn z2_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+fn z2_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::ZNFusionRule, f64> {
     z2_tensor_split(runtime, 2)
 }
 
@@ -604,13 +605,13 @@ fn z2_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
 fn z2_tensor_split(
     runtime: &Runtime,
     num_codomain: usize,
-) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+) -> TensorMap<symtn::sector::ZNFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -629,14 +630,14 @@ fn z2_tensor_split(
 /// The c64 sibling of [`z2_tensor`]. The imaginary part is deliberately
 /// not proportional to the real one, so a stray conjugation or a real-only
 /// path is visible in every comparison this tensor feeds.
-fn z2_complex_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, Complex64> {
+fn z2_complex_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::ZNFusionRule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let complex = |value: f64| Complex64::new(value, 1.0 + value % 5.0);
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -975,10 +976,10 @@ mod typed_is_self_sufficient {
 /// A fermionic leg carrying both parities, degeneracy one each.
 fn fermionic_leg() -> GradedSpace<symtn::sector::FermionParityFusionRule> {
     GradedSpace::try_new(
-        Arc::new(symtn::sector::FermionParityFusionRule),
+        Arc::new(symtn::sector::FermionParityFusionRule::new()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 1),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .expect("fermionic leg is well formed")
@@ -1074,13 +1075,13 @@ fn su2_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::SU2FusionRule, f64>
 
 /// A Z2 endomorphism, `[v] <- [v]`: the abelian half of the `tr`
 /// comparison, where every quantum dimension is one.
-fn z2_endomorphism(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+fn z2_endomorphism(runtime: &Runtime) -> TensorMap<symtn::sector::ZNFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -1161,13 +1162,13 @@ where
     dense
 }
 
-fn z2_bond(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+fn z2_bond(runtime: &Runtime) -> TensorMap<symtn::sector::ZNFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -1275,7 +1276,7 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
     let rule = Arc::new(
         Fz2U1Su2Rule::try_new(
             Fz2U1Rule::try_new(
-                symtn::sector::FermionParityFusionRule,
+                symtn::sector::FermionParityFusionRule::new(),
                 symtn::sector::U1FusionRule,
             )
             .unwrap(),
@@ -1287,9 +1288,9 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
         symtn::sector::ProductSector::new(
             symtn::sector::ProductSector::new(
                 if parity == 0 {
-                    symtn::sector::Z2Irrep::EVEN
+                    symtn::sector::FermionParityIrrep::EVEN
                 } else {
-                    symtn::sector::Z2Irrep::ODD
+                    symtn::sector::FermionParityIrrep::ODD
                 },
                 symtn::sector::U1Irrep::new(charge),
             ),
@@ -1322,10 +1323,10 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
 
 fn fz2_typed_leg() -> GradedSpace<symtn::sector::FermionParityFusionRule> {
     GradedSpace::try_new(
-        Arc::new(symtn::sector::FermionParityFusionRule),
+        Arc::new(symtn::sector::FermionParityFusionRule::new()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::FermionParityIrrep::EVEN, 2),
+            (symtn::sector::FermionParityIrrep::ODD, 3),
         ],
     )
     .unwrap()

@@ -1891,7 +1891,7 @@ mod tests {
 
     #[test]
     fn complete_fz2_twist_cost_matches_exact_probe() {
-        let rule = FermionParityFusionRule;
+        let rule = FermionParityFusionRule::new();
         let odd = SectorId::new(1);
         let space = |codomain_dual: bool, domain_dual: bool| {
             DynamicFusionMapSpace::from_final_homspace(

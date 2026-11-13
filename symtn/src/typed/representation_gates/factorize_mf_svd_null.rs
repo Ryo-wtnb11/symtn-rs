@@ -271,10 +271,10 @@ fn compact_diagonal_null_is_empty_by_shape_without_dense_work() {
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
     let provider = Arc::new(
-        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap(),
     );
-    let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
-    let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
+    let even = product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN);
+    let odd = product_sector(U1Irrep::new(1), FermionParityIrrep::ODD);
     let product = GradedSpace::try_new(Arc::clone(&provider), [(even, 2), (odd, 2)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -926,11 +926,12 @@ fn compact_diagonal_svd_other_host_scalars_and_sectors() {
             f64,
             1e-12
         );
-        let even = product_sector(U1Irrep::new(0), Z2Irrep::EVEN);
-        let odd = product_sector(U1Irrep::new(1), Z2Irrep::ODD);
+        let even = product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN);
+        let odd = product_sector(U1Irrep::new(1), FermionParityIrrep::ODD);
         check!(
             engine,
-            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())
+                .unwrap(),
             [(even, 2), (odd, 1)],
             [
                 SectorSpectrum {

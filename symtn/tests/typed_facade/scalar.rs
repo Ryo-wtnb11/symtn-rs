@@ -159,14 +159,14 @@ fn trace_pairs_preserves_partial_trace_geometry() {
     // each side — so their relative order in `output_axes` is observable, and
     // reversing it changes the bytes.
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
-    let typed: TensorMap<symtn::sector::Z2FusionRule, f64> = TensorMap::from_subblock_fn(
+    let typed: TensorMap<symtn::sector::ZNFusionRule, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
         [&leg, &leg],

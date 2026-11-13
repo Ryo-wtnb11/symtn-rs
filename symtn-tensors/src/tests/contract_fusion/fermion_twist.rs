@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn tensorcontract_fusion_fermion_rhs_dual_codomain_twists_like_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let odd = SectorId::new(1);
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
@@ -70,7 +70,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
     // B blocks: even [-1.25], odd [-0.75, -0.25, 0.25, 0.75]
     // C = @tensor A[a; c] * B[c; b]:
     //   even [-0.625], odd [2.0, 3.0, -3.0, -4.0]  (= -1 * A_odd * B_odd)
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let space = |codomain_dual: bool, domain_dual: bool| {
@@ -269,7 +269,7 @@ fn fermion_twist_folds_into_core_alpha_by_hand_calculation() {
     // one, A (5 elements), not B (10): C[a; b w] = sum_k A[a; k] θ_k
     // B[k; b w] with θ_odd = -1 on B's dual codomain leg V*. W is an even-only
     // leg, so no other sign enters and the result is a hand calculation.
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let v = |dual: bool| SectorLeg::new([(even, 1), (odd, 2)], dual);

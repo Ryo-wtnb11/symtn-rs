@@ -32,7 +32,8 @@ use num_complex::Complex64;
 
 use crate::numerics;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -394,12 +395,19 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_su2_legs() {
 fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
         product_sector(
-            if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+            if odd {
+                FermionParityIrrep::ODD
+            } else {
+                FermionParityIrrep::EVEN
+            },
             U1Irrep::new(charge),
         )
     };
@@ -476,8 +484,8 @@ mod factorizations {
 
     use num_complex::Complex64;
     use symtn::sector::{
-        FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-        U1FusionRule, U1Irrep, Z2Irrep,
+        FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector,
+        SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
     };
     use symtn::typed::{
         Eig, Eigh, GradedSpace, HermitianTol, LeftPolar, Lq, Qr, RightPolar, Runtime,
@@ -785,7 +793,7 @@ mod factorizations {
         let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(
             ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
@@ -795,9 +803,9 @@ mod factorizations {
                 Arc::clone(&provider),
                 pairs.iter().map(|&(q, d)| {
                     let parity = if q.rem_euclid(2) == 0 {
-                        Z2Irrep::EVEN
+                        FermionParityIrrep::EVEN
                     } else {
-                        Z2Irrep::ODD
+                        FermionParityIrrep::ODD
                     };
                     (ProductSector::new(parity, U1Irrep::new(q)), d)
                 }),

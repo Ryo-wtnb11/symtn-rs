@@ -263,14 +263,14 @@ impl SectorLeg {
     /// # Examples
     ///
     /// ```
-    /// use symtn_core::{SectorLeg, Z2Irrep};
+    /// use symtn_core::{SectorLeg, FermionParityIrrep};
     ///
-    /// let leg = SectorLeg::new([(Z2Irrep::ODD, 3), (Z2Irrep::EVEN, 2)], false);
+    /// let leg = SectorLeg::new([(FermionParityIrrep::ODD, 3), (FermionParityIrrep::EVEN, 2)], false);
     /// assert_eq!(leg.sectors().len(), 2);
     /// assert_eq!(leg.degeneracies(), &[2, 3]);
     /// assert!(!leg.is_dual());
     ///
-    /// let dual_leg = SectorLeg::new([(Z2Irrep::ODD, 1)], true);
+    /// let dual_leg = SectorLeg::new([(FermionParityIrrep::ODD, 1)], true);
     /// assert!(dual_leg.is_dual());
     /// ```
     pub fn new<Pairs, Sector>(pairs: Pairs, is_dual: bool) -> Self

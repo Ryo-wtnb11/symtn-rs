@@ -1,4 +1,5 @@
 use super::*;
+use symtn_core::ZNIrrep;
 
 fn poison_destination<R, D>(destination: &mut TensorMap<R, D>)
 where
@@ -350,8 +351,16 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
 
     let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 1)]).unwrap();
-    let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 1)]).unwrap();
+    let z2_leg = GradedSpace::try_new(
+        Arc::clone(&z2),
+        [(ZNIrrep::new(0, z2.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let z3_leg = GradedSpace::try_new(
+        Arc::clone(&z3),
+        [(ZNIrrep::new(0, z3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let z2_source =
         TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], |_, _| 2.0).unwrap();
     let mut z3_destination =
@@ -545,7 +554,11 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
         true,
     );
 
-    let odd = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 2)]).unwrap();
+    let odd = GradedSpace::try_new(
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::ODD, 2)],
+    )
+    .unwrap();
     let fermionic = TensorMap::from_subblock_fn(engine, &runtime, [&odd], [&odd], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
@@ -564,11 +577,12 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
 
     let product_leg = GradedSpace::try_new(
         Arc::new(
-            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())
+                .unwrap(),
         ),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();
@@ -593,7 +607,7 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
     );
 
     let q = GradedSpace::try_new(
-        Arc::new(CU1FusionRule),
+        Arc::new(CU1FusionRule::new()),
         [(CU1Irrep::from_twice_charge(1), 1)],
     )
     .unwrap();
@@ -949,8 +963,16 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
 
     let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 1)]).unwrap();
-    let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 1)]).unwrap();
+    let z2_leg = GradedSpace::try_new(
+        Arc::clone(&z2),
+        [(ZNIrrep::new(0, z2.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let z3_leg = GradedSpace::try_new(
+        Arc::clone(&z3),
+        [(ZNIrrep::new(0, z3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let z2_lhs =
         TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], |_, _| 1.0).unwrap();
     let z2_rhs =
@@ -1060,7 +1082,7 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
         );
     }
 
-    let provider = Arc::new(CU1FusionRule);
+    let provider = Arc::new(CU1FusionRule::new());
     let q = GradedSpace::try_new(provider, [(CU1Irrep::from_twice_charge(1), 1)]).unwrap();
     let source =
         TensorMap::from_subblock_fn(engine, &runtime, [&q, &q, &q], [&q], |_, _| 1.0).unwrap();

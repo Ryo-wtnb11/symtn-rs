@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use symtn_core::{
     BlockKey, BlockSpec, BlockStructure, FusionProductSpace, FusionTreeHomSpace, FusionTreePairKey,
-    SectorId, SectorLeg, Z2FusionRule,
+    SectorId, SectorLeg, ZNFusionRule,
 };
 use symtn_operations::{try_tensortrace_owned_raw, OwnedTraceTerm};
 
@@ -36,7 +36,7 @@ fn padded_structure() -> BlockStructure {
 }
 
 fn incomplete_coupled_structure() -> (BlockStructure, BlockStructure) {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),

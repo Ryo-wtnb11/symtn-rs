@@ -122,7 +122,7 @@ mod owned_overwrite_tests {
     use num_complex::Complex64;
     use symtn_core::{
         BlockKey, BlockSpec, FusionProductSpace, FusionTreeHomSpace, FusionTreePairKey, SectorLeg,
-        Z2FusionRule, Z2Irrep,
+        ZNFusionRule, ZNIrrep,
     };
     use symtn_dense::{
         DenseBackend, DenseDotConfig, DenseError, DenseRead, DenseScalar, DenseTensor, DenseWrite,
@@ -302,15 +302,21 @@ mod owned_overwrite_tests {
         // recoupling coefficient and writes the final owned payload exactly once.
         let space = FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new(
-                [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+                [
+                    (ZNIrrep::new(0, 2).unwrap(), 1),
+                    (ZNIrrep::new(1, 2).unwrap(), 1),
+                ],
                 false,
             )]),
             FusionProductSpace::new([SectorLeg::new(
-                [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+                [
+                    (ZNIrrep::new(0, 2).unwrap(), 1),
+                    (ZNIrrep::new(1, 2).unwrap(), 1),
+                ],
                 false,
             )]),
         )
-        .coupled_subblock_structure(&Z2FusionRule, 1, [vec![1, 1], vec![1, 1]])
+        .coupled_subblock_structure(&ZNFusionRule::new(2).unwrap(), 1, [vec![1, 1], vec![1, 1]])
         .unwrap();
         let structure = Arc::clone(&space);
         let transform = TreeTransformStructure::compile_structures(
@@ -418,7 +424,7 @@ mod owned_overwrite_tests {
                 FusionProductSpace::new([z2_leg(PLANNED_COLS, PLANNED_COLS)]),
             )
             .coupled_subblock_structure(
-                &Z2FusionRule,
+                &ZNFusionRule::new(2).unwrap(),
                 1,
                 [
                     vec![PLANNED_ROWS, PLANNED_COLS],
@@ -486,7 +492,7 @@ mod owned_overwrite_tests {
             FusionProductSpace::new([z2_leg(1, 1), z2_leg(1, 1)]),
             FusionProductSpace::new([z2_leg(2, 2)]),
         )
-        .coupled_subblock_structure_from_leg_degeneracies(&Z2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&ZNFusionRule::new(2).unwrap())
         .unwrap();
         assert_eq!(structure.block_count(), 4);
         let inactive = structure.block(3).unwrap();
@@ -550,7 +556,13 @@ mod owned_overwrite_tests {
     }
 
     fn z2_leg(even: usize, odd: usize) -> SectorLeg {
-        SectorLeg::new([(Z2Irrep::EVEN, even), (Z2Irrep::ODD, odd)], false)
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), even),
+                (ZNIrrep::new(1, 2).unwrap(), odd),
+            ],
+            false,
+        )
     }
 
     /// Z2 rank (1, 3): one codomain tree per coupled sector, so the eight
@@ -562,7 +574,7 @@ mod owned_overwrite_tests {
             FusionProductSpace::new([z2_leg(3, 3)]),
             FusionProductSpace::new([z2_leg(2, 2), z2_leg(2, 2), z2_leg(2, 2)]),
         )
-        .coupled_subblock_structure(&Z2FusionRule, 1, vec![vec![3, 2, 2, 2]; 8])
+        .coupled_subblock_structure(&ZNFusionRule::new(2).unwrap(), 1, vec![vec![3, 2, 2, 2]; 8])
         .unwrap();
         let structure = Arc::clone(&space);
         assert_eq!(structure.block_count(), 8);

@@ -2,8 +2,8 @@
 
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::typed::ContractSpec;
 use symtn::typed::{GradedSpace, Runtime, TensorMap, Truncation};
@@ -75,14 +75,14 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
     let product = GradedSpace::try_new(
         std::sync::Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
         ),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 1),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
         ],
     )
     .unwrap();

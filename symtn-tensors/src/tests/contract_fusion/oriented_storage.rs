@@ -114,8 +114,8 @@ fn fermionic_storage_contract_rejects_nonuniform_twist_before_gemm() {
 
 #[test]
 fn oriented_storage_contract_and_compose_use_parent_rectangular_views() {
-    let rule = Z2FusionRule;
-    let provider = Arc::new(rule);
+    let rule = ZNFusionRule::new(2).unwrap();
+    let provider = Arc::new(rule.clone());
     let (m, k, n) = (2, 3, 4);
     let lhs_blocks = [
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -341,8 +341,8 @@ fn oriented_storage_contract_and_compose_use_parent_rectangular_views() {
 
 #[test]
 fn oriented_fermionic_storage_keeps_contract_and_compose_signs_distinct() {
-    let rule = FermionParityFusionRule;
-    let provider = Arc::new(rule);
+    let rule = FermionParityFusionRule::new();
+    let provider = Arc::new(rule.clone());
     let odd = SectorId::new(1);
     let space = |codomain_dual, domain_dual| {
         DynamicFusionMapSpace::from_final_homspace(

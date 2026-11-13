@@ -209,7 +209,7 @@ fn fibonacci_braid_then_inverse_braid_is_identity() {
 #[test]
 fn tree_pair_block_apis_reject_mixed_product_sector_components() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    let rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let sector_a = rule.encode_component_ids(z2_even(), u1(2)).id();
     let sector_b = rule.encode_component_ids(z2_even(), u1(3)).id();
     let coupled_a = rule.encode_component_ids(z2_even(), u1(4)).id();
@@ -492,9 +492,9 @@ fn split_only_nested_product_braid_matches_composition_oracle() {
     // both split directions.
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -567,7 +567,7 @@ fn identity_braid_rows_are_exact_for_supported_symmetry_families_and_rank_zero()
     let fz2_source = pair(z2_odd());
     assert_eq!(
         multiplicity_free_braid_tree_pair(
-            &FermionParityFusionRule,
+            &FermionParityFusionRule::new(),
             &fz2_source,
             &[0],
             &[1],
@@ -587,9 +587,9 @@ fn identity_braid_rows_are_exact_for_supported_symmetry_families_and_rank_zero()
 
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let product_rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -615,8 +615,15 @@ fn identity_braid_rows_are_exact_for_supported_symmetry_families_and_rank_zero()
     )
     .unwrap();
     assert_eq!(
-        multiplicity_free_braid_tree_pair(&Z2FusionRule, &scalar_source, &[], &[], &[], &[],)
-            .unwrap(),
+        multiplicity_free_braid_tree_pair(
+            &ZNFusionRule::new(2).unwrap(),
+            &scalar_source,
+            &[],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap(),
         vec![(scalar_source, 1.0)]
     );
 }
@@ -630,7 +637,7 @@ fn borrowed_unique_schedule_derivation_uses_quadratic_position_queries() {
     let permutation = (0..rank).rev().collect::<Vec<_>>();
     let raw_axis_positions = (0..rank).rev().collect::<Vec<_>>();
     let prepared = PreparedTreePairOperation::prepare_permute_with_raw_axis_positions(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         rank,
         0,
         &permutation,

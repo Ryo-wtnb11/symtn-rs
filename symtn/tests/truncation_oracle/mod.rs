@@ -26,7 +26,7 @@
 #![allow(dead_code)]
 
 use num_complex::Complex64;
-use symtn::sector::{ProductSector, SU2Irrep, U1Irrep, Z2Irrep};
+use symtn::sector::{FermionParityIrrep, ProductSector, SU2Irrep, U1Irrep};
 use symtn::typed::{SectorSpectrum, SpectrumMagnitude};
 
 /// Closed-form quantum dimension of each multiplicity-free sector type these
@@ -42,7 +42,7 @@ impl ClosedFormDim for U1Irrep {
     }
 }
 
-impl ClosedFormDim for Z2Irrep {
+impl ClosedFormDim for FermionParityIrrep {
     fn closed_form_dim(&self) -> f64 {
         1.0
     }

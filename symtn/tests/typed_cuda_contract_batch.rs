@@ -22,7 +22,9 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
-use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
+use symtn::sector::{
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+};
 use symtn::typed::{
     ContractPlan, ContractSpec, ContractWorkspace, CudaStorage, Direction, Error, GradedSpace,
     Runtime, StackedTensorMap, TensorMap,
@@ -363,12 +365,12 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
     let odd = GradedSpace::try_new(
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
         ),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();
     let dual = odd.try_dual().unwrap();
@@ -412,23 +414,26 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(-1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
         ],
     )
     .unwrap();
     let w = GradedSpace::try_new(
         rule,
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
         ],
     )
     .unwrap();
@@ -1128,12 +1133,12 @@ fn negative_only_signed_core_matches_literal_twist() {
     let odd = symtn::typed::GradedSpace::try_new(
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
         ),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
     )
     .unwrap();
     let odd_dual = odd.try_dual().unwrap();

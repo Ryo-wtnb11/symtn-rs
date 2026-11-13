@@ -9,8 +9,8 @@ use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
+    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
+    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -24,6 +24,7 @@ use crate::network_support;
 use network_support::{net, op};
 
 use crate::numerics;
+use symtn::sector::ZNIrrep;
 
 /// The planned and cached network paths may group the contraction differently from the
 /// direct typed call, so payloads agree within the workspace tolerance rule
@@ -128,8 +129,11 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
     let runtime = Runtime::builder().build().unwrap();
 
     let z2 = GradedSpace::try_new(
-        Arc::new(Z2FusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [
+            (ZNIrrep::new(0, 2).unwrap(), 2),
+            (ZNIrrep::new(1, 2).unwrap(), 1),
+        ],
     )
     .unwrap();
     ordinary_network_and_workspace_reuse(engine, &runtime, &z2, 1002);
@@ -138,9 +142,18 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
     let z3 = GradedSpace::try_new(
         Arc::clone(&z3_provider),
         [
-            (z3_provider.irrep(0), 1),
-            (z3_provider.irrep(1), 2),
-            (z3_provider.irrep(2), 1),
+            (
+                ZNIrrep::new(0, z3_provider.category().modulus()).unwrap(),
+                1,
+            ),
+            (
+                ZNIrrep::new(1, z3_provider.category().modulus()).unwrap(),
+                2,
+            ),
+            (
+                ZNIrrep::new(2, z3_provider.category().modulus()).unwrap(),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -149,7 +162,7 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
     // A charged CU(1) leg exercises the nontrivial pseudo-scalar provider,
     // rather than a vacuum-only dense block.
     let cu1 = GradedSpace::try_new(
-        Arc::new(CU1FusionRule),
+        Arc::new(CU1FusionRule::new()),
         [
             (CU1Irrep::VACUUM, 1),
             (CU1Irrep::PSEUDOSCALAR, 2),
@@ -160,14 +173,17 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
     ordinary_network_and_workspace_reuse(engine, &runtime, &cu1, 1004);
 
     let product_rule = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
         ],
     )
     .unwrap();
@@ -179,7 +195,8 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         TensorMap::from_subblock_fn(engine, &runtime, [&product], [&product], |trees, i| {
             if i[0] != i[1] {
                 0.0
-            } else if *trees.coupled() == product_sector(Z2Irrep::EVEN, U1Irrep::new(0)) {
+            } else if *trees.coupled() == product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0))
+            {
                 2.0 + i[0] as f64
             } else {
                 7.0
@@ -197,8 +214,11 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
 
     let nested_rule = Arc::new(
         symtn_core::ProductFusionRule::<_, _>::try_new(
-            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-                .unwrap(),
+            symtn_core::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule::new(),
+                U1FusionRule,
+            )
+            .unwrap(),
             SU2FusionRule,
         )
         .unwrap(),
@@ -208,14 +228,14 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         [
             (
                 product_sector(
-                    product_sector(Z2Irrep::EVEN, U1Irrep::new(0)),
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)),
                     SU2Irrep::from_twice_spin(0),
                 ),
                 2,
             ),
             (
                 product_sector(
-                    product_sector(Z2Irrep::ODD, U1Irrep::new(1)),
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
                     SU2Irrep::from_twice_spin(1),
                 ),
                 1,

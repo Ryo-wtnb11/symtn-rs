@@ -23,8 +23,8 @@ use symtn::typed::ContractSpec;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, LegSelection, Runtime, TensorMap};
@@ -148,6 +148,7 @@ fn scattered<D: Copy>(shape: &[usize], source: &[D], maps: &[Vec<usize>], zero: 
 use crate::numerics;
 
 use crate::legs::{su2_on, u1_on};
+use symtn::sector::ZNIrrep;
 
 /// Floating terms reaching one compared entry: a fusion-tree expansion to
 /// the physical basis, or a composition with an inclusion isometry over a
@@ -160,9 +161,16 @@ fn fz2(
 ) -> GradedSpace<FermionParityFusionRule> {
     GradedSpace::try_new(
         Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(odd, degeneracy)| (if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN }, degeneracy)),
+        pairs.iter().map(|&(odd, degeneracy)| {
+            (
+                if odd {
+                    FermionParityIrrep::ODD
+                } else {
+                    FermionParityIrrep::EVEN
+                },
+                degeneracy,
+            )
+        }),
     )
     .unwrap()
 }
@@ -399,15 +407,21 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
 fn restrict_of_a_fermionic_odd_dual_leg_equals_the_isometry_composition() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule);
+    let provider = Arc::new(FermionParityFusionRule::new());
     let leg = fz2(&provider, &[(false, 2), (true, 3)]).try_dual().unwrap();
     let spectator = fz2(&provider, &[(false, 2), (true, 2)]);
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &spectator], [&spectator], 5).unwrap();
 
-    let selected = [(Z2Irrep::ODD, 1..3)];
+    let selected = [(FermionParityIrrep::ODD, 1..3)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
-    let start = |sector: &Z2Irrep| if *sector == Z2Irrep::ODD { 1 } else { 0 };
+    let start = |sector: &FermionParityIrrep| {
+        if *sector == FermionParityIrrep::ODD {
+            1
+        } else {
+            0
+        }
+    };
     let iota_dagger = TensorMap::<_, f64>::from_subblock_fn(
         engine,
         &runtime,
@@ -856,12 +870,19 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
         product_sector(
-            if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+            if odd {
+                FermionParityIrrep::ODD
+            } else {
+                FermionParityIrrep::EVEN
+            },
             U1Irrep::new(charge),
         )
     };
@@ -1008,15 +1029,28 @@ fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
     let runtime = Runtime::builder().build().unwrap();
     let two = Arc::new(ZNFusionRule::new(2).unwrap());
     let three = Arc::new(ZNFusionRule::new(3).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&two), [(two.irrep(0), 2), (two.irrep(1), 2)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::clone(&two),
+        [
+            (ZNIrrep::new(0, two.category().modulus()).unwrap(), 2),
+            (ZNIrrep::new(1, two.category().modulus()).unwrap(), 2),
+        ],
+    )
+    .unwrap();
     let foreign = GradedSpace::try_new(
         Arc::clone(&three),
-        [(three.irrep(0), 2), (three.irrep(1), 2)],
+        [
+            (ZNIrrep::new(0, three.category().modulus()).unwrap(), 2),
+            (ZNIrrep::new(1, three.category().modulus()).unwrap(), 2),
+        ],
     )
     .unwrap();
     let source = TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg]).unwrap();
-    let selection = LegSelection::try_new(&foreign, [(three.irrep(0), 0..1)]).unwrap();
+    let selection = LegSelection::try_new(
+        &foreign,
+        [(ZNIrrep::new(0, three.category().modulus()).unwrap(), 0..1)],
+    )
+    .unwrap();
     let error = source.restrict_leg(engine, &[(0, &selection)]).unwrap_err();
     assert!(
         matches!(error, symtn::typed::Error::RuleMismatch),
@@ -1032,7 +1066,7 @@ fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
 fn restriction_commutes_with_permute_and_with_a_contraction_over_an_untouched_leg() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule);
+    let provider = Arc::new(FermionParityFusionRule::new());
     let leg = fz2(&provider, &[(false, 2), (true, 3)]);
     let spectator = fz2(&provider, &[(false, 2), (true, 2)]);
     let bond = fz2(&provider, &[(false, 1), (true, 2)]);
@@ -1040,7 +1074,7 @@ fn restriction_commutes_with_permute_and_with_a_contraction_over_an_untouched_le
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &spectator], [&bond], 67).unwrap();
     let partner: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&bond], [&spectator], 71).unwrap();
-    let selection = LegSelection::try_new(&leg, [(Z2Irrep::ODD, 1..3)]).unwrap();
+    let selection = LegSelection::try_new(&leg, [(FermionParityIrrep::ODD, 1..3)]).unwrap();
 
     // Swapping two codomain legs and restricting are independent.
     let restrict_then_permute = source
@@ -1351,12 +1385,19 @@ fn restrict_and_embed_are_exact_block_copies_on_su2_legs() {
 fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
         product_sector(
-            if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+            if odd {
+                FermionParityIrrep::ODD
+            } else {
+                FermionParityIrrep::EVEN
+            },
             U1Irrep::new(charge),
         )
     };
@@ -1538,12 +1579,19 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
     );
 
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
         product_sector(
-            if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+            if odd {
+                FermionParityIrrep::ODD
+            } else {
+                FermionParityIrrep::EVEN
+            },
             U1Irrep::new(charge),
         )
     };
@@ -1691,12 +1739,19 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
     );
 
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
         product_sector(
-            if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+            if odd {
+                FermionParityIrrep::ODD
+            } else {
+                FermionParityIrrep::EVEN
+            },
             U1Irrep::new(charge),
         )
     };

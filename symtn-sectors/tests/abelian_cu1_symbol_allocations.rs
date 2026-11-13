@@ -5,8 +5,9 @@
 use crate::counting_alloc;
 
 use symtn_sectors::{
-    CU1FusionRule, CU1Irrep, FermionParityFusionRule, MultiplicityFreeRigidSymbols, SectorId,
-    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
+    CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
+    MultiplicityFreeRigidSymbols, SectorCodec, SectorId, U1FusionRule, U1Irrep, ZNFusionRule,
+    ZNIrrep,
 };
 
 /// Every symbol over every tuple of `ids`, summed so nothing is optimized out.
@@ -46,18 +47,20 @@ fn assert_no_allocation<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(rule: &R,
 #[test]
 fn symbols_do_not_allocate() {
     let _serial = crate::counting_alloc::serial();
-    let parity = [Z2Irrep::EVEN.sector_id(), Z2Irrep::ODD.sector_id()];
-    assert_no_allocation(&Z2FusionRule, &parity);
-    assert_no_allocation(&FermionParityFusionRule, &parity);
+    let parity = [FermionParityIrrep::EVEN, FermionParityIrrep::ODD].map(SectorId::from);
+    assert_no_allocation(&FermionParityFusionRule::new(), &parity);
     let zn = ZNFusionRule::new(3).unwrap();
-    let zn_ids: Vec<SectorId> = (0..3).map(|q| zn.irrep(q).into()).collect();
+    let zn_ids: Vec<SectorId> = (0..3)
+        .map(|q| SectorId::from(ZNIrrep::new(q, 3).unwrap()))
+        .collect();
     assert_no_allocation(&zn, &zn_ids);
     let u1: Vec<SectorId> = (-1..=1).map(|q| U1Irrep::new(q).sector_id()).collect();
     assert_no_allocation(&U1FusionRule, &u1);
+    let cu1_rule = CU1FusionRule::new();
     let cu1: Vec<SectorId> = [CU1Irrep::VACUUM, CU1Irrep::PSEUDOSCALAR]
         .into_iter()
         .chain((1..=3).map(CU1Irrep::from_twice_charge))
-        .map(Into::into)
+        .map(|label| cu1_rule.encode_sector(&label).unwrap())
         .collect();
-    assert_no_allocation(&CU1FusionRule, &cu1);
+    assert_no_allocation(&cu1_rule, &cu1);
 }

@@ -789,7 +789,7 @@ mod tests {
     use crate::DynamicFusionMapSpace;
     use num_complex::Complex64;
     use symtn_core::{
-        BlockStructure, FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, Z2FusionRule,
+        BlockStructure, FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, ZNFusionRule,
     };
 
     /// A rectangular Z2 parent, its logical adjoint space and a direct
@@ -801,7 +801,7 @@ mod tests {
         Vec<Complex64>,
         Vec<Complex64>,
     ) {
-        let rule = Z2FusionRule;
+        let rule = ZNFusionRule::new(2).unwrap();
         let vacuum = SectorId::new(0);
         let homspace = FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),
@@ -837,7 +837,7 @@ mod tests {
     }
 
     fn two_key_destination() -> BlockStructure {
-        let rule = Z2FusionRule;
+        let rule = ZNFusionRule::new(2).unwrap();
         let even = SectorId::new(0);
         let odd = SectorId::new(1);
         let homspace = FusionTreeHomSpace::new(
@@ -854,7 +854,7 @@ mod tests {
     /// The canonical single-leg Z2 space whose even and odd blocks have
     /// `shapes`.
     fn source_with_shapes(shapes: &[Vec<usize>]) -> crate::DynamicFusionMapSpace {
-        let rule = Z2FusionRule;
+        let rule = ZNFusionRule::new(2).unwrap();
         let even = SectorId::new(0);
         let odd = SectorId::new(1);
         let homspace = FusionTreeHomSpace::new(

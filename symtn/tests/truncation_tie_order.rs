@@ -22,9 +22,10 @@
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
+use symtn::sector::ZNIrrep;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2FusionRule, Z2Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{CheckedGenericFusion, FusionRule, SectorOrderKey};
 use symtn::typed::{Eigh, GradedSpace, SectorSpectrum, Svd};
@@ -134,9 +135,14 @@ fn u1_tie_inside_and_across_sectors_follows_the_flat_order() {
 #[test]
 fn u1_x_z2_opposite_charge_tie_follows_the_product_order() {
     // Product isless over findindex - 1: (+1, 0) -> (3, 0), (-1, 0) -> (4, 0).
-    let rule =
-        || symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap();
-    let sector = |charge| product_sector(u1(charge), Z2Irrep::EVEN);
+    let rule = || {
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            ZNFusionRule::new(2).unwrap(),
+        )
+        .unwrap()
+    };
+    let sector = |charge| product_sector(u1(charge), ZNIrrep::new(0, 2).unwrap());
     let rank = kept!(
         rule(),
         [(sector(0), [3.0]), (sector(1), [2.0]), (sector(-1), [2.0])],
@@ -176,9 +182,12 @@ fn nested_product_tie_follows_the_flattened_tensorkit_order() {
     // put (odd, 0, odd) first. The spin-1 sector weighs 3, so rank 3 keeps
     // exactly the sector that comes first.
     let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
-        FermionParityFusionRule,
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
+        FermionParityFusionRule::new(),
     )
     .unwrap();
     let kept = kept!(
@@ -186,15 +195,15 @@ fn nested_product_tie_follows_the_flattened_tensorkit_order() {
         [
             (
                 product_sector(
-                    product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(2)),
-                    Z2Irrep::EVEN
+                    product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
+                    FermionParityIrrep::EVEN
                 ),
                 [1.0]
             ),
             (
                 product_sector(
-                    product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(0)),
-                    Z2Irrep::ODD
+                    product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(0)),
+                    FermionParityIrrep::ODD
                 ),
                 [1.0]
             ),
@@ -224,9 +233,9 @@ fn zn_tie_keeps_the_smaller_charge_first() {
     let kept = kept!(
         rule.clone(),
         [
-            (rule.irrep(0), [3.0]),
-            (rule.irrep(1), [2.0]),
-            (rule.irrep(2), [2.0]),
+            (ZNIrrep::new(0, rule.category().modulus()).unwrap(), [3.0]),
+            (ZNIrrep::new(1, rule.category().modulus()).unwrap(), [2.0]),
+            (ZNIrrep::new(2, rule.category().modulus()).unwrap(), [2.0]),
         ],
         Truncation::rank(2)
     );

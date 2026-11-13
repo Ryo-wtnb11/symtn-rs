@@ -96,14 +96,14 @@ struct RuntimeInner {
 ///
 /// ```
 /// use std::sync::Arc;
-/// use symtn::sector::{Z2FusionRule, Z2Irrep};
+/// use symtn::sector::{ZNFusionRule, ZNIrrep};
 /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
 ///
 /// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let rt = Runtime::builder().build()?;
 /// let v = GradedSpace::try_new(
-///     Arc::new(Z2FusionRule),
-///     [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+///     Arc::new(ZNFusionRule::new(2).unwrap()),
+///     [(ZNIrrep::new(0, 2).unwrap(), 1), (ZNIrrep::new(1, 2).unwrap(), 1)],
 /// )?;
 /// let a: TensorMap<_, f64> = TensorMap::zeros(engine, &rt, [&v], [&v])?;
 /// assert_eq!(a.norm(engine, 2.0)?, 0.0);

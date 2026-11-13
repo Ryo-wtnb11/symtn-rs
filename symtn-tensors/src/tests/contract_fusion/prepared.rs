@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn prepared_tensorcontract_fusion_route_replays_like_the_eager_entry() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let fusion_space = || {
         DynamicFusionMapSpace::from_final_homspace(

@@ -6,7 +6,7 @@ use super::*;
 fn eigh_canonical_layout_skips_input_pack_and_vector_scatter() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical EIGH reads source regions and writes final eigenvector regions directly.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
@@ -392,7 +392,7 @@ fn checked_generic_eig_provider_failure_leaves_input_unchanged() {
 fn eigh_noncanonical_layout_uses_copy_fallback() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: expert noncanonical EIGH retains positive pack-and-vector-scatter copy evidence.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let adjoint_space = bound.space().adjoint_view().unwrap();
@@ -411,7 +411,7 @@ fn eigh_noncanonical_layout_uses_copy_fallback() {
 fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical EIGH validates every coupled sector without packing before any driver call.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let regions = tensor
         .structure()
@@ -450,7 +450,7 @@ fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
 fn eigh_fallback_rejects_nonhermitian_complex_input_before_dense_execution() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a valid noncanonical layout receives the same complex Hermitian preflight after packing.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let real = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let regions = real.structure().coupled_sector_regions(2).unwrap().unwrap();
     let later = regions.last().unwrap();
@@ -485,7 +485,7 @@ fn eigh_fallback_rejects_nonhermitian_complex_input_before_dense_execution() {
 fn eigh_vals_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: values-only EIGH validates every borrowed sector before its first no-vector driver.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let regions = tensor
         .structure()
@@ -680,7 +680,7 @@ fn eigh_rejects_a_nonreal_complex_diagonal_before_dense_execution() {
     let error = eigh_full(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor),
     )
     .unwrap_err();
 
@@ -700,7 +700,7 @@ fn eigh_rejects_nonfinite_input_before_dense_execution() {
         let error = eigh_full(
             engine,
             &mut dense,
-            &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
+            &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor),
         )
         .unwrap_err();
         assert!(
@@ -720,7 +720,7 @@ fn eigh_preserves_endomorphism_error_precedence() {
     let error = eigh_full(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor),
     )
     .unwrap_err();
 
@@ -737,7 +737,7 @@ fn eigh_preserves_endomorphism_error_precedence() {
 fn eigh_error_preserves_borrowed_input_and_publishes_no_output() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an EIGH backend failure leaves borrowed storage unchanged and returns no vectors.
-    let rule = Arc::new(Z2FusionRule);
+    let rule = Arc::new(ZNFusionRule::new(2).unwrap());
     let tensor = hermitian_test_tensor(rule.as_ref(), &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingEighInput>::default();
@@ -848,7 +848,7 @@ fn eigh_fallback_stages_vectors_apart_from_the_final_scatter_for_every_dtype() {
     // allocation, which symtn's required structural scatter fills.
     fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let rule = Arc::new(Z2FusionRule);
+        let rule = Arc::new(ZNFusionRule::new(2).unwrap());
         let bound = bound_tensor(Arc::clone(&rule), tensor);
         let adjoint = bound.space().adjoint_view().unwrap();
         assert!(crate::factorize::compact_factor_plan_for_test(&adjoint)
@@ -908,7 +908,7 @@ fn eigh_zero_only_input_normalizes_to_an_empty_factorization_result() {
     let eigh = eigh_full(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor),
     )
     .unwrap();
 
@@ -927,7 +927,7 @@ fn eigh_zero_only_input_normalizes_to_an_empty_factorization_result() {
 fn compact_owned_eigh_preserves_eigh_into_output_precedence() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = one_sector_matrix(vec![2.0, 0.0, 0.0, 3.0]);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let input = bound.as_ref();
     let mut check = |outputs: Vec<DenseTensor>, expected: DenseError| {
         let mut dense = ScriptedExecutor::new(FailAfterObservingEighInput {
@@ -1093,12 +1093,14 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
         ],
     );
     assert_eigh_reconstructs_rule(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &[SectorId::new(0), SectorId::new(1)],
     );
-    let product =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let product = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let product_sectors = [
         product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -1124,7 +1126,7 @@ fn eigh_c64_reconstructs_real_valued_multi_sector_input_and_fixes_gauge() {
     use num_complex::Complex64;
 
     // What: complex direct vectors reconstruct every sector and use the canonical phase gauge.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let real = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(
         real.data()
@@ -1195,14 +1197,14 @@ fn eigh_c64_reconstructs_real_valued_multi_sector_input_and_fixes_gauge() {
 fn eig_full_satisfies_the_eigen_equation_for_real_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     // Non-symmetric endomorphism.
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let eig = eig_full(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
 
@@ -1332,14 +1334,14 @@ fn ascending_provider_eigh_order_is_published_without_a_permutation() {
     // What: the LAPACK/faer `syev` spectrum is already ascending, so full and
     // values-only EIGH publish it after the O(n) check alone: no sort, no
     // value copy, no eigenvector column permutation.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let permutations = crate::probe::record();
     let full = eigh_full(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
     let values = eigh_vals(

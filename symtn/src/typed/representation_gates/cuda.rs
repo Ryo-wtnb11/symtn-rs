@@ -605,9 +605,9 @@ fn typed_cuda_lazy_adjoint_preserves_fermionic_contract_sign() {
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule);
+    let provider = Arc::new(FermionParityFusionRule::new());
     let odd = |is_dual| {
-        GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 1)])
+        GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)])
             .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
             .unwrap()
     };
@@ -691,13 +691,13 @@ fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
     assert_cuda_lazy_contract_orientations(&su2_lhs, &su2_rhs);
 
     let product_provider = Arc::new(
-        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap(),
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap(),
     );
     let product = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();
@@ -1050,8 +1050,8 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
 
     // fZ2 with a dual codomain leg: both sides, both dualities, repeated legs.
     let fz2 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     let dual = fz2.try_dual().unwrap();
@@ -1095,12 +1095,13 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     // degeneracies.
     let fu1 = GradedSpace::try_new(
         Arc::new(
-            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
+                .unwrap(),
         ),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
         ],
     )
     .unwrap();
@@ -1113,19 +1114,20 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     }
     let fsu2 = GradedSpace::try_new(
         Arc::new(
-            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule).unwrap(),
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
+                .unwrap(),
         ),
         [
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
                 2,
             ),
             (
-                product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(1)),
+                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
                 1,
             ),
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(2)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
                 1,
             ),
         ],
@@ -1331,8 +1333,8 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
 
     // Fermion parity with a dual leg.
     let fz2 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
     )
     .unwrap();
     let fz2_dual = fz2.try_dual().unwrap();

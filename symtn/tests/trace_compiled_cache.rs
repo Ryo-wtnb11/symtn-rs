@@ -14,8 +14,8 @@ use symtn::typed::Engine;
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 
@@ -97,14 +97,14 @@ fn fz2u1_leg(leg: usize, sectors: usize) -> GradedSpace<Fz2U1> {
     let low = -((sectors as i32 - 1) / 2);
     let sector = |q: i32| {
         let parity = if q.rem_euclid(2) == 0 {
-            Z2Irrep::EVEN
+            FermionParityIrrep::EVEN
         } else {
-            Z2Irrep::ODD
+            FermionParityIrrep::ODD
         };
         ProductSector::new(parity, U1Irrep::new(q))
     };
     GradedSpace::try_new(
-        Arc::new(Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap()),
+        Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),
         (0..sectors).map(|s| (sector(low + s as i32), 2 + (leg + s) % 3)),
     )
     .unwrap()

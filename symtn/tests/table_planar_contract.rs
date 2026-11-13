@@ -24,8 +24,8 @@ use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep, TableRule,
-    TableSector, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
+    SU2Irrep, TableRule, TableSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     BlockFusionTrees, ContractSpec, Error, GradedSpace, OperationError, Runtime, TensorMap,
@@ -476,11 +476,21 @@ fn bosonic_planar_contract_is_contract() {
 }
 
 /// The tree-hash `entry` for parity sectors, labelled 0 / 1.
-fn parity_entry(tag: &str, trees: &BlockFusionTrees<Z2Irrep>, index: &[usize]) -> Complex64 {
-    let label = |sectors: &[Z2Irrep]| {
+fn parity_entry(
+    tag: &str,
+    trees: &BlockFusionTrees<FermionParityIrrep>,
+    index: &[usize],
+) -> Complex64 {
+    let label = |sectors: &[FermionParityIrrep]| {
         sectors
             .iter()
-            .map(|&s| if s == Z2Irrep::ODD { "1" } else { "0" })
+            .map(|&s| {
+                if s == FermionParityIrrep::ODD {
+                    "1"
+                } else {
+                    "0"
+                }
+            })
             .collect::<Vec<_>>()
             .join(",")
     };
@@ -514,8 +524,8 @@ fn fermionic_planar_contract_is_twist_free_and_matches_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
     )
     .unwrap();
     let mut filled = |tag: &str| {
@@ -583,16 +593,28 @@ fn fermionic_u1_space() -> GradedSpace<ProductFusionRule<FermionParityFusionRule
     GradedSpace::try_new(
         Arc::new(
             ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
         ),
         [
-            (ProductSector::new(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (ProductSector::new(Z2Irrep::ODD, U1Irrep::new(1)), 2),
-            (ProductSector::new(Z2Irrep::ODD, U1Irrep::new(-1)), 1),
-            (ProductSector::new(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0)),
+                2,
+            ),
+            (
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1)),
+                2,
+            ),
+            (
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1)),
+                1,
+            ),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2)),
+                1,
+            ),
         ],
     )
     .unwrap()
@@ -670,8 +692,8 @@ fn fermionic_planar_contract_into_is_alpha_steps_plus_beta() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
     )
     .unwrap();
     let mut filled = |tag: &str, codomain: usize, domain: usize| {

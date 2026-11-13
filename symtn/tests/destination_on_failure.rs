@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use num_complex::Complex64;
+use symtn::sector::ZNIrrep;
 use symtn::sector::{U1FusionRule, U1Irrep, ZNFusionRule};
 use symtn::typed::{
     ContractSpec, Duality, Error, GradedSpace, Runtime, SectorSpectrum, Side, TensorMap,
@@ -566,10 +567,22 @@ macro_rules! rule_suite {
         let lift = $lift;
         let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
         let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
-        let a =
-            GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 2), (z2.irrep(1), 1)]).unwrap();
-        let b =
-            GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 2), (z3.irrep(1), 1)]).unwrap();
+        let a = GradedSpace::try_new(
+            Arc::clone(&z2),
+            [
+                (ZNIrrep::new(0, z2.category().modulus()).unwrap(), 2),
+                (ZNIrrep::new(1, z2.category().modulus()).unwrap(), 1),
+            ],
+        )
+        .unwrap();
+        let b = GradedSpace::try_new(
+            Arc::clone(&z3),
+            [
+                (ZNIrrep::new(0, z3.category().modulus()).unwrap(), 2),
+                (ZNIrrep::new(1, z3.category().modulus()).unwrap(), 1),
+            ],
+        )
+        .unwrap();
         let host_t =
             TensorMap::<_, f64>::rand_with_seed($engine, rt, [&a, &a], [&a, &a], 3).unwrap();
         let t = lift($ops, &host_t);

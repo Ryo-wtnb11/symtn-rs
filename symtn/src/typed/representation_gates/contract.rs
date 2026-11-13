@@ -36,7 +36,15 @@ fn coupled_region_inner_keeps_empty_and_non_fusion_boundaries() {
 #[test]
 fn weighted_trace_keeps_misaligned_and_nonpacked_layouts_on_the_literal_walk() {
     let tree = |dual| {
-        FusionTreeKey::try_from_sector_ids_for_rule(&Z2FusionRule, [0], 0, [dual], [], []).unwrap()
+        FusionTreeKey::try_from_sector_ids_for_rule(
+            &ZNFusionRule::new(2).unwrap(),
+            [0],
+            0,
+            [dual],
+            [],
+            [],
+        )
+        .unwrap()
     };
     let (a, b) = (tree(false), tree(true));
     let block = |row: &FusionTreeKey, col: &FusionTreeKey, offset| {

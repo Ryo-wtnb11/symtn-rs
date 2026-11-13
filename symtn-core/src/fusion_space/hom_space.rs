@@ -114,11 +114,11 @@ impl FusionTreeHomSpace {
     /// # Examples
     ///
     /// ```
-    /// use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, Z2Irrep};
+    /// use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, FermionParityIrrep};
     ///
     /// let hom = FusionTreeHomSpace::new(
-    ///     FusionProductSpace::new([SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false)]),
-    ///     FusionProductSpace::new([SectorLeg::new([(Z2Irrep::EVEN, 1)], false)]),
+    ///     FusionProductSpace::new([SectorLeg::new([(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)], false)]),
+    ///     FusionProductSpace::new([SectorLeg::new([(FermionParityIrrep::EVEN, 1)], false)]),
     /// );
     /// assert_eq!(hom.codomain().len(), 1);
     /// assert_eq!(hom.domain().len(), 1);
@@ -136,9 +136,9 @@ impl FusionTreeHomSpace {
     /// # Examples
     ///
     /// ```
-    /// use symtn_core::{FusionTreeHomSpace, Z2Irrep};
+    /// use symtn_core::{FusionTreeHomSpace, FermionParityIrrep};
     ///
-    /// let hom = FusionTreeHomSpace::from_sectors([(Z2Irrep::EVEN, 1)], [(Z2Irrep::ODD, 1)]);
+    /// let hom = FusionTreeHomSpace::from_sectors([(FermionParityIrrep::EVEN, 1)], [(FermionParityIrrep::ODD, 1)]);
     /// assert_eq!(hom.codomain().len(), 1);
     /// assert_eq!(hom.domain().len(), 1);
     /// ```

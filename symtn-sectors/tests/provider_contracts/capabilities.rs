@@ -19,25 +19,29 @@ fn styles<R: FusionRule>(rule: &R) -> (FusionStyleKind, BraidingStyleKind) {
 #[test]
 fn multiplicity_free_rule_styles() {
     let rep_s3 = TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap();
-    assert_eq!(styles(&Z2FusionRule), (Unique, Bosonic));
+    assert_eq!(styles(&ZNFusionRule::new(2).unwrap()), (Unique, Bosonic));
     assert_eq!(styles(&ZNFusionRule::new(7).unwrap()), (Unique, Bosonic));
-    assert_eq!(styles(&FermionParityFusionRule), (Unique, Fermionic));
+    assert_eq!(styles(&FermionParityFusionRule::new()), (Unique, Fermionic));
     assert_eq!(styles(&U1FusionRule), (Unique, Bosonic));
-    assert_eq!(styles(&CU1FusionRule), (Simple, Bosonic));
+    assert_eq!(styles(&CU1FusionRule::new()), (Simple, Bosonic));
     assert_eq!(styles(&SU2FusionRule), (Simple, Bosonic));
     assert_eq!(styles(&TableRule::fibonacci()), (Simple, Anyonic));
     assert_eq!(styles(&rep_s3), (Simple, NoBraiding));
 
     assert_eq!(
         styles(
-            &symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, U1FusionRule).unwrap()
+            &symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                ZNFusionRule::new(2).unwrap(),
+                U1FusionRule
+            )
+            .unwrap()
         ),
         (Unique, Bosonic)
     );
     assert_eq!(
         styles(
             &symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 SU2FusionRule
             )
             .unwrap()
@@ -48,14 +52,20 @@ fn multiplicity_free_rule_styles() {
         styles(
             &symtn_sectors::ProductFusionRule::<_, _>::try_new(
                 TableRule::fibonacci(),
-                FermionParityFusionRule
+                FermionParityFusionRule::new()
             )
             .unwrap()
         ),
         (Simple, Anyonic)
     );
     assert_eq!(
-        styles(&symtn_sectors::ProductFusionRule::<_, _>::try_new(rep_s3, Z2FusionRule).unwrap()),
+        styles(
+            &symtn_sectors::ProductFusionRule::<_, _>::try_new(
+                rep_s3,
+                ZNFusionRule::new(2).unwrap()
+            )
+            .unwrap()
+        ),
         (Simple, NoBraiding)
     );
     assert_eq!(
@@ -63,10 +73,10 @@ fn multiplicity_free_rule_styles() {
             &symtn_sectors::ProductFusionRule::<_, _>::try_new(
                 symtn_sectors::ProductFusionRule::<_, _>::try_new(
                     U1FusionRule,
-                    FermionParityFusionRule
+                    FermionParityFusionRule::new()
                 )
                 .unwrap(),
-                Z2FusionRule
+                ZNFusionRule::new(2).unwrap()
             )
             .unwrap()
         ),
@@ -87,26 +97,28 @@ fn lie_group_reports_generic_bosonic_for_every_rank_including_two() {
 
 #[test]
 fn trivial_associator_gauge_is_certified_only_by_the_abelian_group_rules() {
-    assert!(Z2FusionRule.has_trivial_associator_gauge());
+    assert!(ZNFusionRule::new(2).unwrap().has_trivial_associator_gauge());
     assert!(ZNFusionRule::new(7).unwrap().has_trivial_associator_gauge());
-    assert!(FermionParityFusionRule.has_trivial_associator_gauge());
+    assert!(FermionParityFusionRule::new().has_trivial_associator_gauge());
     assert!(U1FusionRule.has_trivial_associator_gauge());
-    assert!(!CU1FusionRule.has_trivial_associator_gauge());
+    assert!(!CU1FusionRule::new().has_trivial_associator_gauge());
     assert!(!SU2FusionRule.has_trivial_associator_gauge());
     assert!(!TableRule::fibonacci().has_trivial_associator_gauge());
     // Products: conjunction of the factors.
+    assert!(symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        ZNFusionRule::new(2).unwrap(),
+        U1FusionRule
+    )
+    .unwrap()
+    .has_trivial_associator_gauge());
+    assert!(!symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        ZNFusionRule::new(2).unwrap(),
+        SU2FusionRule
+    )
+    .unwrap()
+    .has_trivial_associator_gauge());
     assert!(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, U1FusionRule)
-            .unwrap()
-            .has_trivial_associator_gauge()
-    );
-    assert!(
-        !symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, SU2FusionRule)
-            .unwrap()
-            .has_trivial_associator_gauge()
-    );
-    assert!(
-        !symtn_sectors::ProductFusionRule::<_, _>::try_new(CU1FusionRule, U1FusionRule)
+        !symtn_sectors::ProductFusionRule::<_, _>::try_new(CU1FusionRule::new(), U1FusionRule)
             .unwrap()
             .has_trivial_associator_gauge()
     );
@@ -131,19 +143,19 @@ fn multiplicity_free_providers_carry_their_markers() {
         )+};
     }
     mf!(f64:
-        Z2FusionRule,
+        ZNFusionRule::new(2).unwrap(),
         ZNFusionRule::new(3).unwrap(),
-        FermionParityFusionRule,
+        FermionParityFusionRule::new(),
         U1FusionRule,
-        CU1FusionRule,
+        CU1FusionRule::new(),
         SU2FusionRule,
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, SU2FusionRule).unwrap(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap(), SU2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), SU2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap(), SU2FusionRule).unwrap(),
     );
     mf!(Complex64:
         TableRule::fibonacci(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(TableRule::fibonacci(), Z2FusionRule).unwrap(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, TableRule::ising()).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(TableRule::fibonacci(), ZNFusionRule::new(2).unwrap()).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), TableRule::ising()).unwrap(),
     );
     physical(&U1FusionRule);
     physical(&SU2FusionRule);

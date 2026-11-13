@@ -9,7 +9,7 @@ pub(super) fn z2_matrix_homspace() -> FusionTreeHomSpace {
 }
 
 pub(super) fn z2_matrix_space_with_homspace(homspace: FusionTreeHomSpace) -> DynamicFusionMapSpace {
-    DynamicFusionMapSpace::from_final_homspace(&Z2FusionRule, homspace).unwrap()
+    DynamicFusionMapSpace::from_final_homspace(&ZNFusionRule::new(2).unwrap(), homspace).unwrap()
 }
 
 pub(super) fn fermion_parity_matrix_homspace() -> FusionTreeHomSpace {
@@ -23,7 +23,7 @@ pub(super) fn fermion_parity_matrix_homspace() -> FusionTreeHomSpace {
 pub(super) fn fermion_parity_matrix_space_with_homspace(
     homspace: FusionTreeHomSpace,
 ) -> DynamicFusionMapSpace {
-    DynamicFusionMapSpace::from_final_homspace(&FermionParityFusionRule, homspace).unwrap()
+    DynamicFusionMapSpace::from_final_homspace(&FermionParityFusionRule::new(), homspace).unwrap()
 }
 
 /// The device eager compose's route on Host storage: [`crate::plan_compose`]
@@ -58,9 +58,15 @@ fn bosonic_tensorcompose_matches_ordinary_contract() {
     // share one compiled Core resolution instead of retaining parallel plans.
     let layout = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let source = layout;
-    let dst = crate::DynamicFusionMapSpace::contracted(&Z2FusionRule, &source, &source, &[1], &[0])
-        .unwrap();
-    let provider = Arc::new(Z2FusionRule);
+    let dst = crate::DynamicFusionMapSpace::contracted(
+        &ZNFusionRule::new(2).unwrap(),
+        &source,
+        &source,
+        &[1],
+        &[0],
+    )
+    .unwrap();
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let source_bound = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
         source.clone(),
         Arc::clone(&provider),
@@ -126,7 +132,7 @@ fn bosonic_tensorcompose_with_an_adjoint_operand_matches_the_materialized_adjoin
     // visible in every element of the result.
     let layout = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let source = layout;
-    let provider = Arc::new(Z2FusionRule);
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let source_bound = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
         source.clone(),
         Arc::clone(&provider),
@@ -139,7 +145,7 @@ fn bosonic_tensorcompose_with_an_adjoint_operand_matches_the_materialized_adjoin
 
     let (adjoint_bound, adjoint_data) = crate::adjoint_bound_dyn(&source_bound, &lhs).unwrap();
     let dst = crate::DynamicFusionMapSpace::contracted(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         adjoint_bound.space(),
         &source,
         &[1],
@@ -189,7 +195,7 @@ fn tensorcompose_fusion_preflights_all_extents_before_mutating_destination() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: both cold and cached composition plans reject malformed source or
     // destination extents before beta scaling or grouped GEMM changes output.
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let layout = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let source = layout;
     let dst =
@@ -259,7 +265,7 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let odd = SectorId::new(1);
     let typed_space = |codomain_dual: bool, domain_dual: bool| {
         DynamicFusionMapSpace::from_final_homspace(
@@ -274,7 +280,7 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
     let lhs = typed_space(false, true);
     let rhs = typed_space(true, false);
     let dst = crate::DynamicFusionMapSpace::contracted(&rule, &lhs, &rhs, &[1], &[0]).unwrap();
-    let provider = Arc::new(rule);
+    let provider = Arc::new(rule.clone());
     let lhs_bound = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
         lhs.clone(),
         Arc::clone(&provider),

@@ -247,8 +247,11 @@ fn a_warm_one_member_replay_converts_no_coefficient_pack() {
     // installed instead of rebuilding them per stage.
     let su2 = su2_rank5_case();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let v = || fermion_su2_leg(&provider, false);
     let fermionic = Case {
@@ -360,8 +363,11 @@ fn a_warm_eager_contraction_converts_no_coefficient_pack() {
     }
     check(&su2_rank5_case(), "SU2");
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let v = || fermion_su2_leg(&provider, false);
     check(

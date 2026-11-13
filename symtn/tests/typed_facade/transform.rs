@@ -155,12 +155,12 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
     // What: the typed direct sum preserves the changed leg's duality, sector
     // union, degeneracies, and lhs-then-rhs slab order directly.
     let runtime = runtime();
-    let provider = Arc::new(symtn::sector::FermionParityFusionRule);
+    let provider = Arc::new(symtn::sector::FermionParityFusionRule::new());
     let lw = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::FermionParityIrrep::EVEN, 1),
+            (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
     .unwrap();
@@ -170,9 +170,9 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
             pairs.iter().map(|&(parity, degeneracy)| {
                 (
                     if parity == 0 {
-                        symtn::sector::Z2Irrep::EVEN
+                        symtn::sector::FermionParityIrrep::EVEN
                     } else {
-                        symtn::sector::Z2Irrep::ODD
+                        symtn::sector::FermionParityIrrep::ODD
                     },
                     degeneracy,
                 )
@@ -182,7 +182,7 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
         .try_dual()
         .unwrap();
         TensorMap::from_subblock_fn(engine, &runtime, [&lw], [&leg], |sectors, indices| {
-            10.0 * f64::from(sectors.coupled().parity()) + indices[1] as f64
+            10.0 * f64::from(sectors.coupled().is_odd() as u8) + indices[1] as f64
         })
         .unwrap()
     };
@@ -194,7 +194,10 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
     assert!(changed.is_dual());
     assert_eq!(
         changed.sectors().unwrap(),
-        vec![symtn::sector::Z2Irrep::EVEN, symtn::sector::Z2Irrep::ODD]
+        vec![
+            symtn::sector::FermionParityIrrep::EVEN,
+            symtn::sector::FermionParityIrrep::ODD
+        ]
     );
     assert_eq!(changed.degeneracies(), &[3, 2]);
     assert_eq!(

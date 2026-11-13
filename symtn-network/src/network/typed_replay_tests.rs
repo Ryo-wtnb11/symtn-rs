@@ -4,7 +4,9 @@ use symtn::expert::SectorLeg;
 #[cfg(feature = "cuda")]
 use symtn::sector::product_sector;
 use symtn::sector::FusionRule;
-use symtn::sector::{FermionParityFusionRule, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep, ZNFusionRule,
+};
 use symtn::typed::Complex64;
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap, TensorScalar};
 
@@ -337,7 +339,7 @@ fn symmetric_slice_binding_checks_adjoint_orientation_leg_and_rule() {
 
     let wrong_rule = SymmetricSlicePlan::try_new(
         &ir,
-        Z2FusionRule.rule_identity(),
+        ZNFusionRule::new(2).unwrap().rule_identity(),
         vec![SymmetricSliceSpec::new(
             label("x"),
             index.authority(),
@@ -1064,8 +1066,8 @@ where
     D: TensorScalar + PartialEq + std::fmt::Debug,
 {
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule);
-    let odd = GradedSpace::try_new(provider, [(Z2Irrep::ODD, 2)]).unwrap();
+    let provider = Arc::new(FermionParityFusionRule::new());
+    let odd = GradedSpace::try_new(provider, [(FermionParityIrrep::ODD, 2)]).unwrap();
     let a = TensorMap::from_subblock_fn(engine, &runtime, [&odd], [&odd], |_, ij| {
         D::from_real((1 + ij[0] + 2 * ij[1]) as f64)
     })
@@ -1122,8 +1124,8 @@ fn fermionic_mixed_slices_match_unsliced_real_and_complex() {
 fn fermionic_complex_conjugated_operand_mixed_slice_matches_unsliced() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule);
-    let odd = GradedSpace::try_new(provider, [(Z2Irrep::ODD, 2)]).unwrap();
+    let provider = Arc::new(FermionParityFusionRule::new());
+    let odd = GradedSpace::try_new(provider, [(FermionParityIrrep::ODD, 2)]).unwrap();
     let a = TensorMap::from_subblock_fn(engine, &runtime, [&odd], [&odd], |_, ij| {
         Complex64::new(
             (1 + ij[0] + 2 * ij[1]) as f64,
@@ -1426,34 +1428,40 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     );
 
     let product_rule = Arc::new(
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_core::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let product_x0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1)],
+        [(product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1)],
     )
     .unwrap();
     let product_x1 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(-1)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 2)],
     )
     .unwrap()
     .try_dual()
     .unwrap();
     let product_y = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2)],
     )
     .unwrap();
     let product_z0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(Z2Irrep::EVEN, U1Irrep::new(-2)), 1)],
+        [(
+            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(-2)),
+            1,
+        )],
     )
     .unwrap();
     let product_z1 = GradedSpace::try_new(
         product_rule,
-        [(product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 1)],
+        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 1)],
     )
     .unwrap();
     assert_asymmetric_cuda_plan_parity(

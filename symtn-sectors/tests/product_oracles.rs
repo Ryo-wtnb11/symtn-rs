@@ -212,7 +212,8 @@ fn product_admission_maps_adapter_errors_without_erasing_sources() {
 #[should_panic(expected = "MultiplicityFreeRigidSymbols::inv_dim_scalar")]
 fn mf_product_inverse_dimension_rejects_a_foreign_factor_id() {
     // docs/provider_interface.md: infallible queries may panic outside their domain.
-    let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, Z2FusionRule).unwrap();
+    let rule =
+        ProductFusionRule::<_, _>::try_new(SU2FusionRule, ZNFusionRule::new(2).unwrap()).unwrap();
     assert_eq!(
         rule.inv_dim_scalar(rule.encode_component_ids(s(1), s(1))),
         0.5
@@ -223,7 +224,8 @@ fn mf_product_inverse_dimension_rejects_a_foreign_factor_id() {
 
 #[test]
 fn su2_fermion_product_has_the_independent_spin_and_parity_signs() {
-    let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, FermionParityFusionRule).unwrap();
+    let rule =
+        ProductFusionRule::<_, _>::try_new(SU2FusionRule, FermionParityFusionRule::new()).unwrap();
     let half_odd = rule.encode_component_ids(s(1), s(1));
     let singlet = rule.encode_component_ids(s(0), s(0));
     let triplet = rule.encode_component_ids(s(2), s(0));
@@ -246,8 +248,11 @@ fn su2_fermion_product_has_the_independent_spin_and_parity_signs() {
 
 #[test]
 fn fermions_in_different_factors_have_no_cross_braid() {
-    let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, FermionParityFusionRule)
-        .unwrap();
+    let rule = ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        FermionParityFusionRule::new(),
+    )
+    .unwrap();
     let left_odd = rule.encode_component_ids(s(1), s(0));
     let right_odd = rule.encode_component_ids(s(0), s(1));
     let both_odd = rule.encode_component_ids(s(1), s(1));
@@ -263,7 +268,8 @@ fn fermions_in_different_factors_have_no_cross_braid() {
 #[test]
 #[should_panic(expected = "MultiplicityFreeFusionSymbols::r_symbol_scalar")]
 fn zero_left_r_still_rejects_an_invalid_right_mf_sector() {
-    let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, Z2FusionRule).unwrap();
+    let rule =
+        ProductFusionRule::<_, _>::try_new(SU2FusionRule, ZNFusionRule::new(2).unwrap()).unwrap();
     let vacuum = rule.encode_component_ids(s(0), s(0));
     let absent = rule.encode_component_ids(s(2), s(0));
     // Negative control: a valid right factor preserves the absent SU(2) channel.
@@ -592,7 +598,8 @@ mod generated {
             ));
         }
 
-        let nested = ProductFusionRule::<_, _>::try_new(rule, FermionParityFusionRule).unwrap();
+        let nested =
+            ProductFusionRule::<_, _>::try_new(rule, FermionParityFusionRule::new()).unwrap();
         assert_ne!(nested.rule_identity(), nested.left_rule().rule_identity());
         let odd = nested.encode_component_ids(x, s(1));
         let odd_dual = nested.encode_component_ids(dual, s(1));
@@ -750,7 +757,7 @@ mod generated {
     fn su3_fermion_product_negates_every_octet_r_entry() {
         let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
         let octet = su3.encode_irrep(&[1, 1]).unwrap();
-        let rule = ProductFusionRule::<_, _>::try_new(su3, FermionParityFusionRule).unwrap();
+        let rule = ProductFusionRule::<_, _>::try_new(su3, FermionParityFusionRule::new()).unwrap();
         let odd = rule.encode_component_ids(octet, s(1));
         let even = rule.encode_component_ids(octet, s(0));
         let f = rule
@@ -1339,7 +1346,8 @@ mod storage {
             ProductError::Overflow
         ));
 
-        let nested = ProductFusionRule::<_, _>::try_new(inner, Z2FusionRule).unwrap();
+        let nested =
+            ProductFusionRule::<_, _>::try_new(inner, ZNFusionRule::new(2).unwrap()).unwrap();
         let even = nested.encode_component_ids(x, s(0));
         let odd = nested.encode_component_ids(x, s(1));
         // N_Z2(0,0;1)=0 fixes the product at zero despite the inner overflow.
@@ -1469,7 +1477,8 @@ mod storage {
 
     #[test]
     fn malformed_product_f_r_a_b_keep_the_fs_shape_error_and_factor_position() {
-        let rule = ProductFusionRule::<_, _>::try_new(cg(Malformed), Z2FusionRule).unwrap();
+        let rule = ProductFusionRule::<_, _>::try_new(cg(Malformed), ZNFusionRule::new(2).unwrap())
+            .unwrap();
         let x = rule.encode_component_ids(s(1), s(0));
         let errors = [
             (
@@ -1529,7 +1538,9 @@ mod storage {
             assert_eq!(block.shape(), (1, 1));
             assert_eq!(block.data(), &[1.0]);
         }
-        let reversed = ProductFusionRule::<_, _>::try_new(Z2FusionRule, cg(Malformed)).unwrap();
+        let reversed =
+            ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), cg(Malformed))
+                .unwrap();
         let x = reversed.encode_component_ids(s(0), s(1));
         let error = reversed.try_a_symbol_generic(x, x, x).unwrap_err();
         let ProductFusionRuleError::Category(failure) = error else {

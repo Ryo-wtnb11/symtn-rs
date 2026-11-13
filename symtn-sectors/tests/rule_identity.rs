@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use symtn_sectors::{
     BraidingStyleKind, FusionRule, FusionStyleKind, MultiplicityFreeFusionRule, RuleIdentity,
-    SectorId, SectorVec, Z2FusionRule,
+    SectorId, SectorVec, ZNFusionRule,
 };
 
 #[derive(Clone, Debug)]
@@ -108,12 +108,12 @@ fn canonical_identity_keeps_prehash_and_provider_type_as_determinants() {
 fn product_rule_identity_includes_stateful_child_identity() {
     let first = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         symtn_sectors::ZNFusionRule::new(3).unwrap(),
-        Z2FusionRule,
+        ZNFusionRule::new(2).unwrap(),
     )
     .unwrap();
     let second = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         symtn_sectors::ZNFusionRule::new(4).unwrap(),
-        Z2FusionRule,
+        ZNFusionRule::new(2).unwrap(),
     )
     .unwrap();
 

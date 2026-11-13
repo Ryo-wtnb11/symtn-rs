@@ -2,10 +2,10 @@ use super::*;
 use crate::test_support::CACHE_TEST_LOCK;
 use std::cell::Cell;
 use symtn_core::{
-    structure_cache_info, FermionParityFusionRule, FusionAlgebraError, FusionProductSpace,
-    FusionTreeKey, Fz2SectorLayout, PackedProductCodec, ProductFusionRule, ProductSectorCodec,
-    ProductSectorLayout, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, StructureCacheKind,
-    Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout, Z2Irrep,
+    structure_cache_info, FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError,
+    FusionProductSpace, FusionTreeKey, Fz2SectorLayout, PackedProductCodec, ProductFusionRule,
+    ProductSectorCodec, ProductSectorLayout, SU2FusionRule, SU2Irrep, SectorId, SectorLeg,
+    StructureCacheKind, Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout,
 };
 
 type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
@@ -20,7 +20,7 @@ thread_local! {
 
 fn rule() -> TripleRule {
     TripleRule::try_new(
-        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap()
@@ -29,7 +29,7 @@ fn rule() -> TripleRule {
 fn sector(parity: usize, charge: i32, twice_spin: usize) -> SectorId {
     TripleCodec::encode(
         Fz2U1Codec::encode(
-            Z2Irrep::new(parity as u8).sector_id(),
+            SectorId::from(FermionParityIrrep::new(parity == 1)),
             U1Irrep::new(charge).sector_id(),
         ),
         SU2Irrep::from_twice_spin(twice_spin).sector_id(),
@@ -275,12 +275,12 @@ fn final_homspace_layout_matches_tensorkit_layout_across_supported_rules() {
         ),
     );
 
-    let even = Z2Irrep::EVEN.sector_id();
-    let odd = Z2Irrep::ODD.sector_id();
+    let even = SectorId::from(FermionParityIrrep::EVEN);
+    let odd = SectorId::from(FermionParityIrrep::ODD);
     let fz2_left = SectorLeg::new([(even, 1), (odd, 3)], false);
     let fz2_right = SectorLeg::new([(even, 2), (odd, 1)], true);
     assert_final_homspace_matches_tensorkit_layout(
-        Arc::new(FermionParityFusionRule),
+        Arc::new(FermionParityFusionRule::new()),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([fz2_left.clone(), fz2_right.clone()]),
             FusionProductSpace::new([fz2_right, fz2_left]),
@@ -602,13 +602,14 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
         },
     );
 
-    let product_rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
+    let product_rule =
+        Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
     let product_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new(
                 [(
                     Fz2U1Codec::encode(
-                        Z2Irrep::EVEN.sector_id(),
+                        SectorId::from(FermionParityIrrep::EVEN),
                         U1Irrep::new(i32::MAX).sector_id(),
                     ),
                     1,
@@ -617,7 +618,10 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
             ),
             SectorLeg::new(
                 [(
-                    Fz2U1Codec::encode(Z2Irrep::ODD.sector_id(), U1Irrep::new(1).sector_id()),
+                    Fz2U1Codec::encode(
+                        SectorId::from(FermionParityIrrep::ODD),
+                        U1Irrep::new(1).sector_id(),
+                    ),
                     1,
                 )],
                 false,
@@ -847,7 +851,8 @@ fn admission_rejects_a_product_containing_the_excluded_u1_id_without_publication
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let provider = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
+    let provider =
+        Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
     let scalar = FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
     let lhs = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&provider),
@@ -855,7 +860,7 @@ fn admission_rejects_a_product_containing_the_excluded_u1_id_without_publication
     )
     .unwrap();
     let excluded_u1 = SectorId::new(u32::MAX as usize);
-    let odd_min = Fz2U1Codec::encode(Z2Irrep::ODD.sector_id(), excluded_u1);
+    let odd_min = Fz2U1Codec::encode(SectorId::from(FermionParityIrrep::ODD), excluded_u1);
     let rhs_homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(odd_min, 1)], false)]),
         FusionProductSpace::new([]),
@@ -915,9 +920,9 @@ fn fz2_lowered_transform_and_contract_build_hand_keys_and_mixed_plans_agree() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let provider = Arc::new(FermionParityFusionRule);
-    let even = Z2Irrep::EVEN.sector_id();
-    let odd = Z2Irrep::ODD.sector_id();
+    let provider = Arc::new(FermionParityFusionRule::new());
+    let even = SectorId::from(FermionParityIrrep::EVEN);
+    let odd = SectorId::from(FermionParityIrrep::ODD);
     let leg = || FusionProductSpace::new([SectorLeg::new([(even, 2), (odd, 3)], false)]);
     let homspace = FusionTreeHomSpace::new(leg(), leg());
     let lowered = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(

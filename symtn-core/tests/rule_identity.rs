@@ -2,7 +2,7 @@ use symtn_core::{
     BlockKey, BlockSpec, BlockStructure, BraidingStyleKind, CoreError, FusionProductSpace,
     FusionRule, FusionStyleKind, FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey,
     MultiplicityFreeFusionRule, MultiplicityIndex, RuleIdentity, SectorId, SectorLeg, SectorVec,
-    Z2FusionRule,
+    ZNFusionRule,
 };
 
 #[derive(Clone, Debug)]
@@ -87,8 +87,15 @@ fn raw_scalar_layout_with_key(key: BlockKey) -> (FusionTreeHomSpace, BlockStruct
 }
 
 fn z2_rank_one_pair(sector: SectorId, is_dual: bool) -> FusionTreePairKey {
-    let tree = FusionTreeKey::try_new_for_rule(&Z2FusionRule, [sector], sector, [is_dual], [], [])
-        .unwrap();
+    let tree = FusionTreeKey::try_new_for_rule(
+        &ZNFusionRule::new(2).unwrap(),
+        [sector],
+        sector,
+        [is_dual],
+        [],
+        [],
+    )
+    .unwrap();
     FusionTreePairKey::pair(tree.clone(), tree)
 }
 
@@ -116,7 +123,7 @@ fn binding_a_rule_rejects_non_categorical_block_namespaces() {
     for key in [BlockKey::Dense, BlockKey::opaque([0])] {
         let (homspace, structure) = raw_scalar_layout_with_key(key);
         let error = homspace
-            .validate_subblock_structure_subset(&Z2FusionRule, &structure)
+            .validate_subblock_structure_subset(&ZNFusionRule::new(2).unwrap(), &structure)
             .unwrap_err();
         assert!(matches!(error, CoreError::ExpectedFusionTreePairKey { .. }));
     }
@@ -127,7 +134,7 @@ fn rule_binding_requires_every_present_block_to_be_a_homspace_subset() {
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let split_codomain = FusionTreeKey::try_new_for_rule(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         [even, even],
         even,
         [false, false],
@@ -136,7 +143,8 @@ fn rule_binding_requires_every_present_block_to_be_a_homspace_subset() {
     )
     .unwrap();
     let split_domain =
-        FusionTreeKey::try_new_for_rule(&Z2FusionRule, [], even, [], [], []).unwrap();
+        FusionTreeKey::try_new_for_rule(&ZNFusionRule::new(2).unwrap(), [], even, [], [], [])
+            .unwrap();
     let cases = [
         (
             "codomain/domain split",
@@ -183,7 +191,7 @@ fn rule_binding_requires_every_present_block_to_be_a_homspace_subset() {
         // its external sectors, orientations, or logical shape disagree with
         // the declared HomSpace.
         assert_eq!(
-            homspace.validate_subblock_structure_subset(&Z2FusionRule, &structure),
+            homspace.validate_subblock_structure_subset(&ZNFusionRule::new(2).unwrap(), &structure),
             Err(expected),
             "{name}"
         );

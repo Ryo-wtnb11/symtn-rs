@@ -29,8 +29,8 @@ use symtn::typed::Direction;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::typed::{GradedSpace, TensorMap};
 use symtn::typed::{Runtime, TensorScalar};
@@ -132,8 +132,8 @@ fn complex_fill(
 
 fn fz2_leg(dual: bool) -> GradedSpace<FermionParityFusionRule> {
     let space = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     if dual {
@@ -225,15 +225,18 @@ fn device_twist_matches_the_host_for_product_providers() {
 
     // fZ2 x U(1): fermionic signs on top of a charge grading.
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
         ],
     )
     .unwrap();
@@ -256,22 +259,25 @@ fn device_twist_matches_the_host_for_product_providers() {
 
     // fZ2 (x) SU(2): fermionic signs with non-Abelian degeneracies.
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
                 2,
             ),
             (
-                product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(1)),
+                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
                 1,
             ),
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(2)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
                 1,
             ),
         ],

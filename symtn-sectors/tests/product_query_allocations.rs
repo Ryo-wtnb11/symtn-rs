@@ -4,20 +4,27 @@ use crate::counting_alloc;
 #[cfg(feature = "cgc-gen")]
 use crate::numerics;
 use symtn_sectors::{
-    CheckedFusionAlgebra, FermionParityFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSector, SectorCodec, U1FusionRule,
-    U1Irrep, Z2Irrep,
+    CheckedFusionAlgebra, FermionParityFusionRule, FermionParityIrrep,
+    MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSector,
+    SectorCodec, U1FusionRule, U1Irrep,
 };
 
 #[test]
 fn warm_product_queries() {
     let _serial = crate::counting_alloc::serial();
-    let rule = ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
+    let rule =
+        ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
     let odd = rule
-        .encode_sector(&ProductSector::new(U1Irrep::new(0), Z2Irrep::ODD))
+        .encode_sector(&ProductSector::new(
+            U1Irrep::new(0),
+            FermionParityIrrep::ODD,
+        ))
         .unwrap();
     let even = rule
-        .encode_sector(&ProductSector::new(U1Irrep::new(0), Z2Irrep::EVEN))
+        .encode_sector(&ProductSector::new(
+            U1Irrep::new(0),
+            FermionParityIrrep::EVEN,
+        ))
         .unwrap();
     let queries: [(&str, &dyn Fn() -> f64); 4] = [
         ("N", &|| rule.try_nsymbol(odd, odd, even).unwrap() as f64),

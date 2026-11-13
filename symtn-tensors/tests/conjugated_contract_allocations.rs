@@ -120,7 +120,7 @@ fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
     symtn_core::clear_structure_caches();
     let fz2_u1_rule = || {
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
-            FermionParityFusionRule,
+            FermionParityFusionRule::new(),
             U1FusionRule,
         )
         .unwrap()

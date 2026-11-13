@@ -314,7 +314,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,

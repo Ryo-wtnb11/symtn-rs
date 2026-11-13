@@ -283,7 +283,7 @@ fn su2_hom() -> FusionTreeHomSpace {
 }
 
 fn fp_su2_hom() -> FusionTreeHomSpace {
-    let rule = FpSu2Rule::try_new(FermionParityFusionRule, SU2FusionRule).unwrap();
+    let rule = FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap();
     let leg = |dual| {
         SectorLeg::new(
             [(0, 0, 1), (1, 1, 2), (1, 2, 1)].map(|(parity, spin, degeneracy)| {
@@ -328,7 +328,8 @@ fn mf_trace_terms_and_outputs_match_the_per_pair_oracle_cold_and_warm() {
     let identity: (&[usize], &[usize], &[usize]) = (&[0, 2], &[1], &[3]);
     let both: (&[usize], &[usize], &[usize]) = (&[], &[0, 1], &[2, 3]);
     let su2 = || Arc::new(SU2FusionRule);
-    let fp = || Arc::new(FpSu2Rule::try_new(FermionParityFusionRule, SU2FusionRule).unwrap());
+    let fp =
+        || Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap());
     let u1 = || Arc::new(U1FusionRule);
     check_mf_trace("su2 open", su2(), su2_hom(), open, false);
     check_mf_trace("su2 identity", su2(), su2_hom(), identity, false);
@@ -501,14 +502,14 @@ fn trace_groups_resolve_through_cache4_per_group() {
 
     // Two instances of one rule share entries (`RuleIdentity`).
     let fp_groups = MfTrace::new(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule, SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
         fp_su2_hom(),
         open,
         1,
     )
     .groups();
     MfTrace::new(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule, SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
         fp_su2_hom(),
         open,
         1,
@@ -519,7 +520,7 @@ fn trace_groups_resolve_through_cache4_per_group() {
         activity(0, fp_groups, fp_groups)
     );
     MfTrace::new(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule, SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
         fp_su2_hom(),
         open,
         1,
@@ -722,14 +723,14 @@ fn mf_trace_terms_match_per_pair_composition_cold_and_warm() {
         &PRESENT_ZERO_RHS,
     );
     check(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule, SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
         fp_su2_hom(),
         &[1, 3],
         &[0],
         &[2],
     );
     check(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule, SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
         fp_su2_hom(),
         &[0, 2],
         &[1],

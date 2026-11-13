@@ -133,12 +133,12 @@ fn uncached_coupled_layout_probe_does_not_publish_identity_or_cache_state() {
     let _guard = test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || {
         SectorLeg::new(
             [
-                (Z2Irrep::EVEN.sector_id(), 2),
-                (Z2Irrep::ODD.sector_id(), 3),
+                (SectorId::from(ZNIrrep::new(0, 2).unwrap()), 2),
+                (SectorId::from(ZNIrrep::new(1, 2).unwrap()), 3),
             ],
             false,
         )
@@ -341,7 +341,7 @@ fn direct_homspace_derivation_matches_reference_for_supported_rules() {
         FusionProductSpace::new([mixed_leg(&parity, true), mixed_leg(&parity, false)]),
     );
     assert_direct_contract_matches_reference(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &fz2_hom,
         &fz2_hom,
         &[3, 2],
@@ -371,7 +371,7 @@ fn direct_homspace_derivation_matches_reference_for_supported_rules() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
     let product_rule = ProductRule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -751,7 +751,7 @@ fn oriented_composed_leg_membership_is_linear_in_dual_operations() {
     let product_rule = DualCountingRule::new(
         ProductFusionRule::<U1FusionRule, FermionParityFusionRule, TensorKitProductCodec>::try_new(
             U1FusionRule,
-            FermionParityFusionRule,
+            FermionParityFusionRule::new(),
         )
         .unwrap(),
     );

@@ -11,8 +11,8 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::sector::{PackedProductCodec, U1SectorLayout};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -189,13 +189,17 @@ macro_rules! all_symmetries {
         // fZ2 x U(1): codomain-only (even, 2), domain-only (odd, 3).
         let f = |odd: bool, charge| {
             product_sector(
-                if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+                if odd {
+                    FermionParityIrrep::ODD
+                } else {
+                    FermionParityIrrep::EVEN
+                },
                 U1Irrep::new(charge),
             )
         };
         side_only_case!(
             $engine,
-            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             [(f(false, 0), 2), (f(true, 1), 2)],
             [(f(false, 0), 1), (f(true, 1), 1)],
             [(f(false, 0), 2), (f(true, 1), 3), (f(true, 3), 2)],

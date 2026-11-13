@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime};
 
@@ -261,7 +261,7 @@ pub fn fermion_su2_provider() -> Arc<FermionSu2Rule> {
     Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
@@ -288,9 +288,9 @@ pub fn fermion_su2_leg_with(degeneracies: [usize; 3]) -> GradedSpace<FermionSu2R
     GradedSpace::try_new(
         fermion_su2_provider(),
         [
-            (label(Z2Irrep::EVEN, 0, 0), degeneracies[0]),
-            (label(Z2Irrep::ODD, 1, 1), degeneracies[1]),
-            (label(Z2Irrep::EVEN, 2, 2), degeneracies[2]),
+            (label(FermionParityIrrep::EVEN, 0, 0), degeneracies[0]),
+            (label(FermionParityIrrep::ODD, 1, 1), degeneracies[1]),
+            (label(FermionParityIrrep::EVEN, 2, 2), degeneracies[2]),
         ],
     )
     .unwrap()

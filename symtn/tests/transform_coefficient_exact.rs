@@ -19,8 +19,8 @@ use symtn::typed::Engine;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -290,12 +290,19 @@ fn u1_times_su2_transforms_scale_componentwise() {
 fn fermionic_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
         product_sector(
-            if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+            if odd {
+                FermionParityIrrep::ODD
+            } else {
+                FermionParityIrrep::EVEN
+            },
             U1Irrep::new(charge),
         )
     };
@@ -388,12 +395,19 @@ fn traces_scale_componentwise() {
     );
 
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
         product_sector(
-            if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN },
+            if odd {
+                FermionParityIrrep::ODD
+            } else {
+                FermionParityIrrep::EVEN
+            },
             U1Irrep::new(charge),
         )
     };

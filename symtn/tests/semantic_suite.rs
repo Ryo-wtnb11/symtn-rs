@@ -14,8 +14,8 @@ use symtn::typed::Direction;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{
     Fz2SectorLayout, PackedProductCodec, ProductSectorLayout, Su2SectorLayout, U1SectorLayout,
@@ -34,6 +34,7 @@ type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1C
 type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, Fz2U1Su2Codec>;
 
 use crate::numerics;
+use symtn::sector::ZNIrrep;
 
 /// Floating terms reaching one compared entry of the operation identities: a
 /// composition over a contracted `V ⊗ V` leg plus the recoupling terms of a
@@ -75,8 +76,11 @@ macro_rules! for_each_space {
         $case!(
             $engine,
             "Z2",
-            Arc::new(Z2FusionRule),
-            [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
+            Arc::new(ZNFusionRule::new(2).unwrap()),
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 2),
+                (ZNIrrep::new(1, 2).unwrap(), 2)
+            ],
             false
         );
         $case!(
@@ -104,8 +108,8 @@ macro_rules! for_each_space {
         $case!(
             $engine,
             "fZ2",
-            Arc::new(FermionParityFusionRule),
-            [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
+            Arc::new(FermionParityFusionRule::new()),
+            [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
             true
         );
         $case!(
@@ -113,7 +117,7 @@ macro_rules! for_each_space {
             "fZ2xU1xSU2",
             Arc::new(
                 Fz2U1Su2Rule::try_new(
-                    Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+                    Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
                     SU2FusionRule,
                 )
                 .unwrap()
@@ -121,21 +125,21 @@ macro_rules! for_each_space {
             [
                 (
                     product_sector(
-                        product_sector(Z2Irrep::EVEN, U1Irrep::new(0)),
+                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)),
                         SU2Irrep::from_twice_spin(0),
                     ),
                     1,
                 ),
                 (
                     product_sector(
-                        product_sector(Z2Irrep::ODD, U1Irrep::new(1)),
+                        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
                         SU2Irrep::from_twice_spin(1),
                     ),
                     1,
                 ),
                 (
                     product_sector(
-                        product_sector(Z2Irrep::EVEN, U1Irrep::new(2)),
+                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)),
                         SU2Irrep::from_twice_spin(0),
                     ),
                     1,
@@ -796,8 +800,12 @@ fn su2_nonuniform_degeneracy_crossed_contract() {
 fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
-    let rule = Arc::new(FermionParityFusionRule);
-    let v = GradedSpace::try_new(rule, [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)]).unwrap();
+    let rule = Arc::new(FermionParityFusionRule::new());
+    let v = GradedSpace::try_new(
+        rule,
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
+    )
+    .unwrap();
     let a: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 5).unwrap();
     let b: TensorMap<_, f64> =
@@ -839,7 +847,7 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
     let rt = Runtime::builder().build().unwrap();
     let rule = Arc::new(
         Fz2U1Su2Rule::try_new(
-            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap(),
@@ -853,9 +861,9 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
     let v = GradedSpace::try_new(
         rule,
         [
-            (label(Z2Irrep::EVEN, 0, 0), 2),
-            (label(Z2Irrep::ODD, 1, 1), 2),
-            (label(Z2Irrep::EVEN, 2, 0), 1),
+            (label(FermionParityIrrep::EVEN, 0, 0), 2),
+            (label(FermionParityIrrep::ODD, 1, 1), 2),
+            (label(FermionParityIrrep::EVEN, 2, 0), 1),
         ],
     )
     .unwrap();
@@ -974,16 +982,16 @@ fn svd_qr_reconstruction_random_spaces() {
     case!(
         engine,
         "Z2",
-        Arc::new(Z2FusionRule),
-        Z2Irrep::EVEN,
-        [Z2Irrep::ODD]
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        ZNIrrep::new(0, 2).unwrap(),
+        [ZNIrrep::new(1, 2).unwrap()]
     );
     case!(
         engine,
         "fZ2",
-        Arc::new(FermionParityFusionRule),
-        Z2Irrep::EVEN,
-        [Z2Irrep::ODD]
+        Arc::new(FermionParityFusionRule::new()),
+        FermionParityIrrep::EVEN,
+        [FermionParityIrrep::ODD]
     );
     case!(
         engine,
@@ -1006,7 +1014,7 @@ fn svd_qr_reconstruction_random_spaces() {
     );
     let triple = Arc::new(
         Fz2U1Su2Rule::try_new(
-            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap(),
@@ -1021,11 +1029,11 @@ fn svd_qr_reconstruction_random_spaces() {
         engine,
         "fZ2xU1xSU2",
         triple,
-        label(Z2Irrep::EVEN, 0, 0),
+        label(FermionParityIrrep::EVEN, 0, 0),
         [
-            label(Z2Irrep::ODD, 1, 1),
-            label(Z2Irrep::EVEN, 2, 0),
-            label(Z2Irrep::ODD, -1, 1),
+            label(FermionParityIrrep::ODD, 1, 1),
+            label(FermionParityIrrep::EVEN, 2, 0),
+            label(FermionParityIrrep::ODD, -1, 1),
         ]
     );
 }

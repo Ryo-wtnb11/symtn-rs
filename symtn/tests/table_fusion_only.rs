@@ -14,7 +14,7 @@ use symtn::typed::{
     ContractSpec, CoreError, Error, GradedSpace, OperationError, Runtime, TensorMap,
 };
 use symtn_sectors::{
-    BraidingStyleKind, FusionRule, SectorCodec, SectorId, TableRule, TableSector, Z2FusionRule,
+    BraidingStyleKind, FusionRule, SectorCodec, SectorId, TableRule, TableSector, ZNFusionRule,
 };
 
 /// Rep(S₃), `anyonwiki_code [3,1,0,2,2,0,1]`: objects `1` (trivial), `2`
@@ -84,7 +84,7 @@ fn rep_s3_reports_no_braiding_and_products_inherit_it() {
     assert_eq!(rule.braiding_style(), BraidingStyleKind::NoBraiding);
     let product = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         TableRule::by_uuid(REP_S3).unwrap(),
-        Z2FusionRule,
+        ZNFusionRule::new(2).unwrap(),
     )
     .unwrap();
     assert_eq!(product.braiding_style(), BraidingStyleKind::NoBraiding);
@@ -282,12 +282,12 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
 #[test]
 fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    use symtn_sectors::{product_sector, Z2Irrep};
+    use symtn_sectors::{product_sector, ZNIrrep};
     let runtime = Runtime::builder().build().unwrap();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             TableRule::by_uuid(REP_S3).unwrap(),
-            Z2FusionRule,
+            ZNFusionRule::new(2).unwrap(),
         )
         .unwrap(),
     );
@@ -295,8 +295,14 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
     let leg = GradedSpace::try_new(
         product,
         [
-            (product_sector(TableSector::new(1), Z2Irrep::EVEN), 1),
-            (product_sector(TableSector::new(3), Z2Irrep::ODD), 1),
+            (
+                product_sector(TableSector::new(1), ZNIrrep::new(0, 2).unwrap()),
+                1,
+            ),
+            (
+                product_sector(TableSector::new(3), ZNIrrep::new(1, 2).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();

@@ -6,7 +6,9 @@ use std::sync::Arc;
 use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
 
-use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
+use symtn::sector::{
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+};
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
@@ -109,8 +111,8 @@ fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
     assert_pair_case::<_, Complex64>(engine, &runtime, &su2, 750_112);
 
     let fz2 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     assert_pair_case::<_, f64>(engine, &runtime, &fz2, 750_120);
@@ -118,12 +120,15 @@ fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
 
     let product = GradedSpace::try_new(
         Arc::new(
-            symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-                .unwrap(),
+            symtn_core::ProductFusionRule::<_, _>::try_new(
+                FermionParityFusionRule::new(),
+                U1FusionRule,
+            )
+            .unwrap(),
         ),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 1),
         ],
     )
     .unwrap();

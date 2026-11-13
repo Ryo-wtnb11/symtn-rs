@@ -63,10 +63,12 @@ unit the codec cannot encode or round-trip; an invalid mode, error, or marker
 combination does not compile.
 
 The provider traits are sealed: they are the bounds generic code names, not
-an extension point. Z2, Z_N, U(1), fermion parity, CU(1), `TableRule`,
-`SU2FusionRule` and `LieGroupFusionRule` implement them through the same category
-adapter as `CategoryRule`, with private codecs that keep their labels, ids,
-identities and checked errors. `ProductFusionRule` uses the same adapter over
+an extension point. Z_N, fermion parity and CU(1) are `CategoryRule`s
+(`ZNFusionRule`, `FermionParityFusionRule` and `CU1FusionRule` name the
+multiplicity-free `EnumeratedCodec` instantiations). U(1), `TableRule`,
+`SU2FusionRule` and `LieGroupFusionRule` implement the traits through the same
+category adapter, with private codecs that keep their labels, ids, identities
+and checked errors. `ProductFusionRule` uses the same adapter over
 fusion-symbols' `Product`. Native implementations remain under `testing` for
 fixtures that implement
 `symtn_sectors::testing::Provider` (re-exported as
@@ -84,13 +86,21 @@ fixtures that implement
 Each operation adds its coefficient and payload bounds. Outer multiplicity
 (`N_ab^c > 1`) requires the checked Generic path.
 
-Built-in rules keep their own types over the shared adapter, rather than being
-`CategoryRule` aliases. [`TableRule`](../symtn-sectors/src/table_rule.rs)
+Z_N, fermion parity and CU(1) are
+[`CategoryRule` aliases](../symtn-sectors/src/enumerated.rs): their labels are
+fusion-symbols' `ZNIrrep`, `FermionParityIrrep` and `CU1Irrep`, an id is the
+object's enumeration index, and the identity is the category value. Labels
+come from fusion-symbols' constructors: `ZNIrrep::new(charge, modulus)` (the
+modulus is `rule.category().modulus()`), `FermionParityIrrep::{EVEN, ODD}` and
+`CU1Irrep::{VACUUM, PSEUDOSCALAR, from_twice_charge}`. Checked queries validate
+ids in argument order (for `N`: left, right, then coupled). A CU(1) fusion
+channel past fusion-symbols' `u32` twice charge is `FusionNotRepresentable`;
+`N` is the exact category value there, as in TensorKit. The other built-in
+rules keep their own types over the shared adapter. [`TableRule`](../symtn-sectors/src/table_rule.rs)
 serves every pinned AnyonWiki `TableCategory`, including Fibonacci, Ising and
 fusion-only Rep(S₃), with identity built from the table's AnyonWiki uuid.
-The [abelian](../symtn-sectors/src/abelian.rs) and
-[CU(1)](../symtn-sectors/src/cu1.rs) rules forward every symbol, including A/B;
-U(1)'s physical entries also use the category's CGC.
+The [U(1)](../symtn-sectors/src/abelian.rs) rule forwards every symbol,
+including A/B; its physical entries also use the category's CGC.
 The [SU2](../symtn-sectors/src/su2.rs) and
 [Lie-group](../symtn-sectors/src/lie.rs) wrappers use `LieGroup` through the adapter.
 symtn validates IDs before constructing category objects and queries the

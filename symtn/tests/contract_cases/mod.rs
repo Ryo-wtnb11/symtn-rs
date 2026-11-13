@@ -25,8 +25,8 @@ use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SectorCodec,
@@ -101,16 +101,16 @@ pub fn fermion_u1() -> GradedSpace<FermionU1> {
     GradedSpace::try_new(
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 U1FusionRule,
             )
             .unwrap(),
         ),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(-1)), 1),
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1)), 1),
         ],
     )
     .unwrap()
@@ -121,22 +121,22 @@ pub fn fermion_su2() -> GradedSpace<FermionSu2> {
     GradedSpace::try_new(
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
                 SU2FusionRule,
             )
             .unwrap(),
         ),
         [
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
                 2,
             ),
             (
-                product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(1)),
+                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
                 2,
             ),
             (
-                product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(2)),
+                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
                 1,
             ),
         ],
@@ -1079,12 +1079,12 @@ pub fn fz2_map(
     odd: f64,
 ) -> TensorMap<FermionParityFusionRule, f64> {
     let v = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     TensorMap::from_subblock_fn(engine, runtime, [&v], [&v], move |trees, _| {
-        if *trees.coupled() == Z2Irrep::EVEN {
+        if *trees.coupled() == FermionParityIrrep::EVEN {
             even
         } else {
             odd
