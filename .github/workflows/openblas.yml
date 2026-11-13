@@ -28,6 +28,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Why: a host-tuned OpenBLAS restored from cache on another runner CPU
+  # dies with SIGILL; DYNAMIC_ARCH picks the kernel at run time.
+  OPENBLAS_DYNAMIC_ARCH: '1'
 
 jobs:
   openblas-contract:
@@ -46,6 +49,8 @@ jobs:
           workspaces: symtn
           save-if: ${{ github.ref == 'refs/heads/main' }}
           key: backend-openblas
+          # Discard host-tuned OpenBLAS builds (openblas-build reuses them).
+          prefix-key: v1-rust-openblas-dynarch
       - uses: ./symtn/.github/actions/cargo-build-script-cache
         with:
           key: backend-openblas

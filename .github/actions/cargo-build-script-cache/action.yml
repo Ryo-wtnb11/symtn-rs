@@ -8,10 +8,10 @@ description: >
   stack and openblas-src's 6.5-min C library despite a full cache hit. These two
   dirs are tiny next to deps/, so restoring them reunites cargo with the rlibs
   rust-cache already cached. cargo's fingerprint check gates reuse but does not
-  see the host CPU, and openblas-src builds its C library for the build host's
-  instruction set, so the key also carries a hash of the runner's CPU flags:
-  an entry built on an AVX-512 runner must not be restored on one without it
-  (SIGILL in krylov_vector, main 01355ba4).
+  see the host CPU. Native libraries built here must therefore not depend on
+  the build host's instruction set: openblas-src is built with
+  OPENBLAS_DYNAMIC_ARCH (ci.yml), so a restore on another runner type stays
+  valid.
 inputs:
   key:
     description: Per-job key discriminator; must be unique per build profile.
@@ -19,15 +19,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - id: cpu
-      shell: bash
-      run: |
-        if [ -r /proc/cpuinfo ]; then
-          flags=$(grep -m1 '^flags' /proc/cpuinfo)
-        else
-          flags=$(sysctl -n machdep.cpu.features machdep.cpu.leaf7_features hw.optional 2>/dev/null || uname -m)
-        fi
-        echo "hash=$(printf '%s' "$flags" | shasum -a 256 | cut -c1-12)" >> "$GITHUB_OUTPUT"
     # Why-not fold into rust-cache's key: rust-cache owns the lockfile hash and
     # its own pruning; a separate cache with a coarser (Cargo.toml) key lets
     # these dirs survive rust-cache's prune without fighting its restore. The
@@ -43,9 +34,9 @@ runs:
           symtn/target/*/build
           symtn/target/llvm-cov-target/*/.fingerprint
           symtn/target/llvm-cov-target/*/build
-        key: cargo-fp-v3-${{ inputs.key }}-${{ runner.os }}-${{ steps.cpu.outputs.hash }}-${{ hashFiles('symtn/**/Cargo.toml') }}
+        key: cargo-fp-v4-${{ inputs.key }}-${{ runner.os }}-${{ hashFiles('symtn/**/Cargo.toml') }}
         restore-keys: |
-          cargo-fp-v3-${{ inputs.key }}-${{ runner.os }}-${{ steps.cpu.outputs.hash }}-
+          cargo-fp-v4-${{ inputs.key }}-${{ runner.os }}-
     - if: github.ref != 'refs/heads/main'
       uses: actions/cache/restore@v4
       with:
@@ -54,6 +45,6 @@ runs:
           symtn/target/*/build
           symtn/target/llvm-cov-target/*/.fingerprint
           symtn/target/llvm-cov-target/*/build
-        key: cargo-fp-v3-${{ inputs.key }}-${{ runner.os }}-${{ steps.cpu.outputs.hash }}-${{ hashFiles('symtn/**/Cargo.toml') }}
+        key: cargo-fp-v4-${{ inputs.key }}-${{ runner.os }}-${{ hashFiles('symtn/**/Cargo.toml') }}
         restore-keys: |
-          cargo-fp-v3-${{ inputs.key }}-${{ runner.os }}-${{ steps.cpu.outputs.hash }}-
+          cargo-fp-v4-${{ inputs.key }}-${{ runner.os }}-
