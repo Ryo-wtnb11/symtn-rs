@@ -210,7 +210,6 @@ impl core::clone::Clone for symtn_operations::host_pool::HostPoolSite
 pub fn symtn_operations::host_pool::HostPoolSite::clone(&self) -> symtn_operations::host_pool::HostPoolSite
 impl core::clone::TrivialClone for symtn_operations::host_pool::HostPoolSite
 impl core::cmp::Eq for symtn_operations::host_pool::HostPoolSite
-pub fn symtn_operations::host_pool::HostPoolSite::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_operations::host_pool::HostPoolSite
 pub fn symtn_operations::host_pool::HostPoolSite::eq(&self, &symtn_operations::host_pool::HostPoolSite) -> bool
 impl core::fmt::Debug for symtn_operations::host_pool::HostPoolSite
@@ -797,7 +796,6 @@ impl core::clone::Clone for symtn_operations::OwnedCatSide
 pub fn symtn_operations::OwnedCatSide::clone(&self) -> symtn_operations::OwnedCatSide
 impl core::clone::TrivialClone for symtn_operations::OwnedCatSide
 impl core::cmp::Eq for symtn_operations::OwnedCatSide
-pub fn symtn_operations::OwnedCatSide::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_operations::OwnedCatSide
 pub fn symtn_operations::OwnedCatSide::eq(&self, &symtn_operations::OwnedCatSide) -> bool
 impl core::fmt::Debug for symtn_operations::OwnedCatSide
@@ -866,7 +864,6 @@ impl core::clone::Clone for symtn_operations::TreeTransformOperationKind
 pub fn symtn_operations::TreeTransformOperationKind::clone(&self) -> symtn_operations::TreeTransformOperationKind
 impl core::clone::TrivialClone for symtn_operations::TreeTransformOperationKind
 impl core::cmp::Eq for symtn_operations::TreeTransformOperationKind
-pub fn symtn_operations::TreeTransformOperationKind::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_operations::TreeTransformOperationKind
 pub fn symtn_operations::TreeTransformOperationKind::eq(&self, &symtn_operations::TreeTransformOperationKind) -> bool
 impl core::fmt::Debug for symtn_operations::TreeTransformOperationKind

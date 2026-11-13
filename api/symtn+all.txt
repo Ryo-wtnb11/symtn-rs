@@ -167,7 +167,6 @@ impl core::clone::Clone for symtn::typed::__network::NetworkReuseClass
 pub fn symtn::typed::__network::NetworkReuseClass::clone(&self) -> symtn::typed::__network::NetworkReuseClass
 impl core::clone::TrivialClone for symtn::typed::__network::NetworkReuseClass
 impl core::cmp::Eq for symtn::typed::__network::NetworkReuseClass
-pub fn symtn::typed::__network::NetworkReuseClass::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::__network::NetworkReuseClass
 pub fn symtn::typed::__network::NetworkReuseClass::eq(&self, &symtn::typed::__network::NetworkReuseClass) -> bool
 impl core::marker::Copy for symtn::typed::__network::NetworkReuseClass
@@ -227,7 +226,6 @@ impl core::clone::Clone for symtn::typed::Alternative
 pub fn symtn::typed::Alternative::clone(&self) -> symtn::typed::Alternative
 impl core::clone::TrivialClone for symtn::typed::Alternative
 impl core::cmp::Eq for symtn::typed::Alternative
-pub fn symtn::typed::Alternative::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::Alternative
 pub fn symtn::typed::Alternative::eq(&self, &symtn::typed::Alternative) -> bool
 impl core::fmt::Debug for symtn::typed::Alternative
@@ -263,7 +261,6 @@ impl core::clone::Clone for symtn::typed::BatchMemberRepresentation
 pub fn symtn::typed::BatchMemberRepresentation::clone(&self) -> symtn::typed::BatchMemberRepresentation
 impl core::clone::TrivialClone for symtn::typed::BatchMemberRepresentation
 impl core::cmp::Eq for symtn::typed::BatchMemberRepresentation
-pub fn symtn::typed::BatchMemberRepresentation::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::BatchMemberRepresentation
 pub fn symtn::typed::BatchMemberRepresentation::eq(&self, &symtn::typed::BatchMemberRepresentation) -> bool
 impl core::fmt::Debug for symtn::typed::BatchMemberRepresentation
@@ -334,7 +331,6 @@ impl core::clone::Clone for symtn::typed::Direction
 pub fn symtn::typed::Direction::clone(&self) -> symtn::typed::Direction
 impl core::clone::TrivialClone for symtn::typed::Direction
 impl core::cmp::Eq for symtn::typed::Direction
-pub fn symtn::typed::Direction::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::Direction
 pub fn symtn::typed::Direction::eq(&self, &symtn::typed::Direction) -> bool
 impl core::fmt::Debug for symtn::typed::Direction
@@ -350,7 +346,6 @@ impl core::clone::Clone for symtn::typed::Duality
 pub fn symtn::typed::Duality::clone(&self) -> symtn::typed::Duality
 impl core::clone::TrivialClone for symtn::typed::Duality
 impl core::cmp::Eq for symtn::typed::Duality
-pub fn symtn::typed::Duality::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::Duality
 pub fn symtn::typed::Duality::eq(&self, &symtn::typed::Duality) -> bool
 impl core::fmt::Debug for symtn::typed::Duality
@@ -449,7 +444,6 @@ impl core::clone::Clone for symtn::typed::MemberFault
 pub fn symtn::typed::MemberFault::clone(&self) -> symtn::typed::MemberFault
 impl core::clone::TrivialClone for symtn::typed::MemberFault
 impl core::cmp::Eq for symtn::typed::MemberFault
-pub fn symtn::typed::MemberFault::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::MemberFault
 pub fn symtn::typed::MemberFault::eq(&self, &symtn::typed::MemberFault) -> bool
 impl core::fmt::Debug for symtn::typed::MemberFault
@@ -465,7 +459,6 @@ impl core::clone::Clone for symtn::typed::PersistedScalar
 pub fn symtn::typed::PersistedScalar::clone(&self) -> symtn::typed::PersistedScalar
 impl core::clone::TrivialClone for symtn::typed::PersistedScalar
 impl core::cmp::Eq for symtn::typed::PersistedScalar
-pub fn symtn::typed::PersistedScalar::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::PersistedScalar
 pub fn symtn::typed::PersistedScalar::eq(&self, &symtn::typed::PersistedScalar) -> bool
 impl core::fmt::Debug for symtn::typed::PersistedScalar
@@ -483,7 +476,6 @@ impl core::clone::Clone for symtn::typed::Side
 pub fn symtn::typed::Side::clone(&self) -> symtn::typed::Side
 impl core::clone::TrivialClone for symtn::typed::Side
 impl core::cmp::Eq for symtn::typed::Side
-pub fn symtn::typed::Side::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::Side
 pub fn symtn::typed::Side::eq(&self, &symtn::typed::Side) -> bool
 impl core::fmt::Debug for symtn::typed::Side
@@ -502,7 +494,6 @@ impl core::clone::Clone for symtn::typed::SignatureField
 pub fn symtn::typed::SignatureField::clone(&self) -> symtn::typed::SignatureField
 impl core::clone::TrivialClone for symtn::typed::SignatureField
 impl core::cmp::Eq for symtn::typed::SignatureField
-pub fn symtn::typed::SignatureField::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn::typed::SignatureField
 pub fn symtn::typed::SignatureField::eq(&self, &symtn::typed::SignatureField) -> bool
 impl core::fmt::Debug for symtn::typed::SignatureField

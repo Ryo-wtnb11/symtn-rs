@@ -92,7 +92,6 @@ impl core::clone::Clone for symtn_matrixalgebra::seam::EndomorphismFamily
 pub fn symtn_matrixalgebra::seam::EndomorphismFamily::clone(&self) -> symtn_matrixalgebra::seam::EndomorphismFamily
 impl core::clone::TrivialClone for symtn_matrixalgebra::seam::EndomorphismFamily
 impl core::cmp::Eq for symtn_matrixalgebra::seam::EndomorphismFamily
-pub fn symtn_matrixalgebra::seam::EndomorphismFamily::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_matrixalgebra::seam::EndomorphismFamily
 pub fn symtn_matrixalgebra::seam::EndomorphismFamily::eq(&self, &symtn_matrixalgebra::seam::EndomorphismFamily) -> bool
 impl core::fmt::Debug for symtn_matrixalgebra::seam::EndomorphismFamily
@@ -111,7 +110,6 @@ impl core::clone::Clone for symtn_matrixalgebra::seam::FactorFamily
 pub fn symtn_matrixalgebra::seam::FactorFamily::clone(&self) -> symtn_matrixalgebra::seam::FactorFamily
 impl core::clone::TrivialClone for symtn_matrixalgebra::seam::FactorFamily
 impl core::cmp::Eq for symtn_matrixalgebra::seam::FactorFamily
-pub fn symtn_matrixalgebra::seam::FactorFamily::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_matrixalgebra::seam::FactorFamily
 pub fn symtn_matrixalgebra::seam::FactorFamily::eq(&self, &symtn_matrixalgebra::seam::FactorFamily) -> bool
 impl core::fmt::Debug for symtn_matrixalgebra::seam::FactorFamily
