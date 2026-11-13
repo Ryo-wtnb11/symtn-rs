@@ -412,8 +412,8 @@ on Host. Built-in and `CategoryRule` providers use the same public bounds.
   return a typed error before querying the provider.
 - Uploading a complex-symbol payload with `to_cuda` provides storage only.
   Device operation bounds require `Scalar = f64`, excluding `TableRule` and
-  checked Generic execution. Prepared batched `EighFullPlan` admits real
-  payloads only.
+  checked Generic execution. On Host, prepared batched `EighFullPlan`
+  supports the same table rules as eager `eigh_full`.
 
 ## Validating a new category
 
