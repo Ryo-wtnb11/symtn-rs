@@ -1180,10 +1180,12 @@ const fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
     left
 }
 
-// Why gated: these fixtures use rank >= 2 groups, which need `lie-generated`.
-#[cfg(all(test, feature = "cgc-gen"))]
+// Why per-test gates: a default build executes rank-one groups, U(2) and tori;
+// the SU(3)+ fixtures need fusion-symbols' `lie-generated`.
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "cgc-gen")]
     use fusion_symbols::lie::RootSystem;
 
     #[test]
@@ -1222,6 +1224,7 @@ mod tests {
         assert_eq!(table.0.read().unwrap().duals.len(), IRREP_TABLE_CAPACITY);
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn vertex_admission_rejects_an_unencodable_dual() {
         if usize::BITS != 64 {
@@ -1244,6 +1247,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn malformed_symbol_axes_map_without_a_source() {
         use std::error::Error as _;
@@ -1267,6 +1271,7 @@ mod tests {
 
     /// The codec's dual is Dynkin reversal and the twist is exactly one; a
     /// complex SU(4) irrep keeps its non-trivial FS phase.
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn dual_is_dynkin_reversal_and_twist_is_unit() {
         for (n, max_total) in [(2, 6), (3, 3), (4, 2)] {
@@ -1300,6 +1305,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn codec_is_graded_lexicographic_and_roundtrips() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
@@ -1343,6 +1349,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn checked_rigid_dimension_is_the_exact_weyl_dimension() {
         // What: `dim` is not `sqrt(dim)^2`, which is off by one rounding for
@@ -1357,6 +1364,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn codec_handles_bounded_binomial_cancellation() {
         if usize::BITS != 64 {
@@ -1370,6 +1378,7 @@ mod tests {
         assert_eq!(rule.encode_irrep(&expected).unwrap(), sector);
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn validation_and_identity_are_typed_and_stable() {
         assert!(GroupId::su(1).is_err());
@@ -1428,6 +1437,7 @@ mod tests {
         assert_ne!(psu3.rule_identity(), rule.rule_identity());
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn stored_identity_is_shared_and_distinguishes_rank() {
         let su3 = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
@@ -1443,6 +1453,7 @@ mod tests {
         assert_ne!(hash(&su3), hash(&su4));
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn irreps_and_duals_are_interned_once_per_sector() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
@@ -1493,6 +1504,7 @@ mod tests {
             .is_err());
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
@@ -1543,6 +1555,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn su3_rigid_symbols_match_sunrepresentations_fixtures() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
@@ -1621,6 +1634,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn su4_adjoint_rigid_shape_smoke() {
         let rule = LieGroupFusionRule::new(GroupId::su(4).unwrap()).unwrap();
@@ -1640,6 +1654,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "cgc-gen")]
     #[test]
     fn rigid_failures_remain_typed() {
         let rule = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
