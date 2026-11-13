@@ -49,6 +49,8 @@ jobs:
           workspaces: symtn
           save-if: ${{ github.ref == 'refs/heads/main' }}
           key: backend-openblas
+          # Discard host-tuned OpenBLAS builds (openblas-build reuses them).
+          prefix-key: v1-rust-openblas-dynarch
       - uses: ./symtn/.github/actions/cargo-build-script-cache
         with:
           key: backend-openblas

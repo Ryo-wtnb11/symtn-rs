@@ -275,6 +275,9 @@ jobs:
           workspaces: symtn
           save-if: ${{ github.ref == 'refs/heads/main' }}
           key: feature-krylov
+          # openblas-build reuses an existing build when its Makefile.conf is
+          # present, so host-tuned entries must not be restored: new prefix.
+          prefix-key: v1-rust-openblas-dynarch
       - uses: ./symtn/.github/actions/cargo-build-script-cache
         with:
           key: feature-krylov
