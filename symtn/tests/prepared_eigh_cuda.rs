@@ -514,9 +514,14 @@ fn assert_diagonal_only<R>(
     <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
     let d = output.d.to_host(cuda).unwrap();
-    for member in 0..d.len() {
+    assert_eq!(
+        output.spectra.len(),
+        d.len(),
+        "{what}: one spectrum per member"
+    );
+    for (member, spectrum) in output.spectra.iter().enumerate() {
         let matrices = sector_matrices(&d.member(engine, member).unwrap());
-        for entry in &output.spectra[member] {
+        for entry in spectrum {
             let m = &matrices[&format!("{:?}", entry.sector)];
             for j in 0..m.cols {
                 for i in 0..m.rows {
