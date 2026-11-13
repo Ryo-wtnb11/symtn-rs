@@ -1189,7 +1189,7 @@ mod tests {
     fn counting_u1_space(
         provider: Arc<FailingPhysicalU1>,
     ) -> BoundDynamicFusionMapSpace<FailingPhysicalU1> {
-        let leg = SectorLeg::new([(U1Irrep::new(0), 1)], false);
+        let leg = SectorLeg::new([(U1Irrep::new(0).unwrap(), 1)], false);
         BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             provider,
             FusionTreeHomSpace::new(
@@ -1348,8 +1348,8 @@ mod tests {
 
     #[test]
     fn u1_non_self_dual_z_matches_tensorkit_formula() {
-        let plus = U1Irrep::new(1);
-        let minus = U1Irrep::new(-1);
+        let plus = U1Irrep::new(1).unwrap();
+        let minus = U1Irrep::new(-1).unwrap();
         let dual_plus = SectorLeg::new([(plus, 1)], true);
         let minus_leg = SectorLeg::new([(minus, 1)], false);
         let space = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
@@ -1393,8 +1393,8 @@ mod tests {
             reduced
         );
 
-        let plus = SectorLeg::new([(U1Irrep::new(1), 1)], false);
-        let minus = SectorLeg::new([(U1Irrep::new(-1), 1)], false);
+        let plus = SectorLeg::new([(U1Irrep::new(1).unwrap(), 1)], false);
+        let minus = SectorLeg::new([(U1Irrep::new(-1).unwrap(), 1)], false);
         let disjoint = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             Arc::new(U1FusionRule),
             FusionTreeHomSpace::new(

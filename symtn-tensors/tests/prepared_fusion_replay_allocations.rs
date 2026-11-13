@@ -23,7 +23,7 @@ const WORKLOADS: [([usize; 2], [usize; 2], [usize; 4]); 3] = [
 fn u1_sectors() -> Vec<SectorId> {
     [-1, 0, 1]
         .into_iter()
-        .map(|charge| U1Irrep::new(charge).sector_id())
+        .map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()))
         .collect()
 }
 
@@ -32,7 +32,7 @@ fn product_sectors() -> Vec<SectorId> {
         .into_iter()
         .map(|(charge, parity)| {
             TensorKitProductCodec::try_encode(
-                U1Irrep::new(charge).sector_id(),
+                SectorId::from(U1Irrep::new(charge).unwrap()),
                 SectorId::new(parity),
             )
             .unwrap()

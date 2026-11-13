@@ -376,8 +376,10 @@ fn direct_homspace_derivation_matches_reference_for_supported_rules() {
     )
     .unwrap();
     let encode = |parity, charge, spin| {
-        let inner =
-            TensorKitProductCodec::encode(SectorId::new(parity), U1Irrep::new(charge).sector_id());
+        let inner = TensorKitProductCodec::encode(
+            SectorId::new(parity),
+            SectorId::from(U1Irrep::new(charge).unwrap()),
+        );
         TensorKitProductCodec::encode(inner, SU2Irrep::from_twice_spin(spin).sector_id())
     };
     let product = [(encode(0, 0, 0), 2), (encode(1, 1, 1), 1)];

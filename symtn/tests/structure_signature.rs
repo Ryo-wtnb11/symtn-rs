@@ -119,7 +119,7 @@ fn fixtures_are_equal_iff_structure_is_equal() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     check_fixture!(engine, "U1", |variant| {
-        let q = U1Irrep::new;
+        let q = |charge| U1Irrep::new(charge).unwrap();
         let pairs = match variant {
             0 => [(q(-1), 2), (q(0), 1), (q(1), 3)],
             1 => [(q(-1), 2), (q(0), 2), (q(1), 3)],
@@ -139,8 +139,8 @@ fn fixtures_are_equal_iff_structure_is_equal() {
     check_fixture!(engine, "fZ2xU1", |variant| {
         let rule =
             Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
-        let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
-        let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
+        let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+        let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
         let pairs = match variant {
             0 => [(even(0), 2), (odd(1), 1), (odd(-1), 2)],
             1 => [(even(0), 2), (odd(1), 2), (odd(-1), 2)],
@@ -194,7 +194,7 @@ fn checked_generic_rule_instance_separates_signatures() {
 fn u1_leg(charges: std::ops::RangeInclusive<i32>, degeneracy: usize) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        charges.map(|charge| (U1Irrep::new(charge), degeneracy)),
+        charges.map(|charge| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap()
 }

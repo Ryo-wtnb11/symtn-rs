@@ -126,9 +126,9 @@ fn tsvd_fusion_reconstructs_u1_tensor() {
     run_tsvd_reconstruction_case(
         &U1FusionRule,
         &[
-            U1Irrep::new(-1).sector_id(),
-            U1Irrep::new(0).sector_id(),
-            U1Irrep::new(1).sector_id(),
+            SectorId::from(U1Irrep::new(-1).unwrap()),
+            SectorId::from(U1Irrep::new(0).unwrap()),
+            SectorId::from(U1Irrep::new(1).unwrap()),
         ],
     );
 }
@@ -151,15 +151,15 @@ fn tsvd_fusion_reconstructs_product_rule_tensor() {
     )
     .unwrap();
     let sectors = [
-        rule.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
-        rule.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
+        rule.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
+        rule.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
     run_tsvd_reconstruction_case(&rule, &sectors);
 }
 
 fn u1_lowest_label_matrix(rows: usize, cols: usize) -> TestTensor<f64> {
     let rule = U1FusionRule;
-    let minimum = U1Irrep::new(i32::MIN + 1).sector_id();
+    let minimum = SectorId::from(U1Irrep::new(i32::MIN + 1).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(minimum, rows)], false)]),
         FusionProductSpace::new([SectorLeg::new([(minimum, cols)], false)]),
@@ -254,7 +254,10 @@ fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
     )
     .unwrap();
     let minimum = rule
-        .try_encode_component_ids(SectorId::new(1), U1Irrep::new(i32::MIN + 1).sector_id())
+        .try_encode_component_ids(
+            SectorId::new(1),
+            SectorId::from(U1Irrep::new(i32::MIN + 1).unwrap()),
+        )
         .unwrap();
     let matrix = |rows: usize, cols: usize, data: Vec<f64>| {
         let homspace = FusionTreeHomSpace::new(
@@ -462,7 +465,7 @@ fn full_factorizations_agree_with_compact_on_matching_square_support() {
     // agree with the compact ones (path agreement under the workspace rule,
     // 2 = the block dimension); each builds only its returned buffers.
     let rule = U1FusionRule;
-    let neutral = U1Irrep::new(0).sector_id();
+    let neutral = SectorId::from(U1Irrep::new(0).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(neutral, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(neutral, 2)], false)]),
@@ -511,8 +514,8 @@ fn full_factorizations_agree_with_compact_on_matching_square_support() {
 fn full_factorizations_skip_dense_backend_for_disjoint_support() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = U1FusionRule;
-    let positive = U1Irrep::new(1).sector_id();
-    let neutral = U1Irrep::new(0).sector_id();
+    let positive = SectorId::from(U1Irrep::new(1).unwrap());
+    let neutral = SectorId::from(U1Irrep::new(0).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(positive, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(neutral, 3)], false)]),
@@ -624,9 +627,9 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
     // What: canonical region borrowing and noncanonical (adjoint-view)
     // packing agree for Abelian, non-Abelian, fermionic, and product rules.
     let u1 = [
-        U1Irrep::new(-1).sector_id(),
-        U1Irrep::new(0).sector_id(),
-        U1Irrep::new(1).sector_id(),
+        SectorId::from(U1Irrep::new(-1).unwrap()),
+        SectorId::from(U1Irrep::new(0).unwrap()),
+        SectorId::from(U1Irrep::new(1).unwrap()),
     ];
     assert_value_region_paths_match(
         Arc::new(U1FusionRule),
@@ -657,8 +660,8 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
     )
     .unwrap();
     let product_sectors = [
-        product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
-        product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
+        product.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
+        product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
     assert_value_region_paths_match(
         Arc::new(product.clone()),

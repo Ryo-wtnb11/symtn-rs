@@ -1092,7 +1092,10 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
                 )
                 .unwrap(),
             ),
-            [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
+            [(
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                2,
+            )],
         )
         .unwrap()
     };

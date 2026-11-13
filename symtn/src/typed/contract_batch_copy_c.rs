@@ -76,15 +76,15 @@ mod tests {
         let v = GradedSpace::try_new(
             Arc::new(U1FusionRule),
             [
-                (U1Irrep::new(0), 1),
-                (U1Irrep::new(1), 2),
-                (U1Irrep::new(2), 1),
+                (U1Irrep::new(0).unwrap(), 1),
+                (U1Irrep::new(1).unwrap(), 2),
+                (U1Irrep::new(2).unwrap(), 1),
             ],
         )
         .unwrap();
         let w = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
         )
         .unwrap();
         let a = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &v], [&w], 55).unwrap();
@@ -224,15 +224,15 @@ mod tests {
         let u1_v = GradedSpace::try_new(
             Arc::new(U1FusionRule),
             [
-                (U1Irrep::new(-1), 8),
-                (U1Irrep::new(0), 8),
-                (U1Irrep::new(1), 8),
+                (U1Irrep::new(-1).unwrap(), 8),
+                (U1Irrep::new(0).unwrap(), 8),
+                (U1Irrep::new(1).unwrap(), 8),
             ],
         )
         .unwrap();
         let u1_c = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
         )
         .unwrap();
         cases!(&u1_v, &u1_c, f64);

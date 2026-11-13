@@ -42,7 +42,7 @@ const SPEC: ContractSpec<'static> = ContractSpec {
 fn fixture(engine: &mut dyn Engine, runtime: &Runtime, salt: f64) -> Host {
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, index| {

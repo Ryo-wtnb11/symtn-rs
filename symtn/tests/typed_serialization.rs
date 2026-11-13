@@ -130,7 +130,7 @@ impl TypedPersistenceCodec<U1FusionRule> for U1Codec {
         bytes: &[u8],
     ) -> Result<U1Irrep, Self::Error> {
         let bytes: [u8; 4] = bytes.try_into().map_err(|_| CodecError::InvalidSector)?;
-        U1Irrep::try_new(i32::from_le_bytes(bytes)).ok_or(CodecError::InvalidSector)
+        U1Irrep::new(i32::from_le_bytes(bytes)).map_err(|_| CodecError::InvalidSector)
     }
 }
 
@@ -589,10 +589,10 @@ fn non_self_dual_u1_space_roundtrip_does_not_dualize_twice() {
     let codec = U1Codec {
         provider: Arc::clone(&provider),
     };
-    let source = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(3), 7)])
+    let source = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(3).unwrap(), 7)])
         .and_then(|space| space.try_dual())
         .unwrap();
-    assert_eq!(source.sectors().unwrap(), [U1Irrep::new(-3)]);
+    assert_eq!(source.sectors().unwrap(), [U1Irrep::new(-3).unwrap()]);
 
     let restored = GradedSpace::<U1FusionRule>::from_bytes_with(
         engine,
@@ -604,7 +604,7 @@ fn non_self_dual_u1_space_roundtrip_does_not_dualize_twice() {
 
     assert!(std::ptr::eq(restored.provider(), provider.as_ref()));
     assert!(restored.is_dual());
-    assert_eq!(restored.sectors().unwrap(), [U1Irrep::new(-3)]);
+    assert_eq!(restored.sectors().unwrap(), [U1Irrep::new(-3).unwrap()]);
     assert_eq!(restored.degeneracies(), [7]);
 }
 
@@ -1402,9 +1402,9 @@ macro_rules! single_precision_roundtrip {
             let leg = GradedSpace::try_new(
                 Arc::clone(&provider),
                 [
-                    (U1Irrep::new(-1), 2),
-                    (U1Irrep::new(0), 1),
-                    (U1Irrep::new(2), 3),
+                    (U1Irrep::new(-1).unwrap(), 2),
+                    (U1Irrep::new(0).unwrap(), 1),
+                    (U1Irrep::new(2).unwrap(), 3),
                 ],
             )
             .unwrap();
@@ -1435,15 +1435,15 @@ macro_rules! single_precision_roundtrip {
                 &leg,
                 [
                     SectorSpectrum {
-                        sector: U1Irrep::new(-1),
+                        sector: U1Irrep::new(-1).unwrap(),
                         values: vec![value(0), value(1)],
                     },
                     SectorSpectrum {
-                        sector: U1Irrep::new(0),
+                        sector: U1Irrep::new(0).unwrap(),
                         values: vec![value(2)],
                     },
                     SectorSpectrum {
-                        sector: U1Irrep::new(2),
+                        sector: U1Irrep::new(2).unwrap(),
                         values: vec![value(3), value(4), value(5)],
                     },
                 ],
@@ -1736,7 +1736,7 @@ fn every_scalar_mismatch_direction_is_typed_and_precedes_provider_resolution() {
     let codec = U1Codec {
         provider: Arc::clone(&provider),
     };
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let f64_bytes =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0)
             .unwrap()
@@ -1807,7 +1807,7 @@ fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
     let codec = U1Codec {
         provider: Arc::clone(&provider),
     };
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(2), 2)])
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(2).unwrap(), 2)])
         .unwrap()
         .try_dual()
         .unwrap();
@@ -1816,7 +1816,7 @@ fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(-2),
+            sector: U1Irrep::new(-2).unwrap(),
             values: vec![Complex64::new(3.0, 4.0), Complex64::new(0.0, 0.0)],
         }],
     )
@@ -1855,7 +1855,7 @@ fn dual_diagonal_full_svd_s_roundtrip_preserves_bond_and_storage() {
     let codec = U1Codec {
         provider: Arc::clone(&provider),
     };
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(2), 3)])
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(2).unwrap(), 3)])
         .unwrap()
         .try_dual()
         .unwrap();
@@ -1864,7 +1864,7 @@ fn dual_diagonal_full_svd_s_roundtrip_preserves_bond_and_storage() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(-2),
+            sector: U1Irrep::new(-2).unwrap(),
             values: vec![
                 Complex64::new(0.0, 0.0),
                 Complex64::new(3.0, 4.0),

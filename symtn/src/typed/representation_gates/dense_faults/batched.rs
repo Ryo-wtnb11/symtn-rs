@@ -10,7 +10,7 @@ use crate::typed::{BatchError, EighFullPlan, StackedTensorMap};
 const COUNT: usize = 3;
 
 fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
-    let q = U1Irrep::new;
+    let q = |charge| U1Irrep::new(charge).unwrap();
     (
         GradedSpace::try_new(Arc::new(U1FusionRule), [(q(-1), 2), (q(0), 1), (q(1), 3)]).unwrap(),
         GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 2), (q(1), 1)]).unwrap(),

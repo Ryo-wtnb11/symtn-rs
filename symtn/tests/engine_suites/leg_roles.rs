@@ -129,7 +129,7 @@ on_each_engine! {
                 Arc::clone(&rule),
                 sectors.iter().map(|&(odd, q, n)| {
                     let parity = if odd { FermionParityIrrep::ODD } else { FermionParityIrrep::EVEN };
-                    (product_sector(parity, U1Irrep::new(q)), n)
+                    (product_sector(parity, U1Irrep::new(q).unwrap()), n)
                 }),
             )
             .unwrap()

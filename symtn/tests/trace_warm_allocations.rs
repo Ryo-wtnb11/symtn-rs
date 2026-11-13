@@ -16,7 +16,7 @@ type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 fn u1_leg(charges: i32) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (-charges..=charges).map(|q| (U1Irrep::new(q), 2)),
+        (-charges..=charges).map(|q| (U1Irrep::new(q).unwrap(), 2)),
     )
     .unwrap()
 }
@@ -28,7 +28,7 @@ fn fz2u1_leg(charges: i32) -> GradedSpace<Fz2U1> {
         } else {
             FermionParityIrrep::ODD
         };
-        ProductSector::new(parity, U1Irrep::new(q))
+        ProductSector::new(parity, U1Irrep::new(q).unwrap())
     };
     GradedSpace::try_new(
         Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),

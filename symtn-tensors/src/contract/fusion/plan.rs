@@ -2026,7 +2026,7 @@ mod tests {
         // What: adjoint lowering records storage conjugation independently
         // from axis order and charges the affected source exactly once.
         let rule = U1FusionRule;
-        let sector = symtn_core::U1Irrep::new(0).sector_id();
+        let sector = SectorId::from(symtn_core::U1Irrep::new(0).unwrap());
         let vector_space = || {
             DynamicFusionMapSpace::from_final_homspace(
                 &rule,

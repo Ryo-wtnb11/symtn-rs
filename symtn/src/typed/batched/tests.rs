@@ -12,7 +12,8 @@ use super::super::{owned_repr, GradedSpace, TensorMap, TypedTensorBody};
 fn spectra_publication_failure_does_not_publish_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let x = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg], [&leg], 1).unwrap();
     let x_adjoint = &x.adjoint(engine).unwrap();
     let input = x.axpby(engine, 1.0, x_adjoint, 1.0).unwrap();
@@ -41,7 +42,7 @@ fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v], 3).unwrap();
@@ -123,9 +124,9 @@ fn placement_alone_separates_signatures() {
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 3),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(1).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -162,7 +163,7 @@ fn first_mismatch_names_each_field_alone() {
 
     let runtime = Runtime::builder().build().unwrap();
     let other_runtime = Runtime::builder().build().unwrap();
-    let q = U1Irrep::new;
+    let q = |charge| U1Irrep::new(charge).unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 2), (q(1), 1)]).unwrap();
     let wide = GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 3), (q(1), 1)]).unwrap();
     let mut signature = |runtime: &Runtime, leg: &GradedSpace<U1FusionRule>| {

@@ -425,7 +425,8 @@ fn fermionic_core_oracle(case: &Case<FermionU1>, lhs: &[f64], rhs: &[f64]) -> Ve
         U1FusionRule,
     )
     .unwrap();
-    let odd = [1, -1].map(|q| rule.encode_component_ids(ODD, U1Irrep::new(q).sector_id()));
+    let odd =
+        [1, -1].map(|q| rule.encode_component_ids(ODD, SectorId::from(U1Irrep::new(q).unwrap())));
     let tree = |key: &symtn_core::BlockKey| match key {
         symtn_core::BlockKey::FusionTree(tree) => tree.clone(),
         other => panic!("fusion-tree block expected, got {other:?}"),

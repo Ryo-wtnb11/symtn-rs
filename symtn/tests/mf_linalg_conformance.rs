@@ -373,7 +373,7 @@ fn public_multiplicity_free_linalg_conformance() {
         engine,
         "U(1)",
         U1FusionRule,
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)]
     );
     let z3 = ZNFusionRule::new(3).unwrap();
     let z3_pairs = [
@@ -408,8 +408,14 @@ fn public_multiplicity_free_linalg_conformance() {
         "fZ2xU1",
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         [
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2
+            ),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2
+            ),
         ]
     );
     factor_conformance!(
@@ -422,7 +428,7 @@ fn public_multiplicity_free_linalg_conformance() {
         .unwrap(),
         [(
             product_sector(
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 SU2Irrep::from_twice_spin(1),
             ),
             2,

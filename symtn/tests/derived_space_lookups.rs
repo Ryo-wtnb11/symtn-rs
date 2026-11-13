@@ -131,7 +131,7 @@ fn warm_derived_spaces_skip_the_sector_structure() {
         "U1",
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            [(-1, 1), (0, 2), (1, 2)].map(|(q, n)| (U1Irrep::new(q), n)),
+            [(-1, 1), (0, 2), (1, 2)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
         )
         .unwrap(),
         3

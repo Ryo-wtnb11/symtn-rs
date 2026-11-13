@@ -319,11 +319,11 @@ fn compact_pinv_of_a_finite_diagonal_inverts_above_the_cutoff() {
         &u1_leg_2_2(),
         [
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![4.0, 1.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: vec![2.0, 0.5],
             },
         ],

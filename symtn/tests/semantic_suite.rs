@@ -88,9 +88,9 @@ macro_rules! for_each_space {
             "U1",
             Arc::new(U1FusionRule),
             [
-                (U1Irrep::new(-1), 2),
-                (U1Irrep::new(0), 2),
-                (U1Irrep::new(1), 1),
+                (U1Irrep::new(-1).unwrap(), 2),
+                (U1Irrep::new(0).unwrap(), 2),
+                (U1Irrep::new(1).unwrap(), 1),
             ],
             false
         );
@@ -125,21 +125,21 @@ macro_rules! for_each_space {
             [
                 (
                     product_sector(
-                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)),
+                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                         SU2Irrep::from_twice_spin(0),
                     ),
                     1,
                 ),
                 (
                     product_sector(
-                        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
+                        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                         SU2Irrep::from_twice_spin(1),
                     ),
                     1,
                 ),
                 (
                     product_sector(
-                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)),
+                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                         SU2Irrep::from_twice_spin(0),
                     ),
                     1,
@@ -854,7 +854,7 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
     );
     let label = |parity, charge, spin| {
         product_sector(
-            product_sector(parity, U1Irrep::new(charge)),
+            product_sector(parity, U1Irrep::new(charge).unwrap()),
             SU2Irrep::from_twice_spin(spin),
         )
     };
@@ -997,12 +997,12 @@ fn svd_qr_reconstruction_random_spaces() {
         engine,
         "U1",
         Arc::new(U1FusionRule),
-        U1Irrep::new(0),
+        U1Irrep::new(0).unwrap(),
         [
-            U1Irrep::new(-2),
-            U1Irrep::new(-1),
-            U1Irrep::new(1),
-            U1Irrep::new(2),
+            U1Irrep::new(-2).unwrap(),
+            U1Irrep::new(-1).unwrap(),
+            U1Irrep::new(1).unwrap(),
+            U1Irrep::new(2).unwrap(),
         ]
     );
     case!(
@@ -1021,7 +1021,7 @@ fn svd_qr_reconstruction_random_spaces() {
     );
     let label = |parity, charge, spin| {
         product_sector(
-            product_sector(parity, U1Irrep::new(charge)),
+            product_sector(parity, U1Irrep::new(charge).unwrap()),
             SU2Irrep::from_twice_spin(spin),
         )
     };
@@ -1135,9 +1135,9 @@ fn weighted_rank_truncation_matches_tensorkit() {
         engine,
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
         |sector: &U1Irrep| sector.charge() as i64,
         [(-1, 1), (0, 2), (1, 2)],

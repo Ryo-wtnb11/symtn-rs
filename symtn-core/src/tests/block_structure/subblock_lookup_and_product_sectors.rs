@@ -367,18 +367,30 @@ fn nested_product_elementary_bend_keeps_the_fermionic_phase() {
 #[test]
 fn typed_sector_homspace_builds_u1_tree_key() {
     let rule = U1FusionRule;
-    let hom = FusionTreeHomSpace::from_sectors([(U1Irrep::new(2), 1)], [(U1Irrep::new(2), 1)]);
+    let hom = FusionTreeHomSpace::from_sectors(
+        [(U1Irrep::new(2).unwrap(), 1)],
+        [(U1Irrep::new(2).unwrap(), 1)],
+    );
 
     let key = hom
         .unique_fusion_tree_key_from_external_sectors(
             &rule,
-            &[U1Irrep::new(2).sector_id(), U1Irrep::new(-2).sector_id()],
+            &[
+                SectorId::from(U1Irrep::new(2).unwrap()),
+                SectorId::from(U1Irrep::new(-2).unwrap()),
+            ],
         )
         .unwrap();
 
-    assert_eq!(key.codomain_uncoupled(), &[U1Irrep::new(2).sector_id()]);
-    assert_eq!(key.domain_uncoupled(), &[U1Irrep::new(2).sector_id()]);
-    assert_eq!(key.coupled(), U1Irrep::new(2).sector_id());
+    assert_eq!(
+        key.codomain_uncoupled(),
+        &[SectorId::from(U1Irrep::new(2).unwrap())]
+    );
+    assert_eq!(
+        key.domain_uncoupled(),
+        &[SectorId::from(U1Irrep::new(2).unwrap())]
+    );
+    assert_eq!(key.coupled(), SectorId::from(U1Irrep::new(2).unwrap()));
 }
 
 #[test]

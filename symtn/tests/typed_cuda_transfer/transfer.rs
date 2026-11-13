@@ -36,7 +36,10 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     let u1_rule = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
         Arc::clone(&u1_rule),
-        [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 2)],
+        [
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+        ],
     )
     .unwrap();
     assert_roundtrip(
@@ -88,8 +91,14 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 1),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 2),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                1,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                2,
+            ),
         ],
     )
     .unwrap();
@@ -140,7 +149,10 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
 
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 2)],
+        [
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+        ],
     )
     .unwrap();
     assert_c64_roundtrip(
@@ -201,8 +213,14 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
             .unwrap(),
         ),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 1),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 2),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                1,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                2,
+            ),
         ],
     )
     .unwrap();

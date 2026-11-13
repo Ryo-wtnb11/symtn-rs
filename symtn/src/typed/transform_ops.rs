@@ -512,11 +512,11 @@ where
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
-    ///     [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
+    ///     [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
     /// )?;
     /// let w = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
-    ///     [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
+    ///     [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
     /// )?;
     /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&w], 7)?;
     /// assert_eq!(t.leg_dims()?, [3, 2]);
@@ -860,7 +860,7 @@ where
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
-    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 2)?;
     /// assert_eq!(t.adjoint(engine)?.adjoint(engine)?.dense_data()?, t.dense_data()?);
     /// # Ok::<(), symtn::typed::Error>(())

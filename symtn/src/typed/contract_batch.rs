@@ -503,8 +503,8 @@ where
 /// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
 /// let rule = Arc::new(U1FusionRule);
-/// let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)])?;
-/// let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 3)])?;
+/// let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 2)])?;
+/// let w = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), 3)])?;
 /// let lhs = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(engine,
 ///     &runtime, [&v, &v], [&w],
 /// )?])?;
@@ -665,13 +665,17 @@ mod failure_tests {
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (U1Irrep::new(-1), 2),
-                (U1Irrep::new(0), 1),
-                (U1Irrep::new(1), 3),
+                (U1Irrep::new(-1).unwrap(), 2),
+                (U1Irrep::new(0).unwrap(), 1),
+                (U1Irrep::new(1).unwrap(), 3),
             ],
         )
         .unwrap();
-        let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
+        let w = GradedSpace::try_new(
+            rule,
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
+        )
+        .unwrap();
         let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
         let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
         let lhs = StackedTensorMap::pack(&[&a, &a]).unwrap();
@@ -747,13 +751,17 @@ mod failure_tests {
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (U1Irrep::new(-1), 2),
-                (U1Irrep::new(0), 1),
-                (U1Irrep::new(1), 3),
+                (U1Irrep::new(-1).unwrap(), 2),
+                (U1Irrep::new(0).unwrap(), 1),
+                (U1Irrep::new(1).unwrap(), 3),
             ],
         )
         .unwrap();
-        let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
+        let w = GradedSpace::try_new(
+            rule,
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
+        )
+        .unwrap();
         let a = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &v], [&w], 5).unwrap();
         let b = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&w], [&v], 6).unwrap();
         let lhs = StackedTensorMap::pack(&[&a, &a])
@@ -872,9 +880,18 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    1,
+                ),
             ],
         )
         .unwrap();
@@ -983,9 +1000,18 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    1,
+                ),
             ],
         )
         .unwrap();
@@ -995,10 +1021,22 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1)), 1),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    1,
+                ),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                    1,
+                ),
             ],
         )
         .unwrap();
@@ -1028,7 +1066,10 @@ mod fermionic_unit_tests {
                 ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                     .unwrap(),
             ),
-            [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
+            [(
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                2,
+            )],
         )
         .unwrap();
         for swapped in [false, true] {
@@ -1051,17 +1092,32 @@ mod fermionic_unit_tests {
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    1,
+                ),
             ],
         )
         .unwrap();
         let w = GradedSpace::try_new(
             rule,
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    2,
+                ),
             ],
         )
         .unwrap();
@@ -1158,7 +1214,7 @@ mod fermionic_unit_tests {
                 Arc::new(U1FusionRule),
                 charges
                     .iter()
-                    .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+                    .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
             )
             .unwrap()
         };
@@ -1194,10 +1250,22 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1)), 1),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    1,
+                ),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                    1,
+                ),
             ],
         )
         .unwrap();

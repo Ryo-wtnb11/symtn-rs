@@ -16,7 +16,7 @@ use network_support::{net, op};
 use crate::numerics;
 
 fn space(provider: Arc<U1FusionRule>, dim: usize) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(provider, [(U1Irrep::new(0), dim)]).unwrap()
+    GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), dim)]).unwrap()
 }
 
 fn pair(

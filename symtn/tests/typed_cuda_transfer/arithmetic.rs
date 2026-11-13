@@ -10,7 +10,7 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let lhs: TensorMap<_, f64> =
@@ -21,7 +21,7 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
     let rhs_provider = Arc::new(U1FusionRule);
     let rhs_leg = GradedSpace::try_new(
         Arc::clone(&rhs_provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let rhs: TensorMap<_, f64> =
@@ -397,7 +397,8 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
         .is_empty());
 
     let other_runtime = Runtime::builder().build().unwrap();
-    let other_leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 1)]).unwrap();
+    let other_leg =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let foreign = TensorMap::from_subblock_fn(
         engine,
         &other_runtime,

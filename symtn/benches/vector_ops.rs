@@ -216,7 +216,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &filter,
                 "U1",
                 U1FusionRule,
-                vec![U1Irrep::new(0), U1Irrep::new(1), U1Irrep::new(2)],
+                vec![
+                    U1Irrep::new(0).unwrap(),
+                    U1Irrep::new(1).unwrap(),
+                    U1Irrep::new(2).unwrap()
+                ],
                 [1.0, 1.0, 1.0],
                 $d,
                 $name,

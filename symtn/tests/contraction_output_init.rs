@@ -40,7 +40,7 @@ impl Bits for Complex64 {
 fn u1(provider: &Arc<U1FusionRule>, sectors: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::clone(provider),
-        sectors.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
+        sectors.iter().map(|&(q, d)| (U1Irrep::new(q).unwrap(), d)),
     )
     .unwrap()
 }

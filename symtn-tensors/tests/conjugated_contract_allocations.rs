@@ -88,7 +88,7 @@ where
 
 fn u1(deg: usize) -> Vec<(SectorId, usize)> {
     (-1..=1)
-        .map(|charge| (U1Irrep::new(charge).sector_id(), deg))
+        .map(|charge| (SectorId::from(U1Irrep::new(charge).unwrap()), deg))
         .collect()
 }
 
@@ -102,9 +102,11 @@ fn fz2_u1(deg: usize) -> Vec<(SectorId, usize)> {
     (-1i32..=1)
         .map(|charge| {
             let parity = SectorId::new(charge.rem_euclid(2) as _);
-            let sector =
-                TensorKitProductCodec::try_encode(parity, U1Irrep::new(charge).sector_id())
-                    .unwrap();
+            let sector = TensorKitProductCodec::try_encode(
+                parity,
+                SectorId::from(U1Irrep::new(charge).unwrap()),
+            )
+            .unwrap();
             (sector, deg)
         })
         .collect()

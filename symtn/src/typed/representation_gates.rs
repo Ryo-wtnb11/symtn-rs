@@ -243,21 +243,24 @@ fn u1_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<U1FusionRule, f64> {
     let provider = Arc::new(U1FusionRule);
     let left = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 2)],
+        [
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+        ],
     )
     .unwrap();
     let right = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 1)],
     )
     .and_then(|space| space.try_dual())
     .unwrap();
     let domain = GradedSpace::try_new(
         provider,
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -403,7 +406,8 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
     assert!(matches!(lazy_zero.repr, TypedTensorRepr::Adjoint(_)));
     assert!(std::ptr::eq(lazy_zero.provider(), provider));
 
-    let empty_leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 0)]).unwrap();
+    let empty_leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 0)]).unwrap();
     let empty = TensorMap::from_subblock_fn(
         engine,
         source.runtime(),
@@ -449,14 +453,14 @@ fn u1_matrix_fixture(
         Arc::clone(&provider),
         codomain
             .into_iter()
-            .map(|(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap();
     let domain = GradedSpace::try_new(
         provider,
         domain
             .into_iter()
-            .map(|(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap();
     TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, indices| {

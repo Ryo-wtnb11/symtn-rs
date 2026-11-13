@@ -80,7 +80,7 @@ fn u1_leg(leg: usize, sectors: usize) -> GradedSpace<U1FusionRule> {
     let low = -((sectors as i32 - 1) / 2);
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (0..sectors).map(|s| (U1Irrep::new(low + s as i32), 2 + (leg + s) % 3)),
+        (0..sectors).map(|s| (U1Irrep::new(low + s as i32).unwrap(), 2 + (leg + s) % 3)),
     )
     .unwrap()
 }
@@ -101,7 +101,7 @@ fn fz2u1_leg(leg: usize, sectors: usize) -> GradedSpace<Fz2U1> {
         } else {
             FermionParityIrrep::ODD
         };
-        ProductSector::new(parity, U1Irrep::new(q))
+        ProductSector::new(parity, U1Irrep::new(q).unwrap())
     };
     GradedSpace::try_new(
         Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),

@@ -85,7 +85,7 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
     let densified = probe::record();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let dense = TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |_, indices| {
         (indices[0] + 2 * indices[1]) as f64
     })
@@ -97,7 +97,7 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
         &runtime,
         &bond,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![2.0, 3.0],
         }],
     )
@@ -168,7 +168,7 @@ fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let dense =
         TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |_, indices| {
             match (indices[0], indices[1]) {
@@ -184,7 +184,7 @@ fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
         &runtime,
         &bond,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![Complex64::new(2.0, 3.0), Complex64::new(-1.0, 0.5)],
         }],
     )
@@ -331,9 +331,9 @@ fn mixed_compact_lazy_inner_maps_non_self_dual_parent_blocks() {
     let bond = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 1),
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(2), 1),
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -343,15 +343,15 @@ fn mixed_compact_lazy_inner_maps_non_self_dual_parent_blocks() {
         &bond,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(2),
+                sector: U1Irrep::new(2).unwrap(),
                 values: vec![6.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(-1),
+                sector: U1Irrep::new(-1).unwrap(),
                 values: vec![5.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![3.0, 4.0],
             },
         ],
@@ -398,9 +398,9 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
     let u1_leg = GradedSpace::try_new(
         Arc::clone(&u1_provider),
         [
-            (U1Irrep::new(-1), 1),
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 1),
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -490,7 +490,7 @@ fn high_rank_identity_has_no_inline_capacity_boundary() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let tensor: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg; 10], [&leg; 9], |_, _| 1.0).unwrap();
     let codomain_axes: Vec<_> = (0..10).collect();
@@ -593,8 +593,8 @@ fn diagonal_spectrum_factor_converts_every_value_bitwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let zero = U1Irrep::new(0);
-    let one = U1Irrep::new(1);
+    let zero = U1Irrep::new(0).unwrap();
+    let one = U1Irrep::new(1).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(zero, 3), (one, 2)]).unwrap();
     let authority: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 0.0).unwrap();
@@ -929,7 +929,7 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
     probe!(
         engine,
         U1FusionRule,
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
         0
     );
     probe!(
@@ -951,8 +951,14 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
         engine,
         ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 3),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                3
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2
+            ),
         ],
         0
     );

@@ -244,7 +244,7 @@ fn misuse_reports_one_first_error_in_both_modes() {
     let u1_leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&u1),
-            pairs.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
+            pairs.iter().map(|&(q, d)| (U1Irrep::new(q).unwrap(), d)),
         )
         .unwrap()
     };
@@ -432,7 +432,7 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
     let u1 = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     // Row `a` of every sector divides by `1 + a`.
@@ -532,7 +532,7 @@ fn isomorphism_is_checked_per_coupled_sector() {
     let leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&u1),
-            pairs.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
+            pairs.iter().map(|&(q, d)| (U1Irrep::new(q).unwrap(), d)),
         )
         .unwrap()
     };

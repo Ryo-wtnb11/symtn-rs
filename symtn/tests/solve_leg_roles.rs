@@ -19,7 +19,8 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
         return;
     }
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let a: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |_, ij| {
             if ij[0] == ij[1] && ij[2] == ij[3] {
@@ -124,13 +125,14 @@ fn compact_divisor_keeps_the_identity_path() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let divisor: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![2.0, 4.0],
         }],
     )
@@ -192,7 +194,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
         )
         .unwrap(),
     );
-    let sector = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1));
+    let sector = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&fermion), [(sector, 2)]).unwrap();
     let w = GradedSpace::try_new(fermion, [(sector, 2)])
         .unwrap()

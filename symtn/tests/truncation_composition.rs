@@ -468,17 +468,32 @@ fn fermionic_u1_product_svd_composition_matches_the_oracle_for_every_policy() {
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 3),
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                3,
+            ),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                2,
+            ),
         ],
     )
     .unwrap();
     let target = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2,
+            ),
         ],
     )
     .unwrap();
@@ -637,7 +652,7 @@ fn a_whole_sector_is_dropped_from_the_bond() {
     let leg = u1_leg(&[(0, 3), (1, 2)]);
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &host_runtime(), [&leg], [&leg], |trees, _| {
-            if trees.coupled() == &U1Irrep::new(0) {
+            if trees.coupled() == &U1Irrep::new(0).unwrap() {
                 1.0
             } else {
                 1.0e-6
@@ -653,7 +668,7 @@ fn a_whole_sector_is_dropped_from_the_bond() {
     );
     assert_eq!(
         found.selection.subspace().sectors().unwrap(),
-        vec![U1Irrep::new(0)],
+        vec![U1Irrep::new(0).unwrap()],
         "the low sector must be gone from the bond, not merely shortened"
     );
 }
@@ -849,12 +864,18 @@ fn a_dense_bond_map_restricted_on_both_legs_equals_two_one_axis_calls() {
         "this fixture must exercise the dense arm"
     );
     for pairs in [
-        vec![(U1Irrep::new(0), 0..2), (U1Irrep::new(1), 0..1)],
+        vec![
+            (U1Irrep::new(0).unwrap(), 0..2),
+            (U1Irrep::new(1).unwrap(), 0..1),
+        ],
         // A non-prefix range: `find_truncated` never produces one, but
         // the compact-preserving form must not assume a leading prefix.
-        vec![(U1Irrep::new(0), 1..4), (U1Irrep::new(1), 2..3)],
+        vec![
+            (U1Irrep::new(0).unwrap(), 1..4),
+            (U1Irrep::new(1).unwrap(), 2..3),
+        ],
         // A sector dropped entirely.
-        vec![(U1Irrep::new(1), 1..3)],
+        vec![(U1Irrep::new(1).unwrap(), 1..3)],
     ] {
         let selection = LegSelection::try_new(&leg, pairs.clone()).unwrap();
         let once = dense
@@ -1071,7 +1092,7 @@ fn multi_axis_restrict_leg_rejects_everything_it_documents() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = u1_leg(&[(0, 3), (1, 2)]);
     let runtime = host_runtime();
-    let selection = LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..2)]).unwrap();
+    let selection = LegSelection::try_new(&leg, [(U1Irrep::new(0).unwrap(), 0..2)]).unwrap();
 
     let square: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&leg], [&leg]).unwrap();
     assert!(matches!(
@@ -1146,7 +1167,7 @@ fn one_selection_on_both_legs_keeps_a_compact_payload_compact() {
         .unwrap();
     let Svd { s, .. } = source.svd_compact(engine, &[0], &[1]).unwrap();
     let bond = s.domain()[0].clone();
-    let selection = LegSelection::try_new(&bond, [(U1Irrep::new(0), 0..2)]).unwrap();
+    let selection = LegSelection::try_new(&bond, [(U1Irrep::new(0).unwrap(), 0..2)]).unwrap();
     let restricted = s
         .restrict_leg(engine, &[(0, &selection), (1, &selection)])
         .unwrap();
@@ -1167,7 +1188,7 @@ fn one_selection_on_both_legs_keeps_a_compact_payload_compact() {
 
 fn spectrum(charge: i32, values: &[f64]) -> SectorSpectrum<U1Irrep, f64> {
     SectorSpectrum {
-        sector: U1Irrep::new(charge),
+        sector: U1Irrep::new(charge).unwrap(),
         values: values.to_vec(),
     }
 }
@@ -1245,7 +1266,7 @@ fn a_selection_from_another_leg_is_rejected_by_both_appliers() {
     let leg = u1_leg(&[(0, 3), (1, 2)]);
     let other = u1_leg(&[(0, 4), (1, 2)]);
     let runtime = host_runtime();
-    let selection = LegSelection::try_new(&other, [(U1Irrep::new(0), 0..2)]).unwrap();
+    let selection = LegSelection::try_new(&other, [(U1Irrep::new(0).unwrap(), 0..2)]).unwrap();
     let tensor: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&leg], [&leg]).unwrap();
     assert!(tensor
         .restrict_leg(engine, &[(0, &selection), (1, &selection)])

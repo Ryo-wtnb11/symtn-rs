@@ -260,8 +260,8 @@ fn fermionic_storage_conjugation_uses_distinct_reusable_structures() {
 
 #[test]
 fn u1_unique_tree_pair_reuses_completed_transformer_but_expert_layouts_stay_eager() {
-    let positive = U1Irrep::new(1).sector_id();
-    let negative = U1Irrep::new(-1).sector_id();
+    let positive = SectorId::from(U1Irrep::new(1).unwrap());
+    let negative = SectorId::from(U1Irrep::new(-1).unwrap());
     let vacuum = U1FusionRule.vacuum();
     let source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(

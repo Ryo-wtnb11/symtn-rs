@@ -260,8 +260,10 @@ fn fusion_layout_shape_and_fermionic_rule_provenance_do_not_alias() {
     assert!(!Arc::ptr_eq(&small, &large));
     assert_ne!(small.as_ref(), large.as_ref());
 
-    let transient_hom =
-        FusionTreeHomSpace::from_sectors([(U1Irrep::new(17), 4)], [(U1Irrep::new(17), 5)]);
+    let transient_hom = FusionTreeHomSpace::from_sectors(
+        [(U1Irrep::new(17).unwrap(), 4)],
+        [(U1Irrep::new(17).unwrap(), 5)],
+    );
     let transient = transient_hom
         .coupled_subblock_structure(&U1FusionRule, 1, [vec![4, 5]])
         .unwrap();
@@ -344,7 +346,10 @@ fn explicit_shape_coupled_structure_reuses_the_bounded_leg_cache() {
 }
 
 fn reset_test_homspace() -> FusionTreeHomSpace {
-    FusionTreeHomSpace::from_sectors([(U1Irrep::new(3), 2)], [(U1Irrep::new(3), 5)])
+    FusionTreeHomSpace::from_sectors(
+        [(U1Irrep::new(3).unwrap(), 2)],
+        [(U1Irrep::new(3).unwrap(), 5)],
+    )
 }
 
 /// One build of the complete structure, as `coupled_subblock_structure_from_leg_degeneracies`

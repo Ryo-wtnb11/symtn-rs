@@ -121,7 +121,11 @@ fn centered(count: i32) -> impl Iterator<Item = i32> {
 fn warm_lazy_adjoint_u1_allocates_like_owned_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_warm_lazy_adjoint!(engine, U1FusionRule, centered(3).map(U1Irrep::new));
+    assert_warm_lazy_adjoint!(
+        engine,
+        U1FusionRule,
+        centered(3).map(|charge| U1Irrep::new(charge).unwrap())
+    );
 }
 
 #[test]
@@ -149,7 +153,7 @@ fn warm_lazy_adjoint_fz2_u1_allocates_like_owned_contract() {
             U1FusionRule
         )
         .unwrap(),
-        centered(3).map(|q| ProductSector::new(parity(q), U1Irrep::new(q))),
+        centered(3).map(|q| ProductSector::new(parity(q), U1Irrep::new(q).unwrap())),
     );
 }
 

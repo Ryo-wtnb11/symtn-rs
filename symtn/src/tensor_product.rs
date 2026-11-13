@@ -1340,8 +1340,8 @@ mod tests {
         let reordered = check_compact_braid_diagonal!(
             symtn_core::U1FusionRule,
             [
-                (symtn_core::U1Irrep::new(-1).sector_id(), 1),
-                (symtn_core::U1Irrep::new(1).sector_id(), 3),
+                (SectorId::from(symtn_core::U1Irrep::new(-1).unwrap()), 1),
+                (SectorId::from(symtn_core::U1Irrep::new(1).unwrap()), 3),
             ]
         );
         assert!(reordered, "the U(1) braid moves a destination ordinal");

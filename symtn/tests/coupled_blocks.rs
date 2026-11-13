@@ -510,7 +510,7 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         } else {
             FermionParityIrrep::ODD
         };
-        ProductSector::new(parity, U1Irrep::new(q))
+        ProductSector::new(parity, U1Irrep::new(q).unwrap())
     };
     let v = GradedSpace::try_new(
         Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),
@@ -592,7 +592,7 @@ fn compact_diagonal_block_is_its_stored_spectrum() {
         &rt,
         &v,
         spectra.iter().map(|(q, values)| SectorSpectrum {
-            sector: U1Irrep::new(*q),
+            sector: U1Irrep::new(*q).unwrap(),
             values: values
                 .iter()
                 .map(|&x| Complex64::new(x, -x / 2.0))
@@ -601,7 +601,7 @@ fn compact_diagonal_block_is_its_stored_spectrum() {
     )
     .unwrap();
     for (q, values) in &spectra {
-        let block = d.block(&U1Irrep::new(*q)).unwrap();
+        let block = d.block(&U1Irrep::new(*q).unwrap()).unwrap();
         let CoupledBlockPayload::Diagonal(stored) = block.payload() else {
             panic!("a compact diagonal block must borrow its spectrum");
         };
@@ -632,7 +632,7 @@ fn absent_coupled_sector_is_tensorkits_empty_view() {
     // `-2` fuses in the codomain `v ⊗ w'` (3·2 = 6 states) but not in the
     // domain `v`; `7` fuses nowhere.
     for (sector, rows, cols) in [(-2, 6, 0), (7, 0, 0)] {
-        let block = t.block(&U1Irrep::new(sector)).unwrap();
+        let block = t.block(&U1Irrep::new(sector).unwrap()).unwrap();
         assert_eq!((block.rows(), block.cols()), (rows, cols), "{sector}");
         assert!(block.get(0, 0).is_none());
         assert!(block.row_trees().unwrap().is_empty());
@@ -640,7 +640,7 @@ fn absent_coupled_sector_is_tensorkits_empty_view() {
             block.payload(),
             CoupledBlockPayload::Dense { adjoint: false, .. }
         ));
-        let swapped = lazy.block(&U1Irrep::new(sector)).unwrap();
+        let swapped = lazy.block(&U1Irrep::new(sector).unwrap()).unwrap();
         assert_eq!((swapped.rows(), swapped.cols()), (cols, rows), "{sector}'");
         assert!(swapped.get(0, 0).is_none());
         assert!(matches!(
@@ -651,19 +651,19 @@ fn absent_coupled_sector_is_tensorkits_empty_view() {
     assert!(t
         .blocks()
         .unwrap()
-        .all(|(sector, _)| sector != U1Irrep::new(-2)));
+        .all(|(sector, _)| sector != U1Irrep::new(-2).unwrap()));
 
     let d = TensorMap::<_, f64>::diagonal(
         engine,
         &rt,
         &v,
         [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| SectorSpectrum {
-            sector: U1Irrep::new(q),
+            sector: U1Irrep::new(q).unwrap(),
             values: vec![1.0; n],
         }),
     )
     .unwrap();
-    let block = d.block(&U1Irrep::new(5)).unwrap();
+    let block = d.block(&U1Irrep::new(5).unwrap()).unwrap();
     assert_eq!((block.rows(), block.cols()), (0, 0));
     assert!(matches!(block.payload(), CoupledBlockPayload::Diagonal(values) if values.is_empty()));
 }

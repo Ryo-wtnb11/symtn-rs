@@ -43,7 +43,8 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
     // the default split has one, a split move either way. Distinct prime
     // degeneracies keep the intermediate payload size unique in the run.
     let runtime = Runtime::builder().build().unwrap();
-    let space = |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), n)]).unwrap();
+    let space =
+        |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), n)]).unwrap();
     let (x, c, y, z, u, w) = (
         space(11),
         space(13),

@@ -19,9 +19,9 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
     // the same U1 contraction result.
     let rule = U1FusionRule;
     let sectors = [
-        U1Irrep::new(-1).sector_id(),
-        U1Irrep::new(0).sector_id(),
-        U1Irrep::new(1).sector_id(),
+        SectorId::from(U1Irrep::new(-1).unwrap()),
+        SectorId::from(U1Irrep::new(0).unwrap()),
+        SectorId::from(U1Irrep::new(1).unwrap()),
     ];
     let leg = || SectorLeg::new(sectors.map(|sector| (sector, 1)), false);
     let hom = FusionTreeHomSpace::new(
@@ -153,7 +153,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
 fn forced_orientations_match_asymmetric_u1_reduced_block_oracle() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = U1FusionRule;
-    let neutral = U1Irrep::new(0).sector_id();
+    let neutral = SectorId::from(U1Irrep::new(0).unwrap());
     let leg = |dimension| SectorLeg::new([(neutral, dimension)], false);
     let lhs_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(2), leg(3)]),
@@ -667,7 +667,7 @@ fn paired_axis_selector_rejects_invalid_axes_before_scoring_or_mutation() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let rule = U1FusionRule;
-    let leg = || SectorLeg::new([(U1Irrep::new(0).sector_id(), 1)], false);
+    let leg = || SectorLeg::new([(SectorId::from(U1Irrep::new(0).unwrap()), 1)], false);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
@@ -869,7 +869,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
     )
     .unwrap();
     let sector = rule.encode_component_ids(
-        left_rule.encode_component_ids(SectorId::new(1), U1Irrep::new(0).sector_id()),
+        left_rule.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(0).unwrap())),
         SU2Irrep::from_twice_spin(1).sector_id(),
     );
     let build_space = |dimensions: [usize; 4]| {

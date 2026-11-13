@@ -1143,7 +1143,7 @@ fn mf_one_sided_identity_sector_between_populated_sectors_publishes_canonically(
 /// charge 2 and a domain-only charge 3; charge 0 is square (full rank,
 /// omitted from both null spaces) and charge 1 is `6 x 4`.
 fn u1_mps_side_only_space() -> BoundDynamicFusionMapSpace<symtn_core::U1FusionRule> {
-    let q = |charge| symtn_core::U1Irrep::new(charge).sector_id();
+    let q = |charge| SectorId::from(symtn_core::U1Irrep::new(charge).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new([(q(0), 3), (q(1), 3)], false),
@@ -1181,7 +1181,7 @@ where
             .collect::<Vec<_>>(),
         [(3, 3), (6, 4)]
     );
-    let q = |charge| symtn_core::U1Irrep::new(charge).sector_id();
+    let q = |charge| SectorId::from(symtn_core::U1Irrep::new(charge).unwrap());
     let codomain = BTreeMap::from([(q(0), 3), (q(1), 6), (q(2), 3)]);
     let domain = BTreeMap::from([(q(0), 3), (q(1), 4), (q(3), 2)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();

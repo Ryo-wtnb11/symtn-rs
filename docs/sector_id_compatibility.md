@@ -96,7 +96,8 @@ Packed `U(1) × fZ2` and `fZ2 × U(1) × SU(2)` reserve 33 and 41 bits
 respectively. They require a 64-bit target, as does the complete encoded U(1)
 label set. Checked constructors return a width error on narrower targets.
 
-U(1) charges range from `i32::MIN + 1` through `i32::MAX`.
-`U1Irrep::try_new(i32::MIN)` returns `None`; `new(i32::MIN)` panics because
-that charge has no representable dual. A fusion sum outside the range returns
-`FusionAlgebraError::U1FusionOverflow`, with no wrapping or saturation.
+U(1) charges range from `i32::MIN + 1` through `i32::MAX`. The label is
+fusion-symbols' `U1Irrep`, whose `new(i32::MIN)` returns an error because that
+charge has no representable dual. A fusion sum outside the range returns
+`FusionAlgebraError::FusionNotRepresentable` from both fusion and `N`, with no
+wrapping or saturation.

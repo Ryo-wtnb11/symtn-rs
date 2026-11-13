@@ -1645,7 +1645,7 @@ mod device {
         provider_rows!(config, "U1", |blocks: usize, degeneracy: usize| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
-                (0..blocks).map(|index| (U1Irrep::new(index as i32), degeneracy)),
+                (0..blocks).map(|index| (U1Irrep::new(index as i32).unwrap(), degeneracy)),
             )
             .expect("U(1) fixture leg")
         });
@@ -1686,7 +1686,7 @@ mod device {
                             } else {
                                 FermionParityIrrep::ODD
                             },
-                            U1Irrep::new((index / 2) as i32),
+                            U1Irrep::new((index / 2) as i32).unwrap(),
                         ),
                         degeneracy,
                     )

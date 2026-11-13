@@ -19,9 +19,9 @@ fn checked_fusion_space_error_exposes_its_typed_source() {
     });
     assert!(std::error::Error::source(&core)
         .is_some_and(|source| source.downcast_ref::<CoreError>().is_some()));
-    let algebra = CheckedFusionSpaceError::from(FusionAlgebraError::U1FusionOverflow {
-        left: i32::MAX,
-        right: 1,
+    let algebra = CheckedFusionSpaceError::from(FusionAlgebraError::FusionNotRepresentable {
+        left: u1(i32::MAX),
+        right: u1(1),
     });
     assert!(std::error::Error::source(&algebra)
         .is_some_and(|source| source.downcast_ref::<FusionAlgebraError>().is_some()));

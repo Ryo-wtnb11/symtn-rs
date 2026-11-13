@@ -320,7 +320,7 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     // The multiplicity-free path gives the same representation and zeros.
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(1), 3), (U1Irrep::new(0), 2)],
+        [(U1Irrep::new(1).unwrap(), 3), (U1Irrep::new(0).unwrap(), 2)],
     )
     .unwrap();
     let u1_diagonal = |engine: &mut dyn Engine, conj: bool| {
@@ -330,11 +330,11 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
             &u1,
             [
                 SectorSpectrum {
-                    sector: U1Irrep::new(1),
+                    sector: U1Irrep::new(1).unwrap(),
                     values: conj_if(conj, &big),
                 },
                 SectorSpectrum {
-                    sector: U1Irrep::new(0),
+                    sector: U1Irrep::new(0).unwrap(),
                     values: conj_if(conj, &small),
                 },
             ],

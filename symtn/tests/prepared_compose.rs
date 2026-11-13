@@ -422,8 +422,8 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
         )
         .unwrap(),
     );
-    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
-    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
+    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
     let v =
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 2), (odd(-1), 1)]).unwrap();
     let wd = GradedSpace::try_new(rule, [(even(0), 2), (odd(1), 2)])

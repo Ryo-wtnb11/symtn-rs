@@ -266,7 +266,7 @@ macro_rules! mf_case {
 fn u1(pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        pairs.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
+        pairs.iter().map(|&(q, d)| (U1Irrep::new(q).unwrap(), d)),
     )
     .unwrap()
 }
@@ -320,7 +320,7 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
                 } else {
                     FermionParityIrrep::EVEN
                 };
-                (product_sector(parity, U1Irrep::new(q)), d)
+                (product_sector(parity, U1Irrep::new(q).unwrap()), d)
             }),
         )
         .unwrap()
@@ -604,7 +604,7 @@ mod cuda {
                     } else {
                         FermionParityIrrep::EVEN
                     };
-                    (product_sector(parity, U1Irrep::new(q)), d)
+                    (product_sector(parity, U1Irrep::new(q).unwrap()), d)
                 }),
             )
             .unwrap()

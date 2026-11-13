@@ -37,7 +37,7 @@ pub type Fz2U1Rule = ProductFusionRule<
 >;
 
 pub fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
-    let q = U1Irrep::new;
+    let q = |charge| U1Irrep::new(charge).unwrap();
     (
         GradedSpace::try_new(Arc::new(U1FusionRule), [(q(-1), 2), (q(0), 1), (q(1), 3)]).unwrap(),
         GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 2), (q(1), 1)]).unwrap(),
@@ -54,8 +54,8 @@ pub fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
 
 pub fn fz2u1_legs() -> (GradedSpace<Fz2U1Rule>, GradedSpace<Fz2U1Rule>) {
     let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
-    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
-    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
+    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
     (
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 1), (odd(-1), 2)]).unwrap(),
         GradedSpace::try_new(rule, [(even(0), 1), (odd(1), 2)]).unwrap(),

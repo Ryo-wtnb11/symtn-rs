@@ -199,7 +199,11 @@ fn centered(count: i32) -> impl Iterator<Item = i32> {
 fn warm_output_axes_u1_costs_no_more_than_contract_then_permute() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_output_axes_cost!(engine, U1FusionRule, centered(3).map(U1Irrep::new));
+    assert_output_axes_cost!(
+        engine,
+        U1FusionRule,
+        centered(3).map(|charge| U1Irrep::new(charge).unwrap())
+    );
 }
 
 #[test]
@@ -227,7 +231,7 @@ fn warm_output_axes_fz2_u1_costs_no_more_than_contract_then_permute() {
             U1FusionRule
         )
         .unwrap(),
-        centered(3).map(|q| ProductSector::new(parity(q), U1Irrep::new(q))),
+        centered(3).map(|q| ProductSector::new(parity(q), U1Irrep::new(q).unwrap())),
     );
 }
 

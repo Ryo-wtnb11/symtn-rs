@@ -75,7 +75,7 @@ fn typed_u1_leg(entries: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
         Arc::new(U1FusionRule),
         entries
             .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap()
 }

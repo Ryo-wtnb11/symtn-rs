@@ -674,7 +674,7 @@ mod cache_tests {
         TripleCodec::encode(
             Fz2U1Codec::encode(
                 SectorId::from(FermionParityIrrep::new(parity == 1)),
-                U1Irrep::new(charge).sector_id(),
+                SectorId::from(U1Irrep::new(charge).unwrap()),
             ),
             SU2Irrep::from_twice_spin(twice_spin).sector_id(),
         )
@@ -703,7 +703,7 @@ mod cache_tests {
     // Single-charge U(1) source: one coupled sector, block shape [deg, deg].
     fn u1_source(charge: i32, deg: usize) -> DynamicFusionMapSpace {
         let rule = U1FusionRule;
-        let sid = U1Irrep::new(charge).sector_id();
+        let sid = SectorId::from(U1Irrep::new(charge).unwrap());
         let leg = || FusionProductSpace::new([SectorLeg::new([(sid, deg)], false)]);
         let hom = FusionTreeHomSpace::new(leg(), leg());
         DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
@@ -714,7 +714,7 @@ mod cache_tests {
     /// hom space.
     fn u1_view_tensor() -> TestTensor<OutputObservedValue> {
         let rule = U1FusionRule;
-        let zero = U1Irrep::new(0).sector_id();
+        let zero = SectorId::from(U1Irrep::new(0).unwrap());
         let homspace = FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(zero, 2)], false)]),
             FusionProductSpace::new([SectorLeg::new([(zero, 3)], false)]),
@@ -747,7 +747,7 @@ mod cache_tests {
 
     fn u1_tensor() -> TestTensor<OutputObservedValue> {
         let rule = U1FusionRule;
-        let one = U1Irrep::new(1).sector_id();
+        let one = SectorId::from(U1Irrep::new(1).unwrap());
         let leg = || FusionProductSpace::new([SectorLeg::new([(one, 2)], false)]);
         let homspace = FusionTreeHomSpace::new(leg(), leg());
         let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
@@ -876,7 +876,7 @@ mod cache_tests {
         // transpose numbers without a pivotal or fermionic phase.
         assert_rank_one_final_layout(
             &U1FusionRule,
-            U1Irrep::new(1).sector_id(),
+            SectorId::from(U1Irrep::new(1).unwrap()),
             2,
             3,
             false,

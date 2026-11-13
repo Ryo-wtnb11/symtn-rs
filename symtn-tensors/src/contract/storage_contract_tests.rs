@@ -49,9 +49,9 @@ fn space<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 fn u1_leg(dual: bool) -> SectorLeg {
     SectorLeg::new(
         [
-            (U1Irrep::new(-1).sector_id(), 2),
-            (U1Irrep::new(0).sector_id(), 1),
-            (U1Irrep::new(1).sector_id(), 2),
+            (SectorId::from(U1Irrep::new(-1).unwrap()), 2),
+            (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+            (SectorId::from(U1Irrep::new(1).unwrap()), 2),
         ],
         dual,
     )
@@ -1058,7 +1058,7 @@ const ODD: SectorId = SectorId::new(1);
 /// fZ2 x U(1), degeneracy > 1, odd sectors of both charge signs. A dual leg
 /// stores the conjugate charges (the typed `GradedSpace::try_dual`).
 fn fermion_u1_leg(rule: &FermionU1, dual: bool) -> SectorLeg {
-    let charge = |q: i32| U1Irrep::new(if dual { -q } else { q }).sector_id();
+    let charge = |q: i32| SectorId::from(U1Irrep::new(if dual { -q } else { q }).unwrap());
     SectorLeg::new(
         [
             (rule.encode_component_ids(EVEN, charge(0)), 2),
@@ -2007,8 +2007,8 @@ fn a_zero_degeneracy_sector_never_yields_a_zero_extent_core_job() {
     let leg = || {
         SectorLeg::new(
             [
-                (U1Irrep::new(0).sector_id(), 1),
-                (U1Irrep::new(1).sector_id(), 1),
+                (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+                (SectorId::from(U1Irrep::new(1).unwrap()), 1),
             ],
             false,
         )
@@ -2016,8 +2016,8 @@ fn a_zero_degeneracy_sector_never_yields_a_zero_extent_core_job() {
     let empty = || {
         SectorLeg::new(
             [
-                (U1Irrep::new(0).sector_id(), 0),
-                (U1Irrep::new(1).sector_id(), 2),
+                (SectorId::from(U1Irrep::new(0).unwrap()), 0),
+                (SectorId::from(U1Irrep::new(1).unwrap()), 2),
             ],
             false,
         )
@@ -2054,9 +2054,9 @@ fn a_zero_degeneracy_sector_never_yields_a_zero_extent_core_job() {
 fn wide_leg() -> SectorLeg {
     SectorLeg::new(
         [
-            (U1Irrep::new(0).sector_id(), 1),
-            (U1Irrep::new(1).sector_id(), 2),
-            (U1Irrep::new(2).sector_id(), 1),
+            (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+            (SectorId::from(U1Irrep::new(1).unwrap()), 2),
+            (SectorId::from(U1Irrep::new(2).unwrap()), 1),
         ],
         false,
     )
@@ -2066,8 +2066,8 @@ fn narrow_leg(dual: bool) -> SectorLeg {
     let sign = if dual { -1 } else { 1 };
     SectorLeg::new(
         [
-            (U1Irrep::new(0).sector_id(), 2),
-            (U1Irrep::new(sign).sector_id(), 1),
+            (SectorId::from(U1Irrep::new(0).unwrap()), 2),
+            (SectorId::from(U1Irrep::new(sign).unwrap()), 1),
         ],
         dual,
     )
@@ -2413,9 +2413,9 @@ mod device {
         let v = || {
             SectorLeg::new(
                 [
-                    (U1Irrep::new(0).sector_id(), 1),
-                    (U1Irrep::new(1).sector_id(), 2),
-                    (U1Irrep::new(2).sector_id(), 1),
+                    (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+                    (SectorId::from(U1Irrep::new(1).unwrap()), 2),
+                    (SectorId::from(U1Irrep::new(2).unwrap()), 1),
                 ],
                 false,
             )
@@ -2423,8 +2423,8 @@ mod device {
         let w = || {
             SectorLeg::new(
                 [
-                    (U1Irrep::new(0).sector_id(), 2),
-                    (U1Irrep::new(1).sector_id(), 1),
+                    (SectorId::from(U1Irrep::new(0).unwrap()), 2),
+                    (SectorId::from(U1Irrep::new(1).unwrap()), 1),
                 ],
                 false,
             )
@@ -2968,9 +2968,9 @@ fn small_output_takes_copy_c_without_copying_an_operand() {
     let u1 = Arc::new(U1FusionRule);
     let leg = |entries: &[(i32, usize)]| {
         SectorLeg::new(
-            entries
-                .iter()
-                .map(|&(charge, degeneracy)| (U1Irrep::new(charge).sector_id(), degeneracy)),
+            entries.iter().map(|&(charge, degeneracy)| {
+                (SectorId::from(U1Irrep::new(charge).unwrap()), degeneracy)
+            }),
             false,
         )
     };

@@ -987,7 +987,7 @@ mod tests {
         let fp_u1 =
             ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap();
-        let odd_charge = fp_u1.encode_component_ids(odd, U1Irrep::new(0).sector_id());
+        let odd_charge = fp_u1.encode_component_ids(odd, SectorId::from(U1Irrep::new(0).unwrap()));
         let product = ProductFusionRule::<_, _>::try_new(fp_u1, SU2FusionRule).unwrap();
         let odd_product =
             product.encode_component_ids(odd_charge, SU2Irrep::from_twice_spin(0).sector_id());
@@ -1005,7 +1005,7 @@ mod tests {
     #[test]
     fn storage_core_route_derives_geometry_once() {
         let rule = std::sync::Arc::new(U1FusionRule);
-        let zero = U1Irrep::new(0).sector_id();
+        let zero = SectorId::from(U1Irrep::new(0).unwrap());
         let space = |space| {
             crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(space, rule.clone()).unwrap()
         };
@@ -1037,7 +1037,7 @@ mod tests {
         use std::sync::Arc;
 
         use symtn_core::{
-            FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep,
+            FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, U1FusionRule, U1Irrep,
         };
         use symtn_operations::{OutputAxisOrder, TensorContractSpec};
 
@@ -1051,9 +1051,9 @@ mod tests {
             let leg = || {
                 SectorLeg::new(
                     [
-                        (U1Irrep::new(-1).sector_id(), 2),
-                        (U1Irrep::new(0).sector_id(), 3),
-                        (U1Irrep::new(1).sector_id(), 1),
+                        (SectorId::from(U1Irrep::new(-1).unwrap()), 2),
+                        (SectorId::from(U1Irrep::new(0).unwrap()), 3),
+                        (SectorId::from(U1Irrep::new(1).unwrap()), 1),
                     ],
                     false,
                 )

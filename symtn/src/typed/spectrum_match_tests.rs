@@ -15,7 +15,7 @@ fn misses_and_data(groups: usize) -> (usize, Vec<f64>) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let sectors: Vec<_> = (0..groups as i32)
-        .map(|k| U1Irrep::new(31 * k - 15_000))
+        .map(|k| U1Irrep::new(31 * k - 15_000).unwrap())
         .collect();
     let bond =
         GradedSpace::try_new(Arc::new(U1FusionRule), sectors.iter().map(|&s| (s, 1))).unwrap();
@@ -62,7 +62,7 @@ fn spectrum_walk_scans_nothing_and_scatters_every_sector() {
 fn cursor_pairs_by_sector_on_shuffled_gapped_spectrum() {
     use super::fusion_tree::SpectrumCursor;
     use symtn_matrixalgebra::SectorSpectrum as Entry;
-    let id = |k: i32| crate::sector::SectorId::from(U1Irrep::new(k));
+    let id = |k: i32| crate::sector::SectorId::from(U1Irrep::new(k).unwrap());
     // Entries for 3, 1, 5 (shuffled); sector 9 has no entry, 7 has no block.
     let spectrum: Vec<Entry<f64>> = [3, 1, 5, 7]
         .iter()

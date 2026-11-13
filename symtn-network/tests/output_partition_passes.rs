@@ -35,7 +35,11 @@ type Map = TensorMap<U1FusionRule, f64>;
 fn operands(engine: &mut dyn Engine) -> (Map, Map) {
     let runtime = Runtime::builder().build().unwrap();
     let space = |n| {
-        GradedSpace::try_new(std::sync::Arc::new(U1FusionRule), [(U1Irrep::new(0), n)]).unwrap()
+        GradedSpace::try_new(
+            std::sync::Arc::new(U1FusionRule),
+            [(U1Irrep::new(0).unwrap(), n)],
+        )
+        .unwrap()
     };
     let (p, q, c, r) = (space(13), space(17), space(19), space(23));
     (

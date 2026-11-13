@@ -15,7 +15,7 @@ type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 fn u1_legs() -> Vec<(SectorId, usize)> {
     [(-1, 2), (0, 3), (1, 4)]
         .into_iter()
-        .map(|(charge, deg)| (U1Irrep::new(charge).sector_id(), deg))
+        .map(|(charge, deg)| (SectorId::from(U1Irrep::new(charge).unwrap()), deg))
         .collect()
 }
 
@@ -32,7 +32,7 @@ fn fz2_u1_legs() -> Vec<(SectorId, usize)> {
         .map(|((charge, parity), deg)| {
             let sector = TensorKitProductCodec::try_encode(
                 SectorId::new(parity),
-                U1Irrep::new(charge).sector_id(),
+                SectorId::from(U1Irrep::new(charge).unwrap()),
             )
             .unwrap();
             (sector, deg)

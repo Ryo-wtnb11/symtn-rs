@@ -27,7 +27,8 @@ type Map = TensorMap<U1FusionRule, f64>;
 /// payload size is unique among the call's allocations.
 fn operands(runtime: &Runtime) -> (Map, Map) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let space = |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), n)]).unwrap();
+    let space =
+        |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), n)]).unwrap();
     let (p, q, c, r) = (space(13), space(17), space(19), space(23));
     (
         Map::rand_with_seed(engine, runtime, [&p, &q], [&c], 1).unwrap(),

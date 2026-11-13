@@ -592,7 +592,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     use num_complex::Complex64;
     let rule = U1FusionRule;
-    let c = |q: i32| U1Irrep::new(q).sector_id();
+    let c = |q: i32| SectorId::from(U1Irrep::new(q).unwrap());
     // Non-self-dual charges: +1 and -1 are distinct duals of each other.
     let leg = || SectorLeg::new([(c(-1), 2), (c(1), 2)], false);
     let hom = || {

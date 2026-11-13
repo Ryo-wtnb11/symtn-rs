@@ -18,6 +18,10 @@ type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
 type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
 
+fn u1(charge: i32) -> SectorId {
+    SectorId::from(U1Irrep::new(charge).unwrap())
+}
+
 fn lowered_product_rule() -> TripleRule {
     TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
@@ -708,7 +712,7 @@ fn bind_revalidates_complete_without_replacing_layout() {
     let rule = lowered_product_rule();
     let pair = Fz2U1Codec::encode(
         SectorId::from(ZNIrrep::new(1, 2).unwrap()),
-        U1Irrep::new(2).sector_id(),
+        SectorId::from(U1Irrep::new(2).unwrap()),
     );
     let sector = TripleCodec::encode(pair, SU2Irrep::from_twice_spin(1).sector_id());
     let layout = DynamicFusionMapSpace::from_final_homspace(
@@ -736,9 +740,9 @@ fn lowered_bind_failure_publishes_no_layout_or_admission() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let max = U1Irrep::new(i32::MAX).sector_id();
-    let one = U1Irrep::new(1).sector_id();
-    let vacuum = U1Irrep::new(0).sector_id();
+    let max = SectorId::from(U1Irrep::new(i32::MAX).unwrap());
+    let one = SectorId::from(U1Irrep::new(1).unwrap());
+    let vacuum = SectorId::from(U1Irrep::new(0).unwrap());
     let pair = FusionTreePairKey::try_pair_from_sector_ids(
         [max.id(), one.id()],
         [],
@@ -795,13 +799,13 @@ fn lowered_bind_failure_publishes_no_layout_or_admission() {
             BoundDynamicFusionMapSpace::bind_multiplicity_free_lowered(raw, Arc::new(U1FusionRule))
                 .unwrap_err();
         assert!(matches!(
-            error,
-            OperationError::FusionAlgebra(cause)
-                if *cause == FusionAlgebraError::U1FusionOverflow {
-                    left: i32::MAX,
-                    right: 1,
-                }
-        ));
+                   error,
+                   OperationError::FusionAlgebra(cause)
+                       if *cause == FusionAlgebraError::FusionNotRepresentable {
+        left: u1(i32::MAX),
+        right: u1(1),
+        }
+               ));
         assert_eq!(original.admission(), &admission);
     }
 }

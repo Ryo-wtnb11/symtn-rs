@@ -185,7 +185,7 @@ where
     let u1 = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     for (name, bond) in [("u1", bond.clone()), ("u1 dual", bond.try_dual().unwrap())] {

@@ -258,7 +258,11 @@ fn full_svd_late_failure_does_not_publish_the_adjoint_cache() {
     let _dense = probe::inject_dense(Box::new(fail_second_svd(&Arc::default())));
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
+    )
+    .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices.iter().sum::<usize>() + 1) as f64
     })
@@ -394,11 +398,14 @@ fn assert_null_late_failure(engine: &mut dyn Engine, left: bool) {
     let provider = Arc::new(U1FusionRule);
     let short = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
-    let long =
-        GradedSpace::try_new(provider, [(U1Irrep::new(0), 3), (U1Irrep::new(1), 3)]).unwrap();
+    let long = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 3)],
+    )
+    .unwrap();
     // The adjoint's null space is the parent's opposite one, so the parent is
     // long on that side and both sectors run a QR.
     let (codomain, domain) = if left {
@@ -558,7 +565,7 @@ fn polar_redirects_through_parent_with_owned_psd_factors_and_a_cold_receiver() {
 
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let rank_deficient =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             let value = ((indices[0] + 1) * (indices[1] + 1)) as f64;
@@ -657,8 +664,11 @@ fn polar_redirect_late_failure_leaves_parent_and_receiver_unchanged() {
         )));
         let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(U1FusionRule);
-        let leg =
-            GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
+        let leg = GradedSpace::try_new(
+            provider,
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
+        )
+        .unwrap();
         let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             (indices.iter().sum::<usize>() + 1) as f64
         })
@@ -919,7 +929,11 @@ fn assert_full_qr_lq_late_failure(engine: &mut dyn Engine, qr: bool) {
     let _dense = probe::inject_dense(Box::new(fail_second_qr()));
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
+    )
+    .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices.iter().sum::<usize>() + 1) as f64
     })

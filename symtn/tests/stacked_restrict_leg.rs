@@ -240,7 +240,7 @@ fn a_selection_of_another_rule_instance_is_a_rule_mismatch() {
 fn restrict_leg_of_a_blockless_structure_is_empty() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let q = fixtures::U1Irrep::new;
+    let q = |charge| fixtures::U1Irrep::new(charge).unwrap();
     let charged = GradedSpace::try_new(Arc::new(fixtures::U1FusionRule), [(q(1), 2)]).unwrap();
     let neutral = GradedSpace::try_new(Arc::new(fixtures::U1FusionRule), [(q(0), 2)]).unwrap();
     let empty = TensorMap::<_, f64>::zeros(engine, &runtime, [&charged], [&neutral]).unwrap();

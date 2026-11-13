@@ -320,7 +320,7 @@ fn u1_leg(degs: &[usize]) -> GradedSpace<U1FusionRule> {
         Arc::new(U1FusionRule),
         degs.iter()
             .enumerate()
-            .map(|(i, &d)| (U1Irrep::new(low + i as i32), d)),
+            .map(|(i, &d)| (U1Irrep::new(low + i as i32).unwrap(), d)),
     )
     .expect("U(1) leg")
 }

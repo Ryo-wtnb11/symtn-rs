@@ -82,7 +82,9 @@ where
 #[test]
 fn reused_unique_scratch_matches_the_key_form() {
     let mut scratch = UniqueTreePairScratch::with_rank(2);
-    let u1: Vec<SectorId> = [-1, 0, 1].map(|q| U1Irrep::new(q).sector_id()).to_vec();
+    let u1: Vec<SectorId> = [-1, 0, 1]
+        .map(|q| SectorId::from(U1Irrep::new(q).unwrap()))
+        .to_vec();
     let z2 = [SectorId::new(0), SectorId::new(1)];
     let mut compared = 0;
     compared += compare(&U1FusionRule, &u1, &[false, true], &[true], &mut scratch);

@@ -256,7 +256,10 @@ fn u1_times_su2_transforms_scale_componentwise() {
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
     );
     let label = |charge: i32, twice_spin: usize| {
-        product_sector(U1Irrep::new(charge), SU2Irrep::from_twice_spin(twice_spin))
+        product_sector(
+            U1Irrep::new(charge).unwrap(),
+            SU2Irrep::from_twice_spin(twice_spin),
+        )
     };
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -303,7 +306,7 @@ fn fermionic_transforms_scale_componentwise() {
             } else {
                 FermionParityIrrep::EVEN
             },
-            U1Irrep::new(charge),
+            U1Irrep::new(charge).unwrap(),
         )
     };
     let leg = GradedSpace::try_new(
@@ -408,7 +411,7 @@ fn traces_scale_componentwise() {
             } else {
                 FermionParityIrrep::EVEN
             },
-            U1Irrep::new(charge),
+            U1Irrep::new(charge).unwrap(),
         )
     };
     let leg = GradedSpace::try_new(

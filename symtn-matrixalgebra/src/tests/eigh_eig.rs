@@ -1000,7 +1000,7 @@ fn eigh_full_does_not_relabel_the_lowest_u1_sector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: full EIGH preserves the eigen equation and factor orientation at the lowest U(1) label.
     let rule = U1FusionRule;
-    let minimum = U1Irrep::new(i32::MIN + 1).sector_id();
+    let minimum = SectorId::from(U1Irrep::new(i32::MIN + 1).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(minimum, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(minimum, 2)], false)]),
@@ -1087,9 +1087,9 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
     assert_eigh_reconstructs_rule(
         &U1FusionRule,
         &[
-            U1Irrep::new(-1).sector_id(),
-            U1Irrep::new(0).sector_id(),
-            U1Irrep::new(1).sector_id(),
+            SectorId::from(U1Irrep::new(-1).unwrap()),
+            SectorId::from(U1Irrep::new(0).unwrap()),
+            SectorId::from(U1Irrep::new(1).unwrap()),
         ],
     );
     assert_eigh_reconstructs_rule(
@@ -1102,8 +1102,8 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
     )
     .unwrap();
     let product_sectors = [
-        product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
-        product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
+        product.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
+        product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
     assert_eigh_reconstructs_rule(&product, &product_sectors);
 

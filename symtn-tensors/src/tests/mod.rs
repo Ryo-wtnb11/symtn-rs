@@ -825,8 +825,9 @@ fn fz2_u1_su2_tree_pair_fixture() -> (
     .unwrap();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
-    let left_sector =
-        |parity, charge| left_rule.encode_component_ids(parity, U1Irrep::new(charge).sector_id());
+    let left_sector = |parity, charge| {
+        left_rule.encode_component_ids(parity, SectorId::from(U1Irrep::new(charge).unwrap()))
+    };
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(
             left_sector(parity, charge),
@@ -864,8 +865,8 @@ fn force_fusion_layout_eviction() {
     let rule = U1FusionRule;
     for charge in 100_000..108_256 {
         let hom = FusionTreeHomSpace::from_sectors(
-            [(U1Irrep::new(charge), 1)],
-            [(U1Irrep::new(charge), 1)],
+            [(U1Irrep::new(charge).unwrap(), 1)],
+            [(U1Irrep::new(charge).unwrap(), 1)],
         );
         let _ = hom.fusion_tree_keys(&rule);
     }

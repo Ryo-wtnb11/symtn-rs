@@ -14,7 +14,10 @@ fn checked_u1_rejects_the_unlabelled_id_and_preserves_valid_boundaries() {
     for (left, right) in [(i32::MAX, 1), (i32::MIN + 1, -1)] {
         assert_eq!(
             rule.try_fusion_channels(u1(left), u1(right)),
-            Err(FusionAlgebraError::U1FusionOverflow { left, right })
+            Err(FusionAlgebraError::FusionNotRepresentable {
+                left: u1(left),
+                right: u1(right),
+            })
         );
     }
     for (left, right, expected) in [
@@ -119,9 +122,9 @@ fn checked_products_preserve_child_u1_errors_and_distinguish_codec_errors() {
     let pair_one = pair.try_encode_component_ids(z2_odd(), u1(1)).unwrap();
     assert_eq!(
         pair.try_fusion_channels(pair_max, pair_one),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         })
     );
 

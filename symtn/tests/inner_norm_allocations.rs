@@ -44,7 +44,7 @@ fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
                 } else {
                     FermionParityIrrep::ODD
                 },
-                U1Irrep::new(charge),
+                U1Irrep::new(charge).unwrap(),
             ),
             SU2Irrep::from_twice_spin(twice_spin),
         )

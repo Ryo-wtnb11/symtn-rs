@@ -528,7 +528,7 @@ fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(1),
+            sector: U1Irrep::new(1).unwrap(),
             values: vec![2.0, 3.0],
         }],
     )

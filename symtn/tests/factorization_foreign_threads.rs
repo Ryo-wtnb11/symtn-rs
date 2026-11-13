@@ -45,7 +45,7 @@ fn streaming_factorizations_from_rayon_workers_and_threads_match_serial_results(
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
-        centered(5).map(|q| (U1Irrep::new(q), 2)),
+        centered(5).map(|q| (U1Irrep::new(q).unwrap(), 2)),
     )
     .unwrap();
     let tensors = (0..6)

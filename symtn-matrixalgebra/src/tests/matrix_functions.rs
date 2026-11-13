@@ -291,11 +291,11 @@ fn solve_left_uses_one_direct_solve_per_sector_for_rectangular_rhs() {
     let sectors = dense_sector_matrices(1, solved.tensor());
     let even = sectors
         .iter()
-        .find(|(sector, _, _, _)| *sector == U1Irrep::new(0).sector_id())
+        .find(|(sector, _, _, _)| *sector == SectorId::from(U1Irrep::new(0).unwrap()))
         .unwrap();
     let odd = sectors
         .iter()
-        .find(|(sector, _, _, _)| *sector == U1Irrep::new(1).sector_id())
+        .find(|(sector, _, _, _)| *sector == SectorId::from(U1Irrep::new(1).unwrap()))
         .unwrap();
     assert_eq!((even.1, even.2), (2, 3));
     // Hand quotients; the triangular solve may divide or multiply by a
@@ -445,7 +445,7 @@ fn solve_left_submits_one_batch_of_the_nonempty_sectors_in_order() {
     let sectors = dense_sector_matrices(1, solved.tensor());
     let odd = sectors
         .iter()
-        .find(|(sector, _, _, _)| *sector == U1Irrep::new(2).sector_id())
+        .find(|(sector, _, _, _)| *sector == SectorId::from(U1Irrep::new(2).unwrap()))
         .unwrap();
     numerics::assert_slices_close("charge 2", &odd.3, &[7.0, 8.0], 1);
 }
@@ -628,8 +628,8 @@ fn solve_left_direct_into_rejects_foreign_authority_and_wrong_output_before_exec
         FusionTreeHomSpace::new(
             divisor.space().space().homspace().domain().clone(),
             FusionProductSpace::new([
-                SectorLeg::new([(U1Irrep::new(0).sector_id(), 1)], false),
-                SectorLeg::new([(U1Irrep::new(0).sector_id(), 1)], false),
+                SectorLeg::new([(SectorId::from(U1Irrep::new(0).unwrap()), 1)], false),
+                SectorLeg::new([(SectorId::from(U1Irrep::new(0).unwrap()), 1)], false),
             ]),
         ),
     )
@@ -729,13 +729,13 @@ where
     let codomain = SectorLeg::new(
         blocks
             .iter()
-            .map(|(charge, rows, _, _)| (U1Irrep::new(*charge).sector_id(), *rows)),
+            .map(|(charge, rows, _, _)| (SectorId::from(U1Irrep::new(*charge).unwrap()), *rows)),
         false,
     );
     let domain = SectorLeg::new(
         blocks
             .iter()
-            .map(|(charge, _, cols, _)| (U1Irrep::new(*charge).sector_id(), *cols)),
+            .map(|(charge, _, cols, _)| (SectorId::from(U1Irrep::new(*charge).unwrap()), *cols)),
         false,
     );
     let homspace = FusionTreeHomSpace::new(
@@ -750,7 +750,7 @@ where
         let coupled = tree.codomain_tree().coupled();
         let (_, rows, _, data) = blocks
             .iter()
-            .find(|(charge, _, _, _)| U1Irrep::new(*charge).sector_id() == coupled)
+            .find(|(charge, _, _, _)| SectorId::from(U1Irrep::new(*charge).unwrap()) == coupled)
             .unwrap();
         data[indices[0] + rows * indices[1]]
     })
@@ -850,8 +850,8 @@ fn inv_uses_sector_local_scale_for_su2_fz2_and_product_rules() {
     )
     .unwrap();
     let product_sectors = [
-        fz2_u1.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
-        fz2_u1.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
+        fz2_u1.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
+        fz2_u1.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
     let fz2_u1_su2 = symtn_core::ProductFusionRule::<_, _>::try_new(fz2_u1, SU2FusionRule).unwrap();
     let nested_sectors = [
@@ -924,7 +924,7 @@ fn inv_dyn_reverses_isomorphic_spaces_with_different_tree_ranks() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: sector identity routes an inverse between isomorphic reduced spaces
     // even when their external tree ranks differ.
-    let charge = U1Irrep::new(0).sector_id();
+    let charge = SectorId::from(U1Irrep::new(0).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new([(charge, 2)], false),
@@ -1252,7 +1252,7 @@ const EXP_INVERSE_RTOL: f64 = 1e-11;
 
 /// Column-major coupled-sector matrix of a single-tree `1 <- 1` U(1) tensor.
 fn u1_block_matrix<D: Copy + Zero>(tensor: &TestTensor<D>, charge: i32) -> Vec<D> {
-    let sector = U1Irrep::new(charge).sector_id();
+    let sector = SectorId::from(U1Irrep::new(charge).unwrap());
     let structure = tensor.structure();
     let block = (0..structure.block_count())
         .map(|index| structure.block(index).unwrap())
@@ -1605,7 +1605,9 @@ fn coupled_sector_matrices(tensor: &TestTensor<f64>) -> Vec<(SectorId, usize, Ve
 /// Rank 2 <- 2 U(1) endomorphism whose coupled sectors carry one, two and three
 /// fusion trees, scaled into the oracle's comfortable range.
 fn exp_multitree_fixture() -> TestTensor<f64> {
-    let sectors: Vec<SectorId> = (0..3).map(|c| U1Irrep::new(c).sector_id()).collect();
+    let sectors: Vec<SectorId> = (0..3)
+        .map(|c| SectorId::from(U1Irrep::new(c).unwrap()))
+        .collect();
     let tensor = tsvd_test_tensor(&U1FusionRule, &sectors);
     TestTensor::<f64>::from_vec_with_fusion_space(
         tensor
@@ -2363,8 +2365,8 @@ fn exp_rejects_a_non_endomorphism() {
     // What: TensorKit's own precondition (`domain == codomain`) still holds —
     // general `exp` widens which endomorphisms are accepted, not which maps are.
     let rule = U1FusionRule;
-    let codomain = SectorLeg::new([(U1Irrep::new(0).sector_id(), 3)], false);
-    let domain = SectorLeg::new([(U1Irrep::new(0).sector_id(), 2)], false);
+    let codomain = SectorLeg::new([(SectorId::from(U1Irrep::new(0).unwrap()), 3)], false);
+    let domain = SectorLeg::new([(SectorId::from(U1Irrep::new(0).unwrap()), 2)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),

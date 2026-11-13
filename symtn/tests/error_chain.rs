@@ -4,7 +4,7 @@
 
 use std::error::Error as StdError;
 
-use symtn::sector::U1FusionRule;
+use symtn::sector::{SectorId, U1FusionRule, U1Irrep};
 use symtn::typed::{
     BatchError, CheckedGenericPlanError, CheckedGenericStructureError,
     CheckedGenericTensorProductError, CoreError, Error, FacadeError, FusionAlgebraError,
@@ -17,6 +17,10 @@ fn chain(error: &(dyn StdError + 'static)) -> Vec<String> {
     std::iter::successors(Some(error), |&error| error.source())
         .map(ToString::to_string)
         .collect()
+}
+
+fn u1(charge: i32) -> SectorId {
+    SectorId::from(U1Irrep::new(charge).unwrap())
 }
 
 fn core() -> CoreError {
@@ -38,9 +42,9 @@ fn assert_printed_once(error: &(dyn StdError + 'static), root: &dyn StdError) {
 #[test]
 fn facade_wrappers_print_each_message_once() {
     let operation = OperationError::from(core());
-    let algebra = FusionAlgebraError::U1FusionOverflow {
-        left: i32::MAX,
-        right: 1,
+    let algebra = FusionAlgebraError::FusionNotRepresentable {
+        left: u1(i32::MAX),
+        right: u1(1),
     };
     let cases: Vec<(Error, Box<dyn StdError>)> = vec![
         (Error::Core(Box::new(core())), Box::new(core())),

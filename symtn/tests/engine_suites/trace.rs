@@ -192,7 +192,7 @@ on_each_engine! {
             TensorMap::from_subblock_fn(engine, &runtime, [&v, &w, &v], [&v, &w], move |trees, index| {
                 let value = next(trees, index);
                 match only {
-                    Some(charge) if trees.codomain_uncoupled()[0] != U1Irrep::new(charge) => 0.0,
+                    Some(charge) if trees.codomain_uncoupled()[0] != U1Irrep::new(charge).unwrap() => 0.0,
                     _ => value,
                 }
             })

@@ -370,7 +370,10 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
             )
             .unwrap(),
         ),
-        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
+        [(
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            2,
+        )],
     )
     .unwrap();
     let dual = odd.try_dual().unwrap();
@@ -423,17 +426,32 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();
     let w = GradedSpace::try_new(
         rule,
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2,
+            ),
         ],
     )
     .unwrap();
@@ -1138,7 +1156,10 @@ fn negative_only_signed_core_matches_literal_twist() {
             )
             .unwrap(),
         ),
-        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
+        [(
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            2,
+        )],
     )
     .unwrap();
     let odd_dual = odd.try_dual().unwrap();

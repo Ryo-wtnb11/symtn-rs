@@ -98,7 +98,7 @@ fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
         let space = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
-                pairs.iter().map(|&(q, n)| (U1Irrep::new(q), n)),
+                pairs.iter().map(|&(q, n)| (U1Irrep::new(q).unwrap(), n)),
             )
             .unwrap()
         };
@@ -106,7 +106,7 @@ fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
         // V ⊗ V: q=0: 1·1; q=1: 1·2 + 2·1 = 4 (two trees); q=2: 2·2 = 4.
         let fused = space(&[(0, 1), (1, 4), (2, 4)]);
         let iso: TensorMap<_, D> = TensorMap::isomorphism(engine, &rt, [&v, &v], [&fused]).unwrap();
-        let u = U1Irrep::new;
+        let u = |charge| U1Irrep::new(charge).unwrap();
         assert_identity_blocks(
             &format!("{what} isomorphism V⊗V ← W"),
             &iso,
@@ -180,7 +180,7 @@ fn u1_negative_charge_isometry_and_isomorphism_match_tensorkit_dense() {
         let space = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
-                pairs.iter().map(|&(q, n)| (U1Irrep::new(q), n)),
+                pairs.iter().map(|&(q, n)| (U1Irrep::new(q).unwrap(), n)),
             )
             .unwrap()
         };

@@ -636,7 +636,7 @@ where
 
 #[test]
 fn multiplicity_free_full_null_eigen_ops_borrow_canonical_input() {
-    let u1 = [-1, 0, 1].map(|charge| U1Irrep::new(charge).sector_id());
+    let u1 = [-1, 0, 1].map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()));
     let su2 = [0, 1].map(|twice| SU2Irrep::from_twice_spin(twice).sector_id());
     let product = symtn_core::ProductFusionRule::<_, _>::try_new(
         FermionParityFusionRule::new(),
@@ -644,9 +644,9 @@ fn multiplicity_free_full_null_eigen_ops_borrow_canonical_input() {
     )
     .unwrap();
     let product_sectors = [
-        product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
-        product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
-        product.encode_component_ids(SectorId::new(1), U1Irrep::new(-1).sector_id()),
+        product.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
+        product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
+        product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(-1).unwrap())),
     ];
     assert_multiplicity_free_full_family_borrows_input::<_, f64>(U1FusionRule, &u1);
     assert_multiplicity_free_full_family_borrows_input::<_, Complex64>(U1FusionRule, &u1);

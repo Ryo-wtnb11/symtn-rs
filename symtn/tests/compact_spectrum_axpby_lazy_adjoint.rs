@@ -103,7 +103,7 @@ macro_rules! pin {
 }
 
 fn u1_wide() -> Vec<U1Irrep> {
-    (-70..70).map(|k| U1Irrep::new(7 * k)).collect()
+    (-70..70).map(|k| U1Irrep::new(7 * k).unwrap()).collect()
 }
 
 fn fz2_u1() -> Vec<<Fz2U1Rule as symtn::sector::TypedSectorAdmission>::Sector> {
@@ -115,7 +115,7 @@ fn fz2_u1() -> Vec<<Fz2U1Rule as symtn::sector::TypedSectorAdmission>::Sector> {
                 } else {
                     FermionParityIrrep::ODD
                 },
-                U1Irrep::new(k * 5),
+                U1Irrep::new(k * 5).unwrap(),
             )
         })
         .collect()

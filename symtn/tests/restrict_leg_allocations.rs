@@ -58,8 +58,8 @@ fn restrict_measurement(scale: usize) -> (Measurement, usize) {
     let selection = LegSelection::try_new(
         &leg,
         [
-            (U1Irrep::new(-1), 0..scale),
-            (U1Irrep::new(0), scale..3 * scale),
+            (U1Irrep::new(-1).unwrap(), 0..scale),
+            (U1Irrep::new(0).unwrap(), scale..3 * scale),
         ],
     )
     .unwrap();
@@ -128,16 +128,16 @@ fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize
     let on_leg = LegSelection::try_new(
         &leg,
         [
-            (U1Irrep::new(-1), 0..scale),
-            (U1Irrep::new(0), scale..3 * scale),
+            (U1Irrep::new(-1).unwrap(), 0..scale),
+            (U1Irrep::new(0).unwrap(), scale..3 * scale),
         ],
     )
     .unwrap();
     let on_dual = LegSelection::try_new(
         &dual,
         [
-            (U1Irrep::new(1), scale..2 * scale),
-            (U1Irrep::new(0), 0..2 * scale),
+            (U1Irrep::new(1).unwrap(), scale..2 * scale),
+            (U1Irrep::new(0).unwrap(), 0..2 * scale),
         ],
     )
     .unwrap();
@@ -208,7 +208,7 @@ fn the_network_restriction_of_several_axes_fills_no_payload() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let zero = U1Irrep::new(0);
+    let zero = U1Irrep::new(0).unwrap();
     let rows = u1_on(&provider, &[(0, 6)]);
     let columns = u1_on(&provider, &[(0, 8)]);
     let source: TensorMap<_, f64> =
@@ -261,8 +261,14 @@ fn compact_restrict_measurement(scale: usize) -> Measurement {
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 47).unwrap();
     let Svd { s, .. } = source.svd_compact(engine, &[0], &[1]).unwrap();
     let bond = s.domain()[0].clone();
-    let selection =
-        LegSelection::try_new(&bond, [(U1Irrep::new(-1), 0..2), (U1Irrep::new(0), 0..3)]).unwrap();
+    let selection = LegSelection::try_new(
+        &bond,
+        [
+            (U1Irrep::new(-1).unwrap(), 0..2),
+            (U1Irrep::new(0).unwrap(), 0..3),
+        ],
+    )
+    .unwrap();
 
     let warm = s
         .restrict_leg(engine, &[(0, &selection), (1, &selection)])
@@ -388,8 +394,8 @@ fn steady_multi_row_restrict(scale: usize, reach: i32) -> (Measurement, usize) {
     let selection = LegSelection::try_new(
         &leg,
         [
-            (U1Irrep::new(-1), 0..scale),
-            (U1Irrep::new(0), scale..3 * scale),
+            (U1Irrep::new(-1).unwrap(), 0..scale),
+            (U1Irrep::new(0).unwrap(), scale..3 * scale),
         ],
     )
     .unwrap();
@@ -466,8 +472,14 @@ fn stacked_restrict_measurement(members: usize) -> (Measurement, usize) {
         })
         .collect();
     let stack = StackedTensorMap::pack(&tensors).unwrap();
-    let selection =
-        LegSelection::try_new(&leg, [(U1Irrep::new(-1), 0..1), (U1Irrep::new(0), 1..3)]).unwrap();
+    let selection = LegSelection::try_new(
+        &leg,
+        [
+            (U1Irrep::new(-1).unwrap(), 0..1),
+            (U1Irrep::new(0).unwrap(), 1..3),
+        ],
+    )
+    .unwrap();
     let warm = stack.restrict_leg(engine, &[(0, &selection)]).unwrap();
     let payload_bytes =
         members * std::mem::size_of_val(warm.member(engine, 0).unwrap().dense_data().unwrap());
@@ -533,9 +545,9 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
     let selection = LegSelection::try_new(
         &leg,
         [
-            (U1Irrep::new(-1), every_other(2 * scale)),
-            (U1Irrep::new(0), every_other(3 * scale)),
-            (U1Irrep::new(1), every_other(2 * scale)),
+            (U1Irrep::new(-1).unwrap(), every_other(2 * scale)),
+            (U1Irrep::new(0).unwrap(), every_other(3 * scale)),
+            (U1Irrep::new(1).unwrap(), every_other(2 * scale)),
         ],
     )
     .unwrap();

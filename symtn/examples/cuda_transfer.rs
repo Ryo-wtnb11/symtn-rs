@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cpu = &mut CpuEngine::serial();
     let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0))?;
     let rt = Runtime::builder().build()?;
-    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     let host = TensorMap::<_, f64>::rand_with_seed(cpu, &rt, [&v], [&v], 7)?;
     let device = host.to_cuda(cuda)?;
     let restored = device.to_host(cuda)?;

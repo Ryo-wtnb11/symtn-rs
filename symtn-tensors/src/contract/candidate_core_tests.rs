@@ -129,9 +129,9 @@ fn square<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 fn u1_leg() -> SectorLeg {
     SectorLeg::new(
         [
-            (U1Irrep::new(-1).sector_id(), 2),
-            (U1Irrep::new(0).sector_id(), 1),
-            (U1Irrep::new(1).sector_id(), 3),
+            (SectorId::from(U1Irrep::new(-1).unwrap()), 2),
+            (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+            (SectorId::from(U1Irrep::new(1).unwrap()), 3),
         ],
         false,
     )
@@ -150,7 +150,7 @@ fn su2_leg() -> SectorLeg {
 
 fn fermion_u1_leg(rule: &FermionU1, dual: bool) -> SectorLeg {
     let (even, odd) = (SectorId::new(0), SectorId::new(1));
-    let charge = |q: i32| U1Irrep::new(if dual { -q } else { q }).sector_id();
+    let charge = |q: i32| SectorId::from(U1Irrep::new(if dual { -q } else { q }).unwrap());
     SectorLeg::new(
         [
             (rule.encode_component_ids(even, charge(0)), 2),
@@ -323,15 +323,15 @@ fn asymmetric_owned_candidate_reaches_swapped_storage_core() {
         u1_leg(),
         SectorLeg::new(
             [
-                (U1Irrep::new(0).sector_id(), 1),
-                (U1Irrep::new(1).sector_id(), 2),
+                (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+                (SectorId::from(U1Irrep::new(1).unwrap()), 2),
             ],
             false,
         ),
         SectorLeg::new(
             [
-                (U1Irrep::new(0).sector_id(), 2),
-                (U1Irrep::new(1).sector_id(), 3),
+                (SectorId::from(U1Irrep::new(0).unwrap()), 2),
+                (SectorId::from(U1Irrep::new(1).unwrap()), 3),
             ],
             false,
         ),

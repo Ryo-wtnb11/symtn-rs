@@ -16,13 +16,13 @@ fn warm_product_queries() {
         ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
     let odd = rule
         .encode_sector(&ProductSector::new(
-            U1Irrep::new(0),
+            U1Irrep::new(0).unwrap(),
             FermionParityIrrep::ODD,
         ))
         .unwrap();
     let even = rule
         .encode_sector(&ProductSector::new(
-            U1Irrep::new(0),
+            U1Irrep::new(0).unwrap(),
             FermionParityIrrep::EVEN,
         ))
         .unwrap();

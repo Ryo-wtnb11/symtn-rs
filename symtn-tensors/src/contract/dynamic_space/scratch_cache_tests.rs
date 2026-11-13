@@ -137,7 +137,7 @@ fn partitioned_contract_destination_rejects_distinct_provider_identities() {
 // block shape); one coupled sector, block shape [deg, deg].
 fn u1_space(charge: i32, deg: usize) -> DynamicFusionMapSpace {
     let rule = U1FusionRule;
-    let sid = U1Irrep::new(charge).sector_id();
+    let sid = SectorId::from(U1Irrep::new(charge).unwrap());
     let leg = || FusionProductSpace::new([SectorLeg::new([(sid, deg)], false)]);
     let hom = FusionTreeHomSpace::new(leg(), leg());
     DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
@@ -775,7 +775,7 @@ fn canonical_explicit_shapes_preserve_content_after_homspace_intern_eviction() {
     symtn_core::clear_structure_caches();
     let before = u1_space(73, 3);
     for charge in 10_000..19_000 {
-        let sid = U1Irrep::new(charge).sector_id();
+        let sid = SectorId::from(U1Irrep::new(charge).unwrap());
         let leg = || FusionProductSpace::new([SectorLeg::new([(sid, 1)], false)]);
         let _ = FusionTreeHomSpace::new(leg(), leg());
     }
@@ -790,7 +790,7 @@ fn large_canonical_shapes_reuse_frozen_content_without_tensor_storage() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let rule = U1FusionRule;
-    let sid = U1Irrep::new(91).sector_id();
+    let sid = SectorId::from(U1Irrep::new(91).unwrap());
     let leg = || FusionProductSpace::new([SectorLeg::new([(sid, 4096)], false)]);
     let hom = FusionTreeHomSpace::new(leg(), leg());
     let first = DynamicFusionMapSpace::from_final_homspace(&rule, hom.clone()).unwrap();
@@ -972,7 +972,12 @@ fn direct_and_adjoint_permutes_memoize_under_distinct_keys() {
     let rule = U1FusionRule;
     let leg = |dual| {
         SectorLeg::new(
-            [-1, 0, 1].map(|q| (U1Irrep::new(q).sector_id(), q.unsigned_abs() as usize + 1)),
+            [-1, 0, 1].map(|q| {
+                (
+                    SectorId::from(U1Irrep::new(q).unwrap()),
+                    q.unsigned_abs() as usize + 1,
+                )
+            }),
             dual,
         )
     };

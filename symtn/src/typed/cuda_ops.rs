@@ -19,7 +19,7 @@ use super::*;
 /// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0))?;
 /// let runtime = Runtime::builder().build()?;
-/// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 4)])?;
+/// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 4)])?;
 /// let device = TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
 ///     (index[0] + 2 * index[1]) as f64
 /// })?

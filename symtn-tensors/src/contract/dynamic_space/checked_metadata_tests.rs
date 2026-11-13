@@ -18,6 +18,10 @@ thread_local! {
     static PRIMER_CALLS: Cell<usize> = const { Cell::new(0) };
 }
 
+fn u1(charge: i32) -> SectorId {
+    SectorId::from(U1Irrep::new(charge).unwrap())
+}
+
 fn rule() -> TripleRule {
     TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
@@ -30,7 +34,7 @@ fn sector(parity: usize, charge: i32, twice_spin: usize) -> SectorId {
     TripleCodec::encode(
         Fz2U1Codec::encode(
             SectorId::from(FermionParityIrrep::new(parity == 1)),
-            U1Irrep::new(charge).sector_id(),
+            SectorId::from(U1Irrep::new(charge).unwrap()),
         ),
         SU2Irrep::from_twice_spin(twice_spin).sector_id(),
     )
@@ -240,9 +244,9 @@ fn final_homspace_layout_matches_tensorkit_layout_across_supported_rules() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-    let u1_minus = U1Irrep::new(-1).sector_id();
-    let u1_zero = U1Irrep::new(0).sector_id();
-    let u1_plus = U1Irrep::new(1).sector_id();
+    let u1_minus = SectorId::from(U1Irrep::new(-1).unwrap());
+    let u1_zero = SectorId::from(U1Irrep::new(0).unwrap());
+    let u1_plus = SectorId::from(U1Irrep::new(1).unwrap());
     let u1_codomain = SectorLeg::new([(u1_minus, 2), (u1_zero, 1), (u1_plus, 3)], false);
     let u1_domain = SectorLeg::new([(u1_minus, 4), (u1_zero, 2), (u1_plus, 1)], true);
     assert_final_homspace_matches_tensorkit_layout(
@@ -316,8 +320,8 @@ fn final_homspace_normalizes_zero_degeneracy_sectors() {
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
 
-    let vacuum = U1Irrep::new(0).sector_id();
-    let absent = U1Irrep::new(1).sector_id();
+    let vacuum = SectorId::from(U1Irrep::new(0).unwrap());
+    let absent = SectorId::from(U1Irrep::new(1).unwrap());
     let explicit_zero = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(vacuum, 3), (absent, 0)], false)]),
         FusionProductSpace::new([SectorLeg::new([(vacuum, 2), (absent, 0)], true)]),
@@ -359,7 +363,7 @@ fn final_and_derived_homspaces_preserve_provider() {
     symtn_core::clear_structure_caches();
 
     let provider = Arc::new(U1FusionRule);
-    let vacuum = U1Irrep::new(0).sector_id();
+    let vacuum = SectorId::from(U1Irrep::new(0).unwrap());
     let root_homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),
         FusionProductSpace::new([SectorLeg::new([(vacuum, 3)], true)]),
@@ -416,7 +420,7 @@ fn lowered_final_homspace_keeps_single_pass_and_publishes_only_success() {
 
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let vacuum = U1Irrep::new(0).sector_id();
+    let vacuum = SectorId::from(U1Irrep::new(0).unwrap());
     let overflowing = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(vacuum, usize::MAX)], false)]),
         FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),
@@ -527,14 +531,14 @@ fn algebra_error_maps_to_exact_operation_cause() {
     // cause and exposes it through the standard error source chain.
     let overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(U1Irrep::new(i32::MAX), 1)], false),
-            SectorLeg::new([(U1Irrep::new(1), 1)], false),
+            SectorLeg::new([(U1Irrep::new(i32::MAX).unwrap(), 1)], false),
+            SectorLeg::new([(U1Irrep::new(1).unwrap(), 1)], false),
         ]),
         FusionProductSpace::new([]),
     );
-    let expected = FusionAlgebraError::U1FusionOverflow {
-        left: i32::MAX,
-        right: 1,
+    let expected = FusionAlgebraError::FusionNotRepresentable {
+        left: u1(i32::MAX),
+        right: u1(1),
     };
     let error = checked_layout_primer(&U1FusionRule, &overflow).unwrap_err();
     assert_eq!(
@@ -572,17 +576,20 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
     // cause before scratch construction, identity, or admission.
     let u1_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(U1Irrep::new(i32::MAX).sector_id(), 1)], false),
-            SectorLeg::new([(U1Irrep::new(1).sector_id(), 1)], false),
+            SectorLeg::new(
+                [(SectorId::from(U1Irrep::new(i32::MAX).unwrap()), 1)],
+                false,
+            ),
+            SectorLeg::new([(SectorId::from(U1Irrep::new(1).unwrap()), 1)], false),
         ]),
         FusionProductSpace::new([]),
     );
     assert_lowered_root_failure(
         Arc::new(U1FusionRule),
         u1_overflow,
-        FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         },
     );
 
@@ -610,7 +617,7 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
                 [(
                     Fz2U1Codec::encode(
                         SectorId::from(FermionParityIrrep::EVEN),
-                        U1Irrep::new(i32::MAX).sector_id(),
+                        SectorId::from(U1Irrep::new(i32::MAX).unwrap()),
                     ),
                     1,
                 )],
@@ -620,7 +627,7 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
                 [(
                     Fz2U1Codec::encode(
                         SectorId::from(FermionParityIrrep::ODD),
-                        U1Irrep::new(1).sector_id(),
+                        SectorId::from(U1Irrep::new(1).unwrap()),
                     ),
                     1,
                 )],
@@ -632,9 +639,9 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
     assert_lowered_root_failure(
         product_rule,
         product_overflow,
-        FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         },
     );
 }
@@ -658,7 +665,7 @@ fn encoded_cold_extent_overflow_does_not_publish_layouts() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let vacuum = U1Irrep::new(0).sector_id();
+    let vacuum = SectorId::from(U1Irrep::new(0).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(vacuum, usize::MAX)], false)]),
         FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),
@@ -733,7 +740,7 @@ fn encoded_u1_and_su2_root_layouts_have_hand_extent() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let u1_vacuum = U1Irrep::new(0).sector_id();
+    let u1_vacuum = SectorId::from(U1Irrep::new(0).unwrap());
     let u1 = DynamicFusionMapSpace::from_final_homspace(
         &U1FusionRule,
         FusionTreeHomSpace::new(
@@ -765,7 +772,7 @@ fn lowered_extent_overflow_precedes_identity_and_scratch_admission() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let vacuum = U1Irrep::new(0).sector_id();
+    let vacuum = SectorId::from(U1Irrep::new(0).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(vacuum, usize::MAX)], false)]),
         FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),
@@ -794,8 +801,11 @@ fn existing_id_failure_builds_and_admits_no_scratch() {
     symtn_core::clear_structure_caches();
     let overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(U1Irrep::new(i32::MAX).sector_id(), 1)], false),
-            SectorLeg::new([(U1Irrep::new(1).sector_id(), 1)], false),
+            SectorLeg::new(
+                [(SectorId::from(U1Irrep::new(i32::MAX).unwrap()), 1)],
+                false,
+            ),
+            SectorLeg::new([(SectorId::from(U1Irrep::new(1).unwrap()), 1)], false),
         ]),
         FusionProductSpace::new([]),
     );
@@ -807,9 +817,9 @@ fn existing_id_failure_builds_and_admits_no_scratch() {
     .unwrap_err();
     assert_eq!(
         error,
-        OperationError::FusionAlgebra(Box::new(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        OperationError::FusionAlgebra(Box::new(FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         }))
     );
 }
@@ -888,7 +898,7 @@ fn transform_invalid_axis_error_is_reported_exactly() {
     // The min-dual leg is rejected at admission, so axis validation and
     // dual representability do not race: build the precedence
     // fixture on a leg whose dual exists.
-    let representable = U1Irrep::new(1).sector_id();
+    let representable = SectorId::from(U1Irrep::new(1).unwrap());
     let source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::new(U1FusionRule),
         FusionTreeHomSpace::new(

@@ -15,7 +15,7 @@ use crate::typed::GradedSpace;
 use std::collections::HashSet;
 
 fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
-    let q = U1Irrep::new;
+    let q = |charge| U1Irrep::new(charge).unwrap();
     let rule = Arc::new(U1FusionRule);
     (
         GradedSpace::try_new(Arc::clone(&rule), [(q(-1), 2), (q(0), 1), (q(1), 3)]).unwrap(),
@@ -75,8 +75,8 @@ fn composition_resolves_to_the_unswapped_unit_core() {
         )
         .unwrap(),
     );
-    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
-    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
+    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
     let v =
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 2), (odd(-1), 1)]).unwrap();
     let wd = GradedSpace::try_new(rule, [(even(0), 2), (odd(1), 2)])
@@ -340,8 +340,8 @@ fn cuda_zero_regions_match_the_hand_derivation() {
         )
         .unwrap(),
     );
-    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
-    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
+    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
     let fz2u1 = (
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 1), (odd(-1), 2)]).unwrap(),
         GradedSpace::try_new(rule, [(even(0), 1), (odd(1), 2)]).unwrap(),

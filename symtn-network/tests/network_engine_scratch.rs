@@ -21,7 +21,8 @@ fn warm_network_contract_allocates_no_route_scratch() {
     let _serial = counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let engine = &mut CpuEngine::serial();
-    let space = |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), n)]).unwrap();
+    let space =
+        |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), n)]).unwrap();
     let (x, c, y, z, u, w) = (
         space(7),
         space(11),

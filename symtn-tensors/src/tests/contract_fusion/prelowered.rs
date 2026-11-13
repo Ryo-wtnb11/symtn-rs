@@ -368,7 +368,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
         TripleCodec::encode(
             Fz2U1Codec::encode(
                 SectorId::from(FermionParityIrrep::new(parity == 1)),
-                U1Irrep::new(charge).sector_id(),
+                SectorId::from(U1Irrep::new(charge).unwrap()),
             ),
             SU2Irrep::from_twice_spin(twice_spin).sector_id(),
         )

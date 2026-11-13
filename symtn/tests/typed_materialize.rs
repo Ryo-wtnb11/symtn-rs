@@ -51,9 +51,9 @@ fn u1_leg() -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 3),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(1).unwrap(), 3),
         ],
     )
     .unwrap()
@@ -82,10 +82,22 @@ macro_rules! fz2_u1_leg {
                 .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 2),
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    1,
+                ),
+                (
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    2,
+                ),
+                (
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                    1,
+                ),
             ],
         )
         .unwrap()
@@ -516,7 +528,7 @@ fn materialize_densifies_a_compact_diagonal() {
     // U(1) sector order is 0, 1, -1. The dual bond carries the dual labels
     // and is listed in the order of the space it dualizes.
     for (bond, sign) in [(u1_leg(), 1), (u1_leg().try_dual().unwrap(), -1)] {
-        let q = |charge: i32| U1Irrep::new(sign * charge);
+        let q = |charge: i32| U1Irrep::new(sign * charge).unwrap();
         diagonal_case!(
             engine,
             bond,

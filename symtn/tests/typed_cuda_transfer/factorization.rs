@@ -189,12 +189,12 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     let u1_provider = Arc::new(U1FusionRule);
     let u1_leg = GradedSpace::try_new(
         Arc::clone(&u1_provider),
-        [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let u1_lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1_leg], [&u1_leg], |trees, _| {
-            if trees.coupled() == &U1Irrep::new(0) {
+            if trees.coupled() == &U1Irrep::new(0).unwrap() {
                 1.0
             } else {
                 2.0
@@ -203,7 +203,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         .unwrap();
     let u1_rhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1_leg], [&u1_leg], |trees, _| {
-            if trees.coupled() == &U1Irrep::new(0) {
+            if trees.coupled() == &U1Irrep::new(0).unwrap() {
                 3.0
             } else {
                 4.0
@@ -300,8 +300,14 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -376,7 +382,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
 
     let wider = GradedSpace::try_new(
         Arc::clone(&u1_provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let mismatched = TensorMap::from_subblock_fn(engine, &runtime, [&wider], [&wider], |_, _| 1.0)
@@ -422,12 +428,12 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     let u1 = Arc::new(U1FusionRule);
     let tall = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let wide = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     let mixed = TensorMap::from_subblock_fn(engine, &runtime, [&tall], [&wide], |_, indices| {
@@ -440,7 +446,8 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     .unwrap();
     assert_typed_cuda_qr_matches_host(engine, cuda, &mixed);
 
-    let charge_zero_only = GradedSpace::try_new(Arc::clone(&u1), [(U1Irrep::new(0), 2)]).unwrap();
+    let charge_zero_only =
+        GradedSpace::try_new(Arc::clone(&u1), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let unmatched = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -497,8 +504,14 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -585,7 +598,8 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     );
     assert_finite_r_diagonal_nonnegative(&zero_right);
 
-    let rank_deficient_leg = GradedSpace::try_new(Arc::clone(&u1), [(U1Irrep::new(0), 3)]).unwrap();
+    let rank_deficient_leg =
+        GradedSpace::try_new(Arc::clone(&u1), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let rank_deficient = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -846,7 +860,7 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
@@ -956,7 +970,8 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
 
     // A 2x2 hand case: `[[1, i], [-i, 1]]` is Hermitian, `[[1, i], [i, 1]]` is
     // complex-symmetric and must be rejected.
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let hand_hermitian = TensorMap::<_, Complex64>::from_subblock_fn(
         engine,
         &runtime,

@@ -367,7 +367,7 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
     }
 
     let u1_provider = std::sync::Arc::new(U1FusionRule);
-    let u1_leg = || SectorLeg::new([(U1Irrep::new(1).sector_id(), 2)], false);
+    let u1_leg = || SectorLeg::new([(SectorId::from(U1Irrep::new(1).unwrap()), 2)], false);
     let u1_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&u1_provider),
         FusionTreeHomSpace::new(
@@ -427,7 +427,7 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
         .unwrap(),
     );
     let product_sector = product_provider.encode_component_ids(
-        left_rule.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
+        left_rule.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
         SU2Irrep::from_twice_spin(1).sector_id(),
     );
     let product_leg = || SectorLeg::new([(product_sector, 2)], false);
@@ -801,8 +801,8 @@ fn tensortrace_fusion_rank_zero_adjoint_keeps_parent_structure() {
 #[test]
 fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
     let rule = U1FusionRule;
-    let charge = U1Irrep::new(1).sector_id();
-    let neutral = U1Irrep::new(0).sector_id();
+    let charge = SectorId::from(U1Irrep::new(1).unwrap());
+    let neutral = SectorId::from(U1Irrep::new(0).unwrap());
     let charged_leg = || SectorLeg::new([(charge, 2)], false);
     let neutral_leg = || SectorLeg::new([(neutral, 3)], false);
     let src_hom = FusionTreeHomSpace::new(
@@ -1005,8 +1005,8 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
 
 #[test]
 fn dynamic_u1_nonconjugating_trace_keeps_parent_axis_geometry() {
-    let charge = U1Irrep::new(1).sector_id();
-    let neutral = U1Irrep::new(0).sector_id();
+    let charge = SectorId::from(U1Irrep::new(1).unwrap());
+    let neutral = SectorId::from(U1Irrep::new(0).unwrap());
     let charged_leg = || SectorLeg::new([(charge, 2)], false);
     let neutral_leg = || SectorLeg::new([(neutral, 3)], false);
     let provider = std::sync::Arc::new(U1FusionRule);
@@ -1480,7 +1480,7 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
     let odd = SectorId::new(1);
     let product_sector = |charge| {
         rule.encode_component_ids(
-            left_rule.encode_component_ids(odd, U1Irrep::new(charge).sector_id()),
+            left_rule.encode_component_ids(odd, SectorId::from(U1Irrep::new(charge).unwrap())),
             SU2Irrep::from_twice_spin(1).sector_id(),
         )
     };
@@ -1622,7 +1622,12 @@ fn structure_executors_reject_terms_compiled_for_other_spaces() {
     // spaces they are given.
     let provider = std::sync::Arc::new(U1FusionRule);
     let source = |degeneracy| {
-        let leg = || SectorLeg::new([(U1Irrep::new(1).sector_id(), degeneracy)], false);
+        let leg = || {
+            SectorLeg::new(
+                [(SectorId::from(U1Irrep::new(1).unwrap()), degeneracy)],
+                false,
+            )
+        };
         BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
             std::sync::Arc::clone(&provider),
             FusionTreeHomSpace::new(

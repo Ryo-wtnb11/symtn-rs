@@ -81,9 +81,9 @@ fn network_conj_expectation_value_is_real() {
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 1),
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 1),
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();

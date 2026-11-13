@@ -11,7 +11,7 @@ use report::Report;
 fn tensor(runtime: &Runtime, n: usize, value: f64) -> TensorMap<U1FusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Arc::new(U1FusionRule);
-    let space = GradedSpace::try_new(rule, [(U1Irrep::new(0), n)]).unwrap();
+    let space = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), n)]).unwrap();
     TensorMap::from_subblock_fn(engine, runtime, [&space], [&space], move |_, ij| {
         if ij[0] == ij[1] {
             value

@@ -66,8 +66,11 @@ fn product_orders_products_as_tensorkit() {
     use symtn_sectors::{ProductSector, TypedSectorAdmission, U1Irrep};
     let rule = ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
     let id = |a, b| {
-        rule.try_encode_label(&ProductSector::new(U1Irrep::new(a), U1Irrep::new(b)))
-            .unwrap()
+        rule.try_encode_label(&ProductSector::new(
+            U1Irrep::new(a).unwrap(),
+            U1Irrep::new(b).unwrap(),
+        ))
+        .unwrap()
     };
     // TensorKit U1 order: 0, +1, -1, ...; the product compares factor by factor.
     assert!(

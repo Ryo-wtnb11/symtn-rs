@@ -102,7 +102,7 @@ macro_rules! block_case {
 fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     let v = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
-        [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q), n)),
+        [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
     let w = v.try_dual().unwrap();
@@ -128,7 +128,7 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         } else {
             FermionParityIrrep::ODD
         };
-        ProductSector::new(parity, U1Irrep::new(q))
+        ProductSector::new(parity, U1Irrep::new(q).unwrap())
     };
     let v = GradedSpace::try_new(
         std::sync::Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),

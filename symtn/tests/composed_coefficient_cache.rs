@@ -165,7 +165,7 @@ fn u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
     let leg = |sectors: &[(i32, usize)]| {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            sectors.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
+            sectors.iter().map(|&(q, d)| (U1Irrep::new(q).unwrap(), d)),
         )
         .unwrap()
     };
@@ -222,7 +222,7 @@ fn fermion_u1_degeneracy_change_rebuilds_without_the_coefficient_cache() {
                 } else {
                     FermionParityIrrep::ODD
                 };
-                (ProductSector::new(parity, U1Irrep::new(q)), d)
+                (ProductSector::new(parity, U1Irrep::new(q).unwrap()), d)
             }),
         )
         .unwrap()

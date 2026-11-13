@@ -89,7 +89,7 @@ fn truncerror_atol(atol: f64, norm_squared: f64) -> Truncation {
 }
 
 fn u1(charge: i32) -> U1Irrep {
-    U1Irrep::new(charge)
+    U1Irrep::new(charge).unwrap()
 }
 
 /// symtn's `relative_error(rtol)` budget is `(rtol * norm)^2`; this `rtol`

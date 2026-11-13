@@ -148,7 +148,7 @@ fn fusion_tree_homspace_uses_tensorkit_parent_iterator_order_not_ord_sort() {
 #[test]
 fn fusion_tree_homspace_uses_visible_dual_space_sector_label_like_tensorkit() {
     let rule = U1FusionRule;
-    let minus_one = U1Irrep::new(-1);
+    let minus_one = U1Irrep::new(-1).unwrap();
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(minus_one, 1)], true)]),
         FusionProductSpace::new([SectorLeg::new([(minus_one, 1)], false)]),

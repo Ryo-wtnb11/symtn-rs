@@ -120,8 +120,8 @@ fn main() {
     };
     let complex = |i: &[usize]| Complex64::new(real(i), ((i[0] + 2 * i[3]) % 5) as f64 / 5.0);
     for (count, k) in [(3, 2), (3, 6), (7, 2)] {
-        cases!(&runtime, "U1", U1FusionRule, |c: i32| U1Irrep::new(c - 1), count, k, f64, "f64", real);
-        cases!(&runtime, "U1", U1FusionRule, |c: i32| U1Irrep::new(c - 1), count, k, Complex64, "c64", complex);
+        cases!(&runtime, "U1", U1FusionRule, |c: i32| U1Irrep::new(c - 1).unwrap(), count, k, f64, "f64", real);
+        cases!(&runtime, "U1", U1FusionRule, |c: i32| U1Irrep::new(c - 1).unwrap(), count, k, Complex64, "c64", complex);
         cases!(&runtime, "SU2", SU2FusionRule, |c: i32| SU2Irrep::from_twice_spin(c as usize), count, k, f64, "f64", real);
         cases!(&runtime, "SU2", SU2FusionRule, |c: i32| SU2Irrep::from_twice_spin(c as usize), count, k, Complex64, "c64", complex);
     }

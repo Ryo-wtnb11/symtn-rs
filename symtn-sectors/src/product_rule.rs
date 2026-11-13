@@ -1114,18 +1114,26 @@ mod tests {
 
         let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
             .unwrap();
-        let label = product_sector(FermionParityIrrep::ODD, U1Irrep::new(-3));
+        let label = product_sector(FermionParityIrrep::ODD, U1Irrep::new(-3).unwrap());
         let id = rule.encode_sector(&label).unwrap();
         assert_eq!(rule.decode_sector(id).unwrap(), label);
-        let by_ids =
-            rule.encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(-3).into());
+        let by_ids = rule.encode_component_ids(
+            FermionParityIrrep::ODD.into(),
+            U1Irrep::new(-3).unwrap().into(),
+        );
         assert_eq!(by_ids, id);
         assert_eq!(
             rule.decode_component_ids(id),
-            Some((FermionParityIrrep::ODD.into(), U1Irrep::new(-3).into()))
+            Some((
+                FermionParityIrrep::ODD.into(),
+                U1Irrep::new(-3).unwrap().into()
+            ))
         );
         assert_eq!(
-            rule.try_encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(-3).into()),
+            rule.try_encode_component_ids(
+                FermionParityIrrep::ODD.into(),
+                U1Irrep::new(-3).unwrap().into()
+            ),
             Ok(id)
         );
     }
@@ -1138,8 +1146,10 @@ mod tests {
         let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
             .unwrap();
         let vacuum = rule.vacuum();
-        let sector =
-            rule.encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(-17).into());
+        let sector = rule.encode_component_ids(
+            FermionParityIrrep::ODD.into(),
+            U1Irrep::new(-17).unwrap().into(),
+        );
         let fused = rule.fusion_channels(sector, sector)[0];
         accepts_canonical_unit(&rule);
         assert_eq!(rule.dual(vacuum), vacuum);
@@ -1166,8 +1176,10 @@ mod tests {
     fn product_rule_composes_checked_symbols_rigidity_and_ordered_identity() {
         let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
             .unwrap();
-        let odd_zero =
-            rule.encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(0).into());
+        let odd_zero = rule.encode_component_ids(
+            FermionParityIrrep::ODD.into(),
+            U1Irrep::new(0).unwrap().into(),
+        );
         let vacuum = rule.vacuum();
 
         assert_eq!(

@@ -19,9 +19,9 @@ fn category_rule_factors_preserve_channels_duals_and_factor_errors() {
 
     let z3 = CategoryRule::try_new(ZN::new(3).unwrap(), EnumeratedCodec::<MF>::new()).unwrap();
     let mf = ProductFusionRule::<_, _>::try_new(z3, U1FusionRule).unwrap();
-    let x = mf.encode_component_ids(s(1), U1Irrep::new(2).sector_id());
-    let y = mf.encode_component_ids(s(2), U1Irrep::new(4).sector_id());
-    let dual = mf.encode_component_ids(s(2), U1Irrep::new(-2).sector_id());
+    let x = mf.encode_component_ids(s(1), SectorId::from(U1Irrep::new(2).unwrap()));
+    let y = mf.encode_component_ids(s(2), SectorId::from(U1Irrep::new(4).unwrap()));
+    let dual = mf.encode_component_ids(s(2), SectorId::from(U1Irrep::new(-2).unwrap()));
     // (1,2) + (1,2) = (2,4) in Z3 x U1; -(1,2) = (2,-2).
     assert_eq!(mf.try_fusion_channels(x, x).unwrap().as_slice(), &[y]);
     assert_eq!(mf.try_nsymbol(x, x, y).unwrap(), 1);
@@ -46,9 +46,9 @@ fn category_rule_factors_preserve_channels_duals_and_factor_errors() {
     ));
     let cg = ProductFusionRule::<_, _>::try_new(U1FusionRule, z3).unwrap();
     assert_eq!(cg.fusion_style(), FusionStyleKind::Generic);
-    let x = cg.encode_component_ids(U1Irrep::new(2).sector_id(), s(1));
-    let y = cg.encode_component_ids(U1Irrep::new(4).sector_id(), s(2));
-    let dual = cg.encode_component_ids(U1Irrep::new(-2).sector_id(), s(2));
+    let x = cg.encode_component_ids(SectorId::from(U1Irrep::new(2).unwrap()), s(1));
+    let y = cg.encode_component_ids(SectorId::from(U1Irrep::new(4).unwrap()), s(2));
+    let dual = cg.encode_component_ids(SectorId::from(U1Irrep::new(-2).unwrap()), s(2));
     assert_eq!(cg.try_fusion_channels(x, x).unwrap().as_slice(), &[y]);
     assert_eq!(
         cg.try_fusion_channels_in_table(x, x).unwrap().as_slice(),
@@ -700,7 +700,7 @@ mod generated {
         let octet = su3.encode_irrep(&[1, 1]).unwrap();
         let three = su3.encode_irrep(&[1, 0]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, U1FusionRule).unwrap();
-        let oq = |q| rule.encode_component_ids(octet, U1Irrep::new(q).sector_id());
+        let oq = |q| rule.encode_component_ids(octet, SectorId::from(U1Irrep::new(q).unwrap()));
         let f = rule
             .try_f_symbol_generic(oq(1), oq(1), oq(1), oq(3), oq(2), oq(2))
             .unwrap();
@@ -723,7 +723,8 @@ mod generated {
                 CGC_TERMS,
             );
         }
-        let fundamental = rule.encode_component_ids(three, U1Irrep::new(1).sector_id());
+        let fundamental =
+            rule.encode_component_ids(three, SectorId::from(U1Irrep::new(1).unwrap()));
         assert_eq!(
             rule.try_frobenius_schur_phase_scalar(fundamental).unwrap(),
             1.0
@@ -891,19 +892,16 @@ mod generated {
     fn checked_generic_products_complete_the_left_admission_before_the_right() {
         let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
         let invalid_sun = s(u32::MAX as usize + 1);
-        let max_charge = U1Irrep::new(i32::MAX).sector_id();
-        let one_charge = U1Irrep::new(1).sector_id();
+        let max_charge = SectorId::from(U1Irrep::new(i32::MAX).unwrap());
+        let one_charge = SectorId::from(U1Irrep::new(1).unwrap());
         let left_mf = ProductFusionRule::<_, _>::try_new(U1FusionRule, su2.clone()).unwrap();
         let a = left_mf.encode_component_ids(max_charge, s(0));
         let b = left_mf.encode_component_ids(one_charge, invalid_sun);
         assert!(matches!(
             left_mf.try_nsymbol(a, b, s(0)),
             Err(ProductFusionRuleError::Left(
-                FusionAlgebraError::U1FusionOverflow {
-                    left: i32::MAX,
-                    right: 1
-                }
-            ))
+                FusionAlgebraError::FusionNotRepresentable { left, right }
+            )) if left == max_charge && right == one_charge
         ));
         // Negative control: repairing the left overflow exposes the right failure.
         let a = left_mf.encode_component_ids(s(0), s(0));
@@ -921,11 +919,8 @@ mod generated {
         assert!(matches!(
             left_cg.try_nsymbol(a, b, s(0)),
             Err(ProductFusionRuleError::Right(
-                FusionAlgebraError::U1FusionOverflow {
-                    left: i32::MAX,
-                    right: 1
-                }
-            ))
+                FusionAlgebraError::FusionNotRepresentable { left, right }
+            )) if left == max_charge && right == one_charge
         ));
     }
 
@@ -1086,7 +1081,7 @@ mod generated {
             let (dynkin, charges) = lie.decode_irrep(id).unwrap();
             product.encode_component_ids(
                 su2.encode_irrep(&dynkin).unwrap(),
-                U1Irrep::new(i32::try_from(charges[0]).unwrap()).sector_id(),
+                SectorId::from(U1Irrep::new(i32::try_from(charges[0]).unwrap()).unwrap()),
             )
         };
         let label = |j: i64, q: i64| lie.encode_irrep_with_charges(&[j], &[q]).unwrap();

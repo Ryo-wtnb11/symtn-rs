@@ -229,12 +229,15 @@ fn fusion_layout_lookup_and_reset_are_concurrent_safe() {
                     }
                     let charge = worker * 100 + iteration;
                     let hom = FusionTreeHomSpace::from_sectors(
-                        [(U1Irrep::new(charge), 2)],
-                        [(U1Irrep::new(charge), 3)],
+                        [(U1Irrep::new(charge).unwrap(), 2)],
+                        [(U1Irrep::new(charge).unwrap(), 3)],
                     );
                     let keys = hom.fusion_tree_keys(&rule);
                     assert_eq!(keys.len(), 1);
-                    assert_eq!(keys[0].coupled(), U1Irrep::new(charge).sector_id());
+                    assert_eq!(
+                        keys[0].coupled(),
+                        SectorId::from(U1Irrep::new(charge).unwrap())
+                    );
                     let structure = hom
                         .coupled_subblock_structure(&rule, 1, [vec![2, 3]])
                         .unwrap();

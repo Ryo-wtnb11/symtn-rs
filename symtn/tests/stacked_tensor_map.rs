@@ -89,8 +89,8 @@ fn runtime_drift_names_the_member_and_field() {
     let leg = GradedSpace::try_new(
         Arc::new(fixtures::U1FusionRule),
         [
-            (fixtures::U1Irrep::new(0), 2),
-            (fixtures::U1Irrep::new(1), 1),
+            (fixtures::U1Irrep::new(0).unwrap(), 2),
+            (fixtures::U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -127,7 +127,7 @@ fn rule_instance_drift_names_the_member_and_field() {
 fn lazy_adjoint_and_compact_diagonal_members_are_rejected() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let q = fixtures::U1Irrep::new;
+    let q = |charge| fixtures::U1Irrep::new(charge).unwrap();
     let bond =
         GradedSpace::try_new(Arc::new(fixtures::U1FusionRule), [(q(0), 2), (q(1), 1)]).unwrap();
     let square = TensorMap::<_, f64>::rand_with_seed(
@@ -228,7 +228,7 @@ fn select_holds_the_chosen_members_in_order() {
 fn select_rejects_out_of_range_and_empty_selections() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let q = fixtures::U1Irrep::new;
+    let q = |charge| fixtures::U1Irrep::new(charge).unwrap();
     let bond =
         GradedSpace::try_new(Arc::new(fixtures::U1FusionRule), [(q(0), 2), (q(1), 1)]).unwrap();
     let members = members!(engine, &runtime, &bond, f64, 3);
@@ -247,7 +247,7 @@ fn select_rejects_out_of_range_and_empty_selections() {
 fn select_of_a_blockless_structure_is_empty() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let q = fixtures::U1Irrep::new;
+    let q = |charge| fixtures::U1Irrep::new(charge).unwrap();
     let charged = GradedSpace::try_new(Arc::new(fixtures::U1FusionRule), [(q(1), 2)]).unwrap();
     let neutral = GradedSpace::try_new(Arc::new(fixtures::U1FusionRule), [(q(0), 2)]).unwrap();
     let empty = TensorMap::<_, f64>::zeros(engine, &runtime, [&charged], [&neutral]).unwrap();

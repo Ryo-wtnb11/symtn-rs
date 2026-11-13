@@ -17,7 +17,7 @@ use symtn::typed::{
 fn unified_methods_resolve_in_path_form() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let t: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v]).unwrap();
 
     // L1 reductions.
@@ -146,7 +146,7 @@ fn unified_methods_resolve_in_path_form() {
         pair.member(engine, 1).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
     );
-    let first = LegSelection::try_new(&v, [(U1Irrep::new(0), 0..1)]).unwrap();
+    let first = LegSelection::try_new(&v, [(U1Irrep::new(0).unwrap(), 0..1)]).unwrap();
     let corner =
         StackedTensorMap::restrict_leg(&stack, engine, &[(0, &first), (1, &first)]).unwrap();
     assert_eq!(

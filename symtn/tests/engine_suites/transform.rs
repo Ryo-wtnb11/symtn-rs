@@ -368,7 +368,7 @@ fn u1_leg(charges: &[(i32, usize)]) -> GradedSpace<symtn::sector::U1FusionRule> 
         Arc::new(symtn::sector::U1FusionRule),
         charges
             .iter()
-            .map(|&(c, d)| (symtn::sector::U1Irrep::new(c), d)),
+            .map(|&(c, d)| (symtn::sector::U1Irrep::new(c).unwrap(), d)),
     )
     .unwrap()
 }

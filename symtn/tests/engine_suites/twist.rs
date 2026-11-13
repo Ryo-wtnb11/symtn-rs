@@ -99,9 +99,9 @@ on_each_engine! {
         let leg_u1 = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
+                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()), 2),
+                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()), 1),
+                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()), 1),
             ],
         )
         .unwrap();

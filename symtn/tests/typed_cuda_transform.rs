@@ -248,7 +248,7 @@ fn u1_leg(charges: &[(i32, usize)], dual: bool) -> GradedSpace<U1FusionRule> {
         Arc::new(U1FusionRule),
         charges
             .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap();
     if dual {
@@ -484,9 +484,18 @@ fn device_product_providers_match_the_host_for_signs_and_recoupling() {
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -1110,9 +1119,18 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();

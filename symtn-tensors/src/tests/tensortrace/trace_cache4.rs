@@ -307,8 +307,9 @@ fn fp_su2_hom() -> FusionTreeHomSpace {
 fn u1_hom() -> FusionTreeHomSpace {
     let leg = || {
         SectorLeg::new(
-            [(-1, 1), (0, 2), (1, 1)]
-                .map(|(charge, degeneracy)| (U1Irrep::new(charge).sector_id(), degeneracy)),
+            [(-1, 1), (0, 2), (1, 1)].map(|(charge, degeneracy)| {
+                (SectorId::from(U1Irrep::new(charge).unwrap()), degeneracy)
+            }),
             false,
         )
     };

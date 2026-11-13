@@ -274,7 +274,7 @@ fn canonical_effective_occurrence_owns_non_self_dual_sector_identity() {
     assert_eq!(effective_labels, vec![label("x"), label("p")]);
     let ir =
         NetworkIR::from_labels(vec![effective_labels, vec![label("x")]], vec![label("p")]).unwrap();
-    let authority_charge = U1Irrep::new(-1);
+    let authority_charge = U1Irrep::new(-1).unwrap();
     let authority_leg = SectorLeg::new([(authority_charge, 2)], true);
     let partner_leg = authority_leg.dual(&U1FusionRule);
     let plan = checked(
@@ -298,7 +298,10 @@ fn canonical_effective_occurrence_owns_non_self_dual_sector_identity() {
         plan.indices()[0].pieces()[0].sector(),
         authority_charge.into()
     );
-    assert_eq!(partner_leg.sectors(), &[SectorId::from(U1Irrep::new(1))]);
+    assert_eq!(
+        partner_leg.sectors(),
+        &[SectorId::from(U1Irrep::new(1).unwrap())]
+    );
     assert!(!partner_leg.is_dual());
     assert!(matches!(
         checked(
@@ -321,7 +324,7 @@ fn canonical_effective_occurrence_owns_non_self_dual_sector_identity() {
 #[test]
 fn rule_identity_seals_numeric_sector_meaning_without_coefficients() {
     let odd: SectorId = FermionParityIrrep::ODD.into();
-    let charge_minus_one: SectorId = U1Irrep::new(-1).into();
+    let charge_minus_one: SectorId = U1Irrep::new(-1).unwrap().into();
     assert_eq!(
         odd, charge_minus_one,
         "fixture requires the raw-id collision"
@@ -359,8 +362,8 @@ fn rule_identity_seals_numeric_sector_meaning_without_coefficients() {
 
 #[test]
 fn structural_zero_sector_combinations_remain_in_enumeration() {
-    let q0: SectorId = U1Irrep::new(0).into();
-    let q1: SectorId = U1Irrep::new(1).into();
+    let q0: SectorId = U1Irrep::new(0).unwrap().into();
+    let q1: SectorId = U1Irrep::new(1).unwrap().into();
     assert_eq!(U1FusionRule.nsymbol(q1, q1, q0), 0);
 
     // One effective rank-three tensor carries the fusion-tree boundary

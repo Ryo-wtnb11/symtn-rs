@@ -10,11 +10,11 @@ fn main() -> Result<(), Error> {
     let rt = Runtime::builder().build()?;
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )?;
     let dual = v.try_dual()?;
     assert!(dual.is_dual());
-    assert_eq!(dual.degeneracy(&U1Irrep::new(-1))?, 1);
+    assert_eq!(dual.degeneracy(&U1Irrep::new(-1).unwrap())?, 1);
     assert_eq!(dual.try_dual()?, v);
     let zero = TensorMap::<_, f64>::zeros(engine, &rt, [&v], [&v])?;
     assert!(zero.norm(engine, 2.0)? < 1e-12);

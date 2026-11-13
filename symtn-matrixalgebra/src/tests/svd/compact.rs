@@ -804,8 +804,8 @@ fn svd_compact_factor_dims_include_sectors_without_populated_trees() {
     // What: public compact SVD retains the complete original leg space,
     // including a sector absent from every populated fusion block.
     let rule = U1FusionRule;
-    let neutral = U1Irrep::new(0).sector_id();
-    let positive = U1Irrep::new(1).sector_id();
+    let neutral = SectorId::from(U1Irrep::new(0).unwrap());
+    let positive = SectorId::from(U1Irrep::new(1).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(neutral, 2), (positive, 3)], false)]),
         FusionProductSpace::new([SectorLeg::new([(neutral, 2)], false)]),
@@ -843,9 +843,9 @@ fn svd_compact_preserves_asymmetric_non_self_dual_u1_factor_layouts() {
     // What: canonical factors retain unequal degeneracies and the dual U(1)
     // domain convention while reconstructing both coupled sectors.
     let rule = U1FusionRule;
-    let neutral = U1Irrep::new(0).sector_id();
-    let positive = U1Irrep::new(1).sector_id();
-    let negative = U1Irrep::new(-1).sector_id();
+    let neutral = SectorId::from(U1Irrep::new(0).unwrap());
+    let positive = SectorId::from(U1Irrep::new(1).unwrap());
+    let negative = SectorId::from(U1Irrep::new(-1).unwrap());
     let codomain = SectorLeg::new([(neutral, 3), (positive, 2)], false);
     let domain = SectorLeg::new([(neutral, 1), (negative, 4)], true);
     let homspace = FusionTreeHomSpace::new(

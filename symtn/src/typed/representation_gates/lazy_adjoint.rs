@@ -85,7 +85,7 @@ fn coupled_block_reads_do_not_materialize_a_lazy_adjoint() {
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     let source: TensorMap<_, num_complex::Complex64> =
@@ -1083,12 +1083,18 @@ fn adjoint_trace_pairs_stays_parent_native() {
     let u1_provider = Arc::new(U1FusionRule);
     let u1_traced = GradedSpace::try_new(
         Arc::clone(&u1_provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
-    let u1_open = GradedSpace::try_new(u1_provider, [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 1)])
-        .and_then(|space| space.try_dual())
-        .unwrap();
+    let u1_open = GradedSpace::try_new(
+        u1_provider,
+        [
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 1),
+        ],
+    )
+    .and_then(|space| space.try_dual())
+    .unwrap();
     let u1 = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -1675,7 +1681,7 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
 
     let bad_leg = GradedSpace::try_new(
         Arc::clone(source.logical_space().provider_arc()),
-        [(U1Irrep::new(7), 1)],
+        [(U1Irrep::new(7).unwrap(), 1)],
     )
     .unwrap();
     let bad =
@@ -1782,12 +1788,12 @@ fn lazy_binary_outputs_keep_the_lhs_provider_allocation() {
     assert!(!Arc::ptr_eq(&lhs_provider, &rhs_provider));
     let lhs_leg = GradedSpace::try_new(
         Arc::clone(&lhs_provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let rhs_leg = GradedSpace::try_new(
         Arc::clone(&rhs_provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let lhs =
@@ -1892,13 +1898,14 @@ fn identity_transforms_preserve_the_cold_lazy_view() {
 fn lazy_adjoint_constructor_rejects_a_compact_diagonal_parent() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let bond = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let bond =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let diagonal = TensorMap::diagonal(
         engine,
         &runtime,
         &bond,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![1.0, 2.0],
         }],
     )
@@ -1915,13 +1922,13 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
     let densified = probe::record();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let real = TensorMap::diagonal(
         engine,
         &runtime,
         &bond,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![1.0, 2.0],
         }],
     )
@@ -1931,7 +1938,7 @@ fn compact_adjoint_never_enters_the_lazy_representation() {
         &runtime,
         &bond,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![
                 num_complex::Complex64::new(1.0, 2.0),
                 num_complex::Complex64::new(3.0, -4.0),
@@ -1989,8 +1996,8 @@ fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
         GradedSpace::try_new(
             Arc::clone(&provider),
             [
-                (U1Irrep::new(0), degeneracies[0]),
-                (U1Irrep::new(1), degeneracies[1]),
+                (U1Irrep::new(0).unwrap(), degeneracies[0]),
+                (U1Irrep::new(1).unwrap(), degeneracies[1]),
             ],
         )
         .unwrap()

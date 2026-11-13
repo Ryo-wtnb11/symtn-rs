@@ -91,18 +91,21 @@ macro_rules! u1_rank_deficient {
         let codomain = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (U1Irrep::new(0), 4),
-                (U1Irrep::new(1), 3),
-                (U1Irrep::new(2), 2),
+                (U1Irrep::new(0).unwrap(), 4),
+                (U1Irrep::new(1).unwrap(), 3),
+                (U1Irrep::new(2).unwrap(), 2),
             ],
         )
         .unwrap();
-        let domain =
-            GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)]).unwrap();
+        let domain = GradedSpace::try_new(
+            rule,
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
+        )
+        .unwrap();
         let value = $value;
         let a: TensorMap<_, $scalar> =
             TensorMap::from_subblock_fn($engine, &$runtime, [&codomain], [&domain], |trees, i| {
-                if *trees.coupled() == U1Irrep::new(0) {
+                if *trees.coupled() == U1Irrep::new(0).unwrap() {
                     // Outer product: rank one.
                     value((i[0] + 1) as f64, 0.5 * i[0] as f64)
                         * value(1.0 + i[1] as f64, -(i[1] as f64))
@@ -129,7 +132,9 @@ macro_rules! check_u1 {
         assert_null_space!($engine, runtime, a, left, true, $tol, value(1.0, 0.0));
         for (charge, nullity) in expected {
             assert_eq!(
-                left.domain()[0].degeneracy(&U1Irrep::new(charge)).unwrap(),
+                left.domain()[0]
+                    .degeneracy(&U1Irrep::new(charge).unwrap())
+                    .unwrap(),
                 nullity,
                 "left nullity of charge {charge}"
             );
@@ -138,7 +143,9 @@ macro_rules! check_u1 {
         let shape = a.left_null($engine, &[0], &[1]).unwrap();
         for (charge, nullity) in [(0, 2), (1, 0), (2, 2)] {
             assert_eq!(
-                shape.domain()[0].degeneracy(&U1Irrep::new(charge)).unwrap(),
+                shape.domain()[0]
+                    .degeneracy(&U1Irrep::new(charge).unwrap())
+                    .unwrap(),
                 nullity
             );
         }
@@ -149,7 +156,7 @@ macro_rules! check_u1 {
         for (charge, nullity) in expected {
             assert_eq!(
                 right.codomain()[0]
-                    .degeneracy(&U1Irrep::new(charge))
+                    .degeneracy(&U1Irrep::new(charge).unwrap())
                     .unwrap(),
                 nullity,
                 "right nullity of charge {charge}"
@@ -240,11 +247,11 @@ fn extend_spectrum_pads_with_rectangular_zeros_and_rejects_malformed_input() {
     use symtn::typed::{Error, SectorSpectrum};
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let entry = |charge, values: &[f64]| SectorSpectrum {
-        sector: U1Irrep::new(charge),
+        sector: U1Irrep::new(charge).unwrap(),
         values: values.to_vec(),
     };
     let padded = leg.extend_spectrum(&[entry(0, &[2.0, -1.0])]).unwrap();
@@ -386,13 +393,20 @@ fn shape_based_null_spaces_on_dual_legs_annihilate_the_dense_blocks() {
     let w = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 3),
-            (U1Irrep::new(2), 1),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 3),
+            (U1Irrep::new(2).unwrap(), 1),
         ],
     )
     .unwrap();
-    let v = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(-1), 1)]).unwrap();
+    let v = GradedSpace::try_new(
+        rule,
+        [
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(-1).unwrap(), 1),
+        ],
+    )
+    .unwrap();
     let w_dual = w.try_dual().unwrap();
     let v_dual = v.try_dual().unwrap();
     // Dual codomain: `w* <- v` couples 0 (3 x 2) and -1 (3 x 1); -2 is

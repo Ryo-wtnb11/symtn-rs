@@ -83,19 +83,19 @@ fn u1_su2_space(provider: &Arc<U1Su2>) -> GradedSpace<U1Su2> {
         Arc::clone(provider),
         [
             (
-                product_sector(U1Irrep::new(0), SU2Irrep::from_twice_spin(0)),
+                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(0)),
                 18,
             ),
             (
-                product_sector(U1Irrep::new(1), SU2Irrep::from_twice_spin(1)),
+                product_sector(U1Irrep::new(1).unwrap(), SU2Irrep::from_twice_spin(1)),
                 14,
             ),
             (
-                product_sector(U1Irrep::new(-1), SU2Irrep::from_twice_spin(1)),
+                product_sector(U1Irrep::new(-1).unwrap(), SU2Irrep::from_twice_spin(1)),
                 14,
             ),
             (
-                product_sector(U1Irrep::new(0), SU2Irrep::from_twice_spin(2)),
+                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(2)),
                 12,
             ),
         ],
@@ -107,9 +107,9 @@ fn u1_space(provider: &Arc<U1FusionRule>) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::clone(provider),
         [
-            (U1Irrep::new(-1), 36),
-            (U1Irrep::new(0), 48),
-            (U1Irrep::new(1), 36),
+            (U1Irrep::new(-1).unwrap(), 36),
+            (U1Irrep::new(0).unwrap(), 48),
+            (U1Irrep::new(1).unwrap(), 36),
         ],
     )
     .unwrap()

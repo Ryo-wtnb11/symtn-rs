@@ -88,7 +88,8 @@ const MALFORMED: [(bool, ErrorKind); 2] = [(false, is_shape_mismatch), (true, is
 fn multiplicity_free_malformed_qr_answer_is_a_typed_dense_error() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let wide = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let wide =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     for (f32_factors, kind) in MALFORMED {
         let _dense = inject_malformed_qr(f32_factors);
         let square: TensorMap<_, f64> =

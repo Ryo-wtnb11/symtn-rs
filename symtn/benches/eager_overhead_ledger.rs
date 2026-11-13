@@ -399,7 +399,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    let u1 = |n: usize| centered(n).map(U1Irrep::new).collect::<Vec<_>>();
+    let u1 = |n: usize| {
+        centered(n)
+            .map(|charge| U1Irrep::new(charge).unwrap())
+            .collect::<Vec<_>>()
+    };
     let fz2u1 = |n: usize| {
         centered(n)
             .map(|q| {
@@ -408,7 +412,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     FermionParityIrrep::ODD
                 };
-                ProductSector::new(parity, U1Irrep::new(q))
+                ProductSector::new(parity, U1Irrep::new(q).unwrap())
             })
             .collect::<Vec<_>>()
     };

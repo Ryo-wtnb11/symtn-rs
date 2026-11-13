@@ -3,7 +3,8 @@ use super::*;
 use crate::probe::{self, Event};
 use std::cell::Cell;
 use symtn_core::{
-    FusionProductSpace, FusionRule, SU2FusionRule, SectorLeg, U1FusionRule, U1Irrep, ZNFusionRule,
+    FusionProductSpace, FusionRule, SU2FusionRule, SectorId, SectorLeg, U1FusionRule, U1Irrep,
+    ZNFusionRule,
 };
 use symtn_operations::TensorContractSpec;
 
@@ -42,9 +43,9 @@ fn run_nan_poisoned_destination_case(
     let wide = || {
         SectorLeg::new(
             [
-                (U1Irrep::new(0).sector_id(), 1),
-                (U1Irrep::new(1).sector_id(), open_degeneracy),
-                (U1Irrep::new(2).sector_id(), 1),
+                (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+                (SectorId::from(U1Irrep::new(1).unwrap()), open_degeneracy),
+                (SectorId::from(U1Irrep::new(2).unwrap()), 1),
             ],
             false,
         )
@@ -52,8 +53,8 @@ fn run_nan_poisoned_destination_case(
     let narrow = || {
         SectorLeg::new(
             [
-                (U1Irrep::new(0).sector_id(), 2),
-                (U1Irrep::new(1).sector_id(), 1),
+                (SectorId::from(U1Irrep::new(0).unwrap()), 2),
+                (SectorId::from(U1Irrep::new(1).unwrap()), 1),
             ],
             false,
         )
@@ -195,7 +196,7 @@ fn dynamic_core_strong_zero_overwrites_nan_scratch_after_shape_change() {
 fn direct_prelowered_source_reuses_ordinary_transform_entry() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = U1FusionRule;
-    let charges = [-1, 0, 1].map(|charge| U1Irrep::new(charge).sector_id());
+    let charges = [-1, 0, 1].map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()));
     let codomain = SectorLeg::new(charges.map(|sector| (sector, 1)), false);
     let domain = SectorLeg::new(charges.map(|sector| (rule.dual(sector), 1)), false);
     let homspace = FusionTreeHomSpace::new(

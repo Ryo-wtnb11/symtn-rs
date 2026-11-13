@@ -220,7 +220,7 @@ fn contract_overwrite_reorders_non_self_dual_unequal_blocks() {
     let u1_provider = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
         Arc::clone(&u1_provider),
-        [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let u1_tag = |sector: &U1Irrep| f64::from(sector.charge());
@@ -238,8 +238,14 @@ fn contract_overwrite_reorders_non_self_dual_unequal_blocks() {
     let product = GradedSpace::try_new(
         product_provider,
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2,
+            ),
         ],
     )
     .unwrap();

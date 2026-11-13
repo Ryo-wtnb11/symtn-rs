@@ -116,11 +116,11 @@ fn rigid_symbols_separate_twist_from_frobenius_schur_phase() {
 fn public_u1_irrep_roundtrips_compact_ids_and_fuses() {
     let rule = U1FusionRule;
     let charges = [
-        U1Irrep::new(-2),
-        U1Irrep::new(-1),
-        U1Irrep::new(0),
-        U1Irrep::new(1),
-        U1Irrep::new(2),
+        U1Irrep::new(-2).unwrap(),
+        U1Irrep::new(-1).unwrap(),
+        U1Irrep::new(0).unwrap(),
+        U1Irrep::new(1).unwrap(),
+        U1Irrep::new(2).unwrap(),
     ];
     let ids = charges.map(SectorId::from);
 
@@ -135,17 +135,20 @@ fn public_u1_irrep_roundtrips_compact_ids_and_fuses() {
         ]
     );
     for charge in charges {
-        assert_eq!(U1Irrep::from_sector_id(charge.sector_id()), Some(charge));
+        assert_eq!(rule.decode_sector(SectorId::from(charge)), Ok(charge));
     }
-    assert_eq!(rule.vacuum(), U1Irrep::new(0).sector_id());
+    assert_eq!(rule.vacuum(), SectorId::from(U1Irrep::new(0).unwrap()));
     assert_eq!(
-        rule.dual(U1Irrep::new(3).sector_id()),
-        U1Irrep::new(-3).sector_id()
+        rule.dual(SectorId::from(U1Irrep::new(3).unwrap())),
+        SectorId::from(U1Irrep::new(-3).unwrap())
     );
     assert_eq!(
-        rule.fusion_channels(U1Irrep::new(-2).sector_id(), U1Irrep::new(5).sector_id())
-            .to_vec(),
-        vec![U1Irrep::new(3).sector_id()]
+        rule.fusion_channels(
+            SectorId::from(U1Irrep::new(-2).unwrap()),
+            SectorId::from(U1Irrep::new(5).unwrap())
+        )
+        .to_vec(),
+        vec![SectorId::from(U1Irrep::new(3).unwrap())]
     );
 }
 

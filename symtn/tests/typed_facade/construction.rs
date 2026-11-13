@@ -333,9 +333,9 @@ fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
     let leg = GradedSpace::try_new(
         provider,
         [
-            (symtn::sector::U1Irrep::new(-1), 1),
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 1),
+            (symtn::sector::U1Irrep::new(-1).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(0).unwrap(), 2),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -640,8 +640,8 @@ fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
     let typed_v = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (symtn::sector::U1Irrep::new(0), 1),
-            (symtn::sector::U1Irrep::new(1), 1),
+            (symtn::sector::U1Irrep::new(0).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -650,9 +650,9 @@ fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
     let typed_fused = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (symtn::sector::U1Irrep::new(-1), 1),
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 1),
+            (symtn::sector::U1Irrep::new(-1).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(0).unwrap(), 2),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();

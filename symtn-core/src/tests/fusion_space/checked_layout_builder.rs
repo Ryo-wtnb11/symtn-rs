@@ -793,9 +793,9 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
         .unwrap_err();
     assert_eq!(
         error,
-        FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         }
     );
 
@@ -847,9 +847,9 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
         .unwrap_err();
     assert_eq!(
         error,
-        FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         }
     );
 
@@ -870,9 +870,9 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
         .unwrap_err();
     assert_eq!(
         error,
-        FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         }
     );
 }
@@ -914,9 +914,9 @@ fn failed_checked_algebra_builds_publish_no_identity_or_intern_state() {
     assert_failed_checked_build_is_transactional(
         &U1FusionRule,
         &u1_overflow,
-        FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         },
     );
 
@@ -949,9 +949,9 @@ fn failed_checked_algebra_builds_publish_no_identity_or_intern_state() {
     assert_failed_checked_build_is_transactional(
         &product_rule,
         &product_overflow,
-        FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         },
     );
 }

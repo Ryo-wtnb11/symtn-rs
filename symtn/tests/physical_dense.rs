@@ -190,9 +190,9 @@ fn su2_spin_one_singlet_projects_to_explicit_doubled_u1_charges() {
     let u1_leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(-2), 1),
-            (U1Irrep::new(2), 1),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(-2).unwrap(), 1),
+            (U1Irrep::new(2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -455,9 +455,9 @@ fn u1_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let v = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 1),
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 1),
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();

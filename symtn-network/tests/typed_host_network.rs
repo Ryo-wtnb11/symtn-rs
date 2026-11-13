@@ -127,8 +127,14 @@ fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
             .unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -467,18 +473,18 @@ fn contracted_leg_degeneracy_mismatch_spells_out_both_legs() {
     let lhs_space = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
     let rhs_space = GradedSpace::try_new(
         provider,
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 4),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 4),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();

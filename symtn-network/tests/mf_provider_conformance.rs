@@ -182,8 +182,14 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -195,7 +201,8 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         TensorMap::from_subblock_fn(engine, &runtime, [&product], [&product], |trees, i| {
             if i[0] != i[1] {
                 0.0
-            } else if *trees.coupled() == product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0))
+            } else if *trees.coupled()
+                == product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap())
             {
                 2.0 + i[0] as f64
             } else {
@@ -228,14 +235,14 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         [
             (
                 product_sector(
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)),
+                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     SU2Irrep::from_twice_spin(0),
                 ),
                 2,
             ),
             (
                 product_sector(
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
+                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     SU2Irrep::from_twice_spin(1),
                 ),
                 1,

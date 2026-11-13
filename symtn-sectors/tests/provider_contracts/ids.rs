@@ -80,8 +80,14 @@ fn zn_ids_are_canonical_charges_below_the_modulus() {
 #[test]
 fn u1_small_charges_interleave_by_sign() {
     for (charge, id) in [(0, 0), (-1, 1), (1, 2), (-2, 3), (2, 4), (-3, 5)] {
-        assert_eq!(U1FusionRule.encode_sector(&U1Irrep::new(charge)), Ok(s(id)));
-        assert_eq!(U1FusionRule.decode_sector(s(id)), Ok(U1Irrep::new(charge)));
+        assert_eq!(
+            U1FusionRule.encode_sector(&U1Irrep::new(charge).unwrap()),
+            Ok(s(id))
+        );
+        assert_eq!(
+            U1FusionRule.decode_sector(s(id)),
+            Ok(U1Irrep::new(charge).unwrap())
+        );
     }
 }
 
@@ -166,7 +172,7 @@ fn cantor_product_ids_nest_through_both_factors() {
         U1FusionRule,
     )
     .unwrap();
-    let odd_one = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1));
+    let odd_one = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
     // (1, 2) -> 3 * 4 / 2 + 1.
     assert_eq!(fz2_u1.encode_sector(&odd_one), Ok(s(7)));
     assert_eq!(fz2_u1.decode_sector(s(7)), Ok(odd_one));
@@ -181,7 +187,7 @@ fn cantor_product_ids_nest_through_both_factors() {
     )
     .unwrap();
     let label = product_sector(
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)),
+        product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
         SU2Irrep::from_twice_spin(1),
     );
     // inner (1, 1) -> 4; outer (4, 1) -> 5 * 6 / 2 + 4.
@@ -194,7 +200,10 @@ fn cantor_product_ids_nest_through_both_factors() {
 fn cantor_product_rejects_the_first_unpairable_ids() {
     let u1_u1 =
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
-    let widest = product_sector(U1Irrep::new(i32::MAX), U1Irrep::new(i32::MAX));
+    let widest = product_sector(
+        U1Irrep::new(i32::MAX).unwrap(),
+        U1Irrep::new(i32::MAX).unwrap(),
+    );
     assert_eq!(
         u1_u1.encode_sector(&widest),
         Err(FusionAlgebraError::ProductCodec(
@@ -202,7 +211,7 @@ fn cantor_product_rejects_the_first_unpairable_ids() {
         ))
     );
     // Zigzag ids (2^32 - 2, 3) still pair: 9223372047592194047.
-    let pairable = product_sector(U1Irrep::new(i32::MAX), U1Irrep::new(-2));
+    let pairable = product_sector(U1Irrep::new(i32::MAX).unwrap(), U1Irrep::new(-2).unwrap());
     assert_eq!(
         u1_u1.encode_sector(&pairable),
         Ok(s(9_223_372_047_592_194_047))
@@ -213,14 +222,26 @@ fn cantor_product_rejects_the_first_unpairable_ids() {
     // s = 6074000999: T = 18446744070963499500, + l = 18446744075258466794 > 2^64 - 1.
     // So r = 1779033704 (zigzag of charge 889516852) is the last right id and
     // r = 1779033705 (zigzag of charge -889516853) the first unpairable one.
-    let last = product_sector(U1Irrep::new(i32::MAX), U1Irrep::new(889_516_852));
-    assert_eq!(U1Irrep::new(889_516_852).sector_id(), s(1_779_033_704));
+    let last = product_sector(
+        U1Irrep::new(i32::MAX).unwrap(),
+        U1Irrep::new(889_516_852).unwrap(),
+    );
+    assert_eq!(
+        SectorId::from(U1Irrep::new(889_516_852).unwrap()),
+        s(1_779_033_704)
+    );
     assert_eq!(
         u1_u1.encode_sector(&last),
         Ok(s(18_446_744_069_184_465_795))
     );
-    let first = product_sector(U1Irrep::new(i32::MAX), U1Irrep::new(-889_516_853));
-    assert_eq!(U1Irrep::new(-889_516_853).sector_id(), s(1_779_033_705));
+    let first = product_sector(
+        U1Irrep::new(i32::MAX).unwrap(),
+        U1Irrep::new(-889_516_853).unwrap(),
+    );
+    assert_eq!(
+        SectorId::from(U1Irrep::new(-889_516_853).unwrap()),
+        s(1_779_033_705)
+    );
     assert_eq!(
         u1_u1.encode_sector(&first),
         Err(FusionAlgebraError::ProductCodec(
@@ -238,7 +259,7 @@ fn packed_product_ids_place_the_left_factor_in_the_low_bits() {
         PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
     >;
     let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
-    let label = product_sector(U1Irrep::new(-1), FermionParityIrrep::ODD);
+    let label = product_sector(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD);
     assert_eq!(rule.encode_sector(&label), Ok(s(0x1_0000_0001)));
     assert_eq!(rule.decode_sector(s(0x1_0000_0001)), Ok(label));
 

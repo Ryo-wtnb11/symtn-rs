@@ -1292,7 +1292,7 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
                 } else {
                     symtn::sector::FermionParityIrrep::ODD
                 },
-                symtn::sector::U1Irrep::new(charge),
+                symtn::sector::U1Irrep::new(charge).unwrap(),
             ),
             SU2Irrep::from_twice_spin(twice_spin),
         )
@@ -1380,9 +1380,9 @@ fn u1_leg(
 ) -> GradedSpace<symtn::sector::U1FusionRule> {
     GradedSpace::try_new(
         Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(charge, degeneracy)| (symtn::sector::U1Irrep::new(charge), degeneracy)),
+        pairs.iter().map(|&(charge, degeneracy)| {
+            (symtn::sector::U1Irrep::new(charge).unwrap(), degeneracy)
+        }),
     )
     .unwrap()
 }
