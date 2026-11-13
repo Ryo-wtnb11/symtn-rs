@@ -22,9 +22,9 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 
 /// The Hermitian eigendecomposition `t = v d v†` (MatrixAlgebraKit
 /// `eigh_full`) of every member of a stack, prepared once for one structure
-/// signature (#1287). Real payloads only; a complex payload is rejected by
-/// [`Self::new`] until Tenferro's batched complex solver works
-/// (tenferro-rs#1923).
+/// signature (#1287). Real and complex payloads follow the same contract;
+/// for a complex payload `v†` is the conjugate transpose and Hermiticity is
+/// checked against it.
 ///
 /// Per member it is the eager [`TensorMap::eigh_full`] of the same placement,
 /// within that operation's gauge contract. Both placements compile the eager
@@ -54,7 +54,10 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 /// # Supported scope
 ///
 /// Endomorphisms with packed coupled-sector regions (every structure a
-/// public constructor builds). A batch fails as a whole
+/// public constructor builds), real or complex on Host, real on CUDA: a
+/// complex CUDA stack is refused by [`Self::execute`] with
+/// `OperationError::Dense(DenseError::Unsupported)` before any device
+/// work. A batch fails as a whole
 /// ([`BatchError`]): on any error no output is returned, and none is
 /// observable afterwards ([`EighFullWorkspace::take_output`] returns `None`)
 /// until the next successful call, which rewrites every member.
@@ -177,9 +180,9 @@ where
     /// # Errors
     ///
     /// The eager structural errors (not an endomorphism, a non-square
-    /// coupled-sector block), `UnsupportedTensorContractScope` for a complex
-    /// payload, a layout without packed coupled-sector regions, or leg roles
-    /// other than the current split.
+    /// coupled-sector block), or `UnsupportedTensorContractScope` for a
+    /// layout without packed coupled-sector regions or leg roles other than
+    /// the current split.
     pub fn new(
         cx: &mut (impl ExecContext + ?Sized),
         source: &StackedTensorMap<R, D, S>,
@@ -207,12 +210,6 @@ where
             return Err(OperationError::UnsupportedTensorContractScope {
                 message: "a prepared eigh supports only the members' current split; \
                           permute the members before pack",
-            }
-            .into());
-        }
-        if !D::CONJUGATION_IS_IDENTITY {
-            return Err(OperationError::UnsupportedTensorContractScope {
-                message: "a prepared eigh supports real payloads until tenferro-rs#1923",
             }
             .into());
         }

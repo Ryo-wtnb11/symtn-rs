@@ -27,8 +27,8 @@ use symtn::typed::Engine;
 use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{
-    ContractSpec, EighFullPlan, GradedSpace, HermitianTol, LeftPolar, Lq, OperationError, Qr,
-    RightPolar, Runtime, SectorSpectrum, StackedTensorMap, Svd, TensorMap, Truncation,
+    ContractSpec, EighFullPlan, GradedSpace, HermitianTol, LeftPolar, Lq, Qr, RightPolar, Runtime,
+    SectorSpectrum, StackedTensorMap, Svd, TensorMap, Truncation,
 };
 use symtn_sectors::{TableRule, TableSector};
 
@@ -1204,26 +1204,33 @@ fn a_non_real_quantum_dimension_is_refused_by_truncation() {
 }
 
 #[test]
-fn a_prepared_batched_eigh_refuses_table_rule_payloads_with_a_typed_error() {
+fn a_prepared_batched_eigh_equals_eager_on_table_rule_members() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // TableRule tensors are `Complex64`, and the prepared Host eigh supports
-    // real payloads only (tenferro-rs#1923): the refusal is the same typed
-    // capability error as for complex data on a real-symbol rule.
+    // TableRule tensors are `Complex64`; on Host each member of the plan is
+    // the eager `eigh_full` of that member (IEEE `==` on every entry).
     let case = Case::ising();
-    let t = case.filled("t", 1, 1);
-    let h = t
-        .axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
-        .unwrap();
-    let stack = StackedTensorMap::pack(&[h.clone(), h]).unwrap();
-    let Err(error) = EighFullPlan::new(engine, &stack, &[0], &[1], HermitianTol::DEFAULT) else {
-        panic!("a Complex64 prepared eigh must be refused");
-    };
-    assert!(
-        matches!(
-            &error,
-            symtn::typed::Error::Operation(operation)
-                if matches!(**operation, OperationError::UnsupportedTensorContractScope { .. })
-        ),
-        "{error:?}"
-    );
+    let members = ["t", "u"].map(|tag| {
+        let t = case.filled(tag, 1, 1);
+        t.axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
+            .unwrap()
+    });
+    let stack = StackedTensorMap::pack(&members).unwrap();
+    let plan = EighFullPlan::new(engine, &stack, &[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    let output = plan.execute(engine, &stack, &mut workspace).unwrap();
+    for (member, h) in members.iter().enumerate() {
+        let eager = h
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+            .unwrap();
+        let d = output.d.member(engine, member).unwrap();
+        let v = output.v.member(engine, member).unwrap();
+        assert!(
+            d.dense_data().unwrap() == eager.d.materialize(engine).unwrap().dense_data().unwrap(),
+            "member {member}: d"
+        );
+        assert!(
+            v.dense_data().unwrap() == eager.v.dense_data().unwrap(),
+            "member {member}: v"
+        );
+    }
 }

@@ -492,14 +492,29 @@ fn complex_device_payloads_are_unsupported() {
         .unwrap()
         .to_cuda(cuda)
         .unwrap();
+    let plan = EighFullPlan::new(
+        engine,
+        &stack,
+        &codomain_axes(&complex[0]),
+        &domain_axes(&complex[0]),
+        HermitianTol::DEFAULT,
+    )
+    .unwrap();
+    let mut ws = plan.workspace().unwrap();
+    let before = cuda_transfer_stats();
     assert!(matches!(
-        EighFullPlan::new(engine, &stack, &codomain_axes(&complex[0]), &domain_axes(&complex[0]), HermitianTol::DEFAULT),
-        Err(Error::Operation(error)) if matches!(
+        plan.execute(cuda, &stack, &mut ws).map(|_| ()),
+        Err(BatchError::Operation(Error::Operation(error))) if matches!(
             *error,
-            symtn::typed::OperationError::UnsupportedTensorContractScope { message }
-                if message.contains("real payloads")
+            symtn::typed::OperationError::Dense(symtn_dense::DenseError::Unsupported { .. })
         )
     ));
+    assert_eq!(
+        delta(cuda_transfer_stats(), before),
+        Default::default(),
+        "refused before any device work"
+    );
+    assert!(ws.take_output().is_none());
 }
 
 /// Every member's `d` is exactly zero off its diagonal and carries the
