@@ -1327,6 +1327,117 @@ fn unchanged_inputs_hit_and_any_change_searches() {
     assert!(run(&plain, &t, &keys, 10075.0).1);
 }
 
+/// An engine of `threads` whose dispatch cost, for every kind, is the row
+/// of the measured `(width, ns)` anchors.
+fn engine_with_anchors(threads: usize, policy: BatchPolicy, anchors: &[(usize, u64)]) -> CpuEngine {
+    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+    let anchors: Vec<_> = anchors
+        .iter()
+        .map(|&(w, ns)| (w, Duration::from_nanos(ns)))
+        .collect();
+    let row = WidthCosts::from_anchors(&anchors).unwrap();
+    let pool = Pool::builder()
+        .threads(threads)
+        .dispatch_costs(DispatchCosts::new(row, row, row))
+        .build()
+        .unwrap();
+    CpuEngine::new(pool).with_batch_policy(policy)
+}
+
+/// One searched GEMM placement of four jobs (a 40000 ns block and three of
+/// 100 ns) on `engine` through `cache`: its lanes, whether it queried a
+/// grant, and how many dispatch costs the cache key read.
+fn keyed_run(
+    engine: &mut CpuEngine,
+    cache: &LaneAllocationCache,
+) -> (Vec<(usize, Vec<usize>)>, bool, usize) {
+    let t = nanos(&[40000, 100, 100, 100]);
+    engine
+        .with_contraction_exec(|exec, _, _| {
+            let exec: &Exec<'_> = exec;
+            let queries = std::cell::Cell::new(0);
+            let grant = |_, t: Duration, w| {
+                queries.set(queries.get() + 1);
+                exec.width_for_within(w, t.as_nanos() as f64, 1)
+            };
+            let mut tables = LaneTables::default();
+            let recording = crate::probe::record();
+            let key = (OpKind::Gemm, |_: usize| [0; 3]);
+            lanes::allocate(exec, &t, key, 10075.0, Some(grant), cache, &mut tables);
+            let reads = recording.get(crate::probe::Event::PlacementCostRead);
+            let a = read_back(exec, &t, 10075.0, &tables);
+            Ok((lanes(&a), queries.get() > 0, reads))
+        })
+        .unwrap()
+}
+
+fn keyed_policy() -> BatchPolicy {
+    BatchPolicy::default().with_model(
+        WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0),
+    )
+}
+
+/// Purpose: a cached lookup reads the token's dispatch-cost row once, not
+/// once to hash it and again to compare it: a hit at budget B reads the
+/// B - 1 costs it compares plus the two the hash covers (widths 2 and B), so
+/// one more width costs one more read. The miss before it searched.
+#[test]
+fn a_cached_lookup_reads_the_cost_row_once() {
+    for budget in [4, 16] {
+        let mut engine = flat(budget, keyed_policy(), 100);
+        let cache = cache(1 << 20);
+        let (cold, searched, _) = keyed_run(&mut engine, &cache);
+        assert!(searched);
+        let (hit, searched, reads) = keyed_run(&mut engine, &cache);
+        assert_eq!((hit, searched), (cold, false), "budget {budget} hit");
+        assert_eq!(reads, (budget - 1) + 2, "budget {budget}");
+    }
+}
+
+/// Purpose: the cache key is complete in the token's dispatch-cost row,
+/// although its hash reads only the row's ends. Two pools whose rows agree
+/// at widths 2 and 8 but not at width 4 (checked first, so the second
+/// lookup does reach the comparison) never share a placement: the second
+/// searches. A third pool with the first one's row, a different pool, hits
+/// its entry, and the second row then hits its own.
+#[test]
+fn a_row_that_differs_only_inside_misses() {
+    let a = [(2, 100), (4, 100), (8, 100)];
+    let b = [(2, 100), (4, 150), (8, 100)];
+    let costs = |engine: &mut CpuEngine| {
+        engine
+            .with_contraction_exec(|exec, _, _| {
+                let at = |w| {
+                    exec.token_ref()
+                        .dispatch_cost(NonZeroUsize::new(w).unwrap())
+                };
+                Ok((exec.budget(), at(2), at(4), at(8)))
+            })
+            .unwrap()
+    };
+    let mut first = engine_with_anchors(8, keyed_policy(), &a);
+    let mut second = engine_with_anchors(8, keyed_policy(), &b);
+    let (ca, cb) = (costs(&mut first), costs(&mut second));
+    assert_eq!((ca.0, ca.1, ca.3), (cb.0, cb.1, cb.3));
+    assert_ne!(ca.2, cb.2);
+
+    let cache = cache(1 << 20);
+    assert!(keyed_run(&mut first, &cache).1);
+    assert!(!keyed_run(&mut first, &cache).1);
+    assert!(
+        keyed_run(&mut second, &cache).1,
+        "a row differing at width 4 searches"
+    );
+    let mut third = engine_with_anchors(8, keyed_policy(), &a);
+    assert!(
+        !keyed_run(&mut third, &cache).1,
+        "an equal row of another pool hits"
+    );
+    assert!(!keyed_run(&mut second, &cache).1);
+}
+
 /// Purpose: the cache's retained bytes stay within its budget. Distinct
 /// batches beyond what a small budget holds evict older entries, and an
 /// entry above the largest admissible size is rejected before its key is

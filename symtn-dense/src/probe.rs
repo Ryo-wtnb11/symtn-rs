@@ -32,9 +32,12 @@ pub(crate) enum Event {
     RunnerLanes,
     /// The block placement made one comparison sort of its working tables.
     PlacementSort,
+    /// The lane-allocation cache key read the token's dispatch cost at one
+    /// width.
+    PlacementCostRead,
 }
 
-const EVENTS: usize = Event::PlacementSort as usize + 1;
+const EVENTS: usize = Event::PlacementCostRead as usize + 1;
 
 #[derive(Default)]
 struct Probe {

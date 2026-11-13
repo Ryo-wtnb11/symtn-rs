@@ -335,11 +335,34 @@ fn model_bits(model: &WorkModel) -> [u64; 5] {
     ]
 }
 
+/// The token's dispatch cost at `width`.
+fn dispatch_cost(exec: &Exec<'_>, width: NonZeroUsize) -> Duration {
+    #[cfg(test)]
+    crate::probe::add(crate::probe::Event::PlacementCostRead, 1);
+    exec.token_ref().dispatch_cost(width)
+}
+
 /// The token's dispatch cost at every width `2..=budget`.
 fn dispatch_costs<'a>(exec: &'a Exec<'_>) -> impl Iterator<Item = Duration> + 'a {
     (2..=exec.budget())
         .filter_map(NonZeroUsize::new)
-        .map(|width| exec.token_ref().dispatch_cost(width))
+        .map(|width| dispatch_cost(exec, width))
+}
+
+/// The dispatch costs a key's hash covers: those at widths 2 and B, the
+/// ends of its `2..=B` row.
+///
+/// Why not the whole row: equality compares every width, so a row that
+/// differs only inside still misses, and a lookup reads the token's row once
+/// (to compare) instead of twice. A complete key that needs no read per
+/// width needs a value of the token that fixes its row, which threadteam
+/// does not expose.
+fn cost_ends(exec: &Exec<'_>) -> [Option<Duration>; 2] {
+    let end = |width| NonZeroUsize::new(width).map(|width| dispatch_cost(exec, width));
+    match exec.budget() {
+        budget if budget >= 2 => [end(2), end(budget)],
+        _ => [None; 2],
+    }
 }
 
 /// The one hash of a key and of its borrowed query, field by field.
@@ -351,13 +374,11 @@ fn hash_key<H: Hasher>(
     model: [u64; 5],
     mean_work: u64,
     team: bool,
-    costs: (usize, impl Iterator<Item = Duration>),
+    cost_ends: [Option<Duration>; 2],
     times: &[Duration],
     keys: &[GrantKey],
 ) {
-    (family, budget, model, mean_work, team).hash(state);
-    state.write_usize(costs.0);
-    costs.1.for_each(|cost| cost.hash(state));
+    (family, budget, model, mean_work, team, cost_ends).hash(state);
     times.hash(state);
     keys.hash(state);
 }
@@ -371,7 +392,7 @@ impl Hash for LaneAllocationKey {
             self.model,
             self.mean_work,
             self.team,
-            (self.costs.len(), self.costs.iter().copied()),
+            [self.costs.first().copied(), self.costs.last().copied()],
             &self.times,
             &self.keys,
         );
@@ -403,15 +424,14 @@ impl LaneAllocationQuery<'_, '_> {
 
 impl Hash for LaneAllocationQuery<'_, '_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let budget = self.exec.budget();
         hash_key(
             state,
             self.family,
-            budget,
+            self.exec.budget(),
             self.model(),
             self.mean_work.to_bits(),
             self.team(),
-            (budget.saturating_sub(1), dispatch_costs(self.exec)),
+            cost_ends(self.exec),
             self.times,
             self.keys,
         );
