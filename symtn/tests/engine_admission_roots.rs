@@ -1,13 +1,14 @@
 //! Admitting the caller's engine takes no execution resource from it: a Host
 //! operation that decides no width and runs no parallel section creates no
 //! ledger root on a team-backed engine, while an operation that forks on the
-//! same engine creates its one root.
+//! same engine creates its one root, which the dependency kernels it calls
+//! share, and a stage with nothing to do adds none.
 
 #![cfg(feature = "ledger-roots")]
 
 use num_complex::Complex64;
 use symtn::sector::U1FusionRule;
-use symtn::typed::{CpuEngine, GradedSpace, Runtime, TensorMap};
+use symtn::typed::{ContractSpec, CpuEngine, GradedSpace, Runtime, TensorMap};
 use symtn_operations::host_pool::eager_test_engine;
 use tenferro_cpu::threadteam::ledger;
 
@@ -96,3 +97,39 @@ macro_rules! no_decision_ops_create_no_root {
 
 no_decision_ops_create_no_root!(no_decision_ops_create_no_root_f64, f64);
 no_decision_ops_create_no_root!(no_decision_ops_create_no_root_c64, Complex64);
+
+/// `x ∘ y` of two `[v] <- [v]` matrices, as a planar contraction into `out`.
+const COMPOSE: ContractSpec<'static> = ContractSpec {
+    lhs: &[1],
+    rhs: &[0],
+    codomain: &[0],
+    domain: &[1],
+};
+
+// Why one root at either beta: every destination block of a block-diagonal
+// product is written by a GEMM, so neither beta leaves an inactive block to
+// initialize, and the GEMMs' dependency calls run on the root they forked.
+#[test]
+fn forking_contraction_creates_one_root() {
+    let runtime = Runtime::builder().build().unwrap();
+    let v = u1_leg(&[(-1, 40), (0, 48), (1, 32)]);
+    let setup = &mut CpuEngine::serial();
+    let x: TensorMap<U1FusionRule, f64> =
+        TensorMap::rand_with_seed(setup, &runtime, [&v], [&v], 21).unwrap();
+    let y = TensorMap::rand_with_seed(setup, &runtime, [&v], [&v], 22).unwrap();
+    let mut out = x.compose(setup, &y).unwrap();
+    assert!(out.subblock_count() > 1, "a multi-block product");
+
+    let mut engine = team_engine();
+    for beta in [0.0, 1.0] {
+        let roots = roots_of(&mut engine, |e| {
+            x.planar_contract_into(e, &y, &COMPOSE, &mut out, 1.0, beta)
+                .unwrap()
+        });
+        assert_eq!(roots.len(), 1, "one root at beta = {beta}");
+        assert!(
+            ledger::max_live(roots[0]) > 1,
+            "the GEMMs fork at beta = {beta}"
+        );
+    }
+}

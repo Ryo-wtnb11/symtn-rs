@@ -93,6 +93,11 @@ where
             alpha,
             D::one(),
         )?;
+        // No scale opens no section: the engine is only admitted, with the
+        // entry's own refusals, and no token is taken.
+        if destination_scales.is_empty() {
+            return crate::host_pool::admit(engine);
+        }
         crate::host_pool::with_exec(engine, |exec| {
             scale_destination_blocks(
                 exec,
@@ -190,9 +195,6 @@ where
     D: TreeTransformScalar + RecouplingCoefficientAction<C>,
     C: Copy,
 {
-    if scales.is_empty() {
-        return Ok(());
-    }
     for index in 0..dst_structure.block_count() {
         let block = dst_structure
             .block(index)
