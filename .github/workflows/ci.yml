@@ -596,6 +596,13 @@ jobs:
         working-directory: symtn
         env:
           CARGO_PROFILE_TEST_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
+      # Why: `lie.rs` is default-build code, but its rank >= 2 paths need
+      # fusion-symbols' generated data, so only `cgc-gen` tests execute them.
+      # `--tests` because the Lie oracles are integration tests; `--lib` alone
+      # leaves symtn-sectors below its floor.
+      - name: Run symtn-sectors tests with generated Lie data (cgc-gen)
+        run: cargo llvm-cov --locked --no-report -p symtn-sectors --features cgc-gen --tests
+        working-directory: symtn
       - name: Generate coverage JSON
         run: cargo llvm-cov report --json --output-path coverage.json
         working-directory: symtn

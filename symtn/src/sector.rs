@@ -68,7 +68,6 @@ pub use symtn_core::{
     ProductSectorCodecError, ProductSectorLayout, Su2SectorLayout, TensorKitProductCodec,
     U1SectorLayout,
 };
-#[cfg(feature = "cgc-gen")]
 pub use symtn_core::{LieGroupFusionRule, LieGroupFusionRuleError};
 /// Vocabulary the rule traits' signatures use.
 pub use symtn_core::{PhysicalBasisError, ProductSectorComponent, SymbolShapeError};

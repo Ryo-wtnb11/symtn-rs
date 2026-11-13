@@ -31,10 +31,10 @@ no trivial or multiplicity-free row is implied. Transform/compose/contract
 checks are public-call self-consistency checks comparing provider authority, spaces, block layout,
 full fusion-tree keys, and payload; scale/add also check elementary payload
 laws, norm/inner check scalar identities, and compact QR reconstructs the input
-outside timing. On this base those fixtures
-print an explicit trace exclusion because this exact `LieGroupFusionRule` lacks the
-`SectorCodec` bound required by checked trace dispatch, and a destination
-exclusion because it lacks the required multiplicity-free dispatch bounds.
+outside timing. Those fixtures
+print that trace rows are not measured (checked trace dispatches, but this
+matrix has no checked-Generic trace row), and a destination exclusion because
+the public destination methods keep multiplicity-free dispatch bounds.
 The checked-Generic API exists; these operations are neither emulated nor
 replaced for the exact SU(N) fixtures.
 Runtime tree-transform counters are reported as cold and warm deltas. The same
