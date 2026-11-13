@@ -172,6 +172,35 @@ impl core::hash::Hash for symtn_sectors::FusionStyleKind
 pub fn symtn_sectors::FusionStyleKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::Copy for symtn_sectors::FusionStyleKind
 impl core::marker::StructuralPartialEq for symtn_sectors::FusionStyleKind
+pub enum symtn_sectors::LieGroupFusionRuleError
+pub symtn_sectors::LieGroupFusionRuleError::DecodeOverflow
+pub symtn_sectors::LieGroupFusionRuleError::DecodeOverflow::sector: symtn_sectors::SectorId
+pub symtn_sectors::LieGroupFusionRuleError::DimensionNotRepresentable
+pub symtn_sectors::LieGroupFusionRuleError::DimensionNotRepresentable::sector: symtn_sectors::SectorId
+pub symtn_sectors::LieGroupFusionRuleError::LabelAllocation
+pub symtn_sectors::LieGroupFusionRuleError::LabelAllocation::len: usize
+pub symtn_sectors::LieGroupFusionRuleError::LabelAllocation::source: alloc::collections::TryReserveError
+pub symtn_sectors::LieGroupFusionRuleError::LabelLength
+pub symtn_sectors::LieGroupFusionRuleError::LabelLength::expected: usize
+pub symtn_sectors::LieGroupFusionRuleError::LabelLength::found: usize
+pub symtn_sectors::LieGroupFusionRuleError::MalformedSymbolAxes
+pub symtn_sectors::LieGroupFusionRuleError::MalformedSymbolAxes::actual: alloc::vec::Vec<usize>
+pub symtn_sectors::LieGroupFusionRuleError::MalformedSymbolAxes::expected: alloc::vec::Vec<usize>
+pub symtn_sectors::LieGroupFusionRuleError::MalformedSymbolData(symtn_sectors::SymbolShapeError)
+pub symtn_sectors::LieGroupFusionRuleError::NegativeLabel
+pub symtn_sectors::LieGroupFusionRuleError::NegativeLabel::index: usize
+pub symtn_sectors::LieGroupFusionRuleError::NegativeLabel::value: i64
+pub symtn_sectors::LieGroupFusionRuleError::Provider(fusion_symbols::lie::LieError)
+pub symtn_sectors::LieGroupFusionRuleError::RankNotRepresentable
+pub symtn_sectors::LieGroupFusionRuleError::RankNotRepresentable::rank: usize
+pub symtn_sectors::LieGroupFusionRuleError::UnrepresentableLabel
+pub symtn_sectors::LieGroupFusionRuleError::UnrepresentableLabel::labels: alloc::vec::Vec<i64>
+impl core::error::Error for symtn_sectors::LieGroupFusionRuleError
+pub fn symtn_sectors::LieGroupFusionRuleError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for symtn_sectors::LieGroupFusionRuleError
+pub fn symtn_sectors::LieGroupFusionRuleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_sectors::LieGroupFusionRuleError
+pub fn symtn_sectors::LieGroupFusionRuleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub enum symtn_sectors::PhysicalBasisError<Coefficient>
 pub symtn_sectors::PhysicalBasisError::CarrierIndexOutOfBounds
 pub symtn_sectors::PhysicalBasisError::CarrierIndexOutOfBounds::dimension: usize
@@ -615,6 +644,65 @@ pub fn symtn_sectors::InfallibleGeneric<'_, R>::try_fusion_channels(&self, symtn
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::try_fusion_channels_in_table(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, Self::Error>
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::vacuum(&self) -> symtn_sectors::SectorId
+pub struct symtn_sectors::LieGroupFusionRule
+impl symtn_sectors::LieGroupFusionRule
+pub fn symtn_sectors::LieGroupFusionRule::decode_irrep(&self, symtn_sectors::SectorId) -> core::result::Result<(alloc::vec::Vec<i64>, alloc::vec::Vec<i64>), symtn_sectors::LieGroupFusionRuleError>
+pub fn symtn_sectors::LieGroupFusionRule::encode_irrep(&self, &[i64]) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::LieGroupFusionRuleError>
+pub fn symtn_sectors::LieGroupFusionRule::encode_irrep_with_charges(&self, &[i64], &[i64]) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::LieGroupFusionRuleError>
+pub fn symtn_sectors::LieGroupFusionRule::encode_spin(&self, fusion_symbols::lie::half_int::HalfInt) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::LieGroupFusionRuleError>
+pub fn symtn_sectors::LieGroupFusionRule::group_id(&self) -> &fusion_symbols::lie::group::GroupId
+pub fn symtn_sectors::LieGroupFusionRule::new(fusion_symbols::lie::group::GroupId) -> core::result::Result<Self, symtn_sectors::LieGroupFusionRuleError>
+impl core::clone::Clone for symtn_sectors::LieGroupFusionRule
+pub fn symtn_sectors::LieGroupFusionRule::clone(&self) -> symtn_sectors::LieGroupFusionRule
+impl core::cmp::Eq for symtn_sectors::LieGroupFusionRule
+impl core::cmp::PartialEq for symtn_sectors::LieGroupFusionRule
+pub fn symtn_sectors::LieGroupFusionRule::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_sectors::LieGroupFusionRule
+pub fn symtn_sectors::LieGroupFusionRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_sectors::LieGroupFusionRule
+pub fn symtn_sectors::LieGroupFusionRule::hash<H: core::hash::Hasher>(&self, &mut H)
+impl symtn_sectors::CategoryProvider for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Category = fusion_symbols::lie::LieGroup
+pub fn symtn_sectors::LieGroupFusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::category(&self) -> &Self::Category
+pub fn symtn_sectors::LieGroupFusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
+pub fn symtn_sectors::LieGroupFusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
+impl symtn_sectors::CheckedCanonicalUnitFusionRule for symtn_sectors::LieGroupFusionRule
+impl symtn_sectors::CheckedGenericFusion for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Error = symtn_sectors::LieGroupFusionRuleError
+pub fn symtn_sectors::LieGroupFusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
+pub fn symtn_sectors::LieGroupFusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
+pub fn symtn_sectors::LieGroupFusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
+pub fn symtn_sectors::LieGroupFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
+pub fn symtn_sectors::LieGroupFusionRule::try_coupled_sector_fold(&self, &[symtn_sectors::SectorId]) -> core::result::Result<symtn_sectors::CoupledSectorFold, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_dual(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_fusion_channels_in_table(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::vacuum(&self) -> symtn_sectors::SectorId
+impl symtn_sectors::CheckedGenericPivotal for symtn_sectors::LieGroupFusionRule
+pub fn symtn_sectors::LieGroupFusionRule::try_twist_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+impl symtn_sectors::CheckedGenericRigidSymbols for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Scalar = f64
+pub fn symtn_sectors::LieGroupFusionRule::try_a_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_b_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_f_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericFArray<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_r_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+impl symtn_sectors::TypedSectorAdmission for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Error = symtn_sectors::LieGroupFusionRuleError
+pub type symtn_sectors::LieGroupFusionRule::Mode = symtn_sectors::CheckedGenericAdmissionMode
+pub type symtn_sectors::LieGroupFusionRule::Sector = alloc::vec::Vec<i64>
+pub fn symtn_sectors::LieGroupFusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Sector, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_encode_label(&self, &Self::Sector) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
 pub struct symtn_sectors::MultiplicityFreeAdmissionMode
 pub struct symtn_sectors::PackedProductCodec<Left, Right>(_)
 impl<Left, Right> symtn_sectors::ProductSectorCodec for symtn_sectors::PackedProductCodec<Left, Right> where Left: symtn_sectors::PackedSectorLayout, Right: symtn_sectors::PackedSectorLayout
@@ -1486,6 +1574,15 @@ pub fn symtn_sectors::FermionParityFusionRule::map_error(&self, &[symtn_sectors:
 pub fn symtn_sectors::FermionParityFusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
 pub fn symtn_sectors::FermionParityFusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::FermionParityFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
+impl symtn_sectors::CategoryProvider for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Category = fusion_symbols::lie::LieGroup
+pub fn symtn_sectors::LieGroupFusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::admit_r(&self, [symtn_sectors::SectorId; 3]) -> core::result::Result<core::option::Option<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; 3]>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::category(&self) -> &Self::Category
+pub fn symtn_sectors::LieGroupFusionRule::map_error(&self, &[symtn_sectors::SectorId], symtn_sectors::CategoryAdapterError<<Self::Category as fusion_symbols::category::FusionCategory>::Error>) -> Self::Error
+pub fn symtn_sectors::LieGroupFusionRule::object(&self, symtn_sectors::SectorId) -> core::result::Result<<Self::Category as fusion_symbols::category::FusionCategory>::Object, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
 impl symtn_sectors::CategoryProvider for symtn_sectors::SU2FusionRule
 pub type symtn_sectors::SU2FusionRule::Category = fusion_symbols::lie::LieGroup
 pub fn symtn_sectors::SU2FusionRule::admit<const N: usize>(&self, symtn_sectors::CategoryOperation, [symtn_sectors::SectorId; N]) -> core::result::Result<[<Self::Category as fusion_symbols::category::FusionCategory>::Object; N], Self::Error>
@@ -1550,6 +1647,7 @@ pub fn symtn_sectors::ProductFusionRule<L, R, P>::object(&self, symtn_sectors::S
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::sector_id(&self, &<Self::Category as fusion_symbols::category::FusionCategory>::Object) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
 pub trait symtn_sectors::CheckedCanonicalUnitFusionRule: symtn_sectors::CheckedGenericFusion
+impl symtn_sectors::CheckedCanonicalUnitFusionRule for symtn_sectors::LieGroupFusionRule
 impl<C, K> symtn_sectors::CheckedCanonicalUnitFusionRule for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::CheckedGenericAdmissionMode, Unit = symtn_sectors::CanonicalUnitAdmission>
 impl<L, R, P> symtn_sectors::CheckedCanonicalUnitFusionRule for symtn_sectors::ProductFusionRule<L, R, P> where L: symtn_sectors::CategoryProvider, R: symtn_sectors::CategoryProvider, (<L as symtn_sectors::TypedSectorAdmission>::Mode, <R as symtn_sectors::TypedSectorAdmission>::Mode): symtn_sectors::ProductAdmission<<L as symtn_sectors::TypedSectorAdmission>::Error, <R as symtn_sectors::TypedSectorAdmission>::Error, Mode = symtn_sectors::CheckedGenericAdmissionMode>, fusion_symbols::product::Product<(<L as symtn_sectors::CategoryProvider>::Category, <R as symtn_sectors::CategoryProvider>::Category)>: fusion_symbols::category::FusionCategory<Object = (<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object), Error = fusion_symbols::product::ProductError<<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error>>, P: symtn_sectors::ProductSectorCodec + 'static
 pub trait symtn_sectors::CheckedFusionAlgebra: symtn_sectors::FusionRule
@@ -1634,6 +1732,18 @@ pub fn symtn_sectors::CheckedGenericFusion::try_fusion_channels(&self, symtn_sec
 pub fn symtn_sectors::CheckedGenericFusion::try_fusion_channels_in_table(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, Self::Error>
 pub fn symtn_sectors::CheckedGenericFusion::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::CheckedGenericFusion::vacuum(&self) -> symtn_sectors::SectorId
+impl symtn_sectors::CheckedGenericFusion for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Error = symtn_sectors::LieGroupFusionRuleError
+pub fn symtn_sectors::LieGroupFusionRule::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
+pub fn symtn_sectors::LieGroupFusionRule::fusion_style(&self) -> symtn_sectors::FusionStyleKind
+pub fn symtn_sectors::LieGroupFusionRule::rule_identity(&self) -> symtn_sectors::RuleIdentity
+pub fn symtn_sectors::LieGroupFusionRule::sector_order_key(&self, symtn_sectors::SectorId) -> symtn_sectors::SectorOrderKey
+pub fn symtn_sectors::LieGroupFusionRule::try_coupled_sector_fold(&self, &[symtn_sectors::SectorId]) -> core::result::Result<symtn_sectors::CoupledSectorFold, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_dual(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_fusion_channels(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_fusion_channels_in_table(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorVec, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::vacuum(&self) -> symtn_sectors::SectorId
 impl<C, K> symtn_sectors::CheckedGenericFusion for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::CheckedGenericAdmissionMode>
 pub type symtn_sectors::CategoryRule<C, K>::Error = <K as symtn_sectors::CategoryCodec<C>>::Error
 pub fn symtn_sectors::CategoryRule<C, K>::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
@@ -1672,6 +1782,8 @@ pub fn symtn_sectors::InfallibleGeneric<'_, R>::try_nsymbol(&self, symtn_sectors
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::vacuum(&self) -> symtn_sectors::SectorId
 pub trait symtn_sectors::CheckedGenericPivotal: symtn_sectors::CheckedGenericRigidSymbols
 pub fn symtn_sectors::CheckedGenericPivotal::try_twist_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Scalar, Self::Error>
+impl symtn_sectors::CheckedGenericPivotal for symtn_sectors::LieGroupFusionRule
+pub fn symtn_sectors::LieGroupFusionRule::try_twist_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
 impl<C, K> symtn_sectors::CheckedGenericPivotal for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, <C as fusion_symbols::category::FusionCategory>::Scalar: symtn_sectors::CategoricalScalar + core::marker::Send + core::marker::Sync, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::CheckedGenericAdmissionMode>
 pub fn symtn_sectors::CategoryRule<C, K>::try_twist_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Scalar, Self::Error>
 impl<L, R, P> symtn_sectors::CheckedGenericPivotal for symtn_sectors::ProductFusionRule<L, R, P> where L: symtn_sectors::CategoryProvider, R: symtn_sectors::CategoryProvider, (<L as symtn_sectors::TypedSectorAdmission>::Mode, <R as symtn_sectors::TypedSectorAdmission>::Mode): symtn_sectors::ProductAdmission<<L as symtn_sectors::TypedSectorAdmission>::Error, <R as symtn_sectors::TypedSectorAdmission>::Error, Mode = symtn_sectors::CheckedGenericAdmissionMode>, fusion_symbols::product::Product<(<L as symtn_sectors::CategoryProvider>::Category, <R as symtn_sectors::CategoryProvider>::Category)>: fusion_symbols::category::FusionCategory<Object = (<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Object), Error = fusion_symbols::product::ProductError<<<L as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error, <<R as symtn_sectors::CategoryProvider>::Category as fusion_symbols::category::FusionCategory>::Error>>, P: symtn_sectors::ProductSectorCodec + 'static, <fusion_symbols::product::Product<(<L as symtn_sectors::CategoryProvider>::Category, <R as symtn_sectors::CategoryProvider>::Category)> as fusion_symbols::category::FusionCategory>::Scalar: symtn_sectors::CategoricalScalar + core::marker::Send + core::marker::Sync
@@ -1686,6 +1798,16 @@ pub fn symtn_sectors::CheckedGenericRigidSymbols::try_frobenius_schur_phase_scal
 pub fn symtn_sectors::CheckedGenericRigidSymbols::try_inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Scalar, Self::Error>
 pub fn symtn_sectors::CheckedGenericRigidSymbols::try_r_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<Self::Scalar>, Self::Error>
 pub fn symtn_sectors::CheckedGenericRigidSymbols::try_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Scalar, Self::Error>
+impl symtn_sectors::CheckedGenericRigidSymbols for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Scalar = f64
+pub fn symtn_sectors::LieGroupFusionRule::try_a_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_b_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_f_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericFArray<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_frobenius_schur_phase_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_r_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<f64>, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
 impl<C, K> symtn_sectors::CheckedGenericRigidSymbols for symtn_sectors::CategoryRule<C, K> where C: fusion_symbols::category::FusionCategory + 'static, <C as fusion_symbols::category::FusionCategory>::Error: core::marker::Send + core::marker::Sync + 'static, <C as fusion_symbols::category::FusionCategory>::Scalar: symtn_sectors::CategoricalScalar + core::marker::Send + core::marker::Sync, K: symtn_sectors::CategoryCodec<C, Mode = symtn_sectors::CheckedGenericAdmissionMode>
 pub type symtn_sectors::CategoryRule<C, K>::Scalar = <C as fusion_symbols::category::FusionCategory>::Scalar
 pub fn symtn_sectors::CategoryRule<C, K>::try_a_symbol_generic(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::GenericRMatrix<Self::Scalar>, Self::Error>
@@ -2098,6 +2220,14 @@ pub fn symtn_sectors::FermionParityFusionRule::try_decode_label(&self, symtn_sec
 pub fn symtn_sectors::FermionParityFusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::FermionParityFusionRule::try_encode_label(&self, &symtn_sectors::Z2Irrep) -> core::result::Result<symtn_sectors::SectorId, symtn_sectors::FusionAlgebraError>
 pub fn symtn_sectors::FermionParityFusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
+impl symtn_sectors::TypedSectorAdmission for symtn_sectors::LieGroupFusionRule
+pub type symtn_sectors::LieGroupFusionRule::Error = symtn_sectors::LieGroupFusionRuleError
+pub type symtn_sectors::LieGroupFusionRule::Mode = symtn_sectors::CheckedGenericAdmissionMode
+pub type symtn_sectors::LieGroupFusionRule::Sector = alloc::vec::Vec<i64>
+pub fn symtn_sectors::LieGroupFusionRule::try_decode_label(&self, symtn_sectors::SectorId) -> core::result::Result<Self::Sector, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::try_encode_label(&self, &Self::Sector) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
 impl symtn_sectors::TypedSectorAdmission for symtn_sectors::SU2FusionRule
 pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::FusionAlgebraError
 pub type symtn_sectors::SU2FusionRule::Mode = symtn_sectors::MultiplicityFreeAdmissionMode

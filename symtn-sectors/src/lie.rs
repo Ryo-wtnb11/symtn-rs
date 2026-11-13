@@ -258,7 +258,10 @@ impl LieGroupFusionRule {
     /// Every group that fusion-symbols' [`LieGroup::new`] executes is admitted:
     /// simple groups of every type, A–G (D2 included), semisimple groups, tori,
     /// U(n) and semisimple×torus central quotients. A group it rejects returns
-    /// [`LieGroupFusionRuleError::Provider`] with its `LieError`.
+    /// [`LieGroupFusionRuleError::Provider`] with its `LieError`. Without the
+    /// `cgc-gen` feature fusion-symbols executes only A1, B1, C1 and D2
+    /// factors (with tori), and every other group returns
+    /// `Provider(LieError::Unsupported { requires: "lie-generated" })`.
     ///
     /// The `RankNotRepresentable` bound covers this rule's label buffers only.
     /// The rule's identity hashes the canonical [`GroupId`] once and compares
@@ -1177,7 +1180,8 @@ const fn gcd_u128(mut left: u128, mut right: u128) -> u128 {
     left
 }
 
-#[cfg(test)]
+// Why gated: these fixtures use rank >= 2 groups, which need `lie-generated`.
+#[cfg(all(test, feature = "cgc-gen"))]
 mod tests {
     use super::*;
     use fusion_symbols::lie::RootSystem;

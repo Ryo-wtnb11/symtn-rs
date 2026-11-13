@@ -16,6 +16,7 @@ mod infallible_matches_checked_domain;
 mod infallible_tier_gate;
 mod lie_group_adapter_contracts;
 mod lie_group_cross_process_determinism;
+mod lie_group_feature_contract;
 mod lie_group_oracles;
 mod product_oracles;
 mod product_rule_client;

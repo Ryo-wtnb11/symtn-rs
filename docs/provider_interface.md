@@ -128,6 +128,11 @@ executed. Sp's argument is the even matrix dimension. D2 forms (Spin(4), SO(4),
 PSO(4)), semisimple products, tori, U(n) and semisimple×torus quotients are
 admitted wherever fusion-symbols executes them; a group it rejects returns its
 `LieError` as `LieGroupFusionRuleError::Provider` at construction.
+Every build provides the rule. Without `cgc-gen`, fusion-symbols executes
+only groups whose simple factors are A1, B1, C1 or D2 (SU(2), SO(3), Sp(2),
+Spin(4), U(2), tori and their products and quotients); any other group returns
+`Provider(LieError::Unsupported { requires: "lie-generated" })`. `cgc-gen`
+enables fusion-symbols' `lie-generated` for the rest.
 
 The encoders mirror fusion-symbols' constructors: `encode_irrep(dynkin)` takes
 Dynkin labels as `LieGroup::irrep` does and serves groups without a torus;

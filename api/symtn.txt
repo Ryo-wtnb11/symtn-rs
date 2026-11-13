@@ -70,6 +70,8 @@ pub use symtn::sector::FusionStyleKind
 pub use symtn::sector::Fz2SectorLayout
 pub use symtn::sector::GenericFArray
 pub use symtn::sector::GenericRMatrix
+pub use symtn::sector::LieGroupFusionRule
+pub use symtn::sector::LieGroupFusionRuleError
 pub use symtn::sector::MultiplicityFreeAdmissionMode
 pub use symtn::sector::MultiplicityFreeFusionRule
 pub use symtn::sector::MultiplicityFreeFusionSymbols

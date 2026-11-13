@@ -10,9 +10,12 @@ fusion-symbols' `Product`: factor order and association remain part of the
 provider and sector type. Multiplicity-free factors select multiplicity-free
 admission; a checked-Generic factor selects checked-Generic admission.
 
-The `cgc-gen` feature enables `LieGroupFusionRule::new(GroupId)` over
-every group fusion-symbols' `LieGroup` executes: factors of every simple type, A–G, semisimple
-products, tori, U(n) and their central quotients. It validates full
+`LieGroupFusionRule::new(GroupId)` builds every group fusion-symbols'
+`LieGroup` executes: factors of every simple type, A–G, semisimple products,
+tori, U(n) and their central quotients. Without the `cgc-gen` feature,
+fusion-symbols executes only A1, B1, C1 and D2 factors (with tori), and other
+groups return `Provider(LieError::Unsupported { requires: "lie-generated" })`;
+`cgc-gen` enables fusion-symbols' `lie-generated` for the rest. It validates full
 global-form admission, ranks Dynkin labels then zigzag-mapped torus charges
 by graded lexicographic order, uses checked Generic Host execution, and
 forwards all symbols to fusion-symbols. A group fusion-symbols rejects fails at

@@ -1051,7 +1051,6 @@ category_provider_via_adapter!(
     crate::TableRule => fusion_symbols::table::TableCategory
 );
 
-#[cfg(feature = "cgc-gen")]
 category_provider_via_adapter!(crate::LieGroupFusionRule => fusion_symbols::lie::LieGroup);
 
 impl<C, K> CategoryProvider for CategoryRule<C, K>

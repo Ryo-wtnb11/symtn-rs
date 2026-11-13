@@ -2698,7 +2698,7 @@ fn run_checked_sun(
     }
 
     if !qr_only && (operation_enabled("trace") || operation_enabled("trace_adjoint")) {
-        println!("# {symmetry}: trace rows excluded: checked-Generic trace dispatch exists, but LieGroupFusionRule lacks the required SectorCodec");
+        println!("# {symmetry}: trace rows not measured: this matrix has no checked-Generic trace row; checked trace is exercised by the trace test suites");
     }
 
     let runtime = benchmark_runtime()?;

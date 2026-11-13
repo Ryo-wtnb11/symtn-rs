@@ -6,4 +6,5 @@ block layouts, with no tensor type of its own. Entry points are
 keys, `BlockStructure`, block views, and storage traits. It validates spaces and layouts but
 does not provide high-level execution.
 
-Enable `cgc-gen` to pass `LieGroupFusionRule` support through to sectors.
+`cgc-gen` forwards fusion-symbols' `lie-generated`, which `LieGroupFusionRule`
+needs for simple factors other than A1, B1, C1 and D2.

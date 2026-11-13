@@ -5,5 +5,5 @@ layouts. It exposes expert `*_into` operations, execution contexts, transform
 and contraction plans, and backend traits; ordinary code should use
 `symtn::typed::TensorMap` methods.
 
-`cuda` enables device seams and `cgc-gen` forwards `LieGroupFusionRule`
-support. User examples live in the `symtn` crate.
+`cuda` enables device seams and `cgc-gen` forwards fusion-symbols'
+`lie-generated`, which `LieGroupFusionRule` needs beyond A1/B1/C1/D2 factors. User examples live in the `symtn` crate.

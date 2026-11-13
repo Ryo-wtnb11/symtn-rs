@@ -28,7 +28,9 @@ schedules; symtn does not prescribe them.
 fusion-symbols owns elementary fusion, multiplicities, dimensions, duals,
 Frobenius–Schur data, twists, F/R/A/B/CGC data, gauges and coefficient caches.
 It owns no symtn tensor, fusion tree, block layout or `SectorId` encoding.
-symtn disables its default features; `cgc-gen` opts into `lie-generated`.
+symtn disables its default features, so `LieGroupFusionRule` serves the
+A1/B1/C1/D2 factors fusion-symbols executes without a feature; `cgc-gen` opts
+into `lie-generated` for every other simple factor.
 
 | Provider data | Boundary |
 | --- | --- |
