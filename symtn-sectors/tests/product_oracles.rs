@@ -1,7 +1,9 @@
 //! Product symbols against independent TensorKitSectors coefficients and hand values.
 
+use crate::product_codec::ParityProductCodec;
 #[cfg(feature = "cgc-gen")]
 use num_complex::Complex64;
+
 use symtn_sectors::*;
 
 use crate::numerics;
@@ -1398,18 +1400,22 @@ mod storage {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn checked_generic_outer_decode_precedes_factor_admission() {
-        let rule = ProductFusionRule::<_, _, PackedProductCodec<U1SectorLayout, Fz2SectorLayout>>::try_new(
+        let rule = ProductFusionRule::<_, _, ParityProductCodec>::try_new(
             U1FusionRule,
             cg(fusion_symbols::finite::ZN::new(2).unwrap()),
-        ).unwrap();
-        let invalid_u1 = s(u32::MAX as usize);
-        let invalid_outer = s(1 << 33);
+        )
+        .unwrap();
+        let invalid_component = s(u32::MAX as usize);
+        let invalid_u1 = ParityProductCodec::encode(invalid_component, s(0));
+        assert!(matches!(
+            rule.try_nsymbol(invalid_u1, s(0), s(5)),
+            Err(ProductFusionRuleError::Codec(
+                ProductSectorCodecError::CodecRejected
+            ))
+        ));
+        // Negative control: fixing the outer codec exposes the left factor error.
         assert!(
-            matches!(rule.try_nsymbol(invalid_u1, s(0), invalid_outer), Err(ProductFusionRuleError::Codec(ProductSectorCodecError::InvalidHighBits { sector, total_bits: 33 })) if sector == invalid_outer)
-        );
-        // Negative control: fixing outer packing exposes the left factor error.
-        assert!(
-            matches!(rule.try_nsymbol(invalid_u1, s(0), s(0)), Err(ProductFusionRuleError::Left(FusionAlgebraError::InvalidSector { sector })) if sector == invalid_u1)
+            matches!(rule.try_nsymbol(invalid_u1, s(0), s(0)), Err(ProductFusionRuleError::Left(FusionAlgebraError::InvalidSector { sector })) if sector == invalid_component)
         );
     }
 

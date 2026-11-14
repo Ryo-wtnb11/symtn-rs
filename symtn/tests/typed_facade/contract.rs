@@ -664,10 +664,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
 fn typed_deligne_product_accepts_a_nondefault_product_codec() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    type Codec = symtn::sector::PackedProductCodec<
-        symtn::sector::U1SectorLayout,
-        symtn::sector::Fz2SectorLayout,
-    >;
+    type Codec = crate::product_codec::ParityProductCodec;
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
@@ -775,10 +772,7 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
 fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    type WrongCodec = symtn::sector::PackedProductCodec<
-        symtn::sector::U1SectorLayout,
-        symtn::sector::Fz2SectorLayout,
-    >;
+    type WrongCodec = crate::product_codec::ParityProductCodec;
     let _guard = cache_lock();
     let runtime = runtime();
     let rule = Arc::new(symtn::sector::U1FusionRule);

@@ -1179,35 +1179,18 @@ fn z2_bond(runtime: &Runtime) -> TensorMap<symtn::sector::ZNFusionRule, f64> {
 
 // ---------------------------------------------------------------------------
 // Semantic laws for U(1), U(1) x fZ2, and
-// fZ2 x U(1) x SU(2). The two product rules exercise the packed product codec.
+// fZ2 x U(1) x SU(2). The product rules exercise the default Cantor codec.
 // ---------------------------------------------------------------------------
-
-type U1Fz2Codec = symtn::sector::PackedProductCodec<
-    symtn::sector::U1SectorLayout,
-    symtn::sector::Fz2SectorLayout,
->;
-type Fz2U1Codec = symtn::sector::PackedProductCodec<
-    symtn::sector::Fz2SectorLayout,
-    symtn::sector::U1SectorLayout,
->;
-type Fz2U1Layout = symtn::sector::ProductSectorLayout<
-    symtn::sector::Fz2SectorLayout,
-    symtn::sector::U1SectorLayout,
->;
-type Fz2U1Su2Codec = symtn::sector::PackedProductCodec<Fz2U1Layout, symtn::sector::Su2SectorLayout>;
 
 type U1Fz2Rule = symtn::sector::ProductFusionRule<
     symtn::sector::U1FusionRule,
     symtn::sector::FermionParityFusionRule,
-    U1Fz2Codec,
 >;
 type Fz2U1Rule = symtn::sector::ProductFusionRule<
     symtn::sector::FermionParityFusionRule,
     symtn::sector::U1FusionRule,
-    Fz2U1Codec,
 >;
-type Fz2U1Su2Rule =
-    symtn::sector::ProductFusionRule<Fz2U1Rule, symtn::sector::SU2FusionRule, Fz2U1Su2Codec>;
+type Fz2U1Su2Rule = symtn::sector::ProductFusionRule<Fz2U1Rule, symtn::sector::SU2FusionRule>;
 
 /// `[p, q] <- [p, q]`, filled with a counter starting at `first_value`.
 ///

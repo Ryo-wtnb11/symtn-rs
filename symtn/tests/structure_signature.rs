@@ -32,15 +32,10 @@ use symtn::sector::{
     product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
     SU2Irrep, U1FusionRule, U1Irrep,
 };
-use symtn::sector::{Fz2SectorLayout, PackedProductCodec, U1SectorLayout};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, StructureSignature, TensorMap};
 
-type Fz2U1Rule = ProductFusionRule<
-    FermionParityFusionRule,
-    U1FusionRule,
-    PackedProductCodec<Fz2SectorLayout, U1SectorLayout>,
->;
+type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 
 use crate::counting_alloc;
 

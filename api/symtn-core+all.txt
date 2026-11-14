@@ -26,7 +26,6 @@ pub use symtn_core::FermionParityIrrep
 pub use symtn_core::FusionAlgebraError
 pub use symtn_core::FusionRule
 pub use symtn_core::FusionStyleKind
-pub use symtn_core::Fz2SectorLayout
 pub use symtn_core::GenericFArray
 pub use symtn_core::GenericFusionSymbols
 pub use symtn_core::GenericRMatrix
@@ -39,8 +38,6 @@ pub use symtn_core::MultiplicityFreeAdmissionMode
 pub use symtn_core::MultiplicityFreeFusionRule
 pub use symtn_core::MultiplicityFreeFusionSymbols
 pub use symtn_core::MultiplicityFreeRigidSymbols
-pub use symtn_core::PackedProductCodec
-pub use symtn_core::PackedSectorLayout
 pub use symtn_core::PhysicalBasisError
 pub use symtn_core::PhysicalFusionBasis
 pub use symtn_core::ProductAdmission
@@ -50,7 +47,6 @@ pub use symtn_core::ProductSector
 pub use symtn_core::ProductSectorCodec
 pub use symtn_core::ProductSectorCodecError
 pub use symtn_core::ProductSectorComponent
-pub use symtn_core::ProductSectorLayout
 pub use symtn_core::RuleIdentity
 pub use symtn_core::SU2FusionRule
 pub use symtn_core::SU2Irrep
@@ -60,7 +56,6 @@ pub use symtn_core::SectorId
 pub use symtn_core::SectorOrderKey
 pub use symtn_core::SectorVec
 pub use symtn_core::StructureCacheEquivalent
-pub use symtn_core::Su2SectorLayout
 pub use symtn_core::SymbolShapeError
 pub use symtn_core::TableRule
 pub use symtn_core::TableRuleError
@@ -69,7 +64,6 @@ pub use symtn_core::TensorKitProductCodec
 pub use symtn_core::TypedSectorAdmission
 pub use symtn_core::U1FusionRule
 pub use symtn_core::U1Irrep
-pub use symtn_core::U1SectorLayout
 pub use symtn_core::UncertifiedUnitAdmission
 pub use symtn_core::ZNFusionRule
 pub use symtn_core::ZNIrrep

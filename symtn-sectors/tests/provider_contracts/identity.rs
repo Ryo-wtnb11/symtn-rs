@@ -9,6 +9,8 @@
 //! - Product identity keeps child order, codec and stateful children:
 //!   `tests/rule_identity.rs`.
 
+use crate::product_codec::ParityProductCodec;
+
 use symtn_sectors::*;
 
 use super::table_identity;
@@ -153,13 +155,12 @@ fn product_identity_composes_factor_identities_under_the_codec() {
         .rule_identity()
     );
     // Codec.
-    let packed = ProductFusionRule::<
-        ZNFusionRule,
+    let custom = ProductFusionRule::<ZNFusionRule, U1FusionRule, ParityProductCodec>::try_new(
+        ZNFusionRule::new(2).unwrap(),
         U1FusionRule,
-        PackedProductCodec<Fz2SectorLayout, U1SectorLayout>,
-    >::try_new(ZNFusionRule::new(2).unwrap(), U1FusionRule)
+    )
     .unwrap();
-    assert_ne!(z2_u1.rule_identity(), packed.rule_identity());
+    assert_ne!(z2_u1.rule_identity(), custom.rule_identity());
     // Association.
     assert_ne!(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(

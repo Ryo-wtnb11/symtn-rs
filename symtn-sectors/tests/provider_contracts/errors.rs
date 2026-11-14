@@ -17,6 +17,8 @@
 
 use std::panic::{self, AssertUnwindSafe};
 
+use crate::product_codec::ParityProductCodec;
+
 use symtn_sectors::*;
 
 use super::s;
@@ -271,20 +273,13 @@ fn product_left_factor_overflow_beats_right_factor_domain_error() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn product_codec_decode_beats_factor_errors() {
-    type U1Fz2 = ProductFusionRule<
-        U1FusionRule,
-        FermionParityFusionRule,
-        PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
-    >;
+    type U1Fz2 = ProductFusionRule<U1FusionRule, FermionParityFusionRule, ParityProductCodec>;
     let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
-    let bad_u1 = s(u32::MAX as usize);
+    let bad_u1 = ParityProductCodec::encode(s(u32::MAX as usize), s(0));
     assert_eq!(
-        rule.try_nsymbol(bad_u1, s(0), s(1 << 33)),
+        rule.try_nsymbol(bad_u1, s(0), s(5)),
         Err(FusionAlgebraError::ProductCodec(
-            ProductSectorCodecError::InvalidHighBits {
-                sector: s(1 << 33),
-                total_bits: 33,
-            }
+            ProductSectorCodecError::CodecRejected
         ))
     );
     assert_eq!(

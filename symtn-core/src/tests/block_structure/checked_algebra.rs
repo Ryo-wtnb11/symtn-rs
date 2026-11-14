@@ -98,13 +98,10 @@ fn checked_fibonacci_matches_valid_operations_and_rejects_unknown_sectors() {
 #[test]
 fn checked_products_preserve_child_u1_errors_and_distinguish_codec_errors() {
     // What: recursive products retain the exact U1 closure cause, while
-    // malformed packed IDs remain a distinct codec failure.
-    type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-    type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-    type TripleLayout = ProductSectorLayout<Fz2U1Layout, Su2SectorLayout>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
+    // custom codec rejection remains a distinct failure.
+    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+    type Fz2Su2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2Su2Rule, U1FusionRule>;
 
     let pair = Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let pair_min = pair
@@ -128,21 +125,35 @@ fn checked_products_preserve_child_u1_errors_and_distinguish_codec_errors() {
         })
     );
 
-    let triple = TripleRule::try_new(pair, SU2FusionRule).unwrap();
-    let triple_min = triple.try_encode_component_ids(pair_min, su2(1)).unwrap();
+    // Keep the large U1 ID at the outer pairing so the fixture is representable.
+    let triple = TripleRule::try_new(
+        Fz2Su2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap(),
+        U1FusionRule,
+    )
+    .unwrap();
+    let triple_min = triple
+        .try_encode_component_ids(
+            TensorKitProductCodec::encode(z2_odd(), su2(1)),
+            excluded_u1_id(),
+        )
+        .unwrap();
     assert_eq!(
         triple.try_dual_sector(triple_min),
         Err(FusionAlgebraError::InvalidSector {
             sector: excluded_u1_id()
         })
     );
-    let invalid = SectorId::new(1usize << TripleLayout::BITS);
-    assert!(matches!(
-        triple.try_dual_sector(invalid),
+    let custom = ProductFusionRule::<_, _, crate::product_codec::ParityProductCodec>::try_new(
+        U1FusionRule,
+        FermionParityFusionRule::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        custom.try_dual_sector(SectorId::new(5)),
         Err(FusionAlgebraError::ProductCodec(
-            ProductSectorCodecError::InvalidHighBits { .. }
+            ProductSectorCodecError::CodecRejected
         ))
-    ));
+    );
 }
 
 #[test]

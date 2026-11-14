@@ -68,7 +68,6 @@ pub use symtn::sector::FermionParityFusionRule
 pub use symtn::sector::FermionParityIrrep
 pub use symtn::sector::FusionRule
 pub use symtn::sector::FusionStyleKind
-pub use symtn::sector::Fz2SectorLayout
 pub use symtn::sector::GenericFArray
 pub use symtn::sector::GenericRMatrix
 pub use symtn::sector::LieGroupFusionRule
@@ -78,8 +77,6 @@ pub use symtn::sector::MultiplicityFreeAdmissionMode
 pub use symtn::sector::MultiplicityFreeFusionRule
 pub use symtn::sector::MultiplicityFreeFusionSymbols
 pub use symtn::sector::MultiplicityFreeRigidSymbols
-pub use symtn::sector::PackedProductCodec
-pub use symtn::sector::PackedSectorLayout
 pub use symtn::sector::PhysicalBasisError
 pub use symtn::sector::PhysicalFusionBasis
 pub use symtn::sector::ProductAdmission
@@ -89,7 +86,6 @@ pub use symtn::sector::ProductSector
 pub use symtn::sector::ProductSectorCodec
 pub use symtn::sector::ProductSectorCodecError
 pub use symtn::sector::ProductSectorComponent
-pub use symtn::sector::ProductSectorLayout
 pub use symtn::sector::RuleIdentity
 pub use symtn::sector::SU2FusionRule
 pub use symtn::sector::SU2Irrep
@@ -97,7 +93,6 @@ pub use symtn::sector::SectorCodec
 pub use symtn::sector::SectorId
 pub use symtn::sector::SectorOrderKey
 pub use symtn::sector::SectorVec
-pub use symtn::sector::Su2SectorLayout
 pub use symtn::sector::SymbolShapeError
 pub use symtn::sector::TableRule
 pub use symtn::sector::TableRuleError
@@ -106,7 +101,6 @@ pub use symtn::sector::TensorKitProductCodec
 pub use symtn::sector::TypedSectorAdmission
 pub use symtn::sector::U1FusionRule
 pub use symtn::sector::U1Irrep
-pub use symtn::sector::U1SectorLayout
 pub use symtn::sector::UncertifiedUnitAdmission
 pub use symtn::sector::ZNFusionRule
 pub use symtn::sector::ZNIrrep

@@ -61,13 +61,8 @@ pub use symtn_core::{
 };
 /// Sealed admission modes: the values of `TypedSectorAdmission::Mode`.
 pub use symtn_core::{CheckedGenericAdmissionMode, MultiplicityFreeAdmissionMode};
-/// Label codecs of a [`ProductFusionRule`], its third type
-/// parameter, and the per-factor layouts they pack.
-pub use symtn_core::{
-    Fz2SectorLayout, PackedProductCodec, PackedSectorLayout, ProductSectorCodec,
-    ProductSectorCodecError, ProductSectorLayout, Su2SectorLayout, TensorKitProductCodec,
-    U1SectorLayout,
-};
 pub use symtn_core::{LieGroupFusionRule, LieGroupFusionRuleError, LieIrrep};
 /// Vocabulary the rule traits' signatures use.
 pub use symtn_core::{PhysicalBasisError, ProductSectorComponent, SymbolShapeError};
+/// Label codecs of a [`ProductFusionRule`], its third type parameter.
+pub use symtn_core::{ProductSectorCodec, ProductSectorCodecError, TensorKitProductCodec};

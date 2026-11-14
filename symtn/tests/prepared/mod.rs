@@ -20,21 +20,14 @@ use symtn::sector::{
     product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
     SU2Irrep, U1FusionRule, U1Irrep,
 };
-use symtn::sector::{
-    CheckedFusionAlgebra, Fz2SectorLayout, MultiplicityFreeRigidSymbols, PackedProductCodec,
-    SectorCodec, U1SectorLayout,
-};
+use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::common::{for_each_index, Payload};
 
 pub mod eigh;
 
-pub type Fz2U1Rule = ProductFusionRule<
-    FermionParityFusionRule,
-    U1FusionRule,
-    PackedProductCodec<Fz2SectorLayout, U1SectorLayout>,
->;
+pub type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 
 pub fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     let q = |charge| U1Irrep::new(charge).unwrap();

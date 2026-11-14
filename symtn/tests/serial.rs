@@ -16,6 +16,8 @@ mod fixtures;
 mod legs;
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
+#[path = "../../tests/support/product_codec.rs"]
+mod product_codec;
 #[macro_use]
 #[path = "support/nonfinite_factor_input.rs"]
 mod nonfinite_factor_input;

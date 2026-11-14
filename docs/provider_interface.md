@@ -416,14 +416,13 @@ malformed symbol data.
 All product mathematics, including A/B, dimensions and scalar promotion,
 comes from fusion-symbols. Fusion channels vary the first factor fastest in
 the factors' native category order, including generated Lie categories; they
-are never sorted by packed ids. Each F/R/A/B multiplicity axis varies the last
-factor fastest, with row-major storage. No cross-factor fermionic sign is
+are never sorted by encoded sector ids. Each F/R/A/B multiplicity axis varies
+the last factor fastest, with row-major storage. No cross-factor fermionic sign is
 added. Tensor operations use the factors' `SectorOrderKey`s for TensorKit
 sector order independently of channel enumeration.
 
-`TensorKitProductCodec` (Cantor pairing) is the default; use
-`PackedProductCodec` for a fixed-width layout. Component order and association
-are part of the Rust type, `ProductSector` label and `RuleIdentity`;
+`TensorKitProductCodec` (Cantor pairing) is the default. Component order and
+association are part of the Rust type, `ProductSector` label and `RuleIdentity`;
 `U(1) ⊠ fZ2` and `fZ2 ⊠ U(1)` are different providers. Unlike TensorKit's flat
 products, symtn retains explicit nesting.
 

@@ -347,16 +347,12 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
         return;
     }
     use symtn_core::{
-        FermionParityFusionRule, FermionParityIrrep, Fz2SectorLayout, PackedProductCodec,
-        ProductFusionRule, ProductSectorCodec, ProductSectorLayout, SU2FusionRule, SU2Irrep,
-        Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout,
+        FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSectorCodec,
+        SU2FusionRule, SU2Irrep, TensorKitProductCodec, U1FusionRule, U1Irrep,
     };
 
-    type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
+    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
     type TripleRuleKey = <TripleRule as TreeTransformRuleCacheKey>::Key;
 
     let rule = TripleRule::try_new(
@@ -365,8 +361,8 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
     )
     .unwrap();
     let sector = |parity: u8, charge: i32, twice_spin: usize| {
-        TripleCodec::encode(
-            Fz2U1Codec::encode(
+        TensorKitProductCodec::encode(
+            TensorKitProductCodec::encode(
                 SectorId::from(FermionParityIrrep::new(parity == 1)),
                 SectorId::from(U1Irrep::new(charge).unwrap()),
             ),

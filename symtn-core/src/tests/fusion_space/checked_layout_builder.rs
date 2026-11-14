@@ -47,23 +47,21 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
         &FusionTreeHomSpace::new(su2_dual_leg.clone(), su2_dual_leg),
     );
 
-    type U1Fz2Codec = PackedProductCodec<U1SectorLayout, Fz2SectorLayout>;
-    type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule, U1Fz2Codec>;
+    type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule>;
     let pair_rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
-    let pair_sector = U1Fz2Codec::encode(u1(1), z2_odd());
+    let pair_sector = TensorKitProductCodec::encode(u1(1), z2_odd());
 
-    type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
+    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
     let triple_rule = TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
-    let triple_sector = TripleCodec::encode(Fz2U1Codec::encode(z2_odd(), u1(1)), su2(1));
-    let triple_pair_coupled = TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(2)), su2(0));
+    let triple_sector =
+        TensorKitProductCodec::encode(TensorKitProductCodec::encode(z2_odd(), u1(1)), su2(1));
+    let triple_pair_coupled =
+        TensorKitProductCodec::encode(TensorKitProductCodec::encode(z2_even(), u1(2)), su2(0));
 
     for rank in 0..=6 {
         assert_checked_keys_match_encoded_oracle(
@@ -76,7 +74,8 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
         );
     }
 
-    let triple_vacuum = TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(0)), su2(0));
+    let triple_vacuum =
+        TensorKitProductCodec::encode(TensorKitProductCodec::encode(z2_even(), u1(0)), su2(0));
     let multi_tuple_side = |invert_dual| {
         FusionProductSpace::new((0..4).map(|axis| {
             SectorLeg::new(
@@ -111,14 +110,20 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
         FusionProductSpace::new([
             SectorLeg::new(
                 [(
-                    TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(2)), su2(0)),
+                    TensorKitProductCodec::encode(
+                        TensorKitProductCodec::encode(z2_even(), u1(2)),
+                        su2(0),
+                    ),
                     4,
                 )],
                 true,
             ),
             SectorLeg::new(
                 [(
-                    TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(0)), su2(0)),
+                    TensorKitProductCodec::encode(
+                        TensorKitProductCodec::encode(z2_even(), u1(0)),
+                        su2(0),
+                    ),
                     5,
                 )],
                 false,
@@ -755,20 +760,22 @@ fn concurrent_commits_share_one_layout_admission() {
 
 #[test]
 fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking() {
-    // What: packed decode stays a codec error, while U(1), SU(2), and
+    // What: custom decode stays a codec error, while U(1), SU(2), and
     // recursive product closure failures retain exact causes.
-    type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
+    type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     let rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
-    let malformed = singleton_rank_hom(SectorId::new(usize::MAX), 1);
+    let custom = ProductFusionRule::<_, _, crate::product_codec::ParityProductCodec>::try_new(
+        U1FusionRule,
+        FermionParityFusionRule::new(),
+    )
+    .unwrap();
+    let malformed = singleton_rank_hom(SectorId::new(5), 1);
     let error = malformed
-        .prepare_fusion_tree_layout_checked(&rule)
+        .prepare_fusion_tree_layout_checked(&custom)
         .unwrap_err();
     assert_eq!(
         error,
-        FusionAlgebraError::ProductCodec(
-            Codec::decode_checked(SectorId::new(usize::MAX)).unwrap_err(),
-        )
+        FusionAlgebraError::ProductCodec(ProductSectorCodecError::CodecRejected)
     );
 
     let invalid_z2 = singleton_rank_hom(SectorId::new(2), 1)
@@ -837,8 +844,11 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
 
     let pair_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(Codec::encode(z2_even(), u1(i32::MAX)), 1)], false),
-            SectorLeg::new([(Codec::encode(z2_odd(), u1(1)), 1)], false),
+            SectorLeg::new(
+                [(TensorKitProductCodec::encode(z2_even(), u1(i32::MAX)), 1)],
+                false,
+            ),
+            SectorLeg::new([(TensorKitProductCodec::encode(z2_odd(), u1(1)), 1)], false),
         ]),
         FusionProductSpace::new([]),
     );
@@ -852,12 +862,17 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
             right: u1(1),
         }
     );
-
-    type PairLayout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type TripleCodec = PackedProductCodec<PairLayout, Su2SectorLayout>;
-    type TripleRule = ProductFusionRule<Rule, SU2FusionRule, TripleCodec>;
-    let triple_rule = TripleRule::try_new(rule, SU2FusionRule).unwrap();
-    let triple = |parity, charge, spin| TripleCodec::encode(Codec::encode(parity, charge), spin);
+    type Fz2Su2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2Su2Rule, U1FusionRule>;
+    let triple_rule = TripleRule::try_new(
+        Fz2Su2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap(),
+        U1FusionRule,
+    )
+    .unwrap();
+    // Keep the overflowing U1 factor at the outer pairing.
+    let triple = |parity, charge, spin| {
+        TensorKitProductCodec::encode(TensorKitProductCodec::encode(parity, spin), charge)
+    };
     let triple_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new([(triple(z2_even(), u1(i32::MAX), su2(0)), 1)], false),
@@ -936,13 +951,15 @@ fn failed_checked_algebra_builds_publish_no_identity_or_intern_state() {
         },
     );
 
-    type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
+    type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     let product_rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let product_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(Codec::encode(z2_even(), u1(i32::MAX)), 1)], false),
-            SectorLeg::new([(Codec::encode(z2_odd(), u1(1)), 1)], false),
+            SectorLeg::new(
+                [(TensorKitProductCodec::encode(z2_even(), u1(i32::MAX)), 1)],
+                false,
+            ),
+            SectorLeg::new([(TensorKitProductCodec::encode(z2_odd(), u1(1)), 1)], false),
         ]),
         FusionProductSpace::new([]),
     );

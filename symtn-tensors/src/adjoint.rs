@@ -598,17 +598,13 @@ mod cache_tests {
     use std::cell::Cell;
     use std::ops::{Add, Mul};
     use symtn_core::{
-        FermionParityFusionRule, FermionParityIrrep, FusionProductSpace, Fz2SectorLayout,
-        PackedProductCodec, ProductFusionRule, ProductSectorCodec, ProductSectorLayout,
-        SU2FusionRule, SU2Irrep, SectorId, SectorLeg, Su2SectorLayout, U1FusionRule, U1Irrep,
-        U1SectorLayout,
+        FermionParityFusionRule, FermionParityIrrep, FusionProductSpace, ProductFusionRule,
+        ProductSectorCodec, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, TensorKitProductCodec,
+        U1FusionRule, U1Irrep,
     };
 
-    type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
+    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
 
     thread_local! {
         static LOWERED_PRIMER_CALLS: Cell<usize> = const { Cell::new(0) };
@@ -671,8 +667,8 @@ mod cache_tests {
     }
 
     fn triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
-        TripleCodec::encode(
-            Fz2U1Codec::encode(
+        TensorKitProductCodec::encode(
+            TensorKitProductCodec::encode(
                 SectorId::from(FermionParityIrrep::new(parity == 1)),
                 SectorId::from(U1Irrep::new(charge).unwrap()),
             ),

@@ -1,9 +1,11 @@
 //! `sector_order_key`: TensorKit `findindex - 1` positions per factor.
 
+use crate::product_codec::ParityProductCodec;
+
 use symtn_sectors::{
     product_sector, CU1FusionRule, FermionParityFusionRule, FermionParityIrrep, FusionRule,
-    Fz2SectorLayout, PackedProductCodec, ProductFusionRule, SU2FusionRule, SU2Irrep, SectorCodec,
-    SectorId, SectorOrderKey, TableRule, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule,
+    ProductFusionRule, SU2FusionRule, SU2Irrep, SectorCodec, SectorId, SectorOrderKey, TableRule,
+    U1FusionRule, U1Irrep, ZNFusionRule,
 };
 
 use super::s;
@@ -366,12 +368,12 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
         FermionParityFusionRule::new(),
     )
     .unwrap();
-    let packed = ProductFusionRule::<
-        U1FusionRule,
-        FermionParityFusionRule,
-        PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
-    >::try_new(U1FusionRule, FermionParityFusionRule::new())
-    .unwrap();
+    let custom =
+        ProductFusionRule::<U1FusionRule, FermionParityFusionRule, ParityProductCodec>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap();
     let labels = [
         (-1, FermionParityIrrep::EVEN),
         (1, FermionParityIrrep::ODD),
@@ -384,7 +386,7 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
         let label = product_sector(U1Irrep::new(charge).unwrap(), parity);
         for sector_key in [
             cantor.sector_order_key(cantor.encode_sector(&label).unwrap()),
-            packed.sector_order_key(packed.encode_sector(&label).unwrap()),
+            custom.sector_order_key(custom.encode_sector(&label).unwrap()),
         ] {
             assert_eq!(positions(sector_key), key);
         }

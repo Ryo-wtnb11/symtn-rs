@@ -8,13 +8,8 @@ pub use symtn::sector::{
     product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
     SU2Irrep, U1FusionRule, U1Irrep,
 };
-pub use symtn::sector::{Fz2SectorLayout, PackedProductCodec, U1SectorLayout};
 
-pub type Fz2U1Rule = ProductFusionRule<
-    FermionParityFusionRule,
-    U1FusionRule,
-    PackedProductCodec<Fz2SectorLayout, U1SectorLayout>,
->;
+pub type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 
 /// A payload whose bit pattern the gates compare, with deterministic values
 /// that include signed zero, a subnormal, an infinity and a NaN payload.
