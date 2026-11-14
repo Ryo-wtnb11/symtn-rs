@@ -103,6 +103,14 @@ operations are Host-only. Uploading a table payload does not enable device
 operations. Per-method bounds remain authoritative; see the
 [provider interface](provider_interface.md#current-typed-api-boundaries).
 
+The prepared `EighFullPlan` solves each coupled sector of all members with
+one Tenferro `eigh` call. Tenferro launches cuSOLVER `XsyevBatched` for it
+only on cuSOLVER 11.7.1 or newer; on an older library it loops one `syevd`
+per member, and exposes no way to require or detect the batched routine.
+A real batch accepts that fallback. A complex batch of more than one member
+is refused with `DenseError::Unsupported` before device work; a single
+complex member takes the per-matrix solver, as eager `eigh_full` does.
+
 ## Parallel execution
 
 Every numerical operation takes the caller's execution context
