@@ -1,7 +1,8 @@
 //! Public checked-Generic transform timing (SU(3)/SU(4) permute, braid,
 //! repartition, plus SU(2) controls: multiplicity-free Lie (`su2`) against
 //! checked Generic Lie (`su2cg`) for permute, braid, repartition and
-//! contract. Run with `cargo bench -p symtn
+//! contract), and the wide checked Generic SU(3) contraction
+//! (`su3cg_contract`). Run with `cargo bench -p symtn
 //! --features cgc-gen --bench checked_generic_transform`.
 //!
 //! Each case runs in a child process so provider and Runtime state start
@@ -143,6 +144,29 @@ macro_rules! su2_control {
                         .unwrap();
                         (source, other)
                     }
+                    // SU(3) `1, 3, 3bar, 8`, two copies each: `8 x 8` carries
+                    // outer multiplicity 2, so the checked Generic layout
+                    // has genuine vertex labels.
+                    "wide_su3" => {
+                        let wide = space(&[(0, 2), (1, 2), (2, 2), (3, 2)]);
+                        let source: TensorMap<$rule, f64> = TensorMap::rand_with_seed(
+                            engine,
+                            &runtime,
+                            [&wide, &wide],
+                            [&wide, &wide],
+                            783,
+                        )
+                        .unwrap();
+                        let other: TensorMap<$rule, f64> = TensorMap::rand_with_seed(
+                            engine,
+                            &runtime,
+                            [&wide, &wide],
+                            [&wide, &wide],
+                            784,
+                        )
+                        .unwrap();
+                        (source, other)
+                    }
                     _ => panic!("unknown fixture: {}", $fixture),
                 });
             println!(
@@ -211,6 +235,7 @@ fn main() {
         .into_iter()
         .map(String::from)
         .chain(su2_control_cases())
+        .chain(std::iter::once(String::from("su3cg_contract/wide_su3")))
         {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .env(CASE_ENV, &case)
@@ -229,6 +254,25 @@ fn main() {
     };
     let case = case.to_str().unwrap();
     println!("case={case} allocation_scope=caller_thread_requested");
+
+    if let Some(fixture) = case.strip_prefix("su3cg_contract/") {
+        // The wide contraction of the SU(2) controls under checked Generic
+        // SU(3): the second Generic rule of the contraction rows.
+        let labels = [&[0, 0][..], &[1, 0], &[0, 1], &[1, 1]];
+        su2_control!(
+            engine,
+            case,
+            fixture,
+            "contract",
+            LieGroupFusionRule,
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap()
+            )
+            .unwrap(),
+            |index: usize| su_irrep(labels[index])
+        );
+        return;
+    }
 
     if let Some(control) = case
         .strip_prefix("su2_permute_control/")
