@@ -611,3 +611,96 @@ fn su2_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     assert_eq!(shape, [7, 7, 7, 7]);
     assert_su2_dual_samples(&actual, true);
 }
+
+#[test]
+fn multiplicity_free_lie_su2_dense_conversions_match_the_compact_rule_bitwise() {
+    use symtn::sector::{LieGroupFusionRule, LieIrrep, MultiplicityFreeAdmissionMode};
+    type MfLie = LieGroupFusionRule<MultiplicityFreeAdmissionMode>;
+
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let lie =
+        std::sync::Arc::new(MfLie::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
+    let lie_w = GradedSpace::try_new(
+        std::sync::Arc::clone(&lie),
+        [(0, 2), (1, 1), (2, 1)].map(|(dj, n)| (lie.category().irrep(&[dj]).unwrap(), n)),
+    )
+    .unwrap();
+    let lie_dual = lie_w.try_dual().unwrap();
+    let w = su2_space([2, 1, 1]);
+    let dual = w.try_dual().unwrap();
+    let compact = TensorMap::<SU2FusionRule, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&w, &dual, &w],
+        [&dual],
+        |trees, index| {
+            fixture_value(
+                trees,
+                index,
+                |j: &SU2Irrep| j.twice_spin() as f64,
+                Complex64::new,
+            )
+        },
+    )
+    .unwrap();
+    let mf = TensorMap::<MfLie, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&lie_w, &lie_dual, &lie_w],
+        [&lie_dual],
+        |trees, index| {
+            fixture_value(
+                trees,
+                index,
+                |j: &LieIrrep| j.dynkin().next().unwrap() as f64,
+                Complex64::new,
+            )
+        },
+    )
+    .unwrap();
+    let bits = |data: &[Complex64]| {
+        data.iter()
+            .map(|x| [x.re.to_bits(), x.im.to_bits()])
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        bits(mf.dense_data().unwrap()),
+        bits(compact.dense_data().unwrap())
+    );
+
+    // Unpermuted, then every permutation and repartition of both tensors.
+    for permutation in std::iter::once(None).chain(PERMUTATIONS.map(Some)) {
+        let (compact, mf) = match permutation {
+            None => (compact.clone(), mf.clone()),
+            Some((codomain, domain)) => (
+                compact.permute(engine, codomain, domain).unwrap(),
+                mf.permute(engine, codomain, domain).unwrap(),
+            ),
+        };
+        let physical = compact.to_physical_dense(engine).unwrap();
+        let mf_physical = mf.to_physical_dense(engine).unwrap();
+        assert_eq!(mf_physical.shape, physical.shape, "{permutation:?}");
+        assert_eq!(
+            bits(&mf_physical.data),
+            bits(&physical.data),
+            "{permutation:?}"
+        );
+        assert_eq!(
+            bits(
+                mf.project_physical_dense(engine, &physical)
+                    .unwrap()
+                    .dense_data()
+                    .unwrap()
+            ),
+            bits(
+                compact
+                    .project_physical_dense(engine, &physical)
+                    .unwrap()
+                    .dense_data()
+                    .unwrap()
+            ),
+            "{permutation:?}"
+        );
+    }
+}

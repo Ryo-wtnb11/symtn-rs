@@ -27,6 +27,10 @@ gives the multiplicity-free provider traits, so the group takes the
 multiplicity-free tensor pipeline, CUDA and multiplicity-free products; it
 refuses any other group with `LieGroupFusionRuleError::IncompatibleFusionStyle`.
 A group fusion-symbols rejects fails at construction with
-`LieGroupFusionRuleError::Provider`. The compact
-`SU2FusionRule` keeps its multiplicity-free and physical-basis capabilities.
+`LieGroupFusionRuleError::Provider`. Multiplicity-free mode also provides
+`PhysicalFusionBasis`: rank-one factors in TensorKit's descending-`m` SU(2)
+order, composed as TensorKit's `ProductSector`, tori one-dimensional; a
+doubled spin beyond `i32` returns `PhysicalBasisError::Unsupported`. The
+compact `SU2FusionRule` keeps its multiplicity-free and physical-basis
+capabilities, bit for bit equal to the multiplicity-free Lie rule over SU(2).
 Raw `SectorId` values remain rule-local rather than stable wire data.

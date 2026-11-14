@@ -513,6 +513,11 @@ pub enum PhysicalBasisError<Coefficient> {
         multiplicity: usize,
         dimension: usize,
     },
+    /// The provider has no physical carrier basis for `sector`, although the
+    /// sector is valid for its fusion algebra.
+    Unsupported {
+        sector: SectorId,
+    },
     Coefficient(Coefficient),
 }
 
@@ -537,6 +542,10 @@ impl<Coefficient: fmt::Display> fmt::Display for PhysicalBasisError<Coefficient>
             } => write!(
                 formatter,
                 "fusion multiplicity index {multiplicity} is out of bounds for ({left:?}, {right:?}) -> {coupled:?} of dimension {dimension}"
+            ),
+            Self::Unsupported { sector } => write!(
+                formatter,
+                "sector {sector:?} has no physical carrier basis in this provider"
             ),
             Self::Coefficient(_) => formatter.write_str("basis coefficient provider failed"),
         }
@@ -574,11 +583,14 @@ impl<Coefficient> From<FusionAlgebraError> for PhysicalBasisError<Coefficient> {
 /// responsible for mapping dual legs through the provider's checked duality
 /// and rigidity data; there is deliberately no independent dual-basis
 /// convention here.
-/// Implementations must use the same sector domain and fusion multiplicities
-/// as their structural fusion authority. In particular, an element exists
-/// exactly for `multiplicity < N(left, right, coupled)`, and the local tensors
-/// are orthonormal isometries whose sum over coupled sectors and
-/// multiplicities is complete on the product carrier space.
+/// Implementations must use the same fusion multiplicities as their
+/// structural fusion authority on their supported physical domain: there an
+/// element exists exactly for `multiplicity < N(left, right, coupled)`, and
+/// the local tensors are orthonormal isometries whose sum over coupled
+/// sectors and multiplicities is complete on the product carrier space. A
+/// sector the structural authority admits may still lie outside that domain;
+/// both methods then return the provider's unsupported error, for example
+/// [`PhysicalBasisError::Unsupported`].
 ///
 /// There is intentionally no `FusionRule` supertrait: checked Generic
 /// providers do not implement that infallible interface. Tensor engines

@@ -228,6 +228,8 @@ pub symtn_sectors::PhysicalBasisError::FusionMultiplicityOutOfBounds::dimension:
 pub symtn_sectors::PhysicalBasisError::FusionMultiplicityOutOfBounds::left: symtn_sectors::SectorId
 pub symtn_sectors::PhysicalBasisError::FusionMultiplicityOutOfBounds::multiplicity: usize
 pub symtn_sectors::PhysicalBasisError::FusionMultiplicityOutOfBounds::right: symtn_sectors::SectorId
+pub symtn_sectors::PhysicalBasisError::Unsupported
+pub symtn_sectors::PhysicalBasisError::Unsupported::sector: symtn_sectors::SectorId
 impl<Coefficient: core::clone::Clone> core::clone::Clone for symtn_sectors::PhysicalBasisError<Coefficient>
 pub fn symtn_sectors::PhysicalBasisError<Coefficient>::clone(&self) -> symtn_sectors::PhysicalBasisError<Coefficient>
 impl<Coefficient: core::cmp::Eq> core::cmp::Eq for symtn_sectors::PhysicalBasisError<Coefficient>
@@ -593,6 +595,11 @@ pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissio
 pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::inv_sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::twist_scalar(&self, symtn_sectors::SectorId) -> f64
+impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>
+pub type symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::Error = symtn_sectors::PhysicalBasisError<never>
+pub type symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::Scalar = f64
+pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
 impl symtn_sectors::SectorCodec for symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>
 pub type symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::Sector = fusion_symbols::lie::LieIrrep
 pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::decode_sector(&self, symtn_sectors::SectorId) -> core::result::Result<fusion_symbols::lie::LieIrrep, symtn_sectors::FusionAlgebraError>
@@ -1692,6 +1699,11 @@ pub type symtn_sectors::PhysicalFusionBasis::Error: core::error::Error + core::m
 pub type symtn_sectors::PhysicalFusionBasis::Scalar: symtn_sectors::CategoricalScalar + core::marker::Send + core::marker::Sync
 pub fn symtn_sectors::PhysicalFusionBasis::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::PhysicalFusionBasis::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
+impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>
+pub type symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::Error = symtn_sectors::PhysicalBasisError<never>
+pub type symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::Scalar = f64
+pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
+pub fn symtn_sectors::LieGroupFusionRule<symtn_sectors::MultiplicityFreeAdmissionMode>::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
 impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::SU2FusionRule
 pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<never>
 pub type symtn_sectors::SU2FusionRule::Scalar = f64

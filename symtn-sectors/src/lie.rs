@@ -11,10 +11,11 @@ use std::sync::{Arc, PoisonError, RwLock};
 use crate::category_rule::{forward, fusion_algebra_error, AdapterAccess};
 use crate::{
     BraidingStyleKind, CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec,
-    CategoryFailure, CheckedCanonicalUnitFusionRule, CheckedGenericAdmissionMode,
-    CheckedGenericFusion, CheckedGenericPivotal, CheckedGenericRigidSymbols, FusionAlgebraError,
-    FusionStyleKind, GenericFArray, GenericRMatrix, MultiplicityFreeAdmissionMode, RuleIdentity,
-    SectorId, SectorOrderKey, SectorVec, SymbolShapeError, TypedSectorAdmission,
+    CategoryFailure, CheckedCanonicalUnitFusionRule, CheckedFusionAlgebra,
+    CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
+    CheckedGenericRigidSymbols, FusionAlgebraError, FusionStyleKind, GenericFArray, GenericRMatrix,
+    MultiplicityFreeAdmissionMode, PhysicalBasisError, PhysicalFusionBasis, RuleIdentity,
+    SectorCodec, SectorId, SectorOrderKey, SectorVec, SymbolShapeError, TypedSectorAdmission,
 };
 
 /// Compact Lie-group rule over the fusion-symbols category adapter, admitted
@@ -58,7 +59,11 @@ use crate::{
 /// (SUNRepresentations' `findindex - 1` for SU(N), the Dynkin label for
 /// SU(2)), D(2) its two A1 labels, and each torus charge its TensorKit
 /// `U1Irrep` `findindex - 1` (`4q - 1` for `q > 0`, else `4|q|`). A single
-/// simple factor's key is therefore its id. No physical expansion is provided.
+/// simple factor's key is therefore its id.
+///
+/// Multiplicity-free mode implements
+/// [`PhysicalFusionBasis`](crate::PhysicalFusionBasis) (see that impl); the
+/// checked Generic mode provides no physical expansion.
 ///
 /// The rule's [`RuleIdentity`] is its mode and [`GroupId`] value: rules over
 /// equal groups in one mode have equal identities whatever constructor or
@@ -1148,6 +1153,114 @@ crate::category_rule::multiplicity_free_adapter_impls!(
     LieIrrep,
     f64
 );
+
+/// Physical carrier basis of a multiplicity-free group: the Kronecker product
+/// of its rank-one factors' SU(2) carriers in Dynkin-label order, the first
+/// factor most significant, as TensorKitSectors' `ProductSector`
+/// `fusiontensor` composes factors. Torus factors are one-dimensional and
+/// contribute no index. Each rank-one carrier follows TensorKitSectors'
+/// `SU2Irrep`: zero-based index `k` has doubled projection `dm = dj - 2k`,
+/// descending in `m`. That is the index reversal of fusion-symbols'
+/// ascending `GroupRepresentations::cgc`; reversing every factor reverses the
+/// whole Kronecker index.
+///
+/// Each element is a product of fusion-symbols' scalar `clebsch_gordan`
+/// values, one per rank-one factor, after symtn checks admission,
+/// multiplicity and carrier indices; no CGC block is built. A sector with a
+/// doubled spin beyond `i32` (fusion-symbols' projection range) or a carrier
+/// dimension beyond `usize` returns [`PhysicalBasisError::Unsupported`].
+impl PhysicalFusionBasis for LieGroupFusionRule<MultiplicityFreeAdmissionMode> {
+    type Scalar = f64;
+    type Error = PhysicalBasisError<std::convert::Infallible>;
+
+    fn try_carrier_dimension(&self, sector: SectorId) -> Result<usize, Self::Error> {
+        carrier_dimension(sector, &self.decode_sector(sector)?)
+    }
+
+    fn try_fusion_tensor_element(
+        &self,
+        left: SectorId,
+        right: SectorId,
+        coupled: SectorId,
+        left_basis: usize,
+        right_basis: usize,
+        coupled_basis: usize,
+        multiplicity: usize,
+    ) -> Result<Self::Scalar, Self::Error> {
+        let fusion_multiplicity = self.try_nsymbol(left, right, coupled)?;
+        if multiplicity >= fusion_multiplicity {
+            return Err(PhysicalBasisError::FusionMultiplicityOutOfBounds {
+                left,
+                right,
+                coupled,
+                multiplicity,
+                dimension: fusion_multiplicity,
+            });
+        }
+        let [(a, da), (b, db), (c, dc)] = [
+            self.checked_carrier(left, left_basis)?,
+            self.checked_carrier(right, right_basis)?,
+            self.checked_carrier(coupled, coupled_basis)?,
+        ];
+        let mut remaining = [da, db, dc];
+        let mut index = [left_basis, right_basis, coupled_basis];
+        let mut element = 1.0;
+        for ((ja, jb), jc) in a.dynkin().zip(b.dynkin()).zip(c.dynkin()) {
+            let dj = [ja, jb, jc];
+            let dm: [i32; 3] = std::array::from_fn(|axis| {
+                remaining[axis] /= dj[axis] as usize + 1;
+                let k = index[axis] / remaining[axis];
+                index[axis] %= remaining[axis];
+                // `checked_carrier` bounds `dj` by `i32::MAX`, and `|dj - 2k| <= dj`.
+                (dj[axis] - 2 * k as i64) as i32
+            });
+            // Admitted N and carrier bounds leave only a projection-sum
+            // mismatch, where fusion-symbols returns exact zero.
+            element *= fusion_symbols::lie::su2::clebsch_gordan(
+                ja as u32, dm[0], jb as u32, dm[1], jc as u32, dm[2],
+            )
+            .to_f64();
+        }
+        Ok(element)
+    }
+}
+
+impl LieGroupFusionRule<MultiplicityFreeAdmissionMode> {
+    /// The decoded irrep and carrier dimension of `sector`, after checking
+    /// that `index` lies in the carrier.
+    fn checked_carrier(
+        &self,
+        sector: SectorId,
+        index: usize,
+    ) -> Result<(LieIrrep, usize), PhysicalBasisError<std::convert::Infallible>> {
+        let irrep = self.decode_sector(sector)?;
+        let dimension = carrier_dimension(sector, &irrep)?;
+        if index >= dimension {
+            return Err(PhysicalBasisError::CarrierIndexOutOfBounds {
+                sector,
+                index,
+                dimension,
+            });
+        }
+        Ok((irrep, dimension))
+    }
+}
+
+/// Product of the rank-one carrier dimensions `dj + 1`. Why per Dynkin label:
+/// multiplicity-free admission leaves only rank-one simple factors (D2 as two
+/// A1) and tori, so every Dynkin label is one SU(2) factor.
+fn carrier_dimension(
+    sector: SectorId,
+    irrep: &LieIrrep,
+) -> Result<usize, PhysicalBasisError<std::convert::Infallible>> {
+    irrep
+        .dynkin()
+        .try_fold(1usize, |dimension, dj| {
+            let dj = i32::try_from(dj).ok()?;
+            dimension.checked_mul(usize::try_from(dj).ok()?.checked_add(1)?)
+        })
+        .ok_or(PhysicalBasisError::Unsupported { sector })
+}
 
 impl CheckedGenericFusion for LieGroupFusionRule {
     type Error = LieGroupFusionRuleError;
