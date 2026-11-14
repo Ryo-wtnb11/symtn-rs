@@ -20,6 +20,7 @@ mod lie_group_cross_process_determinism;
 mod lie_group_feature_contract;
 mod lie_group_oracles;
 mod lie_multiplicity_free_equivalence;
+mod lie_physical_basis;
 mod product_oracles;
 mod product_rule_client;
 #[path = "provider_contracts/main.rs"]
@@ -27,5 +28,4 @@ mod provider_contracts;
 mod rule_identity;
 mod sector_labels;
 mod semantic_axioms;
-mod su2_bend_oracle;
 mod table_rule;

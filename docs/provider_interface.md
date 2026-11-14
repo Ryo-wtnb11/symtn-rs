@@ -113,7 +113,7 @@ category's `frobenius_schur_phase`.
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
 | `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; symtn checks admission, multiplicity and carrier indices, then evaluates each physical entry with fusion-symbols' scalar `clebsch_gordan`, whose exact zero is the projection-sum structural zero |
-| `LieGroupFusionRule<M>` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, fusion-symbols' `LieIrrep` as the typed label, labels as representable as fusion-symbols makes them; `M` = checked `Generic` at every rank (the default) or multiplicity-free for a `Unique`/`Simple` group; no physical expansion | every `GroupId` that `LieGroup::new` executes (every simple type A–G, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
+| `LieGroupFusionRule<M>` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, fusion-symbols' `LieIrrep` as the typed label, labels as representable as fusion-symbols makes them; `M` = checked `Generic` at every rank (the default) or multiplicity-free for a `Unique`/`Simple` group; in multiplicity-free mode, physical indices are the Kronecker product of the rank-one factors' descending-`m` carriers in Dynkin-label order (first factor most significant, as TensorKit's `ProductSector` `fusiontensor`), tori one-dimensional, and a doubled spin beyond `i32` is `PhysicalBasisError::Unsupported` | every `GroupId` that `LieGroup::new` executes (every simple type A–G, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols; each physical entry is a product of fusion-symbols' scalar `clebsch_gordan` per rank-one factor, as for `SU2FusionRule`, after the same checks |
 
 Both keep their identities, sector order, typed errors and validation order.
 `LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
@@ -221,8 +221,8 @@ coefficient data and does not reject a group by rank: generation is deferred
 to the first query that needs it. The tier limits bound retained cache
 entries, not temporary generation memory. The categorical scalar is
 `f64`, and tensor execution uses the ordinary supported real/complex Host
-payloads; physical expansion is not provided by this rule, and CUDA execution
-only in multiplicity-free mode.
+payloads; physical expansion and CUDA execution are provided only in
+multiplicity-free mode.
 Sp fundamental representations have FS indicator -1 and twist +1; this is
 bosonic braiding, not fermionic parity.
 

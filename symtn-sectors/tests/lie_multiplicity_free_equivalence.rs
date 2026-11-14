@@ -8,13 +8,14 @@
 //! fuse past 254. The Lie rule's own domain is wider (labels up to
 //! `u32::MAX`, no closure bound) and is not restricted here. The oracle is
 //! `SU2FusionRule`, whose codec (`id = 2j`, no table) is independent of the
-//! Lie codec.
+//! Lie codec. The physical carrier basis matches too: dimensions on every
+//! compact spin, and every element and its error on the compact domain.
 
 use fusion_symbols::lie::GroupId;
 use symtn_sectors::{
     CheckedFusionAlgebra, FusionAlgebraError, FusionRule, LieGroupFusionRule,
     MultiplicityFreeAdmissionMode, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    SU2FusionRule, SU2Irrep, SectorCodec, SectorId, SU2_MAX_DOUBLED_SPIN,
+    PhysicalFusionBasis, SU2FusionRule, SU2Irrep, SectorCodec, SectorId, SU2_MAX_DOUBLED_SPIN,
 };
 
 type MfLie = LieGroupFusionRule<MultiplicityFreeAdmissionMode>;
@@ -237,4 +238,62 @@ fn symbol_families_match_bitwise_on_every_compact_spin() {
     assert_a_b(&lie, [120, 1, 119]);
     assert_f(&lie, [120, 0, 120, 240, 120, 120]);
     assert_f(&lie, [127, 0, 127, 254, 127, 127]);
+}
+
+#[test]
+fn carrier_dimensions_match_on_every_compact_spin() {
+    let lie = su2();
+    for dj in 0..=SU2_MAX_DOUBLED_SPIN {
+        assert_eq!(
+            lie.try_carrier_dimension(s(dj)),
+            SU2FusionRule.try_carrier_dimension(s(dj)),
+            "2j = {dj}"
+        );
+    }
+}
+
+/// Every element of `a x b -> c`, one index past each carrier and the
+/// multiplicity, bit for bit or as the same error.
+fn assert_elements(lie: &MfLie, [a, b, c]: [usize; 3]) {
+    for i in 0..=a + 1 {
+        for j in 0..=b + 1 {
+            for k in 0..=c + 1 {
+                for mu in 0..2 {
+                    let [x, y, z] = [a, b, c].map(s);
+                    let bits = |r: Result<f64, _>| r.map(f64::to_bits);
+                    assert_eq!(
+                        bits(lie.try_fusion_tensor_element(x, y, z, i, j, k, mu)),
+                        bits(SU2FusionRule.try_fusion_tensor_element(x, y, z, i, j, k, mu)),
+                        "C({a}, {b}, {c})[{i}, {j}, {k}, {mu}]"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn physical_elements_match_bitwise_on_small_spins_and_at_the_closure() {
+    let lie = su2();
+    for a in 0..=6 {
+        for b in 0..=6 {
+            // Absent channels of both parities compare their N errors too.
+            for c in 0..=a + b + 1 {
+                assert_elements(&lie, [a, b, c]);
+            }
+        }
+    }
+    for [a, b, c] in [[127, 127, 254], [127, 127, 0], [253, 1, 254], [126, 2, 127]] {
+        let [x, y, z] = [a, b, c].map(s);
+        for [i, j, k] in [[0, 0, 0], [a / 2, b / 2, c / 2], [a, b, c], [a, 0, c / 2]] {
+            assert_eq!(
+                lie.try_fusion_tensor_element(x, y, z, i, j, k, 0)
+                    .map(f64::to_bits),
+                SU2FusionRule
+                    .try_fusion_tensor_element(x, y, z, i, j, k, 0)
+                    .map(f64::to_bits),
+                "C({a}, {b}, {c})[{i}, {j}, {k}]"
+            );
+        }
+    }
 }
