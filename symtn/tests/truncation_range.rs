@@ -25,16 +25,16 @@
 //! `s = 1e-200` it reports `norm = 0`, every error `0`, and `truncerror`
 //! again discards everything. symtn returns the representable values.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::Truncation;
 use symtn::typed::{GradedSpace, SectorSpectrum};
 
 use crate::numerics;
 
-fn spin(twice: usize) -> SU2Irrep {
-    SU2Irrep::from_twice_spin(twice)
+fn spin(twice: usize) -> symtn_core::LieIrrep {
+    su2_irrep(twice)
 }
 
 /// Kept counts in `[j = 0, j = 1/2]` order and the reported error.
@@ -44,15 +44,15 @@ where
 {
     let sectors = [spin(0), spin(1)];
     let leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        sectors.iter().map(|sector| (*sector, 2)),
+        Arc::new(su2_rule()),
+        sectors.iter().map(|sector| (sector.clone(), 2)),
     )
     .unwrap();
-    let spectra: Vec<SectorSpectrum<SU2Irrep, V>> = sectors
+    let spectra: Vec<SectorSpectrum<symtn_core::LieIrrep, V>> = sectors
         .iter()
         .zip(values)
         .map(|(sector, values)| SectorSpectrum {
-            sector: *sector,
+            sector: sector.clone(),
             values: values.to_vec(),
         })
         .collect();

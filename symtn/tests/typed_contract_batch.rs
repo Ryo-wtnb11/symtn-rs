@@ -1,5 +1,6 @@
 use crate::common::ErrorKind as _;
 use crate::report;
+use crate::su2::{su2_irrep, su2_rule};
 use report::Report;
 use symtn::typed::Engine;
 
@@ -470,11 +471,7 @@ fn public_copy_c_small_output_winners() {
     let c = u1(&[(0, 2), (1, 1)]);
     cases::<_, f64>(&runtime, &v, &c);
     cases::<_, symtn::typed::Complex64>(&runtime, &v, &c);
-    let c_su2 = GradedSpace::try_new(
-        Arc::new(symtn::sector::SU2FusionRule),
-        [(symtn::sector::SU2Irrep::from_twice_spin(0), 1)],
-    )
-    .unwrap();
+    let c_su2 = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1)]).unwrap();
     cases::<_, f64>(&runtime, &su2(), &c_su2);
     cases::<_, symtn::typed::Complex64>(&runtime, &su2(), &c_su2);
 }

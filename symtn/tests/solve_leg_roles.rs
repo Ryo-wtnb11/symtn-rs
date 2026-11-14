@@ -1,9 +1,9 @@
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Error, GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
@@ -179,9 +179,9 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
         }};
     }
 
-    let su2 = Arc::new(SU2FusionRule);
-    let v = GradedSpace::try_new(Arc::clone(&su2), [(SU2Irrep::from_twice_spin(1), 2)]).unwrap();
-    let w = GradedSpace::try_new(su2, [(SU2Irrep::from_twice_spin(1), 2)])
+    let su2 = Arc::new(su2_rule());
+    let v = GradedSpace::try_new(Arc::clone(&su2), [(su2_irrep(1), 2)]).unwrap();
+    let w = GradedSpace::try_new(su2, [(su2_irrep(1), 2)])
         .unwrap()
         .try_dual()
         .unwrap();

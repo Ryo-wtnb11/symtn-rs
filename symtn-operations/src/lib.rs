@@ -12,6 +12,11 @@
 //! strided tree-transform driver and scalar recoupling as a reference oracle
 //! (and adds a method to `HostKernelAdapter`). Do not enable it in applications.
 
+#[cfg(test)]
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+#[cfg(test)]
+use symtn_core as sector_types;
 #[cfg(not(any(
     feature = "cpu-faer",
     feature = "cpu-blas",

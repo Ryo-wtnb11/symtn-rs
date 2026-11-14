@@ -32,6 +32,7 @@
 //! selection breaks ties in, so the kept bond is part of the exact gate.
 
 use crate::report;
+use crate::su2::su2_irrep;
 use report::Report;
 
 use std::sync::Arc;
@@ -39,7 +40,7 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     Eigh, GradedSpace, LegSelection, SectorSpectrum, SpectrumMagnitude, Svd, TruncatedSelection,
@@ -606,7 +607,7 @@ fn su2_multi_tree_eigh_composition_matches_the_oracle_for_every_policy() {
     assert!(
         sector_matrices!(engine, source)
             .iter()
-            .any(|(sector, matrix)| *sector == SU2Irrep::from_twice_spin(1) && matrix.rows > 2),
+            .any(|(sector, matrix)| *sector == su2_irrep(1) && matrix.rows > 2),
         "spin 1/2 must stack several trees"
     );
     eigh_policy_sweep!(

@@ -13,14 +13,14 @@
 //! from the componentwise `(cx, cy)` exactly on those values, because `0 * y`
 //! is a NaN for a non-finite `y` and `cx - 0` loses the sign of a zero.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -229,7 +229,7 @@ fn u1_transforms_scale_componentwise() {
 #[test]
 fn su2_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let dual = leg.try_dual().unwrap();
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
@@ -253,13 +253,10 @@ fn su2_transforms_scale_componentwise() {
 fn u1_times_su2_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
     );
     let label = |charge: i32, twice_spin: usize| {
-        product_sector(
-            U1Irrep::new(charge).unwrap(),
-            SU2Irrep::from_twice_spin(twice_spin),
-        )
+        product_sector(U1Irrep::new(charge).unwrap(), su2_irrep(twice_spin))
     };
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -380,7 +377,7 @@ fn traces_scale_componentwise() {
         |t| t.trace_pairs(engine, &[(1, 3)])
     );
 
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let dual = leg.try_dual().unwrap();
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
@@ -440,7 +437,7 @@ fn traces_scale_componentwise() {
 #[ignore = "multi-block recoupling GEMM still promotes the coefficient"]
 fn su2_recoupling_matrix_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other, &other], [&leg], |t| t.permute(

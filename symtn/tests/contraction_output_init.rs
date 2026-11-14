@@ -9,6 +9,7 @@
 //! tolerance rule (`docs/testing_numerics.md`) with `terms` the contracted
 //! bond length. Inactive blocks are exact zeros by construction.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use symtn::typed::ContractSpec;
 use num_complex::Complex64;
 
 use crate::numerics;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap, TensorScalar};
 
@@ -45,12 +46,10 @@ fn u1(provider: &Arc<U1FusionRule>, sectors: &[(i32, usize)]) -> GradedSpace<U1F
     .unwrap()
 }
 
-fn su2(provider: &Arc<SU2FusionRule>, sectors: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
+fn su2(provider: &Arc<Su2Rule>, sectors: &[(usize, usize)]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
         Arc::clone(provider),
-        sectors
-            .iter()
-            .map(|&(twice, d)| (SU2Irrep::from_twice_spin(twice), d)),
+        sectors.iter().map(|&(twice, d)| (su2_irrep(twice), d)),
     )
     .unwrap()
 }
@@ -204,7 +203,7 @@ fn u1_owned_contractions_leave_unreachable_charges_exactly_zero_c64() {
 fn su2_case<D: Bits>(seed: u64) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     // `[a, c] <- [b]` and `[b] <- [a, c]` couple only to spin 1/2 through the
     // bond; the destination `[a, c] <- [a, c]` also couples to spin 3/2.
     let a = su2(&provider, &[(0, 2), (2, 3)]);
@@ -286,7 +285,7 @@ fn empty_support_yields_a_zero_payload_of_the_full_destination_length() {
     // all; composing with `[b] <- [a]` still owns the full `[a] <- [a]`
     // payload (spins 0 and 1: 2*2 + 3*3 elements), every element `+0.0`.
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let a = su2(&provider, &[(0, 2), (2, 3)]);
     let b = su2(&provider, &[(1, 3)]);
     let lhs: TensorMap<_, f64> =

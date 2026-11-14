@@ -1,6 +1,8 @@
 //! Hermitian and general eigendecomposition tests.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn eigh_canonical_layout_skips_input_pack_and_vector_scatter() {
@@ -1034,19 +1036,16 @@ fn eigh_full_does_not_relabel_the_lowest_u1_sector() {
 #[test]
 fn eigh_full_satisfies_the_eigen_equation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let tensor = hermitian_test_tensor(
         &rule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let eigh = eigh_full(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
 
@@ -1107,10 +1106,10 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
     ];
     assert_eigh_reconstructs_rule(&product, &product_sectors);
 
-    let nested = symtn_core::ProductFusionRule::<_, _>::try_new(product, SU2FusionRule).unwrap();
+    let nested = symtn_core::ProductFusionRule::<_, _>::try_new(product, su2_rule()).unwrap();
     let nested_sectors = [
-        nested.encode_component_ids(product_sectors[0], SU2Irrep::from_twice_spin(0).sector_id()),
-        nested.encode_component_ids(product_sectors[1], SU2Irrep::from_twice_spin(1).sector_id()),
+        nested.encode_component_ids(product_sectors[0], symtn_core::SectorId::new(0)),
+        nested.encode_component_ids(product_sectors[1], symtn_core::SectorId::new(1)),
     ];
     let eigh_copy_rec = crate::probe::record();
     assert_eigh_reconstructs_rule(&nested, &nested_sectors);

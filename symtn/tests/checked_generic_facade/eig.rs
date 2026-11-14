@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
 
@@ -767,7 +768,6 @@ fn assert_unit_gauged_eigenpairs(
 fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     let runtime = Runtime::builder().build().unwrap();
     // `lambda I + N` (a single Jordan chain: defective, and on base the dense
@@ -800,14 +800,8 @@ fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
     )
     .unwrap();
     // Non-Abelian sectors with degeneracy 2 and 3.
-    let mf_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 3),
-        ],
-    )
-    .unwrap();
+    let mf_leg =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), 2), (su2_irrep(2), 3)]).unwrap();
     macro_rules! check {
         ($engine:ident, $leg:expr, $first:expr, $dtype:ty, $from:expr, $widen:expr, $widen_eig:expr, $eps:expr, $lambda:expr) => {{
             let from: fn(Complex64) -> $dtype = $from;
@@ -841,7 +835,7 @@ fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
     let real = [Complex64::new(2.0, 0.0), Complex64::new(-0.5, 0.0)];
     let complex = [Complex64::new(2.0, 1.0), Complex64::new(-0.5, -0.25)];
     let c32 = |z: Complex32| Complex64::new(z.re.into(), z.im.into());
-    let spin_half = SU2Irrep::from_twice_spin(1);
+    let spin_half = su2_irrep(1);
     macro_rules! both_modes {
         ($engine:ident, $($args:tt)*) => {
             check!($engine, checked_leg, Label::Vacuum, $($args)*);
@@ -890,7 +884,6 @@ fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
 fn eig_full_never_returns_nonfinite_eigenvectors_of_finite_input_in_both_modes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     // A finite Jordan block `2 I + N` of size n in one sector. Older faer
     // overflowed in its back-substitution here (f32 from n = 8, f64 from
@@ -947,9 +940,7 @@ fn eig_full_never_returns_nonfinite_eigenvectors_of_finite_input_in_both_modes()
     for (n, single) in [(26, false), (30, false), (8, true), (10, true)] {
         let checked_leg =
             GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(0)), [(Label::Vacuum, n)]).unwrap();
-        let mf_leg =
-            GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), n)])
-                .unwrap();
+        let mf_leg = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), n)]).unwrap();
         if single {
             check!(engine, checked_leg, f32, |x| x as f32);
             check!(engine, checked_leg, Complex32, |x| Complex32::new(

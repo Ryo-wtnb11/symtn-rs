@@ -1,15 +1,16 @@
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::OperationError;
 use symtn::typed::{Complex64, GradedSpace, PhysicalDense, PhysicalDenseError, Runtime, TensorMap};
 
 fn su2_multitree<D: symtn::typed::TensorScalar>(
     runtime: &Runtime,
-    value: impl Fn(&[SU2Irrep]) -> D,
-) -> TensorMap<SU2FusionRule, D> {
+    value: impl Fn(&[symtn_core::LieIrrep]) -> D,
+) -> TensorMap<Su2Rule, D> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let half = SU2Irrep::from_twice_spin(1);
-    let leg = GradedSpace::try_new(std::sync::Arc::new(SU2FusionRule), [(half, 1)]).unwrap();
+    let half = su2_irrep(1);
+    let leg = GradedSpace::try_new(std::sync::Arc::new(su2_rule()), [(half.clone(), 1)]).unwrap();
     TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg, &leg], [&leg], |trees, _| {
         value(trees.codomain_innerlines())
     })
@@ -35,7 +36,7 @@ fn physical_dense_roundtrips_real_and_complex_su2_multitree_data() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let real = su2_multitree(&runtime, |inner| {
-        if inner[0].twice_spin() == 0 {
+        if usize::try_from(inner[0].dynkin().next().unwrap()).unwrap() == 0 {
             1.25
         } else {
             -0.75
@@ -54,7 +55,7 @@ fn physical_dense_roundtrips_real_and_complex_su2_multitree_data() {
     );
 
     let complex = su2_multitree(&runtime, |inner| {
-        if inner[0].twice_spin() == 0 {
+        if usize::try_from(inner[0].dynkin().next().unwrap()).unwrap() == 0 {
             Complex64::new(1.25, -0.5)
         } else {
             Complex64::new(-0.75, 0.25)
@@ -106,7 +107,9 @@ fn projection_validates_shape_and_length_without_changing_target() {
 fn physical_entries_match_tensorkit_su2_values() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let real = su2_multitree(&runtime, |inner| f64::from(inner[0].twice_spin() == 2));
+    let real = su2_multitree(&runtime, |inner| {
+        f64::from(usize::try_from(inner[0].dynkin().next().unwrap()).unwrap() == 2)
+    });
     let inv_sqrt_6 = 1.0 / 6.0_f64.sqrt();
     let expected_real = [
         0.0,
@@ -133,7 +136,7 @@ fn physical_entries_match_tensorkit_su2_values() {
 
     let scale = Complex64::new(1.0, 2.0);
     let complex = su2_multitree(&runtime, |inner| {
-        if inner[0].twice_spin() == 0 {
+        if usize::try_from(inner[0].dynkin().next().unwrap()).unwrap() == 0 {
             scale
         } else {
             Complex64::new(0.0, 0.0)
@@ -171,9 +174,8 @@ fn permute_each_axis<D: Copy>(physical: &PhysicalDense<D>, target_to_source: &[u
 fn su2_spin_one_singlet_projects_to_explicit_doubled_u1_charges() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let spin_one = SU2Irrep::from_twice_spin(2);
-    let su2_leg =
-        GradedSpace::try_new(std::sync::Arc::new(SU2FusionRule), [(spin_one, 1)]).unwrap();
+    let spin_one = su2_irrep(2);
+    let su2_leg = GradedSpace::try_new(std::sync::Arc::new(su2_rule()), [(spin_one, 1)]).unwrap();
     let singlet: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg, &su2_leg], [], |_, _| 1.0)
             .unwrap();
@@ -296,7 +298,7 @@ fn factorial(n: i32) -> f64 {
 
 /// Condon-Shortley Clebsch-Gordan coefficient `<j1 m1; j2 m2 | j m>` from
 /// Racah's closed form, with doubled spins and projections. This is the
-/// TensorKitSectors `SU2Irrep` `fusiontensor` gauge (WignerSymbols.jl
+/// TensorKitSectors SU(2) `fusiontensor` gauge (WignerSymbols.jl
 /// `clebschgordan`), computed independently of the symtn/fusion-symbols code
 /// under test.
 fn clebsch_gordan(j1: i32, m1: i32, j2: i32, m2: i32, j: i32, m: i32) -> f64 {
@@ -487,10 +489,10 @@ fn u1_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     assert_complex_close(&actual, &u1_expected(true));
 }
 
-fn su2_space(degeneracies: [usize; 3]) -> GradedSpace<SU2FusionRule> {
+fn su2_space(degeneracies: [usize; 3]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        std::sync::Arc::new(SU2FusionRule),
-        [0, 1, 2].map(|spin| (SU2Irrep::from_twice_spin(spin), degeneracies[spin])),
+        std::sync::Arc::new(su2_rule()),
+        [0, 1, 2].map(|spin| (su2_irrep(spin), degeneracies[spin])),
     )
     .unwrap()
 }
@@ -533,8 +535,9 @@ fn su2_dense_matches_clebsch_gordan_expansion_without_dual_legs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let w = su2_space([1, 2, 1]);
-    let label = |j: &SU2Irrep| j.twice_spin() as f64;
-    let real = TensorMap::<SU2FusionRule, f64>::from_subblock_fn(
+    let label =
+        |j: &symtn_core::LieIrrep| usize::try_from(j.dynkin().next().unwrap()).unwrap() as f64;
+    let real = TensorMap::<Su2Rule, f64>::from_subblock_fn(
         engine,
         &runtime,
         [&w, &w, &w],
@@ -545,7 +548,7 @@ fn su2_dense_matches_clebsch_gordan_expansion_without_dual_legs() {
     let (shape, actual) = checked_physical_dense!(engine, real, |x| Complex64::new(x, 0.0));
     assert_eq!(shape, [8, 8, 8, 8]);
     assert_complex_close(&actual, &su2_non_dual_expected(false));
-    let complex = TensorMap::<SU2FusionRule, Complex64>::from_subblock_fn(
+    let complex = TensorMap::<Su2Rule, Complex64>::from_subblock_fn(
         engine,
         &runtime,
         [&w, &w, &w],
@@ -587,8 +590,9 @@ fn su2_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let runtime = Runtime::builder().build().unwrap();
     let w = su2_space([2, 1, 1]);
     let dual = w.try_dual().unwrap();
-    let label = |j: &SU2Irrep| j.twice_spin() as f64;
-    let real = TensorMap::<SU2FusionRule, f64>::from_subblock_fn(
+    let label =
+        |j: &symtn_core::LieIrrep| usize::try_from(j.dynkin().next().unwrap()).unwrap() as f64;
+    let real = TensorMap::<Su2Rule, f64>::from_subblock_fn(
         engine,
         &runtime,
         [&w, &dual, &w],
@@ -599,7 +603,7 @@ fn su2_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let (shape, actual) = checked_physical_dense!(engine, real, |x| Complex64::new(x, 0.0));
     assert_eq!(shape, [7, 7, 7, 7]);
     assert_su2_dual_samples(&actual, false);
-    let complex = TensorMap::<SU2FusionRule, Complex64>::from_subblock_fn(
+    let complex = TensorMap::<Su2Rule, Complex64>::from_subblock_fn(
         engine,
         &runtime,
         [&w, &dual, &w],
@@ -610,97 +614,4 @@ fn su2_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let (shape, actual) = checked_physical_dense!(engine, complex, |x| x);
     assert_eq!(shape, [7, 7, 7, 7]);
     assert_su2_dual_samples(&actual, true);
-}
-
-#[test]
-fn multiplicity_free_lie_su2_dense_conversions_match_the_compact_rule_bitwise() {
-    use symtn::sector::{LieGroupFusionRule, LieIrrep, MultiplicityFreeAdmissionMode};
-    type MfLie = LieGroupFusionRule<MultiplicityFreeAdmissionMode>;
-
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let lie =
-        std::sync::Arc::new(MfLie::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
-    let lie_w = GradedSpace::try_new(
-        std::sync::Arc::clone(&lie),
-        [(0, 2), (1, 1), (2, 1)].map(|(dj, n)| (lie.category().irrep(&[dj]).unwrap(), n)),
-    )
-    .unwrap();
-    let lie_dual = lie_w.try_dual().unwrap();
-    let w = su2_space([2, 1, 1]);
-    let dual = w.try_dual().unwrap();
-    let compact = TensorMap::<SU2FusionRule, Complex64>::from_subblock_fn(
-        engine,
-        &runtime,
-        [&w, &dual, &w],
-        [&dual],
-        |trees, index| {
-            fixture_value(
-                trees,
-                index,
-                |j: &SU2Irrep| j.twice_spin() as f64,
-                Complex64::new,
-            )
-        },
-    )
-    .unwrap();
-    let mf = TensorMap::<MfLie, Complex64>::from_subblock_fn(
-        engine,
-        &runtime,
-        [&lie_w, &lie_dual, &lie_w],
-        [&lie_dual],
-        |trees, index| {
-            fixture_value(
-                trees,
-                index,
-                |j: &LieIrrep| j.dynkin().next().unwrap() as f64,
-                Complex64::new,
-            )
-        },
-    )
-    .unwrap();
-    let bits = |data: &[Complex64]| {
-        data.iter()
-            .map(|x| [x.re.to_bits(), x.im.to_bits()])
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        bits(mf.dense_data().unwrap()),
-        bits(compact.dense_data().unwrap())
-    );
-
-    // Unpermuted, then every permutation and repartition of both tensors.
-    for permutation in std::iter::once(None).chain(PERMUTATIONS.map(Some)) {
-        let (compact, mf) = match permutation {
-            None => (compact.clone(), mf.clone()),
-            Some((codomain, domain)) => (
-                compact.permute(engine, codomain, domain).unwrap(),
-                mf.permute(engine, codomain, domain).unwrap(),
-            ),
-        };
-        let physical = compact.to_physical_dense(engine).unwrap();
-        let mf_physical = mf.to_physical_dense(engine).unwrap();
-        assert_eq!(mf_physical.shape, physical.shape, "{permutation:?}");
-        assert_eq!(
-            bits(&mf_physical.data),
-            bits(&physical.data),
-            "{permutation:?}"
-        );
-        assert_eq!(
-            bits(
-                mf.project_physical_dense(engine, &physical)
-                    .unwrap()
-                    .dense_data()
-                    .unwrap()
-            ),
-            bits(
-                compact
-                    .project_physical_dense(engine, &physical)
-                    .unwrap()
-                    .dense_data()
-                    .unwrap()
-            ),
-            "{permutation:?}"
-        );
-    }
 }

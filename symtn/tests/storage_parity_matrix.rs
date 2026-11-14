@@ -48,7 +48,7 @@ use symtn::typed::Engine;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, SU2Irrep, U1Irrep};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1Irrep};
 use symtn::typed::{
     ContractSpec, Direction, Eigh, Error, GradedSpace, HermitianTol, OperationError, Qr, Runtime,
     SectorSpectrum, Svd, TensorMap,
@@ -375,8 +375,8 @@ fn u1_coupled(c: &U1Irrep) -> usize {
     c.charge().unsigned_abs() as usize
 }
 
-fn su2_coupled(c: &SU2Irrep) -> usize {
-    c.twice_spin()
+fn su2_coupled(c: &symtn_core::LieIrrep) -> usize {
+    usize::try_from(c.dynkin().next().unwrap()).unwrap()
 }
 
 #[test]
@@ -991,10 +991,10 @@ macro_rules! materialize_rows {
             .into_iter()
             .enumerate()
             .map(|(s, sector)| SectorSpectrum {
-                sector,
                 values: (0..leg.degeneracy(&sector).unwrap())
                     .map(|i| conv(entry(0.3, s, i, i)))
                     .collect(),
+                sector,
             })
             .collect();
         let compact = TensorMap::<_, $D>::diagonal($engine, runtime, &leg, spectra).unwrap();
@@ -1027,8 +1027,8 @@ fn one<S>(_: &symtn::typed::BlockFusionTrees<S>) -> f64 {
 fn materialize_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
+    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
+        (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
     materialize_rows!(engine, &runtime, u1_leg_2_3_1(), one, f64, real);
@@ -1180,10 +1180,10 @@ macro_rules! transform_rows {
             .into_iter()
             .enumerate()
             .map(|(s, sector)| SectorSpectrum {
-                sector,
                 values: (0..leg.degeneracy(&sector).unwrap())
                     .map(|i| conv(entry(0.3, s, i, i)))
                     .collect(),
+                sector,
             })
             .collect();
         let compact = TensorMap::<_, $D>::diagonal($engine, runtime, &leg, spectra).unwrap();
@@ -1232,8 +1232,8 @@ fn no_cuda_transform<T, D>(_: &T, _: &T, _: D, _: D) {}
 fn transform_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
+    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
+        (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
     transform_rows!(
@@ -1447,8 +1447,8 @@ fn transform_cuda_rows_match_host() {
         ));
     }
     let runtime = Runtime::builder().build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
+    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
+        (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
     transform_rows!(
@@ -1757,10 +1757,10 @@ macro_rules! contract_rows {
             .into_iter()
             .enumerate()
             .map(|(s, sector)| SectorSpectrum {
-                sector,
                 values: (0..leg.degeneracy(&sector).unwrap())
                     .map(|i| conv(entry(0.3, s, i, i)))
                     .collect(),
+                sector,
             })
             .collect();
         let compact = TensorMap::<_, $D>::diagonal($engine, runtime, &leg, spectra).unwrap();
@@ -1844,8 +1844,8 @@ fn no_cuda_contract<T, D>(_: &T, _: &T, _: D, _: D) {}
 fn contract_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
+    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
+        (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
     contract_rows!(
@@ -2016,8 +2016,8 @@ fn contract_cuda_rows_match_host() {
         ));
     }
     let runtime = Runtime::builder().build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
+    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
+        (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
     contract_rows!(
@@ -2155,10 +2155,10 @@ macro_rules! trace_rows {
             .into_iter()
             .enumerate()
             .map(|(s, sector)| SectorSpectrum {
-                sector,
                 values: (0..leg.degeneracy(&sector).unwrap())
                     .map(|i| conv(entry(0.3, s, i, i)))
                     .collect(),
+                sector,
             })
             .collect();
         let compact = TensorMap::<_, $D>::diagonal($engine, runtime, &leg, spectra).unwrap();
@@ -2223,8 +2223,8 @@ fn odd_twist(s: &FermionParityIrrep) -> f64 {
 fn trace_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
+    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
+        (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
     trace_rows!(
@@ -2252,7 +2252,7 @@ fn trace_host_rows_match_the_hand_oracle() {
         &runtime,
         su2_leg_2_3_1(),
         su2_dim,
-        |_: &SU2Irrep| 1.0,
+        |_: &symtn_core::LieIrrep| 1.0,
         f64,
         real,
         no_cuda_contract
@@ -2262,7 +2262,7 @@ fn trace_host_rows_match_the_hand_oracle() {
         &runtime,
         su2_leg_2_3_1(),
         su2_dim,
-        |_: &SU2Irrep| 1.0,
+        |_: &symtn_core::LieIrrep| 1.0,
         Complex64,
         complex,
         no_cuda_contract
@@ -2390,8 +2390,8 @@ fn trace_cuda_rows_match_host() {
         );
     }
     let runtime = Runtime::builder().build().unwrap();
-    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>| {
-        (trees.coupled().twice_spin() + 1) as f64
+    let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
+        (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
     trace_rows!(
@@ -2419,7 +2419,7 @@ fn trace_cuda_rows_match_host() {
         &runtime,
         su2_leg_2_3_1(),
         su2_dim,
-        |_: &SU2Irrep| 1.0,
+        |_: &symtn_core::LieIrrep| 1.0,
         f64,
         real,
         |a, b, alpha, beta| device_rows(engine, cuda, a, b, alpha, beta)
@@ -2429,7 +2429,7 @@ fn trace_cuda_rows_match_host() {
         &runtime,
         su2_leg_2_3_1(),
         su2_dim,
-        |_: &SU2Irrep| 1.0,
+        |_: &symtn_core::LieIrrep| 1.0,
         Complex64,
         complex,
         |a, b, alpha, beta| device_rows(engine, cuda, a, b, alpha, beta)
@@ -2467,7 +2467,7 @@ mod admission_modes {
     //! (`linalg.jl:319`) and `VectorInterface.inner` (`src/tensors/vectorinterface.jl:114`),
     //! whose per-block `Diagonal` methods read only the stored diagonal. The style
     //! of the provider never enters. So SU(2) admitted multiplicity-free
-    //! (`SU2FusionRule`) and checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) must give
+    //! (`MF Lie SU(2)`) and checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) must give
     //! the same answers, and both must match the hand oracle below:
     //!
     //! ```text
@@ -2484,7 +2484,7 @@ mod admission_modes {
     use std::sync::Arc;
     use symtn::typed::Engine;
 
-    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
     use crate::fixtures;
@@ -2727,12 +2727,12 @@ mod admission_modes {
         }
     }
 
-    fn su2(twice: usize) -> SU2Irrep {
-        SU2Irrep::from_twice_spin(twice)
+    fn su2(twice: usize) -> symtn_core::LieIrrep {
+        crate::su2::su2_irrep(twice)
     }
 
-    fn su2_twice(label: &SU2Irrep) -> usize {
-        label.twice_spin()
+    fn su2_twice(label: &symtn_core::LieIrrep) -> usize {
+        usize::try_from(label.dynkin().next().unwrap()).unwrap()
     }
 
     fn sun2(twice: usize) -> LieIrrep {
@@ -2749,7 +2749,7 @@ mod admission_modes {
         // What: one reduction body serves both modes; a checked Generic compact
         // operand reduces and `norm(p != 2)` exists on checked Generic.
         let real = |z: Complex64| z.re;
-        let mf = reductions!(engine, SU2FusionRule, su2, su2_twice, f64, real);
+        let mf = reductions!(engine, crate::su2::su2_rule(), su2, su2_twice, f64, real);
         let checked = reductions!(
             engine,
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -2768,7 +2768,14 @@ mod admission_modes {
     fn compact_dense_and_lazy_reductions_agree_across_modes_c64() {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let complex = |z: Complex64| z;
-        let mf = reductions!(engine, SU2FusionRule, su2, su2_twice, Complex64, complex);
+        let mf = reductions!(
+            engine,
+            crate::su2::su2_rule(),
+            su2,
+            su2_twice,
+            Complex64,
+            complex
+        );
         let checked = reductions!(
             engine,
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -2848,7 +2855,7 @@ mod admission_modes {
         let mf = check!(
             engine,
             "mf su2",
-            SU2FusionRule,
+            crate::su2::su2_rule(),
             SECTORS.map(|(twice, k)| (su2(twice), k))
         );
         let checked = check!(

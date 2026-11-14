@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 
 /// Solve only; every solve fails with `failure` when one is given.
 #[cfg(feature = "cgc-gen")]
@@ -566,8 +568,8 @@ fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
     assert_exp_uses_a_cold_logical_copy(engine, &u1);
     assert_exp_uses_a_cold_logical_copy(engine, &genuinely_complex(&u1));
 
-    let provider = Arc::new(SU2FusionRule);
-    let half = GradedSpace::try_new(provider, [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let provider = Arc::new(su2_rule());
+    let half = GradedSpace::try_new(provider, [(su2_irrep(1), 1)]).unwrap();
     let su2 = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -751,8 +753,8 @@ fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
     assert_ne!(unequal.codomain_rank(), unequal.domain_rank());
     assert_inverse_redirect(engine, &unequal);
 
-    let provider = Arc::new(SU2FusionRule);
-    let half = GradedSpace::try_new(provider, [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let provider = Arc::new(su2_rule());
+    let half = GradedSpace::try_new(provider, [(su2_irrep(1), 1)]).unwrap();
     let su2 = TensorMap::from_subblock_fn(
         engine,
         &runtime,

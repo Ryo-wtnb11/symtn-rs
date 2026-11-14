@@ -1,4 +1,5 @@
 use crate::errors::Rejection as _;
+use crate::su2::{su2_irrep, su2_rule};
 use std::fmt::Debug;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
@@ -6,8 +7,7 @@ use symtn::typed::Engine;
 
 use symtn::expert::TensorStorage;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -514,14 +514,8 @@ fn provider_and_dtype_matrix_matches_direct_contract() {
     pair_case::<_, f64>(engine, &u1);
     pair_case::<_, Complex64>(engine, &u1);
 
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(1), 1)]).unwrap();
     pair_case::<_, f64>(engine, &su2);
     pair_case::<_, Complex64>(engine, &su2);
 

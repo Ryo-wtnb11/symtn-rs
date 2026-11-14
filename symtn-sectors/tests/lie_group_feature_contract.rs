@@ -2,6 +2,7 @@
 //! fusion-symbols can execute.
 
 use fusion_symbols::lie::GroupId;
+use symtn_sectors::TypedSectorAdmission;
 use symtn_sectors::{CheckedGenericAdmissionMode, CheckedGenericFusion, LieGroupFusionRule};
 
 /// A rule that serves `dynkin`/`charges` round-trips the label and finds the
@@ -9,7 +10,12 @@ use symtn_sectors::{CheckedGenericAdmissionMode, CheckedGenericFusion, LieGroupF
 fn assert_serves(rule: &LieGroupFusionRule, dynkin: &[i64], charges: &[i64]) {
     let a = rule.encode_irrep_with_charges(dynkin, charges).unwrap();
     assert_eq!(
-        rule.decode_irrep(a).unwrap(),
+        rule.try_decode_label(a)
+            .map(|label| (
+                label.dynkin().collect::<Vec<_>>(),
+                label.charges().collect::<Vec<_>>()
+            ))
+            .unwrap(),
         (dynkin.to_vec(), charges.to_vec())
     );
     let channels = rule

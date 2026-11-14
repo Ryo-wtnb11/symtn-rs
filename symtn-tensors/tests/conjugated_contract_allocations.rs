@@ -1,13 +1,14 @@
 //! A warm contraction with a lazy-adjoint source reuses its space's adjoint
 //! structure instead of rebuilding it on every call.
 
+use crate::su2::su2_rule;
 use std::sync::Arc;
 use symtn_dense::Engine;
 
 use symtn_core::{
     CheckedFusionAlgebra, FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace,
-    MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSectorCodec, SU2FusionRule, SU2Irrep,
-    SectorId, SectorLeg, TensorKitProductCodec, U1FusionRule, U1Irrep,
+    MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSectorCodec, SectorId, SectorLeg,
+    TensorKitProductCodec, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, ContractDestinationInit, FusionOperand, OutputAxisOrder,
@@ -94,7 +95,7 @@ fn u1(deg: usize) -> Vec<(SectorId, usize)> {
 
 fn su2(deg: usize) -> Vec<(SectorId, usize)> {
     (0..3)
-        .map(|twice| (SU2Irrep::from_twice_spin(twice).sector_id(), deg))
+        .map(|twice| (symtn_core::SectorId::new(twice), deg))
         .collect()
 }
 
@@ -135,7 +136,7 @@ fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
             ),
             (
                 "SU2",
-                warm_conjugated_contract(engine, SU2FusionRule, &su2(deg)),
+                warm_conjugated_contract(engine, su2_rule(), &su2(deg)),
             ),
             (
                 "fZ2xU1",

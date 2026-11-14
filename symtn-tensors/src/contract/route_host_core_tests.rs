@@ -7,6 +7,8 @@
 //! kernels choose them.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 /// A U(1) fixture of each Core / CopyC shape: unswapped Core with an
 /// inactive block, swapped Core, and CopyC in both orientations.
@@ -284,7 +286,7 @@ fn eager_host_routes_accumulate_alpha_times_product_plus_beta_times_destination(
             )
         },
     );
-    let su2 = Arc::new(SU2FusionRule);
+    let su2 = Arc::new(su2_rule());
     for (name, case, route) in [
         (
             "SU2 core",
@@ -588,7 +590,7 @@ fn member_core_and_copy_c_replays_match_the_dense_oracle() {
     for (name, case, _) in core_fixtures() {
         check_member_oracle(name, &case);
     }
-    let su2 = Arc::new(SU2FusionRule);
+    let su2 = Arc::new(su2_rule());
     let su2_copy_c = square_case(&su2, su2_leg, [3, 2], [1, 0], [1, 0, 3, 2]);
     assert_eq!(
         owned_routes(&su2_copy_c),

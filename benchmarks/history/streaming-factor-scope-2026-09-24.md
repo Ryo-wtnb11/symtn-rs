@@ -40,7 +40,7 @@ to sessions (negative control, run by hand).
 
 ## Bitwise results and peak working set
 
-`streaming-factor-scope-2026-09-24-digest.rs` runs 58 site/fixture rows
+[The original digest program](https://github.com/Ryo-wtnb11/symtn-rs/blob/3282c3a8f6451553f4ee0bf171f3293c0a05a15b/benchmarks/history/streaming-factor-scope-2026-09-24-digest.rs) runs 58 site/fixture rows
 (matrixalgebra-level U(1), Generic toy and checked-Generic toy fixtures on
 direct and matricization layouts, and facade U(1), SU(2), fZ2×U(1) `lq`,
 `left_null`, `right_null`, `eigh` rows; f64 and c64) and prints a digest of
@@ -177,3 +177,9 @@ even at one thread, where Tenferro's managed engine keeps a worker pool), so
 thread-local state read inside it belongs to that worker; the factorization
 layer's test probes are therefore moved into and out of the body by
 `in_linalg_scope`.
+
+Retrieve the benchmark source for the recorded revision with:
+
+```sh
+git show 3282c3a8f6451553f4ee0bf171f3293c0a05a15b:benchmarks/history/streaming-factor-scope-2026-09-24-digest.rs
+```

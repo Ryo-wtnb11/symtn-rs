@@ -11,6 +11,8 @@
 
 use super::*;
 use crate::contract::fusion_block::FusionBlockContractWorkspace;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use symtn_operations::ContractDestinationInit;
 
 /// Exactly representable payload in `{-2, -1, ±0, 1, 2}`.
@@ -249,7 +251,7 @@ fn a_warm_one_member_replay_converts_no_coefficient_pack() {
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
@@ -365,7 +367,7 @@ fn a_warm_eager_contraction_converts_no_coefficient_pack() {
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );

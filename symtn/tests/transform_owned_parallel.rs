@@ -3,11 +3,12 @@
 //! the serial owned result, with no allocator-zeroed payload (no
 //! `vec![zero; P]` fallback).
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::hint::black_box;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{product_sector, U1FusionRule, U1Irrep};
 use symtn::typed::{CpuEngine, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -73,7 +74,7 @@ fn parallel_engine() -> CpuEngine {
     symtn_operations::host_pool::eager_test_engine(THREADS)
 }
 
-type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;
+type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, Su2Rule>;
 
 /// U(1) x SU(2): every non-trivial permutation recouples (Multi scatter
 /// groups) and the degeneracies put the payload past the backend's parallel
@@ -82,22 +83,10 @@ fn u1_su2_space(provider: &Arc<U1Su2>) -> GradedSpace<U1Su2> {
     GradedSpace::try_new(
         Arc::clone(provider),
         [
-            (
-                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(0)),
-                18,
-            ),
-            (
-                product_sector(U1Irrep::new(1).unwrap(), SU2Irrep::from_twice_spin(1)),
-                14,
-            ),
-            (
-                product_sector(U1Irrep::new(-1).unwrap(), SU2Irrep::from_twice_spin(1)),
-                14,
-            ),
-            (
-                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(2)),
-                12,
-            ),
+            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(0)), 18),
+            (product_sector(U1Irrep::new(1).unwrap(), su2_irrep(1)), 14),
+            (product_sector(U1Irrep::new(-1).unwrap(), su2_irrep(1)), 14),
+            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(2)), 12),
         ],
     )
     .unwrap()
@@ -161,7 +150,7 @@ fn u1_su2_owned_transforms_are_bit_identical_across_thread_counts() {
     let (serial, parallel) = (&runtime, &runtime);
     let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
     );
     let space = u1_su2_space(&provider);
     let real_serial: TensorMap<_, f64> =
@@ -234,7 +223,7 @@ fn parallel_owned_permute_writes_its_output_without_a_zeroed_payload() {
     let (serial, parallel) = (&runtime, &runtime);
     let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
     );
     let space = u1_su2_space(&provider);
     let source_serial: TensorMap<_, f64> =

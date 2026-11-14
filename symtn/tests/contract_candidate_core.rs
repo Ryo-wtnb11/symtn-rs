@@ -18,6 +18,7 @@
 
 use crate::contract_cases;
 use crate::numerics;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use symtn::typed::Engine;
 
 use std::hint::black_box;
@@ -398,13 +399,10 @@ fn u1_second() -> GradedSpace<symtn::sector::U1FusionRule> {
     u1(&[(0, 2), (1, 1), (2, 1)])
 }
 
-fn su2_second() -> GradedSpace<symtn::sector::SU2FusionRule> {
+fn su2_second() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        std::sync::Arc::new(symtn::sector::SU2FusionRule),
-        [
-            (symtn::sector::SU2Irrep::from_twice_spin(1), 1),
-            (symtn::sector::SU2Irrep::from_twice_spin(2), 2),
-        ],
+        std::sync::Arc::new(su2_rule()),
+        [(su2_irrep(1), 1), (su2_irrep(2), 2)],
     )
     .unwrap()
 }

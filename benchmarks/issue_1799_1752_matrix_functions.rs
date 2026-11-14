@@ -2,13 +2,17 @@
 //! --release. Input setup is outside timing; publication and drop are inside
 //! every call. Multiplicity-free dense `pinv`, Hermitian and general `exp`,
 //! left/right polar and their lazy-adjoint routes on `[V, V] <- [V, V]`.
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+use symtn_core as sector_types;
+use su2::{su2_rule, su2_irrep};
 use num_complex::Complex64;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Instant;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, LinalgBackend, Runtime, TensorMap};
 
 struct Allocator;
@@ -122,7 +126,7 @@ fn main() {
     for (count, k) in [(3, 2), (3, 6), (7, 2)] {
         cases!(&runtime, "U1", U1FusionRule, |c: i32| U1Irrep::new(c - 1).unwrap(), count, k, f64, "f64", real);
         cases!(&runtime, "U1", U1FusionRule, |c: i32| U1Irrep::new(c - 1).unwrap(), count, k, Complex64, "c64", complex);
-        cases!(&runtime, "SU2", SU2FusionRule, |c: i32| SU2Irrep::from_twice_spin(c as usize), count, k, f64, "f64", real);
-        cases!(&runtime, "SU2", SU2FusionRule, |c: i32| SU2Irrep::from_twice_spin(c as usize), count, k, Complex64, "c64", complex);
+        cases!(&runtime, "SU2", su2_rule(), |c: i32| su2_irrep(c as usize), count, k, f64, "f64", real);
+        cases!(&runtime, "SU2", su2_rule(), |c: i32| su2_irrep(c as usize), count, k, Complex64, "c64", complex);
     }
 }

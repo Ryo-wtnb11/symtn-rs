@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 fn scale_vt_rows_by_singular_values(vt: &mut TestTensor<f64>, singular_values: &[SectorSpectrum]) {
     let structure = std::sync::Arc::clone(vt.structure());
@@ -112,12 +114,10 @@ fn tsvd_fusion_reconstructs_z2_tensor_coupled_layout() {
 
 #[test]
 fn tsvd_fusion_reconstructs_su2_tensor() {
+    let su2_provider_rule = su2_rule();
     run_tsvd_reconstruction_case(
-        &SU2FusionRule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        &su2_provider_rule,
+        &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
 }
 
@@ -329,10 +329,7 @@ fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
         (0usize, vec![SectorId::new(0), SectorId::new(1)]),
         (
             1usize,
-            vec![
-                SU2Irrep::from_twice_spin(0).sector_id(),
-                SU2Irrep::from_twice_spin(1).sector_id(),
-            ],
+            vec![symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
         ),
     ] {
         if rule_case == 0 {
@@ -348,13 +345,13 @@ fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
             let reconstructed = contract_pair(&rule, &tensor, &q, &r);
             assert_svd_blocks_match(&tensor, &reconstructed);
         } else {
-            let rule = SU2FusionRule;
+            let rule = su2_rule();
             let tensor = tsvd_test_tensor(&rule, &sectors);
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let Qr { q, r } = qr_compact(
                 engine,
                 &mut dense_executor,
-                &bound_tensor_ref!(Arc::new(rule), &tensor),
+                &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
             )
             .unwrap();
             let reconstructed = contract_pair(&rule, &tensor, &q, &r);
@@ -380,19 +377,16 @@ fn rightorth_fusion_reconstructs_z2_and_su2_tensors() {
         assert_svd_blocks_match(&tensor, &reconstructed);
     }
     {
-        let rule = SU2FusionRule;
+        let rule = su2_rule();
         let tensor = tsvd_test_tensor(
             &rule,
-            &[
-                SU2Irrep::from_twice_spin(0).sector_id(),
-                SU2Irrep::from_twice_spin(1).sector_id(),
-            ],
+            &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
         );
         let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
         let Lq { l, q } = lq_compact(
             engine,
             &mut dense_executor,
-            &bound_tensor_ref!(Arc::new(rule), &tensor),
+            &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
         )
         .unwrap();
         let reconstructed = contract_pair(&rule, &tensor, &l, &q);
@@ -403,19 +397,16 @@ fn rightorth_fusion_reconstructs_z2_and_su2_tensors() {
 #[test]
 fn tsvd_singular_tensor_composes_u_s_vt() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let tensor = tsvd_test_tensor(
         &rule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let svd = svd_compact(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
     let s_tensor = svd.s.clone();
@@ -624,6 +615,7 @@ fn assert_value_region_paths_match<R, D>(
 
 #[test]
 fn value_region_paths_match_packed_oracles_across_supported_rules() {
+    let su2_provider_rule = su2_rule();
     // What: canonical region borrowing and noncanonical (adjoint-view)
     // packing agree for Abelian, non-Abelian, fermionic, and product rules.
     let u1 = [
@@ -637,14 +629,11 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
         &hermitian_test_tensor(&U1FusionRule, &u1),
     );
 
-    let su2 = [
-        SU2Irrep::from_twice_spin(0).sector_id(),
-        SU2Irrep::from_twice_spin(1).sector_id(),
-    ];
+    let su2 = [symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)];
     assert_value_region_paths_match(
-        Arc::new(SU2FusionRule),
-        &tsvd_test_tensor(&SU2FusionRule, &su2),
-        &hermitian_test_tensor(&SU2FusionRule, &su2),
+        Arc::new(su2_provider_rule.clone()),
+        &tsvd_test_tensor(&su2_provider_rule, &su2),
+        &hermitian_test_tensor(&su2_provider_rule, &su2),
     );
 
     let fz2 = [SectorId::new(0), SectorId::new(1)];
@@ -840,19 +829,16 @@ fn every_factorization_and_matrix_function_retains_each_callers_exact_provider_a
 #[test]
 fn adjoint_composition_gives_the_identity_on_the_bond() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let tensor = tsvd_test_tensor(
         &rule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let Qr { q, .. } = qr_compact(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
     let qh = adjoint(&rule, &q).unwrap();

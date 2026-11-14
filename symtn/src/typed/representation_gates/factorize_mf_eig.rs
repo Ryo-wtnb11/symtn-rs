@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 
 #[test]
 fn compact_diagonal_eigh_full_skips_dense_input_and_solver() {
@@ -304,29 +306,33 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
             },
         ]
     );
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let spin_half = SU2Irrep::from_twice_spin(1);
-    let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let spin_half = su2_irrep(1);
+    let su2 = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 2), (spin_half.clone(), 1)],
+    )
+    .unwrap();
     check!(
         engine,
         su2,
         [
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![-3.0]
             },
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![2.0, -2.0]
             },
         ],
         vec![
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![-2.0, 2.0]
             },
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![-3.0]
             },
         ]
@@ -801,29 +807,33 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
             },
         ]
     );
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let spin_half = SU2Irrep::from_twice_spin(1);
-    let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let spin_half = su2_irrep(1);
+    let su2 = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 2), (spin_half.clone(), 1)],
+    )
+    .unwrap();
     check!(
         engine,
         su2,
         [
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![Complex64::new(0.0, -3.0)]
             },
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 1.0)]
             },
         ],
         vec![
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 1.0)]
             },
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![Complex64::new(0.0, -3.0)]
             },
         ]
@@ -1263,19 +1273,23 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
         ],
         1e-12
     );
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let spin_half = SU2Irrep::from_twice_spin(1);
-    let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let spin_half = su2_irrep(1);
+    let su2 = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 2), (spin_half.clone(), 1)],
+    )
+    .unwrap();
     check!(
         engine,
         su2,
         [
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![Complex64::new(0.0, -3.0)]
             },
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![Complex64::new(2.0, 1.0), Complex64::new(-2.0, -1.0)]
             },
         ],
@@ -1538,19 +1552,23 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
         vec![vec![-2.0, 2.0], vec![-4.0, 0.0, 1.0]],
         1e-12
     );
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let spin_half = SU2Irrep::from_twice_spin(1);
-    let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let spin_half = su2_irrep(1);
+    let su2 = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 2), (spin_half.clone(), 1)],
+    )
+    .unwrap();
     check!(
         engine,
         su2,
         [
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![Complex64::new(-3.0, 0.0)]
             },
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![Complex64::new(2.0, 0.0), Complex64::new(-2.0, 0.0)]
             },
         ],

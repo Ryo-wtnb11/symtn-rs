@@ -7,7 +7,7 @@
 //!   `u1_codec_rejects_ids_outside_the_zigzag_domain`.
 //! - Z2/fZ2 id 2 rejection: `tests/sector_labels.rs`
 //!   `parity_codecs_round_trip_and_reject_non_parity_ids`.
-//! - SU(2) id 255 rejection: `tests/sector_labels.rs`
+//! - SU(2) ids beyond the provider domain: `tests/sector_labels.rs`
 //!   `su2_codec_round_trips_up_to_the_supported_doubled_spin`.
 //! - CU(1) id `u32::MAX + 1` rejection: `tests/sector_labels.rs`
 //!   `cu1_codec_and_checked_overflow_preserve_the_tensor_kit_boundary`.
@@ -20,6 +20,8 @@
 //!   `tests/builtin_rules.rs` `product_sector_codec_uses_tensorkit_diagonal_component_order`.
 //! - Custom product codec rejection: `tests/sector_labels.rs`
 //!   `product_codec_reports_the_codec_rejection_it_hit`.
+
+use crate::su2::{su2_irrep, su2_rule};
 
 use symtn_sectors::*;
 
@@ -107,14 +109,12 @@ fn cu1_ids_place_the_two_zero_charge_sectors_first() {
 
 #[test]
 fn su2_ids_are_doubled_spins() {
-    for twice_spin in [0, 1, 2, 3, SU2_MAX_DOUBLED_SPIN] {
+    for twice_spin in [0, 1, 2, 3, u32::MAX as usize] {
         assert_eq!(
-            SU2FusionRule.encode_sector(&SU2Irrep::from_twice_spin(twice_spin)),
+            su2_rule().encode_sector(&su2_irrep(twice_spin)),
             Ok(s(twice_spin))
         );
     }
-    assert_eq!(SU2_MAX_DOUBLED_SPIN, 254);
-    assert_eq!(SU2Irrep::try_from_twice_spin(255), None);
 }
 
 #[cfg(feature = "cgc-gen")]
@@ -190,12 +190,12 @@ fn cantor_product_ids_nest_through_both_factors() {
             U1FusionRule,
         )
         .unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let label = product_sector(
         product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
-        SU2Irrep::from_twice_spin(1),
+        su2_irrep(1),
     );
     // inner (1, 1) -> 4; outer (4, 1) -> 5 * 6 / 2 + 4.
     assert_eq!(nested.encode_sector(&label), Ok(s(19)));

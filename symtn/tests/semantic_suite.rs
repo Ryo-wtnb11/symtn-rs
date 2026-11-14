@@ -8,14 +8,15 @@
 //! non-symmetric (anyonic) braiding, and repartition/bending — extend this
 //! suite when those land.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 use symtn::typed::Direction;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep, ZNFusionRule,
 };
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, Qr, Svd, TensorMap, Truncation};
@@ -25,7 +26,7 @@ use crate::fixtures;
 use fixtures::{codomain_axes, domain_axes};
 
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
 use crate::numerics;
 use symtn::sector::ZNIrrep;
@@ -91,12 +92,8 @@ macro_rules! for_each_space {
         $case!(
             $engine,
             "SU2",
-            Arc::new(SU2FusionRule),
-            [
-                (SU2Irrep::from_twice_spin(0), 2),
-                (SU2Irrep::from_twice_spin(1), 2),
-                (SU2Irrep::from_twice_spin(2), 1),
-            ],
+            Arc::new(su2_rule()),
+            [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1),],
             false
         );
         $case!(
@@ -112,7 +109,7 @@ macro_rules! for_each_space {
             Arc::new(
                 Fz2U1Su2Rule::try_new(
                     Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-                    SU2FusionRule,
+                    su2_rule(),
                 )
                 .unwrap()
             ),
@@ -120,21 +117,21 @@ macro_rules! for_each_space {
                 (
                     product_sector(
                         product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
-                        SU2Irrep::from_twice_spin(0),
+                        su2_irrep(0),
                     ),
                     1,
                 ),
                 (
                     product_sector(
                         product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
-                        SU2Irrep::from_twice_spin(1),
+                        su2_irrep(1),
                     ),
                     1,
                 ),
                 (
                     product_sector(
                         product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
-                        SU2Irrep::from_twice_spin(0),
+                        su2_irrep(0),
                     ),
                     1,
                 ),
@@ -598,10 +595,11 @@ fn norm_trace_and_singular_values_measure_the_same_weighted_square() {
                 .unwrap()
                 .iter()
                 .map(|spectrum| {
-                    let dim = GradedSpace::try_new(Arc::clone(&provider), [(spectrum.sector, 1)])
-                        .unwrap()
-                        .dim()
-                        .unwrap();
+                    let dim =
+                        GradedSpace::try_new(Arc::clone(&provider), [(spectrum.sector.clone(), 1)])
+                            .unwrap()
+                            .dim()
+                            .unwrap();
                     dim * spectrum.values.iter().map(|s| s * s).sum::<f64>()
                 })
                 .sum();
@@ -735,14 +733,10 @@ fn contraction_order_independence() {
 fn su2_nonuniform_degeneracy_crossed_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
-    let rule = Arc::new(SU2FusionRule);
+    let rule = Arc::new(su2_rule());
     let v = GradedSpace::try_new(
         rule,
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
     )
     .unwrap();
     let a: TensorMap<_, f64> =
@@ -842,14 +836,14 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
     let rule = Arc::new(
         Fz2U1Su2Rule::try_new(
             Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     let label = |parity, charge, spin| {
         product_sector(
             product_sector(parity, U1Irrep::new(charge).unwrap()),
-            SU2Irrep::from_twice_spin(spin),
+            su2_irrep(spin),
         )
     };
     let v = GradedSpace::try_new(
@@ -1002,21 +996,21 @@ fn svd_qr_reconstruction_random_spaces() {
     case!(
         engine,
         "SU2",
-        Arc::new(SU2FusionRule),
-        SU2Irrep::from_twice_spin(0),
-        [SU2Irrep::from_twice_spin(1), SU2Irrep::from_twice_spin(2),]
+        Arc::new(su2_rule()),
+        su2_irrep(0),
+        [su2_irrep(1), su2_irrep(2),]
     );
     let triple = Arc::new(
         Fz2U1Su2Rule::try_new(
             Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     let label = |parity, charge, spin| {
         product_sector(
             product_sector(parity, U1Irrep::new(charge).unwrap()),
-            SU2Irrep::from_twice_spin(spin),
+            su2_irrep(spin),
         )
     };
     case!(
@@ -1139,13 +1133,10 @@ fn weighted_rank_truncation_matches_tensorkit() {
     );
     case!(
         engine,
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-        |sector: &SU2Irrep| sector.twice_spin() as i64,
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1),],
+        |sector: &symtn_core::LieIrrep| usize::try_from(sector.dynkin().next().unwrap()).unwrap()
+            as i64,
         [(1, 1), (2, 1)],
         276850.04205868527
     );

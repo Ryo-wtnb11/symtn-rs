@@ -7,12 +7,13 @@
 //! existing body without the view; results are compared bit for bit because
 //! both run the same code on the same parent payload.
 
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn_core::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 
 use super::probe::{self, Event};
@@ -271,12 +272,10 @@ fn u1(pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2(pairs: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
+fn su2(pairs: &[(usize, usize)]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        pairs
-            .iter()
-            .map(|&(j, d)| (SU2Irrep::from_twice_spin(j), d)),
+        Arc::new(su2_rule()),
+        pairs.iter().map(|&(j, d)| (su2_irrep(j), d)),
     )
     .unwrap()
 }

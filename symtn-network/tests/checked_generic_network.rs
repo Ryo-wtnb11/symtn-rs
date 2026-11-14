@@ -1,5 +1,6 @@
 #![cfg(feature = "cgc-gen")]
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1283,7 +1284,6 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
     // What: a checked Generic replay that overwrites its retained step
     // destinations (`contract_into`) gives the eager chain's values and the
     // multiplicity-free SU(2) replay of the same spin-½ blocks.
-    use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     fn fill(seed: usize) -> impl Fn(&[usize]) -> f64 {
         move |indices| (1 + seed + 7 * indices[0] + 3 * indices[1]) as f64 / 16.0
@@ -1357,10 +1357,9 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
     assert_same(&cold, &expected);
     assert_same(&warm, &expected);
 
-    let mf = Arc::new(SU2FusionRule);
-    let mf_space =
-        |dim| GradedSpace::try_new(Arc::clone(&mf), [(SU2Irrep::from_twice_spin(1), dim)]).unwrap();
-    let mf_tensors: Vec<TensorMap<SU2FusionRule, f64>> = degeneracies
+    let mf = Arc::new(su2_rule());
+    let mf_space = |dim| GradedSpace::try_new(Arc::clone(&mf), [(su2_irrep(1), dim)]).unwrap();
+    let mf_tensors: Vec<TensorMap<Su2Rule, f64>> = degeneracies
         .iter()
         .enumerate()
         .map(|(seed, &(rows, cols))| {

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 fn scalar_structure(keys: &[FusionTreePairKey]) -> BlockStructure {
     BlockStructure::from_blocks(
@@ -16,7 +18,7 @@ fn scalar_structure(keys: &[FusionTreePairKey]) -> BlockStructure {
 
 #[test]
 fn absorb_merge_matches_only_complete_asymmetric_interleaved_keys() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let pair = |coupled, innerline| {
         let tree = FusionTreeKey::try_from_sector_ids_for_rule(
             &rule,
@@ -222,20 +224,24 @@ fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
 fn mixed_compact_dense_inner_weights_sectors_and_skips_structural_zeros() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let spin_half = SU2Irrep::from_twice_spin(1);
-    let bond = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let spin_half = su2_irrep(1);
+    let bond = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 2), (spin_half.clone(), 1)],
+    )
+    .unwrap();
     let diagonal = TensorMap::diagonal(
         engine,
         &runtime,
         &bond,
         [
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![1.0, 2.0],
             },
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![3.0],
             },
         ],
@@ -414,16 +420,13 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
     .unwrap();
     let u1_c64 = u1_f64.convert::<Complex64>(engine).unwrap();
 
-    let su2_provider = Arc::new(SU2FusionRule);
+    let su2_provider = Arc::new(su2_rule());
     let su2_leg = GradedSpace::try_new(
         Arc::clone(&su2_provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 1)],
     )
     .unwrap();
-    let su2_f64: TensorMap<SU2FusionRule, f64> = TensorMap::from_subblock_fn(
+    let su2_f64: TensorMap<Su2Rule, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
         [&su2_leg, &su2_leg],
@@ -938,11 +941,8 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
     );
     probe!(
         engine,
-        SU2FusionRule,
-        [
-            (SU2Irrep::from_twice_spin(0), 3),
-            (SU2Irrep::from_twice_spin(1), 2)
-        ],
+        su2_rule(),
+        [(su2_irrep(0), 3), (su2_irrep(1), 2)],
         0
     );
     probe!(

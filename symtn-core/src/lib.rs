@@ -9,12 +9,17 @@
 //! Lower-level crates may lower the block views to concrete strided kernels,
 //! but no external strided or backend type is required to use this crate.
 
+#[cfg(test)]
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use core::fmt;
 use core::ops::{Add, Mul};
 use std::collections::{hash_map::Entry, BTreeMap};
 use std::hash::Hash;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
+#[cfg(test)]
+use symtn_core as sector_types;
 
 #[cfg(test)]
 use num_complex::Complex64;
@@ -32,14 +37,14 @@ pub use symtn_sectors::{
     MultiplicityFreeAdmissionMode, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
     MultiplicityFreeRigidSymbols, PhysicalBasisError, PhysicalFusionBasis, ProductAdmission,
     ProductFusionRule, ProductFusionRuleError, ProductSector, ProductSectorCodec,
-    ProductSectorCodecError, ProductSectorComponent, RuleIdentity, SU2FusionRule, SU2Irrep,
-    SectorCodec, SectorId, SectorOrderKey, SectorVec, SymbolShapeError, TableRule, TableRuleError,
-    TableSector, TensorKitProductCodec, TypedSectorAdmission, U1FusionRule, U1Irrep,
-    UncertifiedUnitAdmission, ZNFusionRule, ZNIrrep, SU2_MAX_DOUBLED_SPIN,
+    ProductSectorCodecError, ProductSectorComponent, RuleIdentity, SectorCodec, SectorId,
+    SectorOrderKey, SectorVec, SymbolShapeError, TableRule, TableRuleError, TableSector,
+    TensorKitProductCodec, TypedSectorAdmission, U1FusionRule, U1Irrep, UncertifiedUnitAdmission,
+    ZNFusionRule, ZNIrrep,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use symtn_sectors::{GenericFusionSymbols, GenericRigidSymbols};
-pub use symtn_sectors::{LieGroupFusionRule, LieGroupFusionRuleError, LieIrrep};
+pub use symtn_sectors::{GroupId, LieGroupFusionRule, LieGroupFusionRuleError, LieIrrep};
 
 pub mod axes;
 mod storage;

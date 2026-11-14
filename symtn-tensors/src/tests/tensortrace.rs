@@ -1,5 +1,7 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::su2_rule;
 use std::sync::Arc;
 use symtn_core::FermionParityIrrep;
 
@@ -383,8 +385,8 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
         TensorTraceAxisSpec::new(&[], &[0], &[1]),
     );
 
-    let su2_provider = std::sync::Arc::new(SU2FusionRule);
-    let su2_leg = || SectorLeg::new([(SU2Irrep::from_twice_spin(1).sector_id(), 2)], false);
+    let su2_provider = std::sync::Arc::new(su2_rule());
+    let su2_leg = || SectorLeg::new([(symtn_core::SectorId::new(1), 2)], false);
     let su2_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&su2_provider),
         FusionTreeHomSpace::new(
@@ -422,13 +424,13 @@ fn owned_trace_matches_initialized_across_supported_multiplicity_free_rules() {
     let product_provider = std::sync::Arc::new(
         FpU1Su2Rule::try_new(
             FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     let product_sector = product_provider.encode_component_ids(
         left_rule.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
-        SU2Irrep::from_twice_spin(1).sector_id(),
+        symtn_core::SectorId::new(1),
     );
     let product_leg = || SectorLeg::new([(product_sector, 2)], false);
     let product_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
@@ -1216,8 +1218,8 @@ fn tensortrace_fusion_rejects_nonsymmetric_braiding_like_tensorkit_tensortrace()
 
 #[test]
 fn tensortrace_fusion_su2_includes_quantum_dimension_factor() {
-    let rule = SU2FusionRule;
-    let half = SU2Irrep::from_twice_spin(1).sector_id();
+    let rule = su2_rule();
+    let half = symtn_core::SectorId::new(1);
     let src_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(half, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(half, 1)], false)]),
@@ -1363,8 +1365,8 @@ fn assert_trace_terms_match_scalar_oracle<R>(
 
 #[test]
 fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
-    let rule = SU2FusionRule;
-    let spin_one = SU2Irrep::from_twice_spin(2).sector_id();
+    let rule = su2_rule();
+    let spin_one = symtn_core::SectorId::new(2);
     let leg = || SectorLeg::new([(spin_one, 1)], false);
     let src_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),
@@ -1415,7 +1417,7 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
         .terms()
         .windows(2)
         .all(|pair| pair[0].src_block() <= pair[1].src_block()));
-    let provider = std::sync::Arc::new(SU2FusionRule);
+    let provider = std::sync::Arc::new(su2_rule());
     let dynamic_src = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         src.fusion_space().unwrap().as_ref().clone(),
         std::sync::Arc::clone(&provider),
@@ -1474,14 +1476,14 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let odd = SectorId::new(1);
     let product_sector = |charge| {
         rule.encode_component_ids(
             left_rule.encode_component_ids(odd, SectorId::from(U1Irrep::new(charge).unwrap())),
-            SU2Irrep::from_twice_spin(1).sector_id(),
+            symtn_core::SectorId::new(1),
         )
     };
     let a = product_sector(1);
@@ -1573,7 +1575,7 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
     let provider = std::sync::Arc::new(
         FpU1Su2Rule::try_new(
             FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );

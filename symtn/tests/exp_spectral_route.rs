@@ -8,6 +8,8 @@
 //! (independent of both symtn routes), and the spectral route's exact
 //! Hermiticity, which Padé of a non-Hermitian block does not have.
 
+#[cfg(feature = "cgc-gen")]
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
@@ -232,12 +234,12 @@ fn multiplicity_free_exp_route_switches_at_the_predicate_boundary() {
 #[test]
 fn checked_and_multiplicity_free_exp_take_the_same_route() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
     let mf = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [0, 1, 2].map(|twice| (SU2Irrep::from_twice_spin(twice), N)),
+        Arc::new(su2_rule()),
+        [0, 1, 2].map(|twice| (su2_irrep(twice), N)),
     )
     .unwrap();
     let checked = GradedSpace::try_new(

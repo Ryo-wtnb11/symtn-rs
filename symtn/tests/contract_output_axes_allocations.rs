@@ -5,12 +5,13 @@
 //! the GEMM's: a temporary plus a permuting `tensoradd!` (its `copyC` path),
 //! inside the one call.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::hint::black_box;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -210,7 +211,7 @@ fn warm_output_axes_u1_costs_no_more_than_contract_then_permute() {
 fn warm_output_axes_su2_costs_no_more_than_contract_then_permute() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_output_axes_cost!(engine, SU2FusionRule, (0..3).map(SU2Irrep::from_twice_spin));
+    assert_output_axes_cost!(engine, su2_rule(), (0..3).map(su2_irrep));
 }
 
 #[test]

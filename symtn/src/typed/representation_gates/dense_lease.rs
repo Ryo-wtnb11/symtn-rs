@@ -5,6 +5,8 @@
 //! adjoint or densify a compact operand do so.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 use num_complex::Complex64;
 #[cfg(feature = "cgc-gen")]
 use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
@@ -253,13 +255,11 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
         )
         .unwrap()
     };
-    let su2 = Arc::new(SU2FusionRule);
+    let su2 = Arc::new(su2_rule());
     let su2_leg = |pairs: &[(usize, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&su2),
-            pairs
-                .iter()
-                .map(|&(j, d)| (SU2Irrep::from_twice_spin(j), d)),
+            pairs.iter().map(|&(j, d)| (su2_irrep(j), d)),
         )
         .unwrap()
     };

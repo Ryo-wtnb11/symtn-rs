@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 
 fn assert_roundtrip<R>(cuda: &mut dyn symtn::typed::Engine, source: TensorMap<R, f64>)
 where
@@ -64,13 +65,10 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
         .unwrap(),
     );
 
-    let su2_rule = Arc::new(SU2FusionRule);
+    let su2_rule = Arc::new(su2_rule());
     let su2 = GradedSpace::try_new(
         Arc::clone(&su2_rule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        [(su2_irrep(0), 1), (su2_irrep(1), 2)],
     )
     .unwrap();
     assert_roundtrip(
@@ -184,14 +182,8 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
         .unwrap(),
     );
 
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1), (su2_irrep(1), 2)]).unwrap();
     assert_c64_roundtrip(
         cuda,
         TensorMap::<_, Complex64>::from_subblock_fn(

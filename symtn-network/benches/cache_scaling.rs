@@ -41,13 +41,17 @@
 //! `symtn::cache::stats()` over the window; a lost publication race counts
 //! in none of them.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
+use su2::{su2_irrep, su2_rule, Su2Rule};
+use symtn_core as sector_types;
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, CpuEngine, Engine, GradedSpace, Runtime, TensorMap};
 use symtn_core::{core_reset_epoch, StructureCache};
 use symtn_network::{clear_plan_cache, Network};
@@ -325,12 +329,10 @@ fn u1_leg(degs: &[usize]) -> GradedSpace<U1FusionRule> {
     .expect("U(1) leg")
 }
 
-fn su2_leg(degs: &[usize]) -> GradedSpace<SU2FusionRule> {
+fn su2_leg(degs: &[usize]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        degs.iter()
-            .enumerate()
-            .map(|(i, &d)| (SU2Irrep::from_twice_spin(i), d)),
+        Arc::new(su2_rule()),
+        degs.iter().enumerate().map(|(i, &d)| (su2_irrep(i), d)),
     )
     .expect("SU(2) leg")
 }

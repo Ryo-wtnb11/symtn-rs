@@ -5,6 +5,8 @@
 //! merged-admission tests compare against the literals the built-in providers
 //! are frozen to in `tests/provider_contracts/errors.rs`.
 
+use crate::su2::su2_rule;
+
 use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -14,7 +16,7 @@ use fusion_symbols::category::{
     BraidingStyle, EnumerationError, FusionCategory, FusionStyle, RBlock, SymbolBlock,
 };
 use fusion_symbols::finite::{ZNIrrep, ZN};
-use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep, U1};
+use fusion_symbols::lie::{GroupId, LieGroup, U1};
 use fusion_symbols::table::TableCategory;
 use num_complex::Complex64;
 use symtn_sectors::*;
@@ -410,13 +412,13 @@ fn multiplicity_free_a_and_b_match_the_hand_values_and_the_builtin_derivation() 
         numerics::assert_close(
             "A",
             rule.a_symbol_scalar(a, b, c),
-            SU2FusionRule.a_symbol_scalar(a, b, c),
+            su2_rule().a_symbol_scalar(a, b, c),
             4,
         );
         numerics::assert_close(
             "B",
             rule.b_symbol_scalar(a, b, c),
-            SU2FusionRule.b_symbol_scalar(a, b, c),
+            su2_rule().b_symbol_scalar(a, b, c),
             4,
         );
     }
@@ -433,7 +435,7 @@ fn a_and_b_blocks_are_the_category_authority() {
     .unwrap();
     let octet = su3.irrep(&[1, 1]).unwrap();
     let rule_octet = rule.try_encode_label(&octet).unwrap();
-    let lie_group_octet = sun.encode_irrep(&[1, 1]).unwrap();
+    let lie_group_octet = sun.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
     let authority_a = su3.a_symbol(&octet, &octet, &octet).unwrap();
     let authority_b = su3.b_symbol(&octet, &octet, &octet).unwrap();
     for block in [
@@ -2102,142 +2104,6 @@ fn admission_expresses_the_u1_schedule() {
     );
 }
 
-/// Compact SU(2): doubled spins `0..=254`, N checked coupled, left, right,
-/// then the whole closure, and an R known to be zero before the coupled id
-/// is converted.
-struct CompactSu2<M>(std::marker::PhantomData<M>);
-
-impl<M> CompactSu2<M> {
-    const NEW: Self = Self(std::marker::PhantomData);
-
-    fn checked(id: SectorId) -> Result<i64, FusionAlgebraError> {
-        if id.id() <= SU2_MAX_DOUBLED_SPIN {
-            Ok(id.id() as i64)
-        } else {
-            invalid(id.id())
-        }
-    }
-}
-
-impl<M: 'static> CategoryCodec<LieGroup> for CompactSu2<M> {
-    type Sector = SU2Irrep;
-    type Error = FusionAlgebraError;
-    type Mode = M;
-    type Unit = CanonicalUnitAdmission;
-
-    fn encode_label<'a>(
-        &self,
-        _: impl Fn() -> &'a LieGroup + Copy,
-        _: &RuleIdentity,
-        label: &SU2Irrep,
-    ) -> Result<SectorId, FusionAlgebraError> {
-        Ok(label.sector_id())
-    }
-    fn decode_label<'a>(
-        &self,
-        _: impl Fn() -> &'a LieGroup + Copy,
-        id: SectorId,
-    ) -> Result<SU2Irrep, FusionAlgebraError> {
-        SU2Irrep::try_from_sector_id(id).ok_or(FusionAlgebraError::InvalidSector { sector: id })
-    }
-    fn object<'a>(
-        &self,
-        category: impl Fn() -> &'a LieGroup + Copy,
-        id: SectorId,
-    ) -> Result<LieIrrep, FusionAlgebraError> {
-        let twice_spin = Self::checked(id)?;
-        category()
-            .irrep(&[twice_spin])
-            .map_err(|_| FusionAlgebraError::InvalidSector { sector: id })
-    }
-    fn sector_id<'a>(
-        &self,
-        _: impl Fn() -> &'a LieGroup + Copy,
-        _: &RuleIdentity,
-        object: &LieIrrep,
-    ) -> Result<SectorId, FusionAlgebraError> {
-        let twice_spin = object.dynkin().next().unwrap_or(0) as usize;
-        Ok(s(twice_spin))
-    }
-    fn admit<'a, const N: usize>(
-        &self,
-        category: impl Fn() -> &'a LieGroup + Copy,
-        _: &RuleIdentity,
-        operation: CategoryOperation,
-        ids: [SectorId; N],
-    ) -> Result<[LieIrrep; N], FusionAlgebraError> {
-        if operation == CategoryOperation::N {
-            Self::checked(ids[2])?;
-        }
-        let twice_spins = ids.map(Self::checked);
-        for twice_spin in &twice_spins {
-            twice_spin.clone()?;
-        }
-        if matches!(operation, CategoryOperation::N | CategoryOperation::Fusion) {
-            let (left, right) = (ids[0].id(), ids[1].id());
-            if left + right > SU2_MAX_DOUBLED_SPIN {
-                return Err(FusionAlgebraError::FusionNotRepresentable {
-                    left: ids[0],
-                    right: ids[1],
-                });
-            }
-        }
-        let group = category();
-        Ok(twice_spins.map(|twice_spin| group.irrep(&[twice_spin.unwrap()]).unwrap()))
-    }
-    fn admit_r<'a>(
-        &self,
-        category: impl Fn() -> &'a LieGroup + Copy,
-        rule: &RuleIdentity,
-        ids: [SectorId; 3],
-    ) -> Result<Option<[LieIrrep; 3]>, FusionAlgebraError> {
-        let (left, right) = (Self::checked(ids[0])?, Self::checked(ids[1])?);
-        let coupled = ids[2].id() as i64;
-        let in_closure = (left - right).abs() <= coupled
-            && coupled <= left + right
-            && (left + right - coupled) % 2 == 0;
-        if !in_closure {
-            return Ok(None);
-        }
-        self.admit(category, rule, CategoryOperation::R, ids)
-            .map(Some)
-    }
-    fn map_error(
-        &self,
-        _: &[SectorId],
-        error: CategoryAdapterError<LieError>,
-    ) -> FusionAlgebraError {
-        FusionAlgebraError::CategoryFailure(CategoryFailure::new(error))
-    }
-}
-
-#[test]
-fn admission_expresses_the_compact_su2_schedule_and_r_zero_shortcut() {
-    let rule = CategoryRule::try_new(
-        LieGroup::new(GroupId::su(2).unwrap()).unwrap(),
-        CompactSu2::<MF>::NEW,
-    )
-    .unwrap();
-    let closure = Err(FusionAlgebraError::FusionNotRepresentable {
-        left: s(128),
-        right: s(127),
-    });
-    assert_eq!(rule.try_nsymbol(s(128), s(127), s(1)), closure);
-    assert_eq!(rule.try_nsymbol(s(128), s(127), s(254)), closure);
-    assert_eq!(rule.try_nsymbol(s(128), s(127), s(255)), invalid(255));
-    assert_eq!(rule.try_nsymbol(s(127), s(127), s(254)), Ok(1));
-    assert_eq!(rule.try_dual_sector(s(255)), invalid(255));
-
-    // R of an absent channel is zero before the coupled id is converted,
-    // even for an id past the codec.
-    assert_eq!(rule.r_symbol_scalar(s(1), s(1), s(300)), 0.0);
-    assert_eq!(
-        rule.r_symbol_scalar(s(1), s(1), s(300)),
-        SU2FusionRule.r_symbol_scalar(s(1), s(1), s(300))
-    );
-    assert_eq!(rule.r_symbol_scalar(s(1), s(1), s(0)), -1.0);
-}
-
 /// A category that counts how often it is touched after construction.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct Watched;
@@ -2497,13 +2363,9 @@ fn admission_expresses_the_product_schedule() {
 }
 
 #[test]
-fn checked_generic_r_of_a_codec_admitted_zero_block_is_empty() {
-    let rule = CategoryRule::try_new(
-        LieGroup::new(GroupId::su(2).unwrap()).unwrap(),
-        CompactSu2::<CG>::NEW,
-    )
-    .unwrap();
-    // 1/2 x 1/2 cannot reach 300; the codec admits a zero block unconverted.
+fn checked_generic_r_of_an_absent_channel_is_empty() {
+    let rule = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
+    // Spin 1/2 x 1/2 cannot reach doubled spin 300.
     let r = rule.try_r_symbol_generic(s(1), s(1), s(300)).unwrap();
     assert_eq!(r.shape(), (0, 0));
     assert!(r.data().is_empty());

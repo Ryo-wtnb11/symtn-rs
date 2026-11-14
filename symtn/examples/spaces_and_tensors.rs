@@ -1,7 +1,8 @@
 //! Construct U(1) and SU(2) spaces, dual legs, and reduced tensors.
 
+use symtn::sector::{GroupId, LieGroupFusionRule, MultiplicityFreeAdmissionMode};
+
 use std::sync::Arc;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 
@@ -30,13 +31,12 @@ fn main() -> Result<(), Error> {
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&v], 7)?;
     let b = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&v], 7)?;
     assert_eq!(a.dense_data()?, b.dense_data()?);
-    let spin = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
-    )?;
+    let rule = Arc::new(
+        LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(GroupId::su(2).unwrap()).unwrap(),
+    );
+    let vacuum = rule.category().irrep(&[0]).unwrap();
+    let half = rule.category().irrep(&[1]).unwrap();
+    let spin = GradedSpace::try_new(rule, [(vacuum, 1), (half, 1)])?;
     let id = TensorMap::<_, f64>::isomorphism(engine, &rt, [&spin], [&spin])?;
     assert_eq!(id.blocks()?.len(), 2);
     assert!((id.inner(engine, &id)? - 3.0).abs() < 1e-12);

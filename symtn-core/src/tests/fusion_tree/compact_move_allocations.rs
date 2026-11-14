@@ -3,17 +3,20 @@
 //! the owned per-source result.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use crate::tests::counting_alloc;
 
 /// The pair keys of the complete SU(2) block `1^⊗5 ← coupled`: every move
 /// below maps it onto a basis of the same size.
 fn complete_spin_one_block(twice_coupled: usize) -> Vec<FusionTreePairKey> {
-    let leg = |twice| SectorLeg::new([(SU2Irrep::from_twice_spin(twice).sector_id(), 1)], false);
+    let su2_provider_rule = su2_rule();
+    let leg = |twice| SectorLeg::new([(symtn_core::SectorId::new(twice), 1)], false);
     FusionTreeHomSpace::new(
         FusionProductSpace::new(std::array::from_fn::<_, 5, _>(|_| leg(2))),
         FusionProductSpace::new([leg(twice_coupled)]),
     )
-    .fusion_tree_keys(&SU2FusionRule)
+    .fusion_tree_keys(&su2_provider_rule)
     .to_vec()
 }
 
@@ -27,18 +30,20 @@ fn identity_columns(rows: usize) -> DenseColumns<f64> {
 }
 
 fn pair_basis(keys: &[FusionTreePairKey]) -> CompactMultiplicityFreeTreePairBasis {
-    let group = validate_tree_pair_block_group_for_rule(&SU2FusionRule, keys)
+    let su2_provider_rule = su2_rule();
+    let group = validate_tree_pair_block_group_for_rule(&su2_provider_rule, keys)
         .unwrap()
         .expect("nonempty block");
     CompactMultiplicityFreeTreePairBasis::from_group(group).unwrap()
 }
 
 fn tree_basis(keys: &[FusionTreePairKey]) -> CompactMultiplicityFreeTreeBasis {
+    let su2_provider_rule = su2_rule();
     let trees = keys
         .iter()
         .map(|key| key.codomain_tree().clone())
         .collect::<Vec<_>>();
-    let group = validate_fusion_tree_block_group_for_rule(&SU2FusionRule, &trees)
+    let group = validate_fusion_tree_block_group_for_rule(&su2_provider_rule, &trees)
         .unwrap()
         .expect("nonempty block");
     CompactMultiplicityFreeTreeBasis::from_group(group).unwrap()
@@ -69,25 +74,29 @@ fn compact_moves_allocate_per_move_not_per_row() {
     // Index 2 swaps two spin-1 legs below an inner line, so the Artin moves
     // recouple (several terms per row), not only reorder.
     fn pair_artin(basis: CompactMultiplicityFreeTreePairBasis, c: &DenseColumns<f64>) -> usize {
-        compact_codomain_artin_block(&SU2FusionRule, basis, Some(c), 2, false)
+        let su2_provider_rule = su2_rule();
+        compact_codomain_artin_block(&su2_provider_rule, basis, Some(c), 2, false)
             .unwrap()
             .1
             .num_rows
     }
     fn tree_artin(basis: CompactMultiplicityFreeTreeBasis, c: &DenseColumns<f64>) -> usize {
-        compact_artin_tree_block(&SU2FusionRule, basis, Some(c), 2, false)
+        let su2_provider_rule = su2_rule();
+        compact_artin_tree_block(&su2_provider_rule, basis, Some(c), 2, false)
             .unwrap()
             .1
             .num_rows
     }
     fn bend_right(basis: CompactMultiplicityFreeTreePairBasis, c: &DenseColumns<f64>) -> usize {
-        compact_bendright_block(&SU2FusionRule, basis, Some(c))
+        let su2_provider_rule = su2_rule();
+        compact_bendright_block(&su2_provider_rule, basis, Some(c))
             .unwrap()
             .1
             .num_rows
     }
     fn bend_left(basis: CompactMultiplicityFreeTreePairBasis, c: &DenseColumns<f64>) -> usize {
-        compact_bendleft_block(&SU2FusionRule, basis, Some(c))
+        let su2_provider_rule = su2_rule();
+        compact_bendleft_block(&su2_provider_rule, basis, Some(c))
             .unwrap()
             .1
             .num_rows

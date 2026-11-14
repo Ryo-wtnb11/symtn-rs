@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 #[derive(Clone, Debug)]
 struct ProbeTreeKey(usize);
@@ -70,7 +72,7 @@ fn fusion_term_accumulator_keeps_singleton_path_and_hashes_multi_terms() {
 
 #[test]
 fn multiplicity_free_su2_braid_expands_innerline_channels() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let tree = FusionTreeKey::try_from_sector_ids(
         [1, 1, 1, 1],
         0,
@@ -98,6 +100,7 @@ fn multiplicity_free_su2_braid_expands_innerline_channels() {
 
 #[test]
 fn bendright_preserves_local_error_precedence_before_missing_duality() {
+    let su2_provider_rule = su2_rule();
     // What: local coupled/innerline errors remain observable before a
     // missing final duality flag when several malformed fields coexist.
     let missing_innerline = FusionTreePairKey::pair(
@@ -105,7 +108,7 @@ fn bendright_preserves_local_error_precedence_before_missing_duality() {
         FusionTreeKey::try_from_sector_ids([], 0, [], [], []).unwrap(),
     );
     assert_eq!(
-        multiplicity_free_bendright_tree_pair(&SU2FusionRule, &missing_innerline).unwrap_err(),
+        multiplicity_free_bendright_tree_pair(&su2_provider_rule, &missing_innerline).unwrap_err(),
         CoreError::MalformedFusionTree {
             message: "bendright requires the last codomain innerline",
         }
@@ -116,7 +119,7 @@ fn bendright_preserves_local_error_precedence_before_missing_duality() {
         FusionTreeKey::try_from_sector_ids([1], 1, [false], [], []).unwrap(),
     );
     assert_eq!(
-        multiplicity_free_bendright_tree_pair(&SU2FusionRule, &mismatched_coupled).unwrap_err(),
+        multiplicity_free_bendright_tree_pair(&su2_provider_rule, &mismatched_coupled).unwrap_err(),
         CoreError::MalformedFusionTree {
             message: "fusion tree pair requires matching coupled sectors",
         }
@@ -320,6 +323,7 @@ fn assert_literal_binary_choice_sector_grids<R>(
 
 #[test]
 fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
+    let su2_provider_rule = su2_rule();
     assert_literal_binary_choice_sector_grids(
         &FermionParityFusionRule::new(),
         z2_even(),
@@ -333,7 +337,7 @@ fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
         ],
     );
     assert_literal_binary_choice_sector_grids(
-        &SU2FusionRule,
+        &su2_provider_rule,
         su2(0),
         su2(1),
         vec![
@@ -344,11 +348,11 @@ fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
     );
 
     type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
     let triple_rule = TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_provider_rule.clone(),
     )
     .unwrap();
     let vacuum =
@@ -372,6 +376,7 @@ fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
 
 #[test]
 fn generic_tree_cannot_enter_multiplicity_free_projection() {
+    let su2_provider_rule = su2_rule();
     // What: a genuine multiplicity-two tree is rejected
     // before the compact path can erase its vertex identity.
     let rule = UnitaryToyOmRule;
@@ -404,7 +409,7 @@ fn generic_tree_cannot_enter_multiplicity_free_projection() {
     let checked = FusionTreeKey::try_from_sector_ids([1, 1], 0, [false; 2], [], [1]).unwrap();
     let separate = FusionTreeKey::try_from_sector_ids([1, 1], 0, [false; 2], [], [2]).unwrap();
     let projection =
-        MultiplicityFreeTreeProjection::checked(&SU2FusionRule, std::slice::from_ref(&checked))
+        MultiplicityFreeTreeProjection::checked(&su2_provider_rule, std::slice::from_ref(&checked))
             .unwrap();
     assert!(projection.tree_at(0).is_some());
     assert!(projection.tree_at(1).is_none());
@@ -413,7 +418,7 @@ fn generic_tree_cannot_enter_multiplicity_free_projection() {
 
 #[test]
 fn compact_block_error_does_not_publish_partial_rows() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let sources = compact_operator_cohort_fixture(&rule, su2(2), su2(2));
     let valid = sources[..4].to_vec();
     let permutation = [7usize, 6, 5, 4, 3, 2, 1, 0];
@@ -479,7 +484,7 @@ fn compact_repartition_preserves_source_major_error_precedence() {
 
 #[test]
 fn ordered_block_linear_storage_preserves_absent_and_zero_structure() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let half = SectorLeg::new([(su2(1), 1)], false);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([half.clone(), half.clone(), half]),
@@ -491,7 +496,7 @@ fn ordered_block_linear_storage_preserves_absent_and_zero_structure() {
         .unwrap()
         .expect("SU2 cohort is nonempty");
 
-    let singleton_basis = CompactMultiplicityFreeTreePairBasis::from_group(group).unwrap();
+    let singleton_basis = CompactMultiplicityFreeTreePairBasis::from_group(group.clone()).unwrap();
     let mut singleton_columns = DenseColumns::with_capacity(2, 2);
     let row0 = singleton_columns.push_empty_row();
     let row1 = singleton_columns.push_empty_row();

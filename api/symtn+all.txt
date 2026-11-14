@@ -77,6 +77,7 @@ pub use symtn::sector::FusionRule
 pub use symtn::sector::FusionStyleKind
 pub use symtn::sector::GenericFArray
 pub use symtn::sector::GenericRMatrix
+pub use symtn::sector::GroupId
 pub use symtn::sector::LieGroupFusionRule
 pub use symtn::sector::LieGroupFusionRuleError
 pub use symtn::sector::LieIrrep
@@ -94,8 +95,6 @@ pub use symtn::sector::ProductSectorCodec
 pub use symtn::sector::ProductSectorCodecError
 pub use symtn::sector::ProductSectorComponent
 pub use symtn::sector::RuleIdentity
-pub use symtn::sector::SU2FusionRule
-pub use symtn::sector::SU2Irrep
 pub use symtn::sector::SectorCodec
 pub use symtn::sector::SectorId
 pub use symtn::sector::SectorOrderKey

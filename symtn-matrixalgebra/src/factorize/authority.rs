@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use symtn_dense::Engine;
 
 use symtn_core::PreparedBlockStructure;
@@ -889,7 +891,7 @@ mod publication_order_tests {
             return;
         }
         symtn_core::clear_structure_caches();
-        let rule = symtn_core::SU2FusionRule;
+        let rule = su2_rule();
         let provider = Arc::new(symtn_core::InfallibleGeneric::new(&rule));
         let authority = CheckedAuthority(&provider);
         let hom = FusionTreeHomSpace::from_sector_ids([(1, 2)], [(1, 3)]);

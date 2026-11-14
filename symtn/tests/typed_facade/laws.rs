@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 
 /// The U(1) oracle. `p` carries three charges with unequal degeneracies
 /// and `q` two, so the two legs are distinguishable by shape alone; `q` is
@@ -736,14 +737,14 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
                 symtn::sector::U1FusionRule,
             )
             .unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     let label = |parity: symtn::sector::FermionParityIrrep, charge: i32, twice_spin: usize| {
         symtn::sector::product_sector(
             symtn::sector::product_sector(parity, symtn::sector::U1Irrep::new(charge).unwrap()),
-            SU2Irrep::from_twice_spin(twice_spin),
+            su2_irrep(twice_spin),
         )
     };
 
@@ -751,7 +752,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
         (label(symtn::sector::FermionParityIrrep::ODD, 1, 1), 1),
         (label(symtn::sector::FermionParityIrrep::EVEN, 0, 2), 2),
     ];
-    let v = GradedSpace::try_new(Arc::clone(&left_assoc), declared).unwrap();
+    let v = GradedSpace::try_new(Arc::clone(&left_assoc), declared.clone()).unwrap();
 
     // Decoded labels come back nested exactly as declared: parity outermost
     // left, then charge, with the spin as the outer right factor. Compared as
@@ -774,7 +775,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
         .find(|label| *label.left().left() == symtn::sector::FermionParityIrrep::ODD)
         .expect("the odd-parity label survives the round trip");
     assert_eq!(*odd.left().right(), symtn::sector::U1Irrep::new(1).unwrap());
-    assert_eq!(*odd.right(), SU2Irrep::from_twice_spin(1));
+    assert_eq!(*odd.right(), su2_irrep(1));
 
     // Association is not an equivalence: `fZ2 ⊠ (U(1) ⊠ SU(2))` is a different
     // provider with a different label type, and the identities do not compare
@@ -782,19 +783,13 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     // only when written for the right association.
     let right_assoc = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         symtn::sector::FermionParityFusionRule::new(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(
-            symtn::sector::U1FusionRule,
-            SU2FusionRule,
-        )
-        .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(symtn::sector::U1FusionRule, su2_rule())
+            .unwrap(),
     )
     .unwrap();
     let right_label = symtn::sector::product_sector(
         symtn::sector::FermionParityIrrep::ODD,
-        symtn::sector::product_sector(
-            symtn::sector::U1Irrep::new(1).unwrap(),
-            SU2Irrep::from_twice_spin(1),
-        ),
+        symtn::sector::product_sector(symtn::sector::U1Irrep::new(1).unwrap(), su2_irrep(1)),
     );
     assert_ne!(
         left_assoc.rule_identity(),
@@ -811,7 +806,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
             symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     assert_ne!(left_assoc.rule_identity(), swapped.rule_identity());

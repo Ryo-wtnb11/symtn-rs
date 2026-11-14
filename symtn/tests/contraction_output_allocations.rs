@@ -7,12 +7,13 @@
 //! overwrites one allocator-zeroed payload. This concerns the allocator-level
 //! whole-output zero fill only; kernel-side output fills are not visible here.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::hint::black_box;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 
 use num_complex::{Complex32, Complex64};
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap, TensorScalar};
 
@@ -35,15 +36,12 @@ fn u1_space(provider: &Arc<U1FusionRule>, sectors: &[(i32, usize)]) -> GradedSpa
     .unwrap()
 }
 
-fn su2_space(
-    provider: &Arc<SU2FusionRule>,
-    sectors: &[(usize, usize)],
-) -> GradedSpace<SU2FusionRule> {
+fn su2_space(provider: &Arc<Su2Rule>, sectors: &[(usize, usize)]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
         Arc::clone(provider),
         sectors
             .iter()
-            .map(|&(twice_spin, degeneracy)| (SU2Irrep::from_twice_spin(twice_spin), degeneracy)),
+            .map(|&(twice_spin, degeneracy)| (su2_irrep(twice_spin), degeneracy)),
     )
     .unwrap()
 }
@@ -129,7 +127,7 @@ fn owned_c64_contraction_output_is_one_unzeroed_payload() {
 fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     // Destination `[a, c] <- [d, e]` couples to spins 1/2 and 3/2; the bond
     // `b` carries only spin 1/2, so the spin-3/2 block is inactive.
     let a = su2_space(&provider, &[(0, 2), (2, 3)]);

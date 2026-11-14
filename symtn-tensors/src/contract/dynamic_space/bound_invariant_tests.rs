@@ -1,18 +1,19 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use crate::tests::GenericMultiplicityRule;
 use crate::BoundDynamicTensorRef;
 use std::cell::Cell;
 use symtn_core::{
     clear_structure_caches, structure_cache_info, BlockSpec, BraidingStyleKind, CoupledSectorFold,
     FermionParityFusionRule, FusionAlgebraError, FusionProductSpace, FusionTreePairKey,
-    InfallibleGeneric, ProductFusionRule, ProductSectorCodec, SU2FusionRule, SU2Irrep, SectorId,
-    SectorLeg, SectorVec, StructureCacheKind, TensorKitProductCodec, U1FusionRule, U1Irrep,
-    ZNFusionRule, ZNIrrep,
+    InfallibleGeneric, ProductFusionRule, ProductSectorCodec, SectorId, SectorLeg, SectorVec,
+    StructureCacheKind, TensorKitProductCodec, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+type TripleRule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
 fn u1(charge: i32) -> SectorId {
     SectorId::from(U1Irrep::new(charge).unwrap())
@@ -21,7 +22,7 @@ fn u1(charge: i32) -> SectorId {
 fn lowered_product_rule() -> TripleRule {
     TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap()
 }
@@ -710,7 +711,7 @@ fn bind_revalidates_complete_without_replacing_layout() {
         SectorId::from(ZNIrrep::new(1, 2).unwrap()),
         SectorId::from(U1Irrep::new(2).unwrap()),
     );
-    let sector = TensorKitProductCodec::encode(pair, SU2Irrep::from_twice_spin(1).sector_id());
+    let sector = TensorKitProductCodec::encode(pair, symtn_core::SectorId::new(1));
     let layout = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sectors([(sector, 1)], [(sector, 1)]),

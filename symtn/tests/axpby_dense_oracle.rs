@@ -8,12 +8,13 @@
 //! The CUDA gate runs with `cargo test -p symtn --features cuda,cpu-faer
 //! --test integration axpby_dense_oracle:: -- --ignored` on a CUDA host.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::HashMap;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{CpuEngine, Engine, GradedSpace, Runtime, TensorMap};
 
@@ -109,10 +110,10 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     (v, w)
 }
 
-fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
+fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
     let v = GradedSpace::try_new(
-        std::sync::Arc::new(SU2FusionRule),
-        [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (SU2Irrep::from_twice_spin(s), n)),
+        std::sync::Arc::new(su2_rule()),
+        [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (su2_irrep(s), n)),
     )
     .unwrap();
     let w = v.try_dual().unwrap();

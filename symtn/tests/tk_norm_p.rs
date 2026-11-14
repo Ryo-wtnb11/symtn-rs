@@ -37,7 +37,8 @@
 //! carry the same entry multiset: a `dim(c)` weight attached to the wrong
 //! sector changes the answer.
 
-use symtn::sector::{SU2FusionRule, U1FusionRule};
+use crate::su2::Su2Rule;
+use symtn::sector::U1FusionRule;
 use symtn::typed::TensorMap;
 use symtn::typed::{Complex64, Error};
 
@@ -106,12 +107,12 @@ fn typed_norm_p_matches_tensorkit() {
             complex_fill(indices)
         })
         .unwrap();
-    let su2_f64: TensorMap<SU2FusionRule, f64> =
+    let su2_f64: TensorMap<Su2Rule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&su2_v], [&su2_w], |_, indices| {
             real_fill(indices)
         })
         .unwrap();
-    let su2_c64: TensorMap<SU2FusionRule, Complex64> =
+    let su2_c64: TensorMap<Su2Rule, Complex64> =
         TensorMap::from_subblock_fn(engine, &rt, [&su2_v], [&su2_w], |_, indices| {
             complex_fill(indices)
         })

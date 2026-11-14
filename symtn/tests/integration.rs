@@ -3,7 +3,10 @@
 //! Fresh heap memory is NaN-poisoned, so an owned output element that no
 //! operation wrote surfaces as NaN in these oracle comparisons.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use num_complex::{Complex32, Complex64};
+use symtn_core as sector_types;
 
 #[path = "../../tests/support/backend.rs"]
 mod backend;

@@ -13,6 +13,9 @@
 //!
 //! Run through `benchmarks/cuda_operation_matrix.sh`.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+use symtn_core as sector_types;
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
 
@@ -36,12 +39,12 @@ fn main() {
 #[cfg(feature = "cuda")]
 mod device {
     use super::counting_alloc;
+    use super::su2::{su2_irrep, su2_rule};
     use std::{hint::black_box, sync::Arc, time::Instant};
 
     use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
     use symtn::sector::{
-        product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-        U1FusionRule, U1Irrep,
+        product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
     };
     use symtn::sector::{
         CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols,
@@ -1664,8 +1667,8 @@ mod device {
         });
         provider_rows!(config, "SU2", |blocks: usize, degeneracy: usize| {
             GradedSpace::try_new(
-                Arc::new(SU2FusionRule),
-                (0..blocks).map(|index| (SU2Irrep::from_twice_spin(index), degeneracy)),
+                Arc::new(su2_rule()),
+                (0..blocks).map(|index| (su2_irrep(index), degeneracy)),
             )
             .expect("SU(2) fixture leg")
         });

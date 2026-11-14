@@ -31,14 +31,15 @@
 
 #![cfg(feature = "cuda")]
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -136,39 +137,26 @@ fn fill<D: DevicePayload, S>(seed: f64) -> impl FnMut(&BlockFusionTrees<S>, &[us
     }
 }
 
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
+fn su2_leg() -> GradedSpace<Su2Rule> {
+    GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(2), 1)]).unwrap()
 }
 
-type FermionSu2 = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+type FermionSu2 = ProductFusionRule<FermionParityFusionRule, Su2Rule>;
 
 /// `fZ2 ⊠ SU(2)`: fermionic signs *and* non-Abelian recoupling in one provider.
 fn fz2_su2_leg() -> GradedSpace<FermionSu2> {
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     GradedSpace::try_new(
         rule,
         [
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
-                2,
-            ),
-            (
-                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(2)),
-                1,
-            ),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, su2_irrep(2)), 1),
         ],
     )
     .unwrap()
@@ -783,14 +771,8 @@ fn device_inner_matches_the_host_where_single_precision_products_overflow() {
         ],
     )
     .unwrap();
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(2), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(2), 2)]).unwrap();
     // `sum_c dim(c)`: three U(1) charges; SU(2) spins 0 and 1, 1 + 3.
     assert_inner_survives_overflowing_products::<_, f32>(engine, cuda, &runtime, &u1, 3.0);
     assert_inner_survives_overflowing_products::<_, Complex32>(engine, cuda, &runtime, &u1, 3.0);

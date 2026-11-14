@@ -3,10 +3,10 @@
 //! evicts them unless it is charged for them: its charge bounds what
 //! evicting it frees in either eviction order.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use symtn::cache::StructureCacheKind;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::counting_alloc;
@@ -18,10 +18,10 @@ fn info(kind: StructureCacheKind) -> symtn::cache::StructureCacheInfo {
         .unwrap()
 }
 
-fn su2(degeneracies: [usize; 4]) -> GradedSpace<SU2FusionRule> {
+fn su2(degeneracies: [usize; 4]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        (0..4).map(|twice| (SU2Irrep::from_twice_spin(twice), degeneracies[twice])),
+        Arc::new(su2_rule()),
+        (0..4).map(|twice| (su2_irrep(twice), degeneracies[twice])),
     )
     .unwrap()
 }
@@ -40,8 +40,7 @@ fn completed_transformer_charge_covers_what_it_frees_after_group_eviction() {
     // An SU(2) permute with recoupling (Multi specs), so cache 3's core is
     // bound from cache-4 groups.
     let runtime = Runtime::builder().build().unwrap();
-    let phys =
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let phys = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), 1)]).unwrap();
     let (l, u, r, d) = (
         su2([4, 5, 2, 1]),
         su2([3, 4, 3, 1]),

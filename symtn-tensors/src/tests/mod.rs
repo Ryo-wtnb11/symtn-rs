@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use symtn_dense::Engine;
 
 mod test_tensor;
@@ -640,8 +642,8 @@ use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionRule, FusionStyleKind, FusionTreeGroupKey,
     FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey, GenericFArray, GenericFusionSymbols,
     GenericRMatrix, GenericRigidSymbols, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, MultiplicityIndex, Placement, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, SectorId, SectorLeg, SectorStructure, SectorVec, U1FusionRule, U1Irrep, ZNFusionRule,
+    MultiplicityFreeRigidSymbols, MultiplicityIndex, Placement, ProductFusionRule, SectorId,
+    SectorLeg, SectorStructure, SectorVec, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn_dense::{DenseDotConfig, DenseError, DenseExecutor, DenseRead, DenseWrite, MatrixOp};
 
@@ -809,7 +811,7 @@ where
 }
 
 type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+type FpU1Su2Rule = ProductFusionRule<FpU1Rule, Su2Rule>;
 
 fn fz2_u1_su2_tree_pair_fixture() -> (
     FpU1Su2Rule,
@@ -820,7 +822,7 @@ fn fz2_u1_su2_tree_pair_fixture() -> (
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let even = SectorId::new(0);
@@ -831,7 +833,7 @@ fn fz2_u1_su2_tree_pair_fixture() -> (
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(
             left_sector(parity, charge),
-            SU2Irrep::from_twice_spin(twice_spin).sector_id(),
+            symtn_core::SectorId::new(twice_spin),
         )
     };
 

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 fn materialized_multiplicity_free_group_oracle<R>(
     rule: &R,
@@ -317,6 +319,7 @@ fn fusion_tree_homspace_tensorcontract_accepts_output_permutation_structurally()
 
 #[test]
 fn direct_homspace_derivation_matches_reference_for_supported_rules() {
+    let su2_provider_rule = su2_rule();
     let mixed_leg =
         |sectors: &[(SectorId, usize)], dual| SectorLeg::new(sectors.iter().copied(), dual);
 
@@ -351,15 +354,15 @@ fn direct_homspace_derivation_matches_reference_for_supported_rules() {
     );
 
     let su2 = [
-        (SU2Irrep::from_twice_spin(0).sector_id(), 2),
-        (SU2Irrep::from_twice_spin(1).sector_id(), 1),
+        (symtn_core::SectorId::new(0), 2),
+        (symtn_core::SectorId::new(1), 1),
     ];
     let su2_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([mixed_leg(&su2, false), mixed_leg(&su2, true)]),
         FusionProductSpace::new([mixed_leg(&su2, true), mixed_leg(&su2, false)]),
     );
     assert_direct_contract_matches_reference(
-        &SU2FusionRule,
+        &su2_provider_rule,
         &su2_hom,
         &su2_hom,
         &[3, 2],
@@ -369,10 +372,10 @@ fn direct_homspace_derivation_matches_reference_for_supported_rules() {
     );
 
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type ProductRule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let product_rule = ProductRule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_provider_rule.clone(),
     )
     .unwrap();
     let encode = |parity, charge, spin| {
@@ -380,7 +383,7 @@ fn direct_homspace_derivation_matches_reference_for_supported_rules() {
             SectorId::new(parity),
             SectorId::from(U1Irrep::new(charge).unwrap()),
         );
-        TensorKitProductCodec::encode(inner, SU2Irrep::from_twice_spin(spin).sector_id())
+        TensorKitProductCodec::encode(inner, symtn_core::SectorId::new(spin))
     };
     let product = [(encode(0, 0, 0), 2), (encode(1, 1, 1), 1)];
     let product_hom = FusionTreeHomSpace::new(

@@ -1,15 +1,16 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use crate::test_support::CACHE_TEST_LOCK;
 use std::cell::Cell;
 use symtn_core::{
     structure_cache_info, FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError,
-    FusionProductSpace, FusionTreeKey, ProductFusionRule, ProductSectorCodec, SU2FusionRule,
-    SU2Irrep, SectorId, SectorLeg, StructureCacheKind, TensorKitProductCodec, U1FusionRule,
-    U1Irrep,
+    FusionProductSpace, FusionTreeKey, ProductFusionRule, ProductSectorCodec, SectorId, SectorLeg,
+    StructureCacheKind, TensorKitProductCodec, U1FusionRule, U1Irrep,
 };
 
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+type TripleRule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
 thread_local! {
     static PRIMER_CALLS: Cell<usize> = const { Cell::new(0) };
@@ -22,7 +23,7 @@ fn u1(charge: i32) -> SectorId {
 fn rule() -> TripleRule {
     TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap()
 }
@@ -33,7 +34,7 @@ fn sector(parity: usize, charge: i32, twice_spin: usize) -> SectorId {
             SectorId::from(FermionParityIrrep::new(parity == 1)),
             SectorId::from(U1Irrep::new(charge).unwrap()),
         ),
-        SU2Irrep::from_twice_spin(twice_spin).sector_id(),
+        symtn_core::SectorId::new(twice_spin),
     )
 }
 
@@ -254,12 +255,12 @@ fn final_homspace_layout_matches_tensorkit_layout_across_supported_rules() {
         ),
     );
 
-    let su2_zero = SU2Irrep::from_twice_spin(0).sector_id();
-    let su2_half = SU2Irrep::from_twice_spin(1).sector_id();
+    let su2_zero = symtn_core::SectorId::new(0);
+    let su2_half = symtn_core::SectorId::new(1);
     let su2_left = SectorLeg::new([(su2_zero, 1), (su2_half, 2)], false);
     let su2_right = SectorLeg::new([(su2_zero, 3), (su2_half, 1)], true);
     assert_final_homspace_matches_tensorkit_layout(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([su2_left.clone(), su2_right.clone()]),
             FusionProductSpace::new([su2_right.clone(), su2_left.clone()]),
@@ -269,7 +270,7 @@ fn final_homspace_layout_matches_tensorkit_layout_across_supported_rules() {
     // offsets and the domain stride.
     let su2_wide = SectorLeg::new([(su2_zero, 2), (su2_half, 3)], false);
     assert_final_homspace_matches_tensorkit_layout(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([su2_left.clone(), su2_left]),
             FusionProductSpace::new([su2_wide, su2_right]),
@@ -596,19 +597,21 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
         },
     );
 
+    // Each irrep dimension fits 32-bit usize, but their doubled-spin sum overflows u32.
+    let large_spin = SectorId::new(u32::MAX as usize / 2 + 1);
     let su2_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(SU2Irrep::from_twice_spin(128).sector_id(), 1)], false),
-            SectorLeg::new([(SU2Irrep::from_twice_spin(127).sector_id(), 1)], false),
+            SectorLeg::new([(large_spin, 1)], false),
+            SectorLeg::new([(large_spin, 1)], false),
         ]),
         FusionProductSpace::new([]),
     );
     assert_lowered_root_failure(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         su2_overflow,
         FusionAlgebraError::FusionNotRepresentable {
-            left: SU2Irrep::from_twice_spin(128).sector_id(),
-            right: SU2Irrep::from_twice_spin(127).sector_id(),
+            left: large_spin,
+            right: large_spin,
         },
     );
 
@@ -736,6 +739,7 @@ fn encoded_and_lowered_final_layouts_share_checked_frozen_content() {
 
 #[test]
 fn encoded_u1_and_su2_root_layouts_have_hand_extent() {
+    let su2_provider_rule = su2_rule();
     // What: canonical U1 and SU2 multiplicity-free roots have the hand
     // extent 2 x 3; the product case is covered by the layout oracle above.
     let _guard = CACHE_TEST_LOCK
@@ -752,9 +756,9 @@ fn encoded_u1_and_su2_root_layouts_have_hand_extent() {
         ),
     )
     .unwrap();
-    let su2_vacuum = SU2Irrep::from_twice_spin(0).sector_id();
+    let su2_vacuum = symtn_core::SectorId::new(0);
     let su2 = DynamicFusionMapSpace::from_final_homspace(
-        &SU2FusionRule,
+        &su2_provider_rule,
         FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(su2_vacuum, 2)], false)]),
             FusionProductSpace::new([SectorLeg::new([(su2_vacuum, 3)], false)]),

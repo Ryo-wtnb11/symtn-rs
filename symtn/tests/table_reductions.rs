@@ -9,11 +9,12 @@
 //! reduction refuses it with the typed error, and its real-dimension twin
 //! equals the real-symbol U(1) exactly.
 
+use crate::su2::su2_rule;
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, U1FusionRule};
+use symtn::sector::U1FusionRule;
 use symtn::typed::{BlockFusionTrees, GradedSpace, Runtime, TensorMap};
 use symtn_sectors::{TableRule, TableSector};
 
@@ -203,7 +204,7 @@ fn a_non_real_quantum_dimension_is_refused_by_every_weighted_reduction() {
     let (v, t) = operands!(
         engine,
         &runtime,
-        Embedded::<_, true>(SU2FusionRule),
+        Embedded::<_, true>(su2_rule()),
         su2_sectors()
     );
     for (what, error) in [
@@ -269,7 +270,7 @@ fn a_real_complex_embedding_reduces_exactly_as_the_real_symbol_rule() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     assert_same_reductions!(engine, &runtime, U1FusionRule, u1_sectors());
-    assert_same_reductions!(engine, &runtime, SU2FusionRule, su2_sectors());
+    assert_same_reductions!(engine, &runtime, su2_rule(), su2_sectors());
 }
 
 #[test]

@@ -4,13 +4,14 @@
 //! cached `Network::contract` and an explicitly planned `Network` preserve their provider and
 //! payload, including a static intra-operand trace.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
 
 use symtn::sector::{
     product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
-    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
+    U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -226,7 +227,7 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
                 U1FusionRule,
             )
             .unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
@@ -236,14 +237,14 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
             (
                 product_sector(
                     product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
-                    SU2Irrep::from_twice_spin(0),
+                    su2_irrep(0),
                 ),
                 2,
             ),
             (
                 product_sector(
                     product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
-                    SU2Irrep::from_twice_spin(1),
+                    su2_irrep(1),
                 ),
                 1,
             ),

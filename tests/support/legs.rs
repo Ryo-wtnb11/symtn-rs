@@ -11,8 +11,11 @@
 
 use std::sync::Arc;
 
+use crate::su2::{su2_irrep, su2_rule};
+
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, LieGroupFusionRule, LieIrrep,
+    MultiplicityFreeAdmissionMode, U1FusionRule, U1Irrep,
 };
 use symtn::typed::GradedSpace;
 
@@ -40,12 +43,14 @@ pub fn u1_on(provider: &Arc<U1FusionRule>, pairs: &[(i32, usize)]) -> GradedSpac
 }
 
 /// SU(2) leg with `(twice_spin, degeneracy)` sectors.
-pub fn su2_leg(pairs: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
+pub fn su2_leg(
+    pairs: &[(usize, usize)],
+) -> GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         pairs
             .iter()
-            .map(|&(twice_spin, degeneracy)| (SU2Irrep::from_twice_spin(twice_spin), degeneracy)),
+            .map(|&(twice_spin, degeneracy)| (su2_irrep(twice_spin), degeneracy)),
     )
     .unwrap()
 }
@@ -53,14 +58,14 @@ pub fn su2_leg(pairs: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
 /// SU(2) leg on a caller-owned rule, for targets that compare legs by rule
 /// identity.
 pub fn su2_on(
-    provider: &Arc<SU2FusionRule>,
+    provider: &Arc<LieGroupFusionRule<MultiplicityFreeAdmissionMode>>,
     pairs: &[(usize, usize)],
-) -> GradedSpace<SU2FusionRule> {
+) -> GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>> {
     GradedSpace::try_new(
         Arc::clone(provider),
         pairs
             .iter()
-            .map(|&(twice_spin, degeneracy)| (SU2Irrep::from_twice_spin(twice_spin), degeneracy)),
+            .map(|&(twice_spin, degeneracy)| (su2_irrep(twice_spin), degeneracy)),
     )
     .unwrap()
 }
@@ -104,17 +109,17 @@ pub fn u1_leg_2_3_1() -> GradedSpace<U1FusionRule> {
 }
 
 /// SU(2) twice-spin 0, 1 with degeneracies 2, 2.
-pub fn su2_leg_2_2() -> GradedSpace<SU2FusionRule> {
+pub fn su2_leg_2_2() -> GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>> {
     su2_leg(&[(0, 2), (1, 2)])
 }
 
 /// SU(2) twice-spin 0, 1, 2 with degeneracies 2, 2, 1.
-pub fn su2_leg_2_2_1() -> GradedSpace<SU2FusionRule> {
+pub fn su2_leg_2_2_1() -> GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>> {
     su2_leg(&[(0, 2), (1, 2), (2, 1)])
 }
 
 /// SU(2) twice-spin 0, 1, 2 with degeneracies 2, 3, 1.
-pub fn su2_leg_2_3_1() -> GradedSpace<SU2FusionRule> {
+pub fn su2_leg_2_3_1() -> GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>> {
     su2_leg(&[(0, 2), (1, 3), (2, 1)])
 }
 
@@ -126,20 +131,23 @@ pub fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
 }
 
 /// SU(2) twice-spin 0, 1, 2 with degeneracies 2, 2, 1, and its dual.
-pub fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
+pub fn su2_legs() -> (
+    GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>>,
+    GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>>,
+) {
     let v = su2_leg_2_2_1();
     let w = v.try_dual().unwrap();
     (v, w)
 }
 
 /// Twice the spin of an SU(2) sector.
-pub fn su2_spin(sector: &SU2Irrep) -> usize {
-    sector.twice_spin()
+pub fn su2_spin(sector: &LieIrrep) -> usize {
+    sector.dynkin().next().unwrap() as usize
 }
 
 /// Dimension of an SU(2) irrep.
-pub fn su2_dim(sector: &SU2Irrep) -> f64 {
-    (sector.twice_spin() + 1) as f64
+pub fn su2_dim(sector: &LieIrrep) -> f64 {
+    (sector.dynkin().next().unwrap() as usize + 1) as f64
 }
 
 /// Two U(1) legs on one rule, charges -1, 0, 1, with degeneracies 2, 3, 4 and
@@ -154,8 +162,11 @@ pub fn u1_norm_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) 
 
 /// Two SU(2) legs on one rule, twice-spin 0, 1, 2, with degeneracies 2, 3, 4
 /// and 5, 1, 2: the operands of the norm tests.
-pub fn su2_norm_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let rule = Arc::new(SU2FusionRule);
+pub fn su2_norm_legs() -> (
+    GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>>,
+    GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>>,
+) {
+    let rule = Arc::new(su2_rule());
     (
         su2_on(&rule, &[(0, 2), (1, 3), (2, 4)]),
         su2_on(&rule, &[(0, 5), (1, 1), (2, 2)]),

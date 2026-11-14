@@ -1,4 +1,6 @@
 //! Separate binary: its process-global lifetime allocator counts worker-thread allocations and frees.
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::{Cell, RefCell};
 use std::process::Command;
@@ -7,6 +9,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
+use symtn_core as sector_types;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64, Runtime, TensorScalar};

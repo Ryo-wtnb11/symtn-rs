@@ -1,3 +1,4 @@
+use crate::su2::{su2_rule, Su2Rule};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -8,8 +9,7 @@ use symtn_core::{
     BlockKey, BlockStructure, BraidingStyleKind, DegeneracyStructure, FusionProductSpace,
     FusionRule, FusionStyleKind, FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    MultiplicityIndex, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorStructure, SectorVec,
-    U1FusionRule, U1Irrep,
+    MultiplicityIndex, SectorId, SectorLeg, SectorStructure, SectorVec, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
     build_tree_pair_transform_group_plan, BoundDynamicFusionMapSpace, RuleIdentity,
@@ -60,10 +60,11 @@ fn derive<R: MultiplicityFreeRigidSymbols>(
 use crate::counting_alloc;
 
 fn su2_f_move_structure() -> BlockStructure {
+    let su2_provider_rule = su2_rule();
     let keys = [[0, 1], [2, 1]].map(|inner| {
         BlockKey::from(FusionTreePairKey::pair(
             FusionTreeKey::try_new_for_rule(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 [SectorId::new(1); 4],
                 SectorId::new(0),
                 [false; 4],
@@ -71,7 +72,7 @@ fn su2_f_move_structure() -> BlockStructure {
                 [MultiplicityIndex::ONE; 3],
             )
             .unwrap(),
-            FusionTreeKey::try_new_for_rule(&SU2FusionRule, [], SectorId::new(0), [], [], [])
+            FusionTreeKey::try_new_for_rule(&su2_provider_rule, [], SectorId::new(0), [], [], [])
                 .unwrap(),
         ))
     });
@@ -91,32 +92,32 @@ impl symtn_core::testing::Provider for AdmissionCountingSu2Rule {}
 
 impl FusionRule for AdmissionCountingSu2Rule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
-        SU2FusionRule.rule_identity()
+        su2_rule().rule_identity()
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
-        SU2FusionRule.fusion_style()
+        su2_rule().fusion_style()
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        SU2FusionRule.braiding_style()
+        su2_rule().braiding_style()
     }
 
     fn vacuum(&self) -> SectorId {
-        SU2FusionRule.vacuum()
+        su2_rule().vacuum()
     }
 
     fn dual(&self, sector: SectorId) -> SectorId {
-        SU2FusionRule.dual(sector)
+        su2_rule().dual(sector)
     }
 
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        SU2FusionRule.fusion_channels(left, right)
+        su2_rule().fusion_channels(left, right)
     }
 
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
         self.nsymbol_calls.fetch_add(1, Ordering::Relaxed);
-        SU2FusionRule.nsymbol(left, right, coupled)
+        su2_rule().nsymbol(left, right, coupled)
     }
 }
 
@@ -134,37 +135,37 @@ impl MultiplicityFreeFusionSymbols for AdmissionCountingSu2Rule {
         left_coupled: SectorId,
         right_coupled: SectorId,
     ) -> Self::Scalar {
-        SU2FusionRule.f_symbol_scalar(left, middle, right, coupled, left_coupled, right_coupled)
+        su2_rule().f_symbol_scalar(left, middle, right, coupled, left_coupled, right_coupled)
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
-        SU2FusionRule.r_symbol_scalar(left, right, coupled)
+        su2_rule().r_symbol_scalar(left, right, coupled)
     }
 }
 
 impl MultiplicityFreeRigidSymbols for AdmissionCountingSu2Rule {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.dim_scalar(sector)
+        su2_rule().dim_scalar(sector)
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.inv_dim_scalar(sector)
+        su2_rule().inv_dim_scalar(sector)
     }
 
     fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.sqrt_dim_scalar(sector)
+        su2_rule().sqrt_dim_scalar(sector)
     }
 
     fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.inv_sqrt_dim_scalar(sector)
+        su2_rule().inv_sqrt_dim_scalar(sector)
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.twist_scalar(sector)
+        su2_rule().twist_scalar(sector)
     }
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.frobenius_schur_phase_scalar(sector)
+        su2_rule().frobenius_schur_phase_scalar(sector)
     }
 }
 
@@ -178,7 +179,7 @@ fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_wo
     let rule = AdmissionCountingSu2Rule {
         nsymbol_calls: Arc::clone(&calls),
     };
-    let vacuum = SU2FusionRule.vacuum();
+    let vacuum = su2_rule().vacuum();
     let source = bound_source(
         Arc::new(rule),
         (0..129).map(|_| SectorLeg::new([(vacuum, 1)], false)),
@@ -215,9 +216,9 @@ fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_wo
 /// Rank eight with `half_legs` spin-1/2 legs and vacuum legs elsewhere: the
 /// complete layout has one block per vacuum-coupled tree of the spin-1/2
 /// legs (1, 2, 5, 14 for 2, 4, 6, 8 of them).
-fn rank_eight_su2_layout(half_legs: usize) -> BoundDynamicFusionMapSpace<SU2FusionRule> {
-    let half = SU2Irrep::from_twice_spin(1).sector_id();
-    let vacuum = SU2FusionRule.vacuum();
+fn rank_eight_su2_layout(half_legs: usize) -> BoundDynamicFusionMapSpace<Su2Rule> {
+    let half = symtn_core::SectorId::new(1);
+    let vacuum = su2_rule().vacuum();
     let legs = (0..8)
         .map(|leg| SectorLeg::new([(if leg < half_legs { half } else { vacuum }, 1)], false))
         .collect::<Vec<_>>();
@@ -225,7 +226,7 @@ fn rank_eight_su2_layout(half_legs: usize) -> BoundDynamicFusionMapSpace<SU2Fusi
         FusionProductSpace::new(legs.clone()),
         FusionProductSpace::new([]),
     );
-    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(Arc::new(SU2FusionRule), hom)
+    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(Arc::new(su2_rule()), hom)
         .unwrap()
 }
 
@@ -422,11 +423,12 @@ fn grouped_multi_compile_borrows_plan_coefficient_matrix() {
 
 /// `[s, s, s] <- [d]` with `s = {1/2, 1}` and the domain leg's sectors `d`.
 fn su2_three_to_one_structure(domain_twice_spins: &[usize]) -> Arc<BlockStructure> {
+    let su2_provider_rule = su2_rule();
     let leg = |twice_spins: &[usize]| {
         SectorLeg::new(
             twice_spins
                 .iter()
-                .map(|&j| (SU2Irrep::from_twice_spin(j).sector_id(), 1)),
+                .map(|&j| (symtn_core::SectorId::new(j), 1)),
             false,
         )
     };
@@ -435,7 +437,7 @@ fn su2_three_to_one_structure(domain_twice_spins: &[usize]) -> Arc<BlockStructur
         FusionProductSpace::new([leg(domain_twice_spins)]),
     );
     let keys = hom
-        .fusion_tree_keys(&SU2FusionRule)
+        .fusion_tree_keys(&su2_provider_rule)
         .iter()
         .cloned()
         .map(BlockKey::from)
@@ -538,11 +540,12 @@ fn sector_change_binding_copies_coefficients_of_changed_groups_only() {
 }
 
 fn assert_sector_change_binding_copies_only_changed_groups(operation: TreeTransformOperation) {
+    let su2_provider_rule = su2_rule();
     let a = su2_three_to_one_structure(&[1, 2]);
     let c = su2_three_to_one_structure(&[1, 2, 3]);
     let plan_a =
-        build_tree_pair_transform_group_plan(&SU2FusionRule, operation.clone(), &a).unwrap();
-    let plan_c = build_tree_pair_transform_group_plan(&SU2FusionRule, operation, &c).unwrap();
+        build_tree_pair_transform_group_plan(&su2_provider_rule, operation.clone(), &a).unwrap();
+    let plan_c = build_tree_pair_transform_group_plan(&su2_provider_rule, operation, &c).unwrap();
 
     let bind_bytes = |bind: &dyn Fn()| {
         counting_alloc::start();

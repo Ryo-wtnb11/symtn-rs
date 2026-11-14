@@ -20,7 +20,7 @@
 //!    (never read) and `β ∈ {0.5, 1}` by distinct finite values; for an owned
 //!    source the reference-step oracle (`materialize`, then eager) is eager
 //!    itself;
-//! 2. multiplicity-free SU(2) (`SU2FusionRule`) == checked Generic SU(2)
+//! 2. multiplicity-free SU(2) (`MF Lie SU(2)`) == checked Generic SU(2)
 //!    (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two adapters to the same exact A1 provider on one input;
 //! 3. the destination keeps its payload allocation and provider.
 //!
@@ -70,6 +70,7 @@
 //! materialized adjoint in `complex_symbol_lazy_adjoint.rs`. Fibonacci `permute` is anyonic and asserted as the
 //! same rejection as eager.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
@@ -77,8 +78,7 @@ use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, TableRule, TableSector,
-    U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, TableRule, TableSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     BlockFusionTrees, Complex64, ContractSpec, GradedSpace, SectorSpectrum, TensorMap,
@@ -557,10 +557,10 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
 /// `(2j, k)` per sector: nontrivial, distinct degeneracies.
 const SU2_SECTORS: [(usize, usize); 3] = [(0, 2), (1, 3), (2, 2)];
 
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
+fn su2_leg() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
+        Arc::new(su2_rule()),
+        SU2_SECTORS.map(|(s, k)| (su2_irrep(s), k)),
     )
     .unwrap()
 }
@@ -665,9 +665,9 @@ fn multiplicity_free_real_symbol_transform_into_is_alpha_eager_plus_beta_destina
     let (v, w) = fz2_legs();
     both_lanes!(engine, &runtime, v, w, debug_key::<FermionParityIrrep>);
     let v = su2_leg();
-    both_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| {
-        twice(t, su2_spin)
-    });
+    both_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<
+        symtn_core::LieIrrep,
+    >| { twice(t, su2_spin) });
 }
 
 #[test]
@@ -704,9 +704,9 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
         engine,
         &runtime,
         v,
-        SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
-        |s: &SU2Irrep| su2_spin(s).to_string(),
-        |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin)
+        SU2_SECTORS.map(|(s, k)| (su2_irrep(s), k)),
+        |s: &symtn_core::LieIrrep| su2_spin(s).to_string(),
+        |t: &BlockFusionTrees<symtn_core::LieIrrep>| twice(t, su2_spin)
     );
 }
 
@@ -872,7 +872,7 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
     let mf = su2_leg();
     let checked = sun2_leg();
     let mf_rows = both_lanes!(engine, &runtime, mf, mf, |t: &BlockFusionTrees<
-        SU2Irrep,
+        symtn_core::LieIrrep,
     >| twice(t, su2_spin));
     let checked_rows = both_lanes!(
         engine,
@@ -885,9 +885,9 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
         engine,
         &runtime,
         mf,
-        SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
-        |s: &SU2Irrep| su2_spin(s).to_string(),
-        |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin)
+        SU2_SECTORS.map(|(s, k)| (su2_irrep(s), k)),
+        |s: &symtn_core::LieIrrep| su2_spin(s).to_string(),
+        |t: &BlockFusionTrees<symtn_core::LieIrrep>| twice(t, su2_spin)
     );
     let checked_bond = bond_lanes!(
         engine,
@@ -1182,9 +1182,9 @@ fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_desti
         &runtime,
         v,
         v,
-        SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
-        |s: &SU2Irrep| su2_spin(s).to_string(),
-        |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin)
+        SU2_SECTORS.map(|(s, k)| (su2_irrep(s), k)),
+        |s: &symtn_core::LieIrrep| su2_spin(s).to_string(),
+        |t: &BlockFusionTrees<symtn_core::LieIrrep>| twice(t, su2_spin)
     );
 }
 
@@ -1202,9 +1202,9 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
         &runtime,
         mf,
         mf,
-        SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
-        |s: &SU2Irrep| su2_spin(s).to_string(),
-        |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin)
+        SU2_SECTORS.map(|(s, k)| (su2_irrep(s), k)),
+        |s: &symtn_core::LieIrrep| su2_spin(s).to_string(),
+        |t: &BlockFusionTrees<symtn_core::LieIrrep>| twice(t, su2_spin)
     );
     let checked_rows = trace_lanes!(
         engine,
@@ -1759,18 +1759,18 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
         debug_key::<FermionParityIrrep>
     );
     let v = su2_leg();
-    contract_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| {
-        twice(t, su2_spin)
-    });
+    contract_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<
+        symtn_core::LieIrrep,
+    >| { twice(t, su2_spin) });
     compact_contract_lanes!(
         engine,
         &runtime,
         v,
         v,
         v,
-        SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
-        |s: &SU2Irrep| su2_spin(s).to_string(),
-        |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin)
+        SU2_SECTORS.map(|(s, k)| (su2_irrep(s), k)),
+        |s: &symtn_core::LieIrrep| su2_spin(s).to_string(),
+        |t: &BlockFusionTrees<symtn_core::LieIrrep>| twice(t, su2_spin)
     );
 }
 
@@ -1783,7 +1783,7 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
     let runtime = host_runtime();
     let mf = su2_leg();
     let checked = sun2_leg();
-    let mf_key = |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin);
+    let mf_key = |t: &BlockFusionTrees<symtn_core::LieIrrep>| twice(t, su2_spin);
     let checked_key = |t: &BlockFusionTrees<LieIrrep>| twice(t, sun_spin);
     let mf_rows = contract_lanes!(engine, &runtime, mf, mf, mf_key);
     let checked_rows = contract_lanes!(engine, &runtime, checked, checked, checked_key);
@@ -1793,8 +1793,8 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
         mf,
         mf,
         mf,
-        SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
-        |s: &SU2Irrep| su2_spin(s).to_string(),
+        SU2_SECTORS.map(|(s, k)| (su2_irrep(s), k)),
+        |s: &symtn_core::LieIrrep| su2_spin(s).to_string(),
         mf_key
     );
     let checked_compact = compact_contract_lanes!(

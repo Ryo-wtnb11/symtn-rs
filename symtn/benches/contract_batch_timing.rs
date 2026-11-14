@@ -6,6 +6,9 @@
 //! Timings and caller-thread allocation counts are evidence, never a CI
 //! threshold.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+use symtn_core as sector_types;
 #[path = "../tests/common/mod.rs"]
 mod common;
 #[path = "../../tests/support"]

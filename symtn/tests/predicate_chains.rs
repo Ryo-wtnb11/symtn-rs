@@ -6,6 +6,7 @@
 //! from the fill.
 
 use crate::numerics;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");
@@ -16,7 +17,7 @@ use report::Report;
 use num_complex::{Complex32, Complex64};
 use numerics::Numeric;
 use std::sync::Arc;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::HermitianTol;
 use symtn::typed::{Eigh, LeftPolar, Qr};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -170,15 +171,8 @@ fn u1_leg() -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 3),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap()
+fn su2_leg() -> GradedSpace<Su2Rule> {
+    GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 3), (su2_irrep(1), 2)]).unwrap()
 }
 
 #[test]

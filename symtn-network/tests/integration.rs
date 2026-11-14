@@ -1,6 +1,9 @@
 //! Behavior tests neither observe nor reset process-global state and run concurrently.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use symtn::typed::{Complex32, Complex64};
+use symtn_core as sector_types;
 
 #[path = "../../symtn/tests/braiding_probe/mod.rs"]
 mod braiding_probe;

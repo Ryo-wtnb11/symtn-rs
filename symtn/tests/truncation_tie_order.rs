@@ -19,13 +19,14 @@
 //! (0.17.0) with MatrixAlgebraKit 0.6.8, `MAK.findtruncated` over a
 //! `SectorVector` holding the fixture's values in the listed (stored) order.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::ZNIrrep;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    ZNFusionRule,
 };
 use symtn::sector::{CheckedGenericFusion, FusionRule, SectorOrderKey};
 use symtn::typed::{Eigh, GradedSpace, SectorSpectrum, Svd};
@@ -184,7 +185,7 @@ fn nested_product_tie_follows_the_flattened_tensorkit_order() {
     let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
         FermionParityFusionRule::new(),
@@ -195,14 +196,14 @@ fn nested_product_tie_follows_the_flattened_tensorkit_order() {
         [
             (
                 product_sector(
-                    product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
+                    product_sector(FermionParityIrrep::EVEN, su2_irrep(2)),
                     FermionParityIrrep::EVEN
                 ),
                 [1.0]
             ),
             (
                 product_sector(
-                    product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(0)),
+                    product_sector(FermionParityIrrep::ODD, su2_irrep(0)),
                     FermionParityIrrep::ODD
                 ),
                 [1.0]
@@ -217,11 +218,8 @@ fn nested_product_tie_follows_the_flattened_tensorkit_order() {
 fn su2_tie_keeps_the_smaller_spin_first() {
     // isless: 1/2 < 1. Weights 2 and 3: rank 3 fits only the first.
     let kept = kept!(
-        SU2FusionRule,
-        [
-            (SU2Irrep::from_twice_spin(1), [1.0]),
-            (SU2Irrep::from_twice_spin(2), [1.0]),
-        ],
+        su2_rule(),
+        [(su2_irrep(1), [1.0]), (su2_irrep(2), [1.0]),],
         Truncation::rank(3)
     );
     assert_eq!(kept, [1, 0]);
@@ -327,11 +325,8 @@ fn su2_within_sector_tie_discards_the_earlier_position_with_dim_weights() {
     // Spin 0 (weight 1) holds both 0.1s; spin 1/2 weighs 2. norm^2 = 3.02.
     // Discard (0, 0) for 0.01; (0, 2) would bring 0.02 > 0.0144.
     let kept = positions!(
-        SU2FusionRule,
-        [
-            (SU2Irrep::from_twice_spin(0), [0.1, 1.0, 0.1]),
-            (SU2Irrep::from_twice_spin(1), [1.0]),
-        ],
+        su2_rule(),
+        [(su2_irrep(0), [0.1, 1.0, 0.1]), (su2_irrep(1), [1.0]),],
         truncerror_atol(0.12, 3.02)
     );
     assert_eq!(kept, [vec![1, 2], vec![0]]);
@@ -356,11 +351,8 @@ fn rank_keeps_the_largest_magnitudes_wherever_they_are_stored() {
     assert_eq!(kept, [vec![2, 3], vec![0]]);
     // SU(2): 2.0 (spin 0, weight 1) then 2.0 (spin 1/2, weight 2) fill rank 3.
     let kept = positions!(
-        SU2FusionRule,
-        [
-            (SU2Irrep::from_twice_spin(0), [1.0, 2.0]),
-            (SU2Irrep::from_twice_spin(1), [2.0, 0.5]),
-        ],
+        su2_rule(),
+        [(su2_irrep(0), [1.0, 2.0]), (su2_irrep(1), [2.0, 0.5]),],
         Truncation::rank(3)
     );
     assert_eq!(kept, [vec![1], vec![0]]);

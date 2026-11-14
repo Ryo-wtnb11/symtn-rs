@@ -2,6 +2,7 @@
 
 #![cfg(feature = "cgc-gen")]
 
+use symtn_sectors::TypedSectorAdmission;
 use symtn_sectors::{
     CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols,
     LieGroupFusionRule, SectorId,
@@ -19,7 +20,13 @@ fn absent_lie_group_moves_do_not_require_an_encoded_dual_or_finite_dimension() {
     // This id's Dynkin reversal lies beyond usize::MAX in graded-lex order.
     let unencodable_dual = SectorId::new(usize::MAX);
     assert_eq!(
-        su3.decode_irrep(unencodable_dual).unwrap().0,
+        su3.try_decode_label(unencodable_dual)
+            .map(|label| (
+                label.dynkin().collect::<Vec<_>>(),
+                label.charges().collect::<Vec<_>>()
+            ))
+            .unwrap()
+            .0,
         [2_746_052_115, 3_327_948_884]
     );
 
@@ -29,7 +36,7 @@ fn absent_lie_group_moves_do_not_require_an_encoded_dual_or_finite_dimension() {
     .unwrap();
     let mut labels = vec![0; 77];
     labels[36] = 19;
-    let overflowing_dimension = su78.encode_irrep(&labels).unwrap();
+    let overflowing_dimension = su78.encode_irrep_with_charges(&labels, &[]).unwrap();
     for (rule, sector) in [(&su3, unencodable_dual), (&su78, overflowing_dimension)] {
         let unit = rule.vacuum();
         // For nontrivial a, N(a,1;1) = N(1,a;1) = 0 without dimensions or duals.

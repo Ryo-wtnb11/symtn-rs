@@ -12,13 +12,14 @@
 
 #![allow(dead_code)]
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -37,11 +38,11 @@ pub fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     )
 }
 
-pub fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let j = SU2Irrep::from_twice_spin;
+pub fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
+    let j = su2_irrep;
     (
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 2), (j(1), 2), (j(2), 1)]).unwrap(),
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 1), (j(2), 2)]).unwrap(),
+        GradedSpace::try_new(Arc::new(su2_rule()), [(j(0), 2), (j(1), 2), (j(2), 1)]).unwrap(),
+        GradedSpace::try_new(Arc::new(su2_rule()), [(j(0), 1), (j(2), 2)]).unwrap(),
     )
 }
 

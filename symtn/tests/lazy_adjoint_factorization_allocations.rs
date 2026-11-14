@@ -6,11 +6,11 @@
 //! materialize-then-factor, if any, must not grow with the degeneracies.
 //! Warm measurements, one dense thread.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::hint::black_box;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::counting_alloc;
@@ -190,12 +190,11 @@ fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = |scale: usize| {
         GradedSpace::try_new(
             Arc::clone(&provider),
-            [(0, 2), (1, 2), (2, 1)]
-                .map(|(twice, d)| (SU2Irrep::from_twice_spin(twice), d * scale)),
+            [(0, 2), (1, 2), (2, 1)].map(|(twice, d)| (su2_irrep(twice), d * scale)),
         )
         .unwrap()
     };

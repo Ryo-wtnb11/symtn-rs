@@ -1,6 +1,7 @@
 //! Complex composition and contraction agree with their real and imaginary
 //! parts.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 
@@ -8,7 +9,7 @@ use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
 };
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
@@ -129,13 +130,7 @@ fn c64_contract_matches_real_imag_decomposition() {
     .unwrap();
     assert_complex_contract_identity(&runtime, &u1);
 
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1), (su2_irrep(1), 2)]).unwrap();
     assert_complex_contract_identity(&runtime, &su2);
 }

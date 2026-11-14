@@ -31,12 +31,11 @@ fusion-symbols categories of every simple type, A–G, their products, tori and 
 Generic Host execution; without `cgc-gen` it serves A1/B1/C1/D2 factors and
 tori, and other groups return `LieError::Unsupported { requires: "lie-generated" }`.
 It uses fusion-symbols' `LieIrrep` labels and explicit `GroupId` global
-forms; `LieGroupFusionRule::<MultiplicityFreeAdmissionMode>` serves
-multiplicity-free groups (SU(2), U(2), tori, D2 and their products) on the
+forms, both re-exported from `symtn::sector`.
+`LieGroupFusionRule::<MultiplicityFreeAdmissionMode>` serves multiplicity-free groups (SU(2), U(2), tori, D2 and their products) on the
 multiplicity-free tensor pipeline, CUDA included, with a physical carrier
 basis for dense conversion (TensorKit's descending-`m` SU(2) order per
-rank-one factor). `SU2FusionRule` retains its compact multiplicity-free and
-physical-basis capabilities.
+rank-one factor).
 Contraction-order planners and their configuration (`opt-path`, `cotengra-python`) belong to `symtn-network`.
 
 The `krylov` feature makes Host `TensorMap` a vector of the

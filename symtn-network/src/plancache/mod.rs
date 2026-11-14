@@ -1464,12 +1464,13 @@ mod tests {
     use super::Optimizer;
     use super::{needs_replan, ReplanPolicy, WorkspaceBudget, WorkspacePools};
     use crate::network::NetworkExecutionWorkspace;
+    use crate::su2::Su2Rule;
     use crate::{Network, TemporaryLabel};
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Barrier};
     #[cfg(feature = "cotengra-python")]
     use std::time::Duration;
-    use symtn::sector::{SU2FusionRule, U1FusionRule};
+    use symtn::sector::U1FusionRule;
     use symtn::typed::Complex64;
     use symtn::typed::{ContractSpec, GradedSpace, TensorMap};
 
@@ -2014,7 +2015,7 @@ mod tests {
         let mut lease = first.lease();
         lease.commit_recycling();
         drop(pools.pool::<U1FusionRule, Complex64, Vec<Complex64>>());
-        drop(pools.pool::<SU2FusionRule, f64, Vec<f64>>());
+        drop(pools.pool::<Su2Rule, f64, Vec<f64>>());
         assert!(!first.registered.load(Ordering::SeqCst));
         drop(lease);
         assert!(first.available.lock().unwrap().is_empty());

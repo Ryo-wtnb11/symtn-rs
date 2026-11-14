@@ -1,13 +1,16 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn expert_layout_transformers_are_rebuilt_per_call_and_never_published() {
+    let su2_provider_rule = su2_rule();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -15,7 +18,7 @@ fn expert_layout_transformers_are_rebuilt_per_call_and_never_published() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -82,6 +85,7 @@ fn expert_layout_transformers_are_rebuilt_per_call_and_never_published() {
 
 #[test]
 fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     // Composed-coefficient hits must not race a clearing sibling test.
     let _guard = crate::test_support::CACHE_TEST_LOCK
@@ -89,7 +93,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -97,7 +101,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -133,7 +137,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
 
     let tree_pair_lowering_calls_rec = probe::record();
     let direct =
-        uncached_tree_pair_structure(&SU2FusionRule, direct_operation, &dst, &src).unwrap();
+        uncached_tree_pair_structure(&su2_provider_rule, direct_operation, &dst, &src).unwrap();
     assert_eq!(
         tree_pair_lowering_calls_rec.get(Event::OrderedTreePairLowering),
         group_count
@@ -144,7 +148,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     let miss = planning
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &miss_operation,
             dst.structure(),
             src.structure(),
@@ -164,7 +168,7 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
     let rebuilt = planning
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &hit_operation,
             dst.structure(),
             src.structure(),
@@ -231,9 +235,10 @@ fn su2_two_by_two_f_move_uses_one_completed_structure_miss_compiler() {
 
 #[test]
 fn all_codomain_plan_compiles_distinct_degeneracy_shapes() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -241,7 +246,7 @@ fn all_codomain_plan_compiles_distinct_degeneracy_shapes() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -286,7 +291,7 @@ fn all_codomain_plan_compiles_distinct_degeneracy_shapes() {
     .unwrap();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
     let resolve = |dst: &TestTensor<f64>, src: &TestTensor<f64>| {
-        uncached_all_codomain_structure(&SU2FusionRule, operation.clone(), dst, src).unwrap()
+        uncached_all_codomain_structure(&su2_provider_rule, operation.clone(), dst, src).unwrap()
     };
 
     let small = resolve(&dst, &src);
@@ -316,9 +321,10 @@ fn all_codomain_plan_compiles_distinct_degeneracy_shapes() {
 
 #[test]
 fn all_codomain_plan_replays_su2_recoupling() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -326,7 +332,7 @@ fn all_codomain_plan_replays_su2_recoupling() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -351,7 +357,8 @@ fn all_codomain_plan_replays_su2_recoupling() {
     let mut dst =
         TestTensor::<f64>::from_vec_with_structure(vec![0.0, 0.0], space, block_structure).unwrap();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
-    let structure = uncached_all_codomain_structure(&SU2FusionRule, operation, &dst, &src).unwrap();
+    let structure =
+        uncached_all_codomain_structure(&su2_provider_rule, operation, &dst, &src).unwrap();
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
 
@@ -391,9 +398,10 @@ fn all_codomain_plan_replays_su2_recoupling() {
 
 #[test]
 fn tree_pair_and_all_codomain_transforms_agree_on_an_all_codomain_source() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -401,7 +409,7 @@ fn tree_pair_and_all_codomain_transforms_agree_on_an_all_codomain_source() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -430,7 +438,7 @@ fn tree_pair_and_all_codomain_transforms_agree_on_an_all_codomain_source() {
 
     context_tree_transform_into(
         &mut context,
-        &SU2FusionRule,
+        &su2_provider_rule,
         operation.clone(),
         &mut dst,
         &src,
@@ -441,7 +449,8 @@ fn tree_pair_and_all_codomain_transforms_agree_on_an_all_codomain_source() {
     let tree_pair = dst.data().to_vec();
 
     dst.data_mut().copy_from_slice(&[0.0, 0.0]);
-    let structure = uncached_all_codomain_structure(&SU2FusionRule, operation, &dst, &src).unwrap();
+    let structure =
+        uncached_all_codomain_structure(&su2_provider_rule, operation, &dst, &src).unwrap();
     replay_into(
         engine,
         &mut DenseTreeTransformOperations::default(),

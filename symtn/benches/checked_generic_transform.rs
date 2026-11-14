@@ -1,8 +1,7 @@
 //! Public checked-Generic transform timing (SU(3)/SU(4) permute, braid,
-//! repartition, plus SU(2) controls: `SU2FusionRule` against
-//! `LieGroupFusionRule(su(2))` in checked Generic (`su2cg`) and
-//! multiplicity-free (`su2mf`) mode for permute, braid, repartition and
-//! contract). Run with `cargo bench -p symtn
+//! repartition, plus SU(2) controls: multiplicity-free Lie (`su2`) against
+//! checked Generic Lie (`su2cg`) for permute, braid, repartition and
+//! contract. Run with `cargo bench -p symtn
 //! --features cgc-gen --bench checked_generic_transform`.
 //!
 //! Each case runs in a child process so provider and Runtime state start
@@ -15,8 +14,7 @@ mod counting_alloc;
 use std::sync::Arc;
 
 use symtn::sector::{
-    CheckedGenericAdmissionMode, LieGroupFusionRule, MultiplicityFreeAdmissionMode, SU2FusionRule,
-    SU2Irrep,
+    CheckedGenericAdmissionMode, LieGroupFusionRule, MultiplicityFreeAdmissionMode,
 };
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
@@ -69,12 +67,12 @@ fn completed_transformers() -> symtn::cache::StructureCacheInfo {
         .expect("every structure cache kind reports")
 }
 
-/// The SU(2) control cases: `SU2FusionRule` (MF) against
+/// The SU(2) control cases: `MF Lie SU(2)` (MF) against
 /// `LieGroupFusionRule(su(2))` (checked Generic) on the same spaces.
 /// `small` is the original control (`[1/2, 1/2 | 0 + 1]`); `wide` has
 /// spins `0..=2`, two copies each, on all four legs.
 fn su2_control_cases() -> impl Iterator<Item = String> {
-    ["su2", "su2cg", "su2mf"].into_iter().flat_map(|rule| {
+    ["su2", "su2cg"].into_iter().flat_map(|rule| {
         ["small", "wide"].into_iter().flat_map(move |fixture| {
             ["permute", "braid", "repartition", "contract"]
                 .into_iter()
@@ -239,25 +237,11 @@ fn main() {
             case.strip_prefix("su2cg_permute_control/")
                 .map(|rest| ("su2cg", rest))
         })
-        .or_else(|| {
-            case.strip_prefix("su2mf_permute_control/")
-                .map(|rest| ("su2mf", rest))
-        })
     {
         let (rule, rest) = control;
         let (fixture, operation) = rest.split_once('/').unwrap();
         match rule {
-            "su2" => su2_control!(
-                engine,
-                case,
-                fixture,
-                operation,
-                SU2FusionRule,
-                SU2FusionRule,
-                |twice: usize| SU2Irrep::from_twice_spin(twice)
-            ),
-            "su2mf" => {
-                // Labels come from a category built outside the timed regions.
+            "su2" => {
                 let su2 = fusion_symbols::lie::LieGroup::new(
                     fusion_symbols::lie::GroupId::su(2).unwrap(),
                 )

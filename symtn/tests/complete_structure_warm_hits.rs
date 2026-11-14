@@ -2,6 +2,7 @@
 //! is a hit, never a miss, admission, or eviction, and returns bit-identical
 //! data. Every test in this target takes the shared serial guard.
 
+use crate::su2::{su2_irrep, su2_rule};
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 
 fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
@@ -11,8 +12,8 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         .unwrap()
 }
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, LegSelection, Runtime, TensorMap};
 
@@ -124,8 +125,8 @@ fn warm_eager_calls_hit_complete_structure_cache() {
         engine,
         &runtime,
         "SU2",
-        SU2FusionRule,
-        (0..3).map(SU2Irrep::from_twice_spin).collect()
+        su2_rule(),
+        (0..3).map(su2_irrep).collect()
     );
     warm_ops!(
         engine,

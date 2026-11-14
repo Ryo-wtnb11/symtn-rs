@@ -13,6 +13,8 @@
 //!   SU(2) route, itself checked against the physical dense expansion
 //!   `C = Σ A B` (TensorKit `convert(Array, ·)`).
 
+#[cfg(feature = "cgc-gen")]
+use crate::su2::{su2_irrep, su2_rule};
 use std::fmt::Debug;
 use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
@@ -209,7 +211,7 @@ fn generic_toy_core_composition_matches_block_products() {
 mod racah {
     use super::*;
     use std::collections::BTreeMap;
-    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     #[test]
     fn su3_staged_contraction_matches_block_products() {
@@ -263,7 +265,11 @@ mod racah {
         hashed_value(&format!("{:?}{index:?}", twice(trees, sun_spin)), seed)
     }
 
-    fn su2_value(trees: &BlockFusionTrees<SU2Irrep>, index: &[usize], seed: u64) -> f64 {
+    fn su2_value(
+        trees: &BlockFusionTrees<symtn_core::LieIrrep>,
+        index: &[usize],
+        seed: u64,
+    ) -> f64 {
         hashed_value(&format!("{:?}{index:?}", twice(trees, su2_spin)), seed)
     }
 
@@ -304,8 +310,8 @@ mod racah {
         let degeneracies = [(0usize, 2usize), (1, 2), (2, 1)];
 
         let mf_v = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            degeneracies.map(|(s, n)| (SU2Irrep::from_twice_spin(s), n)),
+            Arc::new(su2_rule()),
+            degeneracies.map(|(s, n)| (su2_irrep(s), n)),
         )
         .unwrap();
         let mf_w = mf_v.try_dual().unwrap();

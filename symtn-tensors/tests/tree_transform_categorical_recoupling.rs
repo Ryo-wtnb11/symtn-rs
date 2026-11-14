@@ -9,6 +9,7 @@
 //! structures, and proves the fixtures actually contain recoupling.
 
 use crate::categorical_recoupling;
+use crate::su2::su2_rule;
 
 use categorical_recoupling::{
     alphas, assert_close, compile, expected, expected_scaled, fermionic_space, fermionic_su2_rule,
@@ -16,7 +17,7 @@ use categorical_recoupling::{
     su2_space, Compiled, Side, TestScalar,
 };
 use num_complex::Complex64;
-use symtn_core::{FermionParityFusionRule, SU2FusionRule};
+use symtn_core::FermionParityFusionRule;
 use symtn_operations::TreeTransformBlock;
 use symtn_tensors::TreeTransformOperation;
 
@@ -216,6 +217,7 @@ fn a_fermionic_abelian_rule_compiles_to_single_blocks_only() {
 
 #[test]
 fn the_fermionic_recoupling_matrix_differs_from_the_bosonic_one() {
+    let su2_provider_rule = su2_rule();
     // What: the fZ2 x SU(2) fixtures are not the SU(2) ones relabelled — their
     // recoupling entries carry the fermionic signs — so the fermionic evidence
     // is about fermionic data and not a second copy of the bosonic case.
@@ -225,7 +227,7 @@ fn the_fermionic_recoupling_matrix_differs_from_the_bosonic_one() {
     let swap = [0usize, 2, 1, 3];
     let bosonic = compile(
         "su2_braid",
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::braid(swap, [], 0..4, []),
         &su2_space(&legs, &channels, 2),
         false,

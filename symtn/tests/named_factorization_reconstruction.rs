@@ -10,12 +10,13 @@
 //! factor values are pinned.
 
 use crate::fixtures;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{
     Eig, Eigh, GradedSpace, HermitianTol, LeftPolar, Lq, Qr, RightPolar, Svd, TensorMap,
@@ -158,10 +159,10 @@ fn u1_leg() -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
+fn su2_leg() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [(0, 2), (1, 2), (2, 1)].map(|(twice, n)| (SU2Irrep::from_twice_spin(twice), n)),
+        Arc::new(su2_rule()),
+        [(0, 2), (1, 2), (2, 1)].map(|(twice, n)| (su2_irrep(twice), n)),
     )
     .unwrap()
 }

@@ -11,9 +11,9 @@
 //! axes of the operand), not the code under test. The device variant runs
 //! with `--features cuda -- --ignored`.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{
     Complex64, ContractSpec, Engine, Error, GradedSpace, OperationError, Runtime, TensorMap,
 };
@@ -217,9 +217,9 @@ macro_rules! into_matrix {
     }};
 }
 
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    let j = |twice: usize| SU2Irrep::from_twice_spin(twice);
-    GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 2), (j(1), 1), (j(2), 2)]).unwrap()
+fn su2_leg() -> GradedSpace<Su2Rule> {
+    let j = |twice: usize| su2_irrep(twice);
+    GradedSpace::try_new(Arc::new(su2_rule()), [(j(0), 2), (j(1), 1), (j(2), 2)]).unwrap()
 }
 
 macro_rules! multiplicity_free {

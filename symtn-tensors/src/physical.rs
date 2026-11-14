@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use core::fmt;
 use std::collections::HashMap;
 
@@ -991,8 +993,7 @@ mod tests {
     use symtn_core::{
         BraidingStyleKind, FusionProductSpace, FusionRule, FusionStyleKind, FusionTreeHomSpace,
         MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-        PhysicalFusionBasis, RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec,
-        U1FusionRule, U1Irrep,
+        PhysicalFusionBasis, RuleIdentity, SectorId, SectorLeg, SectorVec, U1FusionRule, U1Irrep,
     };
 
     use super::*;
@@ -1135,11 +1136,11 @@ mod tests {
         }
     }
 
-    fn su2_multitree_space() -> BoundDynamicFusionMapSpace<SU2FusionRule> {
-        let half = SU2Irrep::from_twice_spin(1);
+    fn su2_multitree_space() -> BoundDynamicFusionMapSpace<Su2Rule> {
+        let half = SectorId::new(1);
         let leg = || SectorLeg::new([(half, 1)], false);
         BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::new(SU2FusionRule),
+            Arc::new(su2_rule()),
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg(), leg(), leg()]),
                 FusionProductSpace::new([leg()]),
@@ -1173,7 +1174,7 @@ mod tests {
     #[test]
     fn physical_expansion_plan_reuses_staged_provider_data() {
         let space = su2_multitree_space();
-        let plan = PhysicalExpansionPlan::<SU2FusionRule, f64>::compile(&space).unwrap();
+        let plan = PhysicalExpansionPlan::<Su2Rule, f64>::compile(&space).unwrap();
         assert_eq!(plan.shape(), &[2, 2, 2, 2]);
         assert_eq!(plan.provider_identity(), space.provider().rule_identity());
         let first = plan
@@ -1289,9 +1290,9 @@ mod tests {
 
     #[test]
     fn su2_dual_map_is_tensorkit_antisymmetric_z_dagger() {
-        let half = SU2Irrep::from_twice_spin(1);
+        let half = SectorId::new(1);
         let space = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::new(SU2FusionRule),
+            Arc::new(su2_rule()),
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([SectorLeg::new([(half, 1)], true)]),
                 FusionProductSpace::new([SectorLeg::new([(half, 1)], false)]),

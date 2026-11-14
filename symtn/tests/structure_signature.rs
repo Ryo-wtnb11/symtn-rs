@@ -6,6 +6,7 @@
 //! same rule, placement and live runtime render differently only when their
 //! content ids differ.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -29,8 +30,8 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         .unwrap()
 }
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, StructureSignature, TensorMap};
@@ -125,13 +126,13 @@ fn fixtures_are_equal_iff_structure_is_equal() {
         GradedSpace::try_new(Arc::new(U1FusionRule), pairs).unwrap()
     });
     check_fixture!(engine, "SU2", |variant| {
-        let j = SU2Irrep::from_twice_spin;
+        let j = su2_irrep;
         let pairs = match variant {
             0 => [(j(0), 2), (j(1), 2), (j(2), 1)],
             1 => [(j(0), 2), (j(1), 3), (j(2), 1)],
             _ => [(j(0), 2), (j(1), 2), (j(3), 1)],
         };
-        GradedSpace::try_new(Arc::new(SU2FusionRule), pairs).unwrap()
+        GradedSpace::try_new(Arc::new(su2_rule()), pairs).unwrap()
     });
     check_fixture!(engine, "fZ2xU1", |variant| {
         let rule =

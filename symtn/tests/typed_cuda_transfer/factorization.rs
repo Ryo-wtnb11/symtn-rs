@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 use symtn::sector::ZNIrrep;
 
 /// [`HostSvdTrunc`] for the Hermitian eigendecomposition.
@@ -227,11 +228,14 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         assert_eq!(u1_device.inner(cuda, &u1_rhs_device).unwrap(), repeated);
     }
 
-    let su2_provider = Arc::new(SU2FusionRule);
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let spin_half = SU2Irrep::from_twice_spin(1);
-    let su2_leg =
-        GradedSpace::try_new(Arc::clone(&su2_provider), [(spin0, 1), (spin_half, 1)]).unwrap();
+    let su2_provider = Arc::new(su2_rule());
+    let spin0 = su2_irrep(0);
+    let spin_half = su2_irrep(1);
+    let su2_leg = GradedSpace::try_new(
+        Arc::clone(&su2_provider),
+        [(spin0.clone(), 1), (spin_half.clone(), 1)],
+    )
+    .unwrap();
     let su2_lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |trees, _| {
             if trees.coupled() == &spin0 {
@@ -474,15 +478,9 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     .unwrap();
     assert_typed_cuda_qr_matches_host(engine, cuda, &square);
 
-    let su2 = Arc::new(SU2FusionRule);
-    let su2_leg = GradedSpace::try_new(
-        Arc::clone(&su2),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 = Arc::new(su2_rule());
+    let su2_leg =
+        GradedSpace::try_new(Arc::clone(&su2), [(su2_irrep(0), 2), (su2_irrep(1), 2)]).unwrap();
     let su2_tensor =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |_, indices| {
             if indices[0] == indices[1] {
@@ -901,14 +899,8 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
         FACTOR_TERMS,
     );
 
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(1), 2)]).unwrap();
     let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
         engine,
         &runtime,

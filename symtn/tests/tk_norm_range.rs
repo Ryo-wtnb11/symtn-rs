@@ -32,11 +32,10 @@
 //! `formula_and_symtn_reproduce_tensorkit_at_unit_scale`, which anchor the
 //! formula's conventions (quantum-dimension weight, complex modulus).
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
-use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
@@ -85,16 +84,16 @@ fn u1_big() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     )
 }
 
-fn su2_space(entries: [(usize, usize); 3]) -> GradedSpace<SU2FusionRule> {
+fn su2_space(entries: [(usize, usize); 3]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        entries.map(|(twice_spin, deg)| (SU2Irrep::from_twice_spin(twice_spin), deg)),
+        Arc::new(su2_rule()),
+        entries.map(|(twice_spin, deg)| (su2_irrep(twice_spin), deg)),
     )
     .unwrap()
 }
 
 /// `SU2Space(0 => 2, 1//2 => 3, 1 => 4) ← SU2Space(0 => 5, 1//2 => 1, 1 => 2)`.
-fn su2() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
+fn su2() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
     (
         su2_space([(0, 2), (1, 3), (2, 4)]),
         su2_space([(0, 5), (1, 1), (2, 2)]),
@@ -418,7 +417,7 @@ fn mixed_magnitudes_keep_the_dominant_block() {
 #[test]
 fn zero_and_empty_payloads_have_zero_norm() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let zeros: TensorMap<SU2FusionRule, Complex64> = {
+    let zeros: TensorMap<Su2Rule, Complex64> = {
         let (v, w) = su2();
         TensorMap::zeros(engine, &host_runtime(), [&v], [&w]).unwrap()
     };
@@ -455,7 +454,7 @@ fn compact_diagonal_norms_rescale_with_quantum_dimensions() {
                 (2, vec![1.0, 2.0, 2.0, 4.0]),
             ]
             .map(|(twice_spin, values)| SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(twice_spin),
+                sector: su2_irrep(twice_spin),
                 values: values.into_iter().map(|v| s * v).collect(),
             }),
         )

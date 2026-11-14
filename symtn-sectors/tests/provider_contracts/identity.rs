@@ -9,6 +9,8 @@
 //! - Product identity keeps child order, codec and stateful children:
 //!   `tests/rule_identity.rs`.
 
+use crate::su2::su2_rule;
+
 use crate::product_codec::ParityProductCodec;
 
 use symtn_sectors::*;
@@ -20,10 +22,6 @@ fn stateless_rules_are_identified_by_their_type() {
     assert_eq!(
         U1FusionRule.rule_identity(),
         RuleIdentity::of_type::<U1FusionRule>()
-    );
-    assert_eq!(
-        SU2FusionRule.rule_identity(),
-        RuleIdentity::of_type::<SU2FusionRule>()
     );
 }
 
@@ -77,35 +75,7 @@ fn multiplicity_free_lie_identity_is_the_mode_and_group() {
         )
     );
     assert_ne!(mf_identity, CheckedGenericFusion::rule_identity(&generic));
-    assert_ne!(mf_identity, SU2FusionRule.rule_identity());
     assert_eq!(mf.typed_rule_identity(), mf_identity);
-}
-
-#[cfg(feature = "cgc-gen")]
-#[test]
-fn lie_group_su2_and_compact_su2_are_different_rules() {
-    let sun2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
-        fusion_symbols::lie::GroupId::su(2).unwrap(),
-    )
-    .unwrap();
-    assert_ne!(sun2.rule_identity(), SU2FusionRule.rule_identity());
-    assert_eq!(
-        sun2.rule_identity(),
-        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
-            fusion_symbols::lie::GroupId::su(2).unwrap()
-        )
-        .unwrap()
-        .rule_identity()
-    );
-    assert_ne!(
-        sun2.rule_identity(),
-        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
-            fusion_symbols::lie::GroupId::su(3).unwrap()
-        )
-        .unwrap()
-        .rule_identity()
-    );
-    assert_eq!(sun2.typed_rule_identity(), sun2.rule_identity());
 }
 
 #[test]
@@ -169,13 +139,13 @@ fn product_identity_composes_factor_identities_under_the_codec() {
                 U1FusionRule
             )
             .unwrap(),
-            SU2FusionRule
+            su2_rule()
         )
         .unwrap()
         .rule_identity(),
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             ZNFusionRule::new(2).unwrap(),
-            symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap()
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap()
         )
         .unwrap()
         .rule_identity()

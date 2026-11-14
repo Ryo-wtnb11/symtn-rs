@@ -9,13 +9,13 @@
 //! Reconstructions against the permuted tensor are checked as well, so a
 //! wrong permutation cannot hide behind an equally wrong oracle.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::OperationError;
 use symtn::typed::{
@@ -58,15 +58,15 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     (v, w.try_dual().unwrap())
 }
 
-fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
+fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
     let v = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [(0, 2), (1, 2), (2, 1)].map(|(twice, n)| (SU2Irrep::from_twice_spin(twice), n)),
+        Arc::new(su2_rule()),
+        [(0, 2), (1, 2), (2, 1)].map(|(twice, n)| (su2_irrep(twice), n)),
     )
     .unwrap();
     let w = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [(1, 1), (2, 2)].map(|(twice, n)| (SU2Irrep::from_twice_spin(twice), n)),
+        Arc::new(su2_rule()),
+        [(1, 1), (2, 2)].map(|(twice, n)| (su2_irrep(twice), n)),
     )
     .unwrap();
     (v, w.try_dual().unwrap())

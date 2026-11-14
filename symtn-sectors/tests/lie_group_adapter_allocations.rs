@@ -24,7 +24,7 @@ fn warm_lie_group_scalar_queries_reuse_interned_handles() {
             fusion_symbols::lie::GroupId::su(n).unwrap(),
         )
         .unwrap();
-        let adjoint = rule.encode_irrep(labels).unwrap();
+        let adjoint = rule.encode_irrep_with_charges(labels, &[]).unwrap();
         let query = || {
             (
                 rule.try_dim_scalar(adjoint).unwrap(),
@@ -47,7 +47,7 @@ fn warm_lie_group_symbol_queries() {
         fusion_symbols::lie::GroupId::su(3).unwrap(),
     )
     .unwrap();
-    let octet = rule.encode_irrep(&[1, 1]).unwrap();
+    let octet = rule.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
     let object = rule.object(octet).unwrap();
     let category = CategoryProvider::category(&rule);
     let direct_f = || {
@@ -110,8 +110,8 @@ fn warm_lie_group_symbol_queries() {
         );
     }
     // Tensor-unit vertices distinguish which input A and B dualize.
-    let three = rule.encode_irrep(&[1, 0]).unwrap();
-    let unit = rule.encode_irrep(&[0, 0]).unwrap();
+    let three = rule.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
+    let unit = rule.encode_irrep_with_charges(&[0, 0], &[]).unwrap();
     for block in [
         rule.try_a_symbol_generic(three, unit, three).unwrap(),
         rule.try_b_symbol_generic(unit, three, three).unwrap(),

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 #[test]
 fn rule_aware_tree_validation_covers_rank_shape_style_and_vertices() {
@@ -130,6 +132,7 @@ fn rule_aware_constructor_enforces_one_based_vertex_bounds() {
 
 #[test]
 fn checked_tree_constructors_report_builtin_closure_without_unwinding() {
+    let su2_provider_rule = su2_rule();
     // What: raw checked construction preserves exact finite-algebra
     // failures instead of entering the infallible provider path.
     assert_eq!(
@@ -150,8 +153,8 @@ fn checked_tree_constructors_report_builtin_closure_without_unwinding() {
     );
     assert_eq!(
         FusionTreeKey::try_from_sector_ids_for_rule_checked(
-            &SU2FusionRule,
-            [128, 127],
+            &su2_provider_rule,
+            [u32::MAX as usize, 1],
             0,
             [false; 2],
             [],
@@ -159,8 +162,8 @@ fn checked_tree_constructors_report_builtin_closure_without_unwinding() {
         ),
         Err(CheckedFusionSpaceError::FusionAlgebra(Box::new(
             FusionAlgebraError::FusionNotRepresentable {
-                left: su2(128),
-                right: su2(127),
+                left: su2(u32::MAX as usize),
+                right: su2(1),
             }
         )))
     );
@@ -237,6 +240,7 @@ where
 
 #[test]
 fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
+    let su2_provider_rule = su2_rule();
     // What: checked validation accepts the same valid raw trees as the
     // established validator across built-in and recursive product rules.
     assert_checked_tree_matches_infallible(
@@ -270,7 +274,7 @@ fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
         ),
     );
     assert_checked_tree_matches_infallible(
-        &SU2FusionRule,
+        &su2_provider_rule,
         FusionTreeKey::new(
             [su2(1); 2],
             su2(0),
@@ -293,10 +297,10 @@ fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
     #[cfg(target_pointer_width = "64")]
     {
         type InnerRule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-        type Rule = ProductFusionRule<InnerRule, SU2FusionRule>;
+        type Rule = ProductFusionRule<InnerRule, Su2Rule>;
         let rule = Rule::try_new(
             InnerRule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_provider_rule.clone(),
         )
         .unwrap();
         let sector = |parity, charge, spin| {
@@ -398,13 +402,14 @@ fn tree_pair_validation_requires_exact_coupled_sector() {
 
 #[test]
 fn unique_proof_hook_rechecks_style_and_prepared_source_rank() {
+    let su2_provider_rule = su2_rule();
     // What: downstream callers cannot use a general categorical proof to
     // bypass the Unique-style or prepared source-split contract.
     let vacuum = su2(0);
     let half = su2(1);
     let simple_pair = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [half, half],
             vacuum,
             [false; 2],
@@ -412,11 +417,11 @@ fn unique_proof_hook_rechecks_style_and_prepared_source_rank() {
             [MultiplicityIndex::ONE],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&SU2FusionRule, [], vacuum, [], [], []).unwrap(),
+        FusionTreeKey::try_new_for_rule(&su2_provider_rule, [], vacuum, [], [], []).unwrap(),
     );
     let simple_structure = packed_fixture_structure(2, [(simple_pair, vec![1, 1])]).unwrap();
     let simple_proof =
-        LocallyValidatedFusionTreeBlockStructure::try_new(&SU2FusionRule, &simple_structure)
+        LocallyValidatedFusionTreeBlockStructure::try_new(&su2_provider_rule, &simple_structure)
             .unwrap();
     let rank_two_identity =
         PreparedTreePairOperation::prepare_transpose(2, 0, &[0, 1], &[]).unwrap();
@@ -460,6 +465,7 @@ fn unique_proof_hook_rechecks_style_and_prepared_source_rank() {
 
 #[test]
 fn rule_validation_preserves_builtin_multiplicity_free_keys() {
+    let su2_provider_rule = su2_rule();
     // What: validation is observational for representative abelian,
     // non-abelian, anyonic, fermionic, and product fusion trees.
     fn assert_preserved<R: FusionRule>(rule: &R, tree: FusionTreeKey) {
@@ -483,9 +489,9 @@ fn rule_validation_preserves_builtin_multiplicity_free_keys() {
     let half = su2(1);
     let one = su2(2);
     assert_preserved(
-        &SU2FusionRule,
+        &su2_provider_rule,
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [half, half, one],
             one,
             [false, true, false],
@@ -518,8 +524,8 @@ fn rule_validation_preserves_builtin_multiplicity_free_keys() {
         )
         .unwrap(),
     );
-    type ProductRule = ProductFusionRule<U1FusionRule, SU2FusionRule>;
-    let product = ProductRule::try_new(U1FusionRule, SU2FusionRule).unwrap();
+    type ProductRule = ProductFusionRule<U1FusionRule, Su2Rule>;
+    let product = ProductRule::try_new(U1FusionRule, su2_provider_rule.clone()).unwrap();
     let left = product.encode_component_ids(u1(1), half);
     let right = product.encode_component_ids(u1(-1), half);
     let coupled = product.encode_component_ids(u1(0), su2(0));

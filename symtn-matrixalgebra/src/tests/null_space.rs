@@ -1,6 +1,8 @@
 //! Left/right null-space tests.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 fn checked_spy_null(
     left: bool,
@@ -637,7 +639,7 @@ where
 #[test]
 fn multiplicity_free_full_null_eigen_ops_borrow_canonical_input() {
     let u1 = [-1, 0, 1].map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()));
-    let su2 = [0, 1].map(|twice| SU2Irrep::from_twice_spin(twice).sector_id());
+    let su2 = [0, 1].map(symtn_core::SectorId::new);
     let product = symtn_core::ProductFusionRule::<_, _>::try_new(
         FermionParityFusionRule::new(),
         U1FusionRule,
@@ -650,8 +652,8 @@ fn multiplicity_free_full_null_eigen_ops_borrow_canonical_input() {
     ];
     assert_multiplicity_free_full_family_borrows_input::<_, f64>(U1FusionRule, &u1);
     assert_multiplicity_free_full_family_borrows_input::<_, Complex64>(U1FusionRule, &u1);
-    assert_multiplicity_free_full_family_borrows_input::<_, f64>(SU2FusionRule, &su2);
-    assert_multiplicity_free_full_family_borrows_input::<_, Complex64>(SU2FusionRule, &su2);
+    assert_multiplicity_free_full_family_borrows_input::<_, f64>(su2_rule(), &su2);
+    assert_multiplicity_free_full_family_borrows_input::<_, Complex64>(su2_rule(), &su2);
     assert_multiplicity_free_full_family_borrows_input::<_, f64>(product.clone(), &product_sectors);
     assert_multiplicity_free_full_family_borrows_input::<_, Complex64>(product, &product_sectors);
 }
@@ -687,9 +689,9 @@ fn su3_checked_input<D: FactorScalar>(
     BoundDynamicFusionMapSpace<symtn_core::LieGroupFusionRule>,
     Vec<D>,
 ) {
-    let adjoint = provider.encode_irrep(&[1, 1]).unwrap();
-    let trivial = provider.encode_irrep(&[0, 0]).unwrap();
-    let fundamental = provider.encode_irrep(&[1, 0]).unwrap();
+    let adjoint = provider.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+    let trivial = provider.encode_irrep_with_charges(&[0, 0], &[]).unwrap();
+    let fundamental = provider.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
     let leg = || SectorLeg::new([(adjoint, 2), (trivial, 1), (fundamental, 1)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),

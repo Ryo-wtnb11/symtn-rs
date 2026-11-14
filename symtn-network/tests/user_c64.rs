@@ -1,6 +1,7 @@
 //! Complex user-level contracts not already owned by the typed operation and
 //! decomposition suites.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::typed::Engine;
 
@@ -8,7 +9,7 @@ use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
 };
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
@@ -89,13 +90,7 @@ fn network_conj_expectation_value_is_real() {
     .unwrap();
     assert_typed_network_conj(engine, &runtime, &u1);
 
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1), (su2_irrep(1), 2)]).unwrap();
     assert_typed_network_conj(engine, &runtime, &su2);
 }

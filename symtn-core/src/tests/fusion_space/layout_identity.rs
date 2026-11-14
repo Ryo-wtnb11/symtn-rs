@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn explicit_shape_coupled_grid_reports_extent_overflow() {
@@ -203,12 +205,12 @@ fn fusion_tree_key_cache_hits_across_degeneracy_and_keeps_dual_signature() {
     let _guard = test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let mk_leg = |degeneracy| {
         SectorLeg::new(
             [
-                (SU2Irrep::from_twice_spin(0).sector_id(), degeneracy),
-                (SU2Irrep::from_twice_spin(1).sector_id(), degeneracy + 1),
+                (symtn_core::SectorId::new(0), degeneracy),
+                (symtn_core::SectorId::new(1), degeneracy + 1),
             ],
             false,
         )

@@ -7,11 +7,12 @@
 
 #![allow(dead_code)]
 
+use crate::su2::su2_irrep;
 use num_complex::Complex64;
 use symtn::sector::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionRule, FusionStyleKind,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    RuleIdentity, SU2Irrep, SectorCodec, SectorId, SectorOrderKey, SectorVec, U1Irrep,
+    RuleIdentity, SectorCodec, SectorId, SectorOrderKey, SectorVec, U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, FusionAlgebraError};
 use symtn_sectors::TableSector;
@@ -72,7 +73,7 @@ pub fn assert_close(what: &str, got: Complex64, want: Complex64) {
 pub struct Embedded<B, const TILTED: bool>(pub B);
 
 pub trait Base:
-    Copy
+    Clone
     + MultiplicityFreeRigidSymbols<Scalar = f64>
     + CheckedFusionAlgebra
     + SectorCodec
@@ -82,7 +83,7 @@ pub trait Base:
 {
 }
 impl<B> Base for B where
-    B: Copy
+    B: Clone
         + MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
         + SectorCodec
@@ -246,8 +247,8 @@ macro_rules! operands {
     }};
 }
 
-pub fn su2_sectors() -> [(SU2Irrep, usize); 3] {
-    [0, 1, 2].map(|twice| (SU2Irrep::from_twice_spin(twice), 2))
+pub fn su2_sectors() -> [(symtn_core::LieIrrep, usize); 3] {
+    [0, 1, 2].map(|twice| (su2_irrep(twice), 2))
 }
 
 pub fn u1_sectors() -> [(U1Irrep, usize); 3] {

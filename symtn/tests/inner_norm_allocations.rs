@@ -1,11 +1,12 @@
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::BTreeSet;
 use std::hint::black_box;
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::{CheckedGenericRigidSymbols, TypedSectorAdmission};
@@ -13,7 +14,7 @@ use symtn::typed::TensorScalar;
 use symtn::typed::{Complex32, Complex64, GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
 use crate::counting_alloc;
 
@@ -26,7 +27,7 @@ fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
     let rule = Arc::new(
         Fz2U1Su2Rule::try_new(
             Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
@@ -40,7 +41,7 @@ fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
                 },
                 U1Irrep::new(charge).unwrap(),
             ),
-            SU2Irrep::from_twice_spin(twice_spin),
+            su2_irrep(twice_spin),
         )
     };
     GradedSpace::try_new(
@@ -158,21 +159,24 @@ fn warmed_compact_dense_inner_does_not_allocate() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let spin_half = SU2Irrep::from_twice_spin(1);
-    let space =
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 3), (spin_half, 2)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let spin_half = su2_irrep(1);
+    let space = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 3), (spin_half.clone(), 2)],
+    )
+    .unwrap();
     let compact = TensorMap::diagonal(
         engine,
         &runtime,
         &space,
         [
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![Complex64::new(1.0, 0.5); 3],
             },
             SectorSpectrum {
-                sector: spin_half,
+                sector: spin_half.clone(),
                 values: vec![Complex64::new(2.0, -0.5); 2],
             },
         ],

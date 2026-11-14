@@ -5,8 +5,8 @@
 use num_complex::Complex64;
 
 pub use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 
 pub type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
@@ -97,9 +97,9 @@ macro_rules! for_each_symmetry {
             .unwrap()
         });
         $check!($($extra,)* $engine, "SU2", |variant: usize| {
-            let j = SU2Irrep::from_twice_spin;
+            let j = crate::su2::su2_irrep;
             GradedSpace::try_new(
-                Arc::new(SU2FusionRule),
+                Arc::new(crate::su2::su2_rule()),
                 [(j(0), 3), (j(1), 2 + variant), (j(2), 1)],
             )
             .unwrap()

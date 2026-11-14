@@ -38,6 +38,11 @@
 //!   measured payload ceiling.
 
 #[cfg(test)]
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+#[cfg(test)]
+use symtn_core as sector_types;
+#[cfg(test)]
 extern crate self as symtn_network;
 
 #[cfg(test)]

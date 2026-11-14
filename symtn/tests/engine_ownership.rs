@@ -8,9 +8,10 @@
 //! - A broken engine is refused with a typed error; symtn does not fall back
 //!   to a serial engine of its own.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::{Arc, Barrier};
 
-use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{product_sector, U1FusionRule, U1Irrep};
 use symtn::typed::{
     ContractSpec, CpuEngine, Direction, Engine, ExecContext, GradedSpace, HermitianTol, LeftPolar,
     Pool, Runtime, TensorMap,
@@ -19,7 +20,7 @@ use symtn::typed::{
 use crate::common::ErrorKind as _;
 use crate::numerics;
 
-type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;
+type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, Su2Rule>;
 
 /// U(1) x SU(2) with degeneracies large enough that a threaded engine has
 /// real work to split in the recoupling replay, the contraction and the
@@ -29,13 +30,8 @@ fn space() -> GradedSpace<U1Su2> {
 }
 
 fn space_with(degeneracies: [usize; 4]) -> GradedSpace<U1Su2> {
-    let provider = Arc::new(U1Su2::try_new(U1FusionRule, SU2FusionRule).unwrap());
-    let sector = |q, twice_spin| {
-        product_sector(
-            U1Irrep::new(q).unwrap(),
-            SU2Irrep::from_twice_spin(twice_spin),
-        )
-    };
+    let provider = Arc::new(U1Su2::try_new(U1FusionRule, su2_rule()).unwrap());
+    let sector = |q, twice_spin| product_sector(U1Irrep::new(q).unwrap(), su2_irrep(twice_spin));
     GradedSpace::try_new(
         provider,
         [
@@ -337,10 +333,10 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
         // its destination is all inactive: the engine is still admitted.
         let su2 = |terms: &[(usize, usize)]| {
             GradedSpace::try_new(
-                Arc::new(SU2FusionRule),
+                Arc::new(su2_rule()),
                 terms
                     .iter()
-                    .map(|&(twice, degeneracy)| (SU2Irrep::from_twice_spin(twice), degeneracy)),
+                    .map(|&(twice, degeneracy)| (su2_irrep(twice), degeneracy)),
             )
             .unwrap()
         };

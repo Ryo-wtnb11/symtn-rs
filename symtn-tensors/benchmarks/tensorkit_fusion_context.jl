@@ -123,7 +123,7 @@ function bench_su2_output_transform_canonical_dst_scratch(config::BenchConfig)
 end
 
 function bench_product_fz2_u1_su2_complex(config::BenchConfig)
-    I = FermionParity ⊠ U1Irrep ⊠ SU2Irrep
+    I = FermionParity ⊠ U1Irrep ⊠ Irrep[SU₂]
     Va = Vect[I]((1, 1, 1//2) => 1)
     Vb = Vect[I]((1, -1, 1//2) => 1)
     Vc = Vect[I]((0, 0, 0) => 1, (0, 0, 1) => 1)

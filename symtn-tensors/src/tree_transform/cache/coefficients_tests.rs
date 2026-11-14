@@ -2,12 +2,14 @@
 //! completeness, staged and epoch-guarded publication, degeneracy-only reuse
 //! and output identity against the uncached eager producer.
 
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn_core::{
     BlockKey, BlockStructure, FusionProductSpace, FusionTreeHomSpace, FusionTreePairKey,
-    FusionTreePairOrientation, RuleIdentity, SU2FusionRule, SU2Irrep, SectorLeg,
+    FusionTreePairOrientation, RuleIdentity, SectorLeg,
 };
 
 use super::super::{TransformerMode, TreeTransformPlanning, TreeTransformScope};
@@ -22,12 +24,12 @@ struct KeyMarker;
 /// `degeneracy`-fold: a group holds every coupled sector of its legs.
 fn su2_structure(degeneracy: usize) -> Arc<BlockStructure> {
     let leg = SectorLeg::new(
-        [0, 1, 2].map(|spin| (SU2Irrep::from_twice_spin(spin).sector_id(), degeneracy)),
+        [0, 1, 2].map(|spin| (symtn_core::SectorId::new(spin), degeneracy)),
         false,
     );
     Arc::clone(
         BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::new(SU2FusionRule),
+            Arc::new(su2_rule()),
             FusionTreeHomSpace::new(
                 FusionProductSpace::new([leg.clone(), leg.clone()]),
                 FusionProductSpace::new([leg.clone(), leg]),
@@ -133,7 +135,7 @@ fn every_key_determinant_splits_entries_and_equal_keys_hit() {
     };
     // What: every keyed determinant, varied alone, misses.
     assert!(misses(reuse(
-        RuleIdentity::of_type::<SU2FusionRule>(),
+        RuleIdentity::of_type::<Su2Rule>(),
         TransformerMode::MultiplicityFree,
         TreeTransformScope::TreePair,
         &operation,
@@ -321,6 +323,7 @@ fn an_entry_charges_its_recoupling_matrix_and_trees() {
 /// storage conjugation do not split entries.
 #[test]
 fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer() {
+    let su2_provider_rule = su2_rule();
     // Unlocked constructors can evict groups even while CACHE_TEST_LOCK is held.
     if crate::test_support::run_isolated_or_return(
         "SYMTN_TENSORS_COEFFICIENT_DEGENERACY_REUSE_ISOLATED",
@@ -346,7 +349,7 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
     let group_count = src.fusion_tree_group_slice().len();
     take_coefficient_group_activity();
     planning
-        .resolve_tree_pair(engine, &SU2FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &su2_provider_rule, &operation, &dst, &src, false)
         .unwrap();
     let cold = take_coefficient_group_activity();
     assert_eq!(cold.hits + cold.misses, group_count);
@@ -357,7 +360,7 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
         let warm = planning
             .resolve_tree_pair(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &operation,
                 &dst,
                 &src,
@@ -370,15 +373,18 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
             (group_count, 0, 0),
             "degeneracy {degeneracy}, conjugate {storage_conjugate}"
         );
-        let eager =
-            crate::build_tree_pair_transform_group_plan(&SU2FusionRule, operation.clone(), &src)
-                .unwrap()
-                .compile_shared_structures_with_storage_conjugation(
-                    Arc::clone(&dst),
-                    Arc::clone(&src),
-                    storage_conjugate,
-                )
-                .unwrap();
+        let eager = crate::build_tree_pair_transform_group_plan(
+            &su2_provider_rule,
+            operation.clone(),
+            &src,
+        )
+        .unwrap()
+        .compile_shared_structures_with_storage_conjugation(
+            Arc::clone(&dst),
+            Arc::clone(&src),
+            storage_conjugate,
+        )
+        .unwrap();
         assert_eq!(warm, eager);
         let bits = |structure: &crate::TreeTransformStructure<f64>| {
             let mut coefficients = Vec::new();
@@ -397,6 +403,7 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
 /// values of an uncached build; another operation's group set does not.
 #[test]
 fn degeneracy_only_bindings_of_one_group_set_share_one_coefficient_payload() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     // Hits must not race a clearing sibling test.
     let _guard = crate::test_support::CACHE_TEST_LOCK
@@ -408,7 +415,14 @@ fn degeneracy_only_bindings_of_one_group_set_share_one_coefficient_payload() {
     let mut bind = |degeneracy: usize, operation: &TreeTransformOperation| {
         let source = su2_structure(degeneracy);
         planning
-            .resolve_tree_pair(engine, &SU2FusionRule, operation, &source, &source, false)
+            .resolve_tree_pair(
+                engine,
+                &su2_provider_rule,
+                operation,
+                &source,
+                &source,
+                false,
+            )
             .unwrap()
     };
     let first = bind(43, &operation);
@@ -428,7 +442,7 @@ fn degeneracy_only_bindings_of_one_group_set_share_one_coefficient_payload() {
             .collect::<Vec<_>>()
     };
     let source = su2_structure(47);
-    let eager = crate::build_tree_pair_transform_group_plan(&SU2FusionRule, operation, &source)
+    let eager = crate::build_tree_pair_transform_group_plan(&su2_provider_rule, operation, &source)
         .unwrap()
         .compile_shared_structures_with_storage_conjugation(Arc::clone(&source), source, false)
         .unwrap();

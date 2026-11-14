@@ -11,6 +11,7 @@
 //! sample keys use sector ids above `u32::MAX`, so the file is 64-bit only.
 #![cfg(target_pointer_width = "64")]
 
+use crate::su2::su2_rule;
 use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::Arc;
@@ -19,8 +20,8 @@ use smallvec::SmallVec;
 use symtn_core::{
     BlockKey, BlockStructure, BraidingStyleKind, CoreError, FusionProductSpace, FusionRule,
     FusionStyleKind, FusionTreeGroupKey, FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey,
-    FusionTreeRef, RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorStructure,
-    SectorVec, StructureCacheEquivalent, TableRule, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
+    FusionTreeRef, RuleIdentity, SectorId, SectorLeg, SectorStructure, SectorVec,
+    StructureCacheEquivalent, TableRule, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 fn fx<T: Hash + ?Sized>(value: &T) -> u64 {
@@ -456,8 +457,9 @@ fn hom(codomain: &[Leg], domain: &[Leg]) -> FusionTreeHomSpace {
 }
 
 fn real_structures() -> Vec<(&'static str, Arc<BlockStructure>)> {
+    let su2_provider_rule = su2_rule();
     let u1 = |charge: i32| SectorId::from(U1Irrep::new(charge).unwrap());
-    let su2 = |twice: usize| SU2Irrep::from_twice_spin(twice).sector_id();
+    let su2 = |twice: usize| symtn_core::SectorId::new(twice);
     let z2 = vec![
         (ZNIrrep::new(0, 2).unwrap().into(), 1),
         (ZNIrrep::new(1, 2).unwrap().into(), 2),
@@ -503,7 +505,7 @@ fn real_structures() -> Vec<(&'static str, Arc<BlockStructure>)> {
                 &[leg(&su2_leg, false), leg(&su2_leg, false)],
                 &[leg(&su2_leg, false), leg(&su2_leg, false)],
             )
-            .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+            .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
             .unwrap(),
         ),
         (

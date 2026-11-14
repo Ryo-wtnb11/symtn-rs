@@ -281,7 +281,7 @@ fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
             .unwrap(),
         );
         let adjoint_id = provider
-            .encode_irrep(&adjoint.dynkin().collect::<Vec<_>>())
+            .encode_irrep_with_charges(&adjoint.dynkin().collect::<Vec<_>>(), &[])
             .unwrap();
         assert_eq!(
             provider

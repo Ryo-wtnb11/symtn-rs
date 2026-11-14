@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 
 /// Destination QR only (`qr` must not be reached); the second call fails.
 fn fail_second_qr() -> SpyExecutor {
@@ -546,8 +548,8 @@ fn polar_redirects_through_parent_with_owned_psd_factors_and_a_cold_receiver() {
     let domain_only = u1_matrix_fixture(engine, [(0, 2)], [(0, 2), (1, 2)]);
     assert_polar_redirect(engine, &domain_only, true);
 
-    let provider = Arc::new(SU2FusionRule);
-    let half = GradedSpace::try_new(provider, [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let provider = Arc::new(su2_rule());
+    let half = GradedSpace::try_new(provider, [(su2_irrep(1), 1)]).unwrap();
     let multitree = TensorMap::from_subblock_fn(
         engine,
         &Runtime::builder().build().unwrap(),
@@ -1095,8 +1097,7 @@ fn rejected_truncation_does_not_materialize_the_adjoint() {
     // What: the parent-native path preserves typed truncation errors
     // without publishing the logical-adjoint payload first.
     let source = u1_lazy_fixture(engine);
-    let foreign =
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 1)]).unwrap();
+    let foreign = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1)]).unwrap();
     let lazy = source.adjoint(engine).unwrap();
     let Svd { s, .. } = lazy.svd_compact(engine, &[0], &[1, 2]).unwrap();
     assert!(matches!(s.domain()[0]

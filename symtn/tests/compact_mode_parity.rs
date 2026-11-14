@@ -35,6 +35,8 @@
 //! anyonic and asserted as the unchanged `contract` rejection.
 
 use crate::report;
+#[cfg(feature = "cgc-gen")]
+use crate::su2::{su2_irrep, su2_rule};
 use report::{cause, report};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -487,13 +489,12 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
     let _serial = crate::counting_alloc::serial();
     // What: SU(2) is bosonic, so twist returns the compact receiver as is in
     // both modes.
-    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::LieGroupFusionRule;
     let runtime = host_runtime();
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let mf_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        su2.iter()
-            .map(|&(twice, k)| (SU2Irrep::from_twice_spin(twice), k)),
+        Arc::new(su2_rule()),
+        su2.iter().map(|&(twice, k)| (su2_irrep(twice), k)),
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
@@ -512,7 +513,7 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
         &runtime,
         &mf_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(twice),
+            sector: su2_irrep(twice),
             values: values(twice, k),
         }),
     )
@@ -1086,12 +1087,11 @@ fn su2_compact_compose_and_contract_agree_across_modes() {
     let _serial = crate::counting_alloc::serial();
     // What: the non-Abelian row. The bent outputs carry SU(2) bending
     // coefficients through the mode's own permute.
-    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::LieGroupFusionRule;
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let mf_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        su2.iter()
-            .map(|&(twice, k)| (SU2Irrep::from_twice_spin(twice), k)),
+        Arc::new(su2_rule()),
+        su2.iter().map(|&(twice, k)| (su2_irrep(twice), k)),
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
@@ -1104,7 +1104,9 @@ fn su2_compact_compose_and_contract_agree_across_modes() {
         su2.iter().map(|&(twice, k)| (su_irrep(&[twice as i64]), k)),
     )
     .unwrap();
-    let mf_label = |sector: &SU2Irrep| sector.twice_spin() as f64;
+    let mf_label = |sector: &symtn_core::LieIrrep| {
+        usize::try_from(sector.dynkin().next().unwrap()).unwrap() as f64
+    };
     let checked_label = |sector: &LieIrrep| sector.dynkin().next().unwrap() as f64;
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
     let real = |x: f64| x;
@@ -1666,16 +1668,15 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
     // What: the non-Abelian row. TensorKit's swap coefficient is 1 on
     // j = 0, 1/2 and 1 (up to its rounding); both modes keep the spectrum and
     // agree with each other and with their dense routes.
-    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::LieGroupFusionRule;
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let tensorkit_coefficient = [1.0, 1.0, 1.0];
     let values = |twice: usize, k: usize| -> Vec<f64> {
         (0..k).map(|i| 0.5 + (twice * 4 + i) as f64).collect()
     };
     let mf_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        su2.iter()
-            .map(|&(twice, k)| (SU2Irrep::from_twice_spin(twice), k)),
+        Arc::new(su2_rule()),
+        su2.iter().map(|&(twice, k)| (su2_irrep(twice), k)),
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
@@ -1693,7 +1694,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
         &host_runtime(),
         &mf_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(twice),
+            sector: su2_irrep(twice),
             values: values(twice, k),
         }),
     )
@@ -1718,7 +1719,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
         for (index, &(twice, k)) in su2.iter().enumerate() {
             let mf_entry = mf_swapped
                 .iter()
-                .find(|e| e.sector == SU2Irrep::from_twice_spin(twice))
+                .find(|e| e.sector == su2_irrep(twice))
                 .unwrap();
             let checked_entry = checked_swapped
                 .iter()
@@ -2065,7 +2066,7 @@ fn su2_compact_full_trace_agrees_across_modes() {
     let _serial = crate::counting_alloc::serial();
     // What: the non-Abelian row; SU(2) is bosonic, so the hand trace is
     // `Σ_j (2j + 1) Σ_i s_j[i]`.
-    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::LieGroupFusionRule;
     let su2 = [(0usize, 2usize), (1, 3), (2, 1)];
     let values = |twice: usize, k: usize| -> Vec<f64> {
         (0..k).map(|i| 0.5 + (twice * 4 + i) as f64).collect()
@@ -2075,9 +2076,8 @@ fn su2_compact_full_trace_agrees_across_modes() {
         .map(|&(twice, k)| (twice + 1) as f64 * values(twice, k).iter().sum::<f64>())
         .sum();
     let mf_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        su2.iter()
-            .map(|&(twice, k)| (SU2Irrep::from_twice_spin(twice), k)),
+        Arc::new(su2_rule()),
+        su2.iter().map(|&(twice, k)| (su2_irrep(twice), k)),
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
@@ -2095,7 +2095,7 @@ fn su2_compact_full_trace_agrees_across_modes() {
         &host_runtime(),
         &mf_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(twice),
+            sector: su2_irrep(twice),
             values: values(twice, k),
         }),
     )

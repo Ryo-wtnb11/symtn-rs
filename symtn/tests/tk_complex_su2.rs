@@ -1,10 +1,10 @@
 //! Complex SU(2) structural-operation correspondence with TensorKit
 //! 0.17.1 (Julia 1.11.6).
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 fn close(got: f64, expected: f64) {
@@ -30,23 +30,18 @@ fn fill(c0: i64, labels: [i64; 5], idx: &[usize]) -> f64 {
 pub fn source(
     engine: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
-) -> TensorMap<SU2FusionRule, Complex64> {
-    let rule = Arc::new(SU2FusionRule);
-    let space = GradedSpace::try_new(
-        rule,
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
-    )
-    .unwrap();
+) -> TensorMap<Su2Rule, Complex64> {
+    let rule = Arc::new(su2_rule());
+    let space = GradedSpace::try_new(rule, [(su2_irrep(0), 1), (su2_irrep(1), 1)]).unwrap();
     TensorMap::from_subblock_fn(
         engine,
         runtime,
         [&space, &space],
         [&space, &space],
         |trees, idx| {
-            let label = |sector: &SU2Irrep| sector.twice_spin() as i64;
+            let label = |sector: &symtn_core::LieIrrep| {
+                usize::try_from(sector.dynkin().next().unwrap()).unwrap() as i64
+            };
             let codomain = trees.codomain_uncoupled();
             let domain = trees.domain_uncoupled();
             let labels = [

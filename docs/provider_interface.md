@@ -65,8 +65,8 @@ combination does not compile.
 The provider traits are sealed: they are the bounds generic code names, not
 an extension point. Z_N, fermion parity and CU(1) are `CategoryRule`s
 (`ZNFusionRule`, `FermionParityFusionRule` and `CU1FusionRule` name the
-multiplicity-free `EnumeratedCodec` instantiations). U(1), `TableRule`,
-`SU2FusionRule` and `LieGroupFusionRule` implement the traits through the same
+multiplicity-free `EnumeratedCodec` instantiations). U(1), `TableRule`, and
+`LieGroupFusionRule` implement the traits through the same
 category adapter, with private codecs that keep their labels, ids, identities
 and checked errors. `ProductFusionRule` uses the same adapter over
 fusion-symbols' `Product`. Native implementations remain under `testing` for
@@ -105,17 +105,15 @@ serves every pinned AnyonWiki `TableCategory`, including Fibonacci, Ising and
 fusion-only Rep(S₃), with identity built from the table's AnyonWiki uuid.
 The [U(1)](../symtn-sectors/src/abelian.rs) rule forwards every symbol,
 including A/B; its physical entries also use the category's CGC.
-The [SU2](../symtn-sectors/src/su2.rs) and
-[Lie-group](../symtn-sectors/src/lie.rs) wrappers use `LieGroup` through the adapter.
+The [Lie-group](../symtn-sectors/src/lie.rs) rule uses `LieGroup` through the adapter.
 symtn validates IDs before constructing category objects and queries the
 category's `frobenius_schur_phase`.
 
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
-| `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; symtn checks admission, multiplicity and carrier indices, then evaluates each physical entry with fusion-symbols' scalar `clebsch_gordan`, whose exact zero is the projection-sum structural zero |
-| `LieGroupFusionRule<M>` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, fusion-symbols' `LieIrrep` as the typed label, labels as representable as fusion-symbols makes them; `M` = checked `Generic` at every rank (the default) or multiplicity-free for a `Unique`/`Simple` group; in multiplicity-free mode, physical indices are the Kronecker product of the rank-one factors' descending-`m` carriers in Dynkin-label order (first factor most significant, as TensorKit's `ProductSector` `fusiontensor`), tori one-dimensional, and a doubled spin beyond `i32` is `PhysicalBasisError::Unsupported` | every `GroupId` that `LieGroup::new` executes (every simple type A–G, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols; each physical entry is a product of fusion-symbols' scalar `clebsch_gordan` per rank-one factor, as for `SU2FusionRule`, after the same checks |
+| `LieGroupFusionRule<M>` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, fusion-symbols' `LieIrrep` as the typed label, labels as representable as fusion-symbols makes them; `M` = checked `Generic` at every rank (the default) or multiplicity-free for a `Unique`/`Simple` group; in multiplicity-free mode, physical indices are the Kronecker product of the rank-one factors' descending-`m` carriers in Dynkin-label order (first factor most significant, as TensorKit's `ProductSector` `fusiontensor`), tori one-dimensional, and a doubled spin beyond `i32` is `PhysicalBasisError::Unsupported` | every `GroupId` that `LieGroup::new` executes (every simple type A–G, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols; each physical entry is a product of fusion-symbols' scalar `clebsch_gordan` per rank-one factor, after validating admission, multiplicity and carrier indices |
 
-Both keep their identities, sector order, typed errors and validation order.
+The rule keeps its identity, sector order, typed errors and validation order.
 `LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
 nonfinite dimensions. It constructs the category eagerly, so unsupported
 groups fail at construction. A group with one coordinate (a rank-one simple
@@ -139,7 +137,8 @@ on encoding and when a fusion produces them; a fusion overflow names the
 coordinate-wise sum of its inputs, the product's highest weight.
 
 Construct it with `LieGroupFusionRule::<M>::new(group)`, where `group` is a
-`fusion_symbols::lie::GroupId` and `M` is `CheckedGenericAdmissionMode` or
+fusion-symbols `GroupId` (re-exported by `symtn_sectors`, `symtn_core` and
+`symtn::sector`) and `M` is `CheckedGenericAdmissionMode` or
 `MultiplicityFreeAdmissionMode`; `group_id()` borrows that complete metadata
 and `category()` the `LieGroup`. Checked Generic mode reports `Generic`
 fusion and `LieGroupFusionRuleError`. Multiplicity-free mode admits a group
@@ -148,15 +147,8 @@ SO(3), Sp(2), D2, U(2) and their products), reports that style, answers the
 multiplicity-free traits with `FusionAlgebraError` (an id outside the domain
 is `InvalidSector`, a label without an id `UnrepresentableSectorLabel`, an
 unrepresentable fusion outcome `FusionNotRepresentable`), and refuses any other
-group with `LieGroupFusionRuleError::IncompatibleFusionStyle`. Over SU(2) it
-equals `SU2FusionRule` bit for bit wherever the compact rule admits the
-inputs: ids, labels, duals, dimensions, twists and FS phases on every
-`2j ∈ 0..=254`, and channels, N, F, R, A and B on every input the compact
-rule admits: labels `<= 254`, with the fusion closure `a + b <= 254` for
-channels, N and R only (F, A and B admit each label alone, so their
-vertices may fuse past 254). Its own domain is wider: labels up to
-`u32::MAX` and no closure bound, so for example `N(254, 1, 253)` is `1` where
-`SU2FusionRule` reports `FusionNotRepresentable`.
+group with `LieGroupFusionRuleError::IncompatibleFusionStyle`. Over SU(2),
+labels extend to `u32::MAX`.
 Supported families are SU(n), Sp(m), Spin(n), SO(n), their adjoint forms and
 fs's supported central quotients, including half-spin forms, and the
 exceptional groups G2, F4, E6, E7 and E8, so every simple type, A–G, is
@@ -170,18 +162,14 @@ Spin(4), U(2), tori and their products and quotients); any other group returns
 `Provider(LieError::Unsupported { requires: "lie-generated" })`. `cgc-gen`
 enables fusion-symbols' `lie-generated` for the rest.
 
-The encoders mirror fusion-symbols' constructors: `encode_irrep(dynkin)` takes
-Dynkin labels as `LieGroup::irrep` does and serves groups without a torus;
-`encode_irrep_with_charges(dynkin, charges)` takes the label as
-`LieGroup::irrep_with_charges` does and serves every group; and
-`encode_spin(j)` takes a `fusion_symbols::lie::HalfInt` spin as
-`LieGroup::irrep_spin` does, for SU(2) and SO(3) in any rank-one presentation.
-`encode_irrep` on a group with a torus, and `encode_spin` on any other group,
-return `LieGroupFusionRuleError::Provider(LieError::InvalidLabel)`.
-`decode_irrep(id)` returns the Dynkin labels and the charges; the typed label is
-fusion-symbols' `LieIrrep`, built with `rule.category().irrep(..)`,
-`irrep_with_charges(..)` or `irrep_spin(..)`, and a label of another group is
-rejected. The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
+The typed label is fusion-symbols' `LieIrrep`, built with
+`rule.category().irrep(..)`, `irrep_with_charges(..)` or `irrep_spin(..)`.
+`TypedSectorAdmission::try_encode_label` and `try_decode_label` convert
+between that label and its rule-local id; a label of another group is
+rejected. Multiplicity-free rules also expose this conversion through
+`SectorCodec`. `encode_irrep_with_charges(dynkin, charges)` retains the
+coordinate-level entry for all groups.
+The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
 to `0, 1, 2, 3, 4, …`) and ranks the whole coordinate vector by total grade
 then lexicographically, so a single simple factor keeps its Dynkin-only ids.
 `sector_order_key` does not use that rank: it lists one TensorKit position per

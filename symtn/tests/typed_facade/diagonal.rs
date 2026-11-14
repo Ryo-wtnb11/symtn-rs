@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use symtn::typed::Engine;
 
 #[test]
@@ -1474,14 +1475,9 @@ fn compact_full_trace_matches_the_forced_dense_route() {
 
         // SU(2): dim(c) takes the values 1 and 2, so a coefficient-free
         // reduction cannot pass.
-        let mut typed_leg: GradedSpace<symtn::sector::SU2FusionRule> = GradedSpace::try_new(
-            Arc::new(symtn::sector::SU2FusionRule),
-            [
-                (SU2Irrep::from_twice_spin(0), 2),
-                (SU2Irrep::from_twice_spin(1), 3),
-            ],
-        )
-        .unwrap();
+        let mut typed_leg: GradedSpace<Su2Rule> =
+            GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(1), 3)])
+                .unwrap();
         if is_dual {
             typed_leg = typed_leg.try_dual().unwrap();
         }

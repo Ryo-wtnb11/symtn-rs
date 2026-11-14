@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 use symtn::sector::ZNIrrep;
 
 #[test]
@@ -325,18 +326,15 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
         assert!((device - host).abs() <= 1e-12 * (1.0 + host.abs()));
     }
 
-    let su2_provider = Arc::new(SU2FusionRule);
+    let su2_provider = Arc::new(su2_rule());
     let su2_leg = GradedSpace::try_new(
         Arc::clone(&su2_provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
+        [(su2_irrep(0), 1), (su2_irrep(1), 1)],
     )
     .unwrap();
     let su2: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |trees, _| {
-            if trees.coupled() == &SU2Irrep::from_twice_spin(0) {
+            if trees.coupled() == &su2_irrep(0) {
                 1.0
             } else {
                 2.0

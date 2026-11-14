@@ -5,11 +5,12 @@
 //! production adjoint kernel.
 
 use crate::common;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{BlockFusionTrees, GradedSpace, TensorMap};
 
@@ -81,31 +82,26 @@ fn u1_rank4(runtime: &Runtime) -> TensorMap<U1FusionRule, Complex64> {
 }
 
 /// SU(2) 2+2 fixture with several coupled sectors and degeneracies 2/1/3.
-fn su2_rank4(runtime: &Runtime) -> TensorMap<SU2FusionRule, Complex64> {
+fn su2_rank4(runtime: &Runtime) -> TensorMap<Su2Rule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-            (SU2Irrep::from_twice_spin(2), 3),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 1), (su2_irrep(2), 3)],
     )
     .unwrap();
-    let other = GradedSpace::try_new(
-        provider,
-        [
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(3), 1),
-        ],
-    )
-    .unwrap();
+    let other = GradedSpace::try_new(provider, [(su2_irrep(1), 2), (su2_irrep(3), 1)]).unwrap();
     let tensor =
         TensorMap::from_subblock_fn(engine, runtime, [&leg, &other], [&leg, &leg], complex_value)
             .unwrap();
     let coupled: std::collections::BTreeSet<_> = (0..tensor.subblock_count())
-        .map(|index| *tensor.subblock_fusion_trees(index).unwrap().coupled())
+        .map(|index| {
+            tensor
+                .subblock_fusion_trees(index)
+                .unwrap()
+                .coupled()
+                .clone()
+        })
         .collect();
     assert!(
         coupled.len() >= 2,
@@ -297,17 +293,13 @@ fn empty_support_lazy_adjoint_materializes_an_empty_payload() {
 fn su2_tr_matches_the_literal_weighted_diagonal_sum_and_conjugates_lazily() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-            (SU2Irrep::from_twice_spin(2), 3),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 1), (su2_irrep(2), 3)],
     )
     .unwrap();
-    let other = GradedSpace::try_new(provider, [(SU2Irrep::from_twice_spin(1), 2)]).unwrap();
+    let other = GradedSpace::try_new(provider, [(su2_irrep(1), 2)]).unwrap();
     let complex = TensorMap::from_subblock_fn(
         engine,
         &runtime,

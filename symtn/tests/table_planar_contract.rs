@@ -19,13 +19,14 @@
 //! equals the same-run explicit steps on fℤ₂×U(1), through a lazy adjoint and
 //! in the destination form with complex α and β ≠ 0.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, TableRule, TableSector, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, TableRule,
+    TableSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     BlockFusionTrees, ContractSpec, Error, GradedSpace, OperationError, Runtime, TensorMap,
@@ -464,12 +465,8 @@ fn bosonic_planar_contract_is_contract() {
     bosonic_planar_is_contract!(engine, &runtime, &u1);
     // SU(2) with j = ½ legs (Frobenius–Schur indicator −1).
     let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
     )
     .unwrap();
     bosonic_planar_is_contract!(engine, &runtime, &su2);

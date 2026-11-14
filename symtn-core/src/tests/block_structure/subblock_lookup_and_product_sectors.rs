@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 #[test]
 fn block_structure_finds_fusion_tree_subblock_by_key() {
@@ -53,11 +55,11 @@ fn fusion_tree_pair_block_reports_missing_key() {
 #[test]
 fn product_fusion_tree_homspace_matches_tensorkit_fz2_u1_su2_fixture() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type FpU1Su2Rule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let left_sector = |parity, charge| left_rule.encode_component_ids(parity, u1(charge));
@@ -99,7 +101,7 @@ fn product_fusion_tree_homspace_matches_tensorkit_fz2_u1_su2_fixture() {
 
 #[test]
 fn multiplicity_free_su2_repartition_matches_tensorkit_bend_factor() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let source =
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap();
@@ -135,7 +137,7 @@ fn multiplicity_free_su2_repartition_matches_tensorkit_bend_factor() {
 
 #[test]
 fn multiplicity_free_su2_permute_tree_pair_matches_tensorkit_swap() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let source =
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap();
@@ -156,7 +158,7 @@ fn multiplicity_free_su2_permute_tree_pair_matches_tensorkit_swap() {
 fn prepared_simple_pair_matches_explicit_generic_composition() {
     // What: a prepared Simple-fusion pair operation equals the explicit
     // repartition -> all-codomain Artin -> repartition composition.
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let source =
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap();
@@ -329,11 +331,11 @@ fn nested_product_elementary_bend_keeps_the_fermionic_phase() {
     // What: the elementary bend of an odd fZ2 pair retains the negative
     // product-category phase independently of the block/per-source runners.
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type ProductRule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let coupled =
