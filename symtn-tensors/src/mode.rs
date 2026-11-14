@@ -37,8 +37,7 @@ use symtn_core::{
     BlockKey, BlockStructure, BraidingStyleKind, CheckedFusionAlgebra, CheckedGenericAdmissionMode,
     CheckedGenericFusion, CheckedGenericPivotal, CheckedGenericRigidSymbols, CoreError,
     FusionStyleKind, FusionTreeHomSpace, FusionTreeKey, MultiplicityFreeAdmissionMode,
-    MultiplicityFreeRigidSymbols, OrientedFusionTreeHomSpace, Permuted, PermutedMemoTicket,
-    RuleIdentity, SectorId,
+    MultiplicityFreeRigidSymbols, OrientedFusionTreeHomSpace, Permuted, RuleIdentity, SectorId,
 };
 use symtn_operations::TreeTransformStructure;
 
@@ -57,6 +56,7 @@ use crate::contract::{
     PreparedCheckedGenericDynamicSpace, StorageContractResolution, ValidatedCoreContract,
     CHECKED_CONTRACTION_REQUIRES_BOSONIC,
 };
+use crate::tree_context::CheckedTreeTransformStage;
 use crate::tree_transform::{
     build_checked_generic_tree_pair_transform_group_plan_validated, lookup_bound, publishable,
     validate_checked_generic_tree_pair_plan_preflight, CheckedGenericTreePairPreflight,
@@ -297,6 +297,12 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     /// contraction call for checked Generic, whose pending coefficients
     /// publish only after that call's commit.
     type StructureCache;
+    /// What a tree-structure resolution caches into: the context's planning
+    /// state for multiplicity-free, the call's pending coefficients for
+    /// checked Generic. Why not [`Self::StructureCache`]: a checked
+    /// contraction's transaction also stages its intermediates, which an
+    /// eager transform never does, so a transform must not own one.
+    type TransformCache;
     /// What an eager transform's staging proved about its source.
     type SourceProof<'a>
     where
@@ -328,7 +334,7 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     /// The tree-pair transform structure `dst <- operation(src)`.
     fn tree_structure(
         engine: &mut dyn Engine,
-        cache: &mut Self::StructureCache,
+        cache: &mut Self::TransformCache,
         rule: &R,
         operation: &TreeTransformOperation,
         dst: &Arc<BlockStructure>,
@@ -341,7 +347,7 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     /// given, the caller already ran: a miss builds without repeating it.
     fn tree_structure_with(
         engine: &mut dyn Engine,
-        cache: &mut Self::StructureCache,
+        cache: &mut Self::TransformCache,
         rule: &R,
         operation: &TreeTransformOperation,
         dst: &Arc<BlockStructure>,
@@ -364,7 +370,11 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     fn transform_cache<'c>(
         planning: &'c mut TreeTransformPlanning,
         stage: &'c mut Self::TransformStage,
-    ) -> &'c mut Self::StructureCache;
+    ) -> &'c mut Self::TransformCache;
+
+    /// The part of a contraction's planning state its tree structures
+    /// resolve with.
+    fn contract_transform_cache(cache: &mut Self::StructureCache) -> &mut Self::TransformCache;
 
     /// The planning state a contraction resolves its plan with: the
     /// context's own, or the call's transaction.
@@ -656,6 +666,7 @@ where
     type Scalar = R::Scalar;
     type Error = OperationError;
     type StructureCache = TreeTransformPlanning;
+    type TransformCache = TreeTransformPlanning;
     type SourceProof<'a>
         = ()
     where
@@ -696,7 +707,7 @@ where
 
     fn tree_structure_with(
         engine: &mut dyn Engine,
-        cache: &mut Self::StructureCache,
+        cache: &mut Self::TransformCache,
         rule: &R,
         operation: &TreeTransformOperation,
         dst: &Arc<BlockStructure>,
@@ -801,6 +812,10 @@ where
         _txn: &'c mut (),
     ) -> &'c mut TreeTransformPlanning {
         planning
+    }
+
+    fn contract_transform_cache(cache: &mut TreeTransformPlanning) -> &mut TreeTransformPlanning {
+        cache
     }
 
     /// Match first, then resolve against the caller's structure: no
@@ -1147,6 +1162,9 @@ where
     /// composed coefficients and completed transformers, published only
     /// after its commits (#2063).
     type StructureCache = CheckedContractTxn;
+    /// The call's composed coefficients and completed transformers,
+    /// published only after the destination commit (#2063).
+    type TransformCache = CheckedPendingCoefficients;
     /// The admitted rule identity and, unless the destination memo answered
     /// (#2154), the plan preflight of the logical source.
     type SourceProof<'a>
@@ -1156,13 +1174,7 @@ where
     )
     where
         R: 'a;
-    /// The staged destination, the call's transaction and, for a derived
-    /// destination, its memo publication.
-    type TransformStage = (
-        PreparedCheckedGenericDynamicSpace,
-        CheckedContractTxn,
-        Option<PermutedMemoTicket>,
-    );
+    type TransformStage = CheckedTreeTransformStage;
     type ContractTxn = CheckedContractTxn;
     /// The binding whose provider admission stages derived spaces, with the
     /// entry's twist answer.
@@ -1189,7 +1201,7 @@ where
 
     fn tree_structure_with(
         _engine: &mut dyn Engine,
-        txn: &mut CheckedContractTxn,
+        coefficients: &mut CheckedPendingCoefficients,
         rule: &R,
         operation: &TreeTransformOperation,
         dst: &Arc<BlockStructure>,
@@ -1270,7 +1282,6 @@ where
             source_proof,
             &reuse,
         )?;
-        let coefficients = txn.coefficients();
         coefficients.stage(reuse.into_pending());
         let built = match mapped {
             Some((logical, operand)) => plan.compile_shared_structures_with_storage_mapping(
@@ -1327,7 +1338,7 @@ where
         }
         // Before admission: a clear during this request leaves its
         // transformer and composed coefficients unpublished.
-        let txn = CheckedContractTxn::new();
+        let coefficients = CheckedPendingCoefficients::new();
         let identity = std::cell::OnceCell::new();
         let source_proof = std::cell::OnceCell::new();
         let (codomain_axes, domain_axes) = tree_transform_operation_axes(operation);
@@ -1404,7 +1415,11 @@ where
         Ok(StagedTransform {
             preview: prepared.shared_structure(),
             nout: codomain_axes.len(),
-            stage: (prepared, txn, ticket),
+            stage: CheckedTreeTransformStage {
+                destination: prepared,
+                coefficients,
+                memo: ticket,
+            },
             proof: (identity, source_proof.into_inner()),
         })
     }
@@ -1412,8 +1427,8 @@ where
     fn transform_cache<'c>(
         _planning: &'c mut TreeTransformPlanning,
         stage: &'c mut Self::TransformStage,
-    ) -> &'c mut CheckedContractTxn {
-        &mut stage.1
+    ) -> &'c mut CheckedPendingCoefficients {
+        &mut stage.coefficients
     }
 
     fn contract_cache<'c>(
@@ -1421,6 +1436,10 @@ where
         txn: &'c mut CheckedContractTxn,
     ) -> &'c mut CheckedContractTxn {
         txn
+    }
+
+    fn contract_transform_cache(txn: &mut CheckedContractTxn) -> &mut CheckedPendingCoefficients {
+        txn.coefficients()
     }
 
     /// Resolve first, against the preview, then match. Why this order: a
@@ -1442,20 +1461,27 @@ where
         R: 'a,
     {
         let resolved = resolve(staged, None)?;
-        Ok(stage(&resolved).0.matches(dst).then_some(resolved))
+        Ok(stage(&resolved)
+            .destination
+            .matches(dst)
+            .then_some(resolved))
     }
 
     /// Publication follows commit: only now are the destination's ids
     /// committed, and only a resident (canonical) destination is keyed.
     fn commit_transform(
         logical: &BoundDynamicFusionMapSpace<R>,
-        (prepared, txn, ticket): Self::TransformStage,
+        CheckedTreeTransformStage {
+            destination: prepared,
+            coefficients,
+            memo,
+        }: Self::TransformStage,
         preview: Arc<BlockStructure>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::Error> {
         let destination = logical.commit_final_homspace_generic_bound_checked(prepared)?;
         let committed = destination.space();
-        txn.commit_transform((preview, Arc::clone(committed.structure())));
-        if let Some(ticket) = ticket {
+        coefficients.flush_committed(&[(preview, Arc::clone(committed.structure()))]);
+        if let Some(ticket) = memo {
             ticket.publish(committed.homspace(), committed.structure());
         }
         Ok(destination)
@@ -1652,7 +1678,7 @@ where
         };
         let transform_structure = Self::tree_structure(
             engine,
-            txn,
+            txn.coefficients(),
             rule,
             operation,
             space.structure(),
@@ -1704,7 +1730,7 @@ where
         let space = txn.stage(prepared, None);
         let output_transform_structure = Self::tree_structure(
             engine,
-            txn,
+            txn.coefficients(),
             rule,
             plan.output_transform(),
             output_dst.structure(),

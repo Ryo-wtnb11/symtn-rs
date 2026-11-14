@@ -230,11 +230,12 @@ impl PendingCoefficientGroups {
     }
 }
 
-/// The checked Generic contraction's composed coefficients and completed
-/// transformers, staged across its staged-operand and output transforms and
-/// published only by [`Self::flush_committed`] once the contraction's
-/// commits succeeded. One instance per contraction call: holding it across
-/// calls would publish what a failed call built.
+/// One checked Generic operation's pending composed coefficients and
+/// completed transformers: a contraction's, staged across its operand and
+/// output transforms, or an eager tree transform's. Dropping it on failure
+/// publishes nothing; [`Self::flush_committed`] publishes only after that
+/// operation's required commits succeeded. One instance per call: holding it
+/// across calls would publish what a failed call built.
 #[must_use = "built groups are cached only when flushed after the commit"]
 pub(crate) struct CheckedPendingCoefficients {
     pending: PendingCoefficientGroups,

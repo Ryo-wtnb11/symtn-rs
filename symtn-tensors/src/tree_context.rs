@@ -568,52 +568,24 @@ where
     }
 }
 
-/// A checked Generic transform's staged destination, its call transaction
-/// and its memo publication, held opaque until [`StagedTreeTransform::commit`].
+/// A checked Generic transform's staged destination, the pending composed
+/// coefficients and completed transformer of this one call, and its memo
+/// publication, held opaque until [`StagedTreeTransform::commit`]: dropping
+/// it publishes nothing, and its pending state flushes only after the
+/// destination commit.
 ///
 /// Internal and unstable despite being public for `symtn`.
 #[doc(hidden)]
-pub struct CheckedTreeTransformStage(
-    (
-        crate::contract::PreparedCheckedGenericDynamicSpace,
-        crate::contract::CheckedContractTxn,
-        Option<symtn_core::PermutedMemoTicket>,
-    ),
-);
+pub struct CheckedTreeTransformStage {
+    pub(crate) destination: crate::contract::PreparedCheckedGenericDynamicSpace,
+    pub(crate) coefficients: crate::tree_transform::CheckedPendingCoefficients,
+    pub(crate) memo: Option<symtn_core::PermutedMemoTicket>,
+}
 
 impl<'a, R> StagedTreeTransform<'a, R, CheckedTreeTransformStage, f64>
 where
     R: CheckedGenericRigidSymbols<Scalar = f64>,
 {
-    fn checked(
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        resolved: ResolvedTransform<
-            'a,
-            <CheckedGenericAdmissionMode as PlanningAlgebra<R>>::TransformStage,
-            f64,
-        >,
-    ) -> Self {
-        let ResolvedTransform {
-            preview,
-            replay_destination,
-            nout,
-            stage,
-            structure,
-            src_structure,
-        } = resolved;
-        Self {
-            logical,
-            resolved: ResolvedTransform {
-                preview,
-                replay_destination,
-                nout,
-                stage: CheckedTreeTransformStage(stage),
-                structure,
-                src_structure,
-            },
-        }
-    }
-
     /// Commits the staged checked Generic destination after the replay, then
     /// publishes what the transform staged.
     pub fn commit(
@@ -622,7 +594,7 @@ where
         let ResolvedTransform { stage, preview, .. } = self.resolved;
         <CheckedGenericAdmissionMode as PlanningAlgebra<R>>::commit_transform(
             self.logical,
-            stage.0,
+            stage,
             preview,
         )
     }
@@ -695,7 +667,7 @@ where
         let resolved = self.stage_resolve::<CheckedGenericAdmissionMode, R>(
             engine, logical, adjoint_of, src_len, operation,
         )?;
-        Ok(StagedTreeTransform::checked(logical, resolved))
+        Ok(StagedTreeTransform { logical, resolved })
     }
 
     /// The checked Generic twin of
@@ -721,7 +693,7 @@ where
         let resolved = self.stage_into_in::<CheckedGenericAdmissionMode, R, E>(
             engine, logical, adjoint_of, src_len, operation, dst_space,
         )?;
-        Ok(StagedTreeTransform::checked(logical, resolved))
+        Ok(StagedTreeTransform { logical, resolved })
     }
 
     /// The checked Generic twin of

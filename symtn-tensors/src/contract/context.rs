@@ -1851,7 +1851,7 @@ where
     let temporary_structure = Arc::clone(temporary.structure());
     let transform = M::tree_structure(
         engine,
-        cache,
+        M::contract_transform_cache(cache),
         target.rule,
         &operation,
         target.space.structure(),

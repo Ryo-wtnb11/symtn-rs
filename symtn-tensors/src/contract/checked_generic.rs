@@ -241,13 +241,6 @@ impl CheckedContractTxn {
             memo.publish(&homspace, &structure);
         }
     }
-
-    /// Publishes after an eager transform's destination commit
-    /// (`destination`: its preview and committed structures); a transform
-    /// stages no intermediate.
-    pub(crate) fn commit_transform(self, destination: (Arc<BlockStructure>, Arc<BlockStructure>)) {
-        self.coefficients.flush_committed(&[destination]);
-    }
 }
 
 /// That `logical` is the logical space of `operand`: the storage space
