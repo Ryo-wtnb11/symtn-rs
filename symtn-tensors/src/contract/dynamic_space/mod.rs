@@ -47,6 +47,14 @@ pub(crate) struct TransformedLayoutProbe {
 ///
 /// The dynamic expert entry points (`*_dyn_into`) take it directly together with
 /// raw `f64` slices in the coupled-sector matrix layout.
+///
+/// Invariant: the block structure is a library enumeration of the HomSpace
+/// (or a view derived from one, such as an adjoint view), so every block's
+/// trees, sectors, duality and degeneracies match the HomSpace legs. No
+/// constructor accepts a foreign `BlockStructure` and neither field is
+/// reassigned after construction, so operations rely on this structural
+/// subset proof instead of repeating it; foreign structure is proved where it
+/// enters (bind and the core tuple validators).
 #[derive(Clone, Debug)]
 pub struct DynamicFusionMapSpace {
     nout: usize,

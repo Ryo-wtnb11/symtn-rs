@@ -250,13 +250,6 @@ impl CheckedContractTxn {
     }
 }
 
-fn validate_source_structure<E>(
-    space: &DynamicFusionMapSpace,
-) -> Result<(), CheckedGenericPlanError<E>> {
-    StructurallyValidatedFusionTreeSubset::try_new(space.homspace(), space.structure())?;
-    Ok(())
-}
-
 /// That `logical` is the logical space of `operand`: the storage space
 /// itself, or for a lazy adjoint the swapped HomSpace whose every block maps
 /// onto a parent block of the transposed shape. Provider-free.
@@ -325,7 +318,15 @@ where
             }
             .into());
         }
-        validate_source_structure::<P::Error>(storage)?;
+        // Why not re-check the structure here: a `DynamicFusionMapSpace` is
+        // structurally valid by construction (see its type docs), so this
+        // O(blocks * rank) walk could not fail for any reachable operand.
+        // Foreign structure is proved where it enters (bind, core tuple APIs).
+        debug_assert!(
+            StructurallyValidatedFusionTreeSubset::try_new(storage.homspace(), storage.structure())
+                .is_ok(),
+            "checked operand structure must match its HomSpace by construction"
+        );
         validate_checked_operand_relation(logical.space(), operand)?;
     }
     Ok(axis_plan)
