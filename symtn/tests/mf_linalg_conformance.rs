@@ -14,19 +14,12 @@ use symtn::sector::{
     product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
     SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
 };
-use symtn::sector::{
-    MultiplicityFreeRigidSymbols, PackedProductCodec, ProductSectorLayout, SectorCodec,
-    Su2SectorLayout, U1SectorLayout,
-};
+use symtn::sector::{MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{Complex64, GradedSpace, TensorMap, Truncation};
 use symtn::typed::{Eig, Eigh, LeftPolar, Lq, Qr, RightPolar, Svd};
 
-type Fz2SectorLayout = symtn::sector::Fz2SectorLayout;
-type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-type Fz2U1Su2Codec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, Fz2U1Su2Codec>;
+type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
 
 use crate::fixtures;
 

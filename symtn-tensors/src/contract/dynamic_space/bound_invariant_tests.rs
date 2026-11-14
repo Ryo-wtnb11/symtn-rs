@@ -6,17 +6,13 @@ use std::cell::Cell;
 use symtn_core::{
     clear_structure_caches, structure_cache_info, BlockSpec, BraidingStyleKind, CoupledSectorFold,
     FermionParityFusionRule, FusionAlgebraError, FusionProductSpace, FusionTreePairKey,
-    Fz2SectorLayout, InfallibleGeneric, PackedProductCodec, ProductFusionRule, ProductSectorCodec,
-    ProductSectorLayout, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec,
-    StructureCacheKind, Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule,
-    ZNIrrep,
+    InfallibleGeneric, ProductFusionRule, ProductSectorCodec, SU2FusionRule, SU2Irrep, SectorId,
+    SectorLeg, SectorVec, StructureCacheKind, TensorKitProductCodec, U1FusionRule, U1Irrep,
+    ZNFusionRule, ZNIrrep,
 };
 
-type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
+type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
 
 fn u1(charge: i32) -> SectorId {
     SectorId::from(U1Irrep::new(charge).unwrap())
@@ -710,11 +706,11 @@ fn bind_revalidates_complete_without_replacing_layout() {
     assert!(Arc::ptr_eq(&structure, &bound.space.subblock_structure));
 
     let rule = lowered_product_rule();
-    let pair = Fz2U1Codec::encode(
+    let pair = TensorKitProductCodec::encode(
         SectorId::from(ZNIrrep::new(1, 2).unwrap()),
         SectorId::from(U1Irrep::new(2).unwrap()),
     );
-    let sector = TripleCodec::encode(pair, SU2Irrep::from_twice_spin(1).sector_id());
+    let sector = TensorKitProductCodec::encode(pair, SU2Irrep::from_twice_spin(1).sector_id());
     let layout = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sectors([(sector, 1)], [(sector, 1)]),
@@ -812,15 +808,18 @@ fn lowered_bind_failure_publishes_no_layout_or_admission() {
 
 #[test]
 fn lowered_bind_preserves_omitted_product_codec_failure() {
-    // What: an invalid packed-product sector omitted by a valid Subset is
+    // What: a rejected custom-codec sector omitted by a valid Subset is
     // reported exactly when complete-grid preparation reaches it, without publication.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = lowered_product_rule();
+    let rule = ProductFusionRule::<_, _, crate::product_codec::ParityProductCodec>::try_new(
+        U1FusionRule,
+        FermionParityFusionRule::new(),
+    )
+    .unwrap();
     let valid = rule.vacuum();
-    let invalid = SectorId::new(usize::MAX);
-    let expected = TripleCodec::decode_checked(invalid).unwrap_err();
+    let invalid = SectorId::new(5);
     let pair = FusionTreePairKey::try_pair_from_sector_ids(
         [valid.id()],
         [valid.id()],
@@ -856,7 +855,9 @@ fn lowered_bind_preserves_omitted_product_codec_failure() {
         .unwrap_err();
     assert_eq!(
         error,
-        OperationError::FusionAlgebra(Box::new(FusionAlgebraError::ProductCodec(expected)))
+        OperationError::FusionAlgebra(Box::new(FusionAlgebraError::ProductCodec(
+            symtn_core::ProductSectorCodecError::CodecRejected
+        )))
     );
 }
 

@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, Fz2SectorLayout,
-    PackedProductCodec, ProductFusionRule, U1FusionRule, U1Irrep, U1SectorLayout,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
@@ -17,8 +17,7 @@ use crate::fixtures;
 
 use fixtures::host_runtime;
 
-type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
+type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 
 /// Pinned over a bond: compact vs dense-twin `axpby(alpha, lazy, beta)`, for a
 /// scalar built by `scalar(re, im)`.

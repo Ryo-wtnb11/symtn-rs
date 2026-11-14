@@ -203,12 +203,11 @@ fn checked_tree_distinguishes_absent_channels_from_algebra_failure() {
 
     #[cfg(target_pointer_width = "64")]
     {
-        type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-        type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
+        type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
         let rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
-        let left = Codec::encode(z2_even(), u1(i32::MAX));
-        let right = Codec::encode(z2_odd(), u1(1));
-        let coupled = Codec::encode(z2_odd(), u1(0));
+        let left = TensorKitProductCodec::encode(z2_even(), u1(i32::MAX));
+        let right = TensorKitProductCodec::encode(z2_odd(), u1(1));
+        let coupled = TensorKitProductCodec::encode(z2_odd(), u1(0));
         assert_eq!(
             FusionTreeKey::new(
                 [left, right],
@@ -293,17 +292,16 @@ fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
 
     #[cfg(target_pointer_width = "64")]
     {
-        type InnerCodec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-        type InnerRule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, InnerCodec>;
-        type InnerLayout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-        type Codec = PackedProductCodec<InnerLayout, Su2SectorLayout>;
-        type Rule = ProductFusionRule<InnerRule, SU2FusionRule, Codec>;
+        type InnerRule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+        type Rule = ProductFusionRule<InnerRule, SU2FusionRule>;
         let rule = Rule::try_new(
             InnerRule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap();
-        let sector = |parity, charge, spin| Codec::encode(InnerCodec::encode(parity, charge), spin);
+        let sector = |parity, charge, spin| {
+            TensorKitProductCodec::encode(TensorKitProductCodec::encode(parity, charge), spin)
+        };
         assert_checked_tree_matches_infallible(
             &rule,
             FusionTreeKey::new(
@@ -520,7 +518,6 @@ fn rule_validation_preserves_builtin_multiplicity_free_keys() {
         )
         .unwrap(),
     );
-
     type ProductRule = ProductFusionRule<U1FusionRule, SU2FusionRule>;
     let product = ProductRule::try_new(U1FusionRule, SU2FusionRule).unwrap();
     let left = product.encode_component_ids(u1(1), half);

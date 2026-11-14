@@ -100,19 +100,6 @@ fn product_channels_enumerate_the_left_factor_fastest() {
         .collect();
     assert_eq!(labels, [(0, 0), (2, 0), (0, 2), (2, 2), (0, 4), (2, 4)]);
     assert_eq!(ids(su2_su2.fusion_channels(x, x)), [0, 5, 3, 12, 10, 23]);
-
-    // The same order under a packed codec, whose ids are not monotone in it.
-    let packed = ProductFusionRule::<
-        SU2FusionRule,
-        SU2FusionRule,
-        PackedProductCodec<Su2SectorLayout, Su2SectorLayout>,
-    >::try_new(SU2FusionRule, SU2FusionRule)
-    .unwrap();
-    let x = s(1 | (2 << 8));
-    assert_eq!(
-        ids(packed.try_fusion_channels(x, x).unwrap()),
-        [0, 2, 512, 514, 1024, 1026]
-    );
 }
 
 #[test]

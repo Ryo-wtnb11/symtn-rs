@@ -28,15 +28,14 @@ pub use symtn_sectors::{
     CheckedCanonicalUnitFusionRule, CheckedFusionAlgebra, CheckedGenericFusion,
     CheckedGenericPivotal, CheckedGenericRigidSymbols, CoupledSectorFold, CoupledSectorFoldBuilder,
     EnumeratedCodec, FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError, FusionRule,
-    FusionStyleKind, Fz2SectorLayout, GenericFArray, GenericRMatrix, InfallibleGeneric,
+    FusionStyleKind, GenericFArray, GenericRMatrix, InfallibleGeneric,
     MultiplicityFreeAdmissionMode, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, PackedProductCodec, PackedSectorLayout, PhysicalBasisError,
-    PhysicalFusionBasis, ProductAdmission, ProductFusionRule, ProductFusionRuleError,
-    ProductSector, ProductSectorCodec, ProductSectorCodecError, ProductSectorComponent,
-    ProductSectorLayout, RuleIdentity, SU2FusionRule, SU2Irrep, SectorCodec, SectorId,
-    SectorOrderKey, SectorVec, Su2SectorLayout, SymbolShapeError, TableRule, TableRuleError,
+    MultiplicityFreeRigidSymbols, PhysicalBasisError, PhysicalFusionBasis, ProductAdmission,
+    ProductFusionRule, ProductFusionRuleError, ProductSector, ProductSectorCodec,
+    ProductSectorCodecError, ProductSectorComponent, RuleIdentity, SU2FusionRule, SU2Irrep,
+    SectorCodec, SectorId, SectorOrderKey, SectorVec, SymbolShapeError, TableRule, TableRuleError,
     TableSector, TensorKitProductCodec, TypedSectorAdmission, U1FusionRule, U1Irrep,
-    U1SectorLayout, UncertifiedUnitAdmission, ZNFusionRule, ZNIrrep, SU2_MAX_DOUBLED_SPIN,
+    UncertifiedUnitAdmission, ZNFusionRule, ZNIrrep, SU2_MAX_DOUBLED_SPIN,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use symtn_sectors::{GenericFusionSymbols, GenericRigidSymbols};
@@ -74,6 +73,9 @@ pub mod testing;
 
 #[cfg(any(test, feature = "testing"))]
 mod probe;
+#[cfg(test)]
+#[path = "../../tests/support/product_codec.rs"]
+mod product_codec;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

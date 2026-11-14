@@ -150,6 +150,9 @@ pub(crate) use tree_transform::{
 };
 
 #[cfg(test)]
+#[path = "../../tests/support/product_codec.rs"]
+mod product_codec;
+#[cfg(test)]
 mod tests;
 
 /// The workspace tolerance rule for arithmetic test comparisons

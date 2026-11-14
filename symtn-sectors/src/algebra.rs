@@ -1,5 +1,4 @@
 use core::fmt;
-use core::marker::PhantomData;
 use core::ops::{Add, Div, Mul};
 use std::convert::Infallible;
 
@@ -1477,48 +1476,11 @@ pub enum ProductSectorComponent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProductSectorCodecError {
     CodecRejected,
-    WidthOverflow {
-        left_bits: u32,
-        right_bits: u32,
-        available_bits: u32,
-    },
-    ComponentOutOfRange {
-        component: ProductSectorComponent,
-        sector: SectorId,
-        bits: u32,
-    },
-    InvalidHighBits {
-        sector: SectorId,
-        total_bits: u32,
-    },
 }
 
 impl core::fmt::Display for ProductSectorCodecError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::CodecRejected => write!(formatter, "product sector codec rejected the value"),
-            Self::WidthOverflow {
-                left_bits,
-                right_bits,
-                available_bits,
-            } => write!(
-                formatter,
-                "product sector needs {} bits but this target provides {available_bits}",
-                u64::from(*left_bits) + u64::from(*right_bits)
-            ),
-            Self::ComponentOutOfRange {
-                component,
-                sector,
-                bits,
-            } => write!(
-                formatter,
-                "{component:?} product component {sector:?} does not fit its {bits}-bit layout"
-            ),
-            Self::InvalidHighBits { sector, total_bits } => write!(
-                formatter,
-                "packed product sector {sector:?} has bits above its {total_bits}-bit layout"
-            ),
-        }
+        write!(formatter, "product sector codec rejected the value")
     }
 }
 
@@ -1528,7 +1490,6 @@ impl std::error::Error for ProductSectorCodecError {}
 ///
 /// This is the default codec of [`ProductFusionRule`](crate::ProductFusionRule)
 /// in every layer.
-/// Select [`PackedProductCodec`] explicitly for fixed-width encoding.
 /// Nested Cantor decoding is
 /// magnitude-dependent and its representable component domain shrinks as
 /// pairing is nested.
@@ -1580,218 +1541,6 @@ fn tensor_kit_product_pairing_sum(paired: u128) -> u128 {
 
 fn triangular_number(value: u128) -> u128 {
     value * (value + 1) / 2
-}
-
-/// Fixed-width leaf or recursively packed product layout.
-///
-/// Packed products place the left component in the low bits and the right
-/// component in the high bits. A zero-bit layout can represent only ID 0;
-/// a full-`usize` layout accepts every raw ID but cannot be combined with any
-/// positive-width sibling. The combined width must not exceed `usize::BITS`.
-///
-/// [`PackedProductCodec`] independently enforces the declared raw bit width
-/// before calling [`Self::validate`], so a custom validator cannot permit
-/// overlapping component bits.
-pub trait PackedSectorLayout {
-    const BITS: u32;
-
-    fn validate(sector: SectorId) -> Result<(), ProductSectorCodecError>;
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Fz2SectorLayout;
-
-impl PackedSectorLayout for Fz2SectorLayout {
-    const BITS: u32 = 1;
-
-    fn validate(sector: SectorId) -> Result<(), ProductSectorCodecError> {
-        if sector.id() <= 1 {
-            Ok(())
-        } else {
-            Err(ProductSectorCodecError::InvalidHighBits {
-                sector,
-                total_bits: Self::BITS,
-            })
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct U1SectorLayout;
-
-impl PackedSectorLayout for U1SectorLayout {
-    const BITS: u32 = 32;
-
-    fn validate(sector: SectorId) -> Result<(), ProductSectorCodecError> {
-        if u32::try_from(sector.id()).is_ok() {
-            Ok(())
-        } else {
-            Err(ProductSectorCodecError::InvalidHighBits {
-                sector,
-                total_bits: Self::BITS,
-            })
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Su2SectorLayout;
-
-impl PackedSectorLayout for Su2SectorLayout {
-    const BITS: u32 = 8;
-
-    fn validate(sector: SectorId) -> Result<(), ProductSectorCodecError> {
-        if sector.id() <= 254 {
-            Ok(())
-        } else {
-            Err(ProductSectorCodecError::InvalidHighBits {
-                sector,
-                total_bits: Self::BITS,
-            })
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct ProductSectorLayout<Left, Right>(PhantomData<(Left, Right)>);
-
-impl<Left, Right> PackedSectorLayout for ProductSectorLayout<Left, Right>
-where
-    Left: PackedSectorLayout,
-    Right: PackedSectorLayout,
-{
-    const BITS: u32 = Left::BITS.saturating_add(Right::BITS);
-
-    fn validate(sector: SectorId) -> Result<(), ProductSectorCodecError> {
-        let (left, right) = decode_packed_components::<Left, Right>(sector)?;
-        validate_packed_component::<Left>(left, ProductSectorComponent::Left)?;
-        validate_packed_component::<Right>(right, ProductSectorComponent::Right)
-    }
-}
-
-/// Association-independent fixed-width product encoding.
-///
-/// `left` occupies bits `0..Left::BITS`; `right` occupies the next
-/// `Right::BITS`. Recursive products therefore flatten to the same numeric ID
-/// for `(A x B) x C` and `A x (B x C)` when the ordered leaf layouts agree.
-/// The codec types, and therefore `RuleIdentity`/cache identities, remain
-/// distinct across those source-level associations; numeric equality does not
-/// authorize cross-provider cache reuse.
-///
-/// Capacity is target-dependent because the final ID is a `usize`. A layout
-/// wider than `usize::BITS` is rejected with
-/// [`ProductSectorCodecError::WidthOverflow`].
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct PackedProductCodec<Left, Right>(PhantomData<(Left, Right)>);
-
-impl<Left, Right> ProductSectorCodec for PackedProductCodec<Left, Right>
-where
-    Left: PackedSectorLayout,
-    Right: PackedSectorLayout,
-{
-    fn try_encode(left: SectorId, right: SectorId) -> Option<SectorId> {
-        Self::encode_checked(left, right).ok()
-    }
-
-    fn decode(sector: SectorId) -> Option<(SectorId, SectorId)> {
-        Self::decode_checked(sector).ok()
-    }
-
-    fn encode_checked(
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorId, ProductSectorCodecError> {
-        validate_packed_width::<Left, Right>()?;
-        validate_packed_component::<Left>(left, ProductSectorComponent::Left)?;
-        validate_packed_component::<Right>(right, ProductSectorComponent::Right)?;
-        let shifted_right = if Left::BITS == usize::BITS {
-            0
-        } else {
-            right.id() << Left::BITS
-        };
-        Ok(SectorId::new(left.id() | shifted_right))
-    }
-
-    fn decode_checked(sector: SectorId) -> Result<(SectorId, SectorId), ProductSectorCodecError> {
-        let (left, right) = decode_packed_components::<Left, Right>(sector)?;
-        validate_packed_component::<Left>(left, ProductSectorComponent::Left)?;
-        validate_packed_component::<Right>(right, ProductSectorComponent::Right)?;
-        Ok((left, right))
-    }
-}
-
-fn validate_packed_component<Layout>(
-    sector: SectorId,
-    component: ProductSectorComponent,
-) -> Result<(), ProductSectorCodecError>
-where
-    Layout: PackedSectorLayout,
-{
-    let fits_declared_width = match Layout::BITS.cmp(&usize::BITS) {
-        core::cmp::Ordering::Greater => false,
-        core::cmp::Ordering::Equal => true,
-        core::cmp::Ordering::Less if Layout::BITS == 0 => sector.id() == 0,
-        core::cmp::Ordering::Less => sector.id() < (1usize << Layout::BITS),
-    };
-    if !fits_declared_width {
-        return Err(ProductSectorCodecError::ComponentOutOfRange {
-            component,
-            sector,
-            bits: Layout::BITS,
-        });
-    }
-    Layout::validate(sector).map_err(|_| ProductSectorCodecError::ComponentOutOfRange {
-        component,
-        sector,
-        bits: Layout::BITS,
-    })
-}
-
-fn validate_packed_width<Left, Right>() -> Result<u32, ProductSectorCodecError>
-where
-    Left: PackedSectorLayout,
-    Right: PackedSectorLayout,
-{
-    let total_bits =
-        Left::BITS
-            .checked_add(Right::BITS)
-            .ok_or(ProductSectorCodecError::WidthOverflow {
-                left_bits: Left::BITS,
-                right_bits: Right::BITS,
-                available_bits: usize::BITS,
-            })?;
-    if total_bits > usize::BITS {
-        return Err(ProductSectorCodecError::WidthOverflow {
-            left_bits: Left::BITS,
-            right_bits: Right::BITS,
-            available_bits: usize::BITS,
-        });
-    }
-    Ok(total_bits)
-}
-
-fn decode_packed_components<Left, Right>(
-    sector: SectorId,
-) -> Result<(SectorId, SectorId), ProductSectorCodecError>
-where
-    Left: PackedSectorLayout,
-    Right: PackedSectorLayout,
-{
-    let total_bits = validate_packed_width::<Left, Right>()?;
-    if total_bits < usize::BITS && sector.id() >> total_bits != 0 {
-        return Err(ProductSectorCodecError::InvalidHighBits { sector, total_bits });
-    }
-    let left_mask = if Left::BITS == usize::BITS {
-        usize::MAX
-    } else {
-        (1usize << Left::BITS) - 1
-    };
-    let right = if Left::BITS == usize::BITS {
-        0
-    } else {
-        sector.id() >> Left::BITS
-    };
-    Ok((SectorId::new(sector.id() & left_mask), SectorId::new(right)))
 }
 
 #[cfg(test)]

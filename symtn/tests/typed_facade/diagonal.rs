@@ -1444,7 +1444,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
     // What: the full trace of a rank-(1,1) compact spectrum factor over its
     // only pair is the same number on compact and forced-dense storage — U(1),
     // SU(2) (non-unit quantum dimensions), fZ2 (the twist makes it a
-    // supertrace) and the packed U(1) x fZ2 product route, on plain and dual
+    // supertrace) and the default Cantor U(1) x fZ2 product route, on plain and dual
     // bond legs, f64 and c64, both pair orders, and on legs the compact swaps
     // bent themselves.
     let runtime = runtime();
@@ -1509,7 +1509,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
         let typed_s = compact_bond_trace(&runtime, &typed_leg, complex);
         sweep_compact_trace_variants(&format!("fz2 dual={is_dual} c64"), &typed_s, widen_complex);
 
-        // U(1) x fZ2, using the packed codec from the rule aliases of this
+        // U(1) x fZ2, using the default Cantor codec from the rule aliases of this
         // file's earlier section: both the charge and parity factor must survive into the
         // coefficient.
         let product_label = |charge: i32, parity: u8| {

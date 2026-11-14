@@ -1,12 +1,13 @@
 use std::collections::BTreeSet;
 
+use crate::product_codec::ParityProductCodec;
+
 use symtn_sectors::{
     product_sector, BraidingStyleKind, CU1FusionRule, CU1Irrep, CheckedFusionAlgebra,
     FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError, FusionRule, FusionStyleKind,
-    Fz2SectorLayout, PackedProductCodec, ProductFusionRule, ProductSector, ProductSectorCodecError,
-    RuleIdentity, SU2FusionRule, SU2Irrep, SectorCodec, SectorId, SectorVec, TableRule,
-    TableSector, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule, ZNIrrep,
-    SU2_MAX_DOUBLED_SPIN,
+    ProductFusionRule, ProductSector, ProductSectorCodecError, RuleIdentity, SU2FusionRule,
+    SU2Irrep, SectorCodec, SectorId, SectorVec, TableRule, TableSector, U1FusionRule, U1Irrep,
+    ZNFusionRule, ZNIrrep, SU2_MAX_DOUBLED_SPIN,
 };
 
 #[test]
@@ -291,13 +292,12 @@ fn su2_codec_round_trips_up_to_the_supported_doubled_spin() {
     );
 }
 
-type U1Fz2Codec = PackedProductCodec<U1SectorLayout, Fz2SectorLayout>;
-type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule, U1Fz2Codec>;
+type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule>;
 
 #[test]
 fn product_codec_round_trips_component_labels() {
     // What: the product label is decoded back component-wise, so the pair
-    // survives the packed id, not just the id itself.
+    // survives the product id, not just the id itself.
     let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
     assert_round_trip(
         &rule,
@@ -309,22 +309,18 @@ fn product_codec_round_trips_component_labels() {
     );
 }
 
-// The 33-bit U(1) x fZ2 layout only fits, and only has spare high bits, on a
-// 64-bit target.
-#[cfg(target_pointer_width = "64")]
 #[test]
-fn product_codec_reports_the_packing_failure_it_hit() {
-    // What: the packed layout's own diagnosis survives to the caller instead
-    // of being flattened into a generic label rejection.
-    let rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
-    let sector = SectorId::new(1usize << 33);
+fn product_codec_reports_the_codec_rejection_it_hit() {
+    // What: codec rejection stays distinct from a factor's label rejection.
+    let rule = ProductFusionRule::<_, _, ParityProductCodec>::try_new(
+        U1FusionRule,
+        FermionParityFusionRule::new(),
+    )
+    .unwrap();
     assert_eq!(
-        SectorCodec::decode_sector(&rule, sector),
+        SectorCodec::decode_sector(&rule, SectorId::new(5)),
         Err(FusionAlgebraError::ProductCodec(
-            ProductSectorCodecError::InvalidHighBits {
-                sector,
-                total_bits: 33,
-            }
+            ProductSectorCodecError::CodecRejected
         ))
     );
 }

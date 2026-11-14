@@ -390,7 +390,7 @@ fn components<P: crate::ProductSectorCodec>(inputs: &[SectorId], factor: usize) 
 /// Tensor operations order sectors by the factors' TensorKit order keys,
 /// independently of the product id codec and channel enumeration.
 ///
-/// The default [`TensorKitProductCodec`] packs component ids. A different
+/// The default [`TensorKitProductCodec`] encodes component ids. A different
 /// [`crate::ProductSectorCodec`] changes the rule identity, not its mathematics.
 /// Factor order and nesting remain explicit in the Rust type and rule identity.
 #[derive(Clone)]
@@ -422,12 +422,12 @@ where
         &self.codec.right
     }
 
-    /// Packs component ids, panicking when the codec cannot represent them.
+    /// Encodes component ids, panicking when the codec cannot represent them.
     pub fn encode_component_ids(&self, left: SectorId, right: SectorId) -> SectorId {
         P::encode(left, right)
     }
 
-    /// Packs component ids with the product admission error.
+    /// Encodes component ids with the product admission error.
     pub fn try_encode_component_ids(
         &self,
         left: SectorId,
@@ -437,7 +437,7 @@ where
             .map_err(<Pair<L, R> as ProductAdmission<L::Error, R::Error>>::codec)
     }
 
-    /// Unpacks component ids, or returns `None` for an invalid product id.
+    /// Decodes component ids, or returns `None` for an invalid product id.
     pub fn decode_component_ids(&self, sector: SectorId) -> Option<(SectorId, SectorId)> {
         P::decode(sector)
     }

@@ -168,7 +168,6 @@ fn canonical_coupled_layouts_pass_checked_subset_proof() {
     assert_rule(&U1FusionRule, u1(7));
     assert_rule(&SU2FusionRule, su2(3));
     assert_rule(&TableRule::fibonacci(), SectorId::new(1));
-
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type Triple = ProductFusionRule<Fz2U1, SU2FusionRule>;
     let pair = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
@@ -290,127 +289,6 @@ fn next_lexicographic_permutation(values: &mut [usize]) -> bool {
     values.swap(pivot, successor);
     values[pivot + 1..].reverse();
     true
-}
-
-struct PermissiveOneBitLayout;
-
-impl PackedSectorLayout for PermissiveOneBitLayout {
-    const BITS: u32 = 1;
-
-    fn validate(_sector: SectorId) -> Result<(), ProductSectorCodecError> {
-        Ok(())
-    }
-}
-
-struct ZeroBitLayout;
-
-impl PackedSectorLayout for ZeroBitLayout {
-    const BITS: u32 = 0;
-
-    fn validate(sector: SectorId) -> Result<(), ProductSectorCodecError> {
-        (sector.id() == 0)
-            .then_some(())
-            .ok_or(ProductSectorCodecError::InvalidHighBits {
-                sector,
-                total_bits: 0,
-            })
-    }
-}
-
-struct FullWidthLayout;
-
-impl PackedSectorLayout for FullWidthLayout {
-    const BITS: u32 = usize::BITS;
-
-    fn validate(_sector: SectorId) -> Result<(), ProductSectorCodecError> {
-        Ok(())
-    }
-}
-
-#[test]
-fn packed_product_codec_reports_invalid_components_and_widths() {
-    // What: malformed packed IDs and layouts wider than usize fail with a
-    // typed reason instead of panicking, wrapping, or silently truncating.
-    type FpU1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    let invalid_parity = FpU1Codec::encode_checked(SectorId::new(2), u1(0));
-    assert!(matches!(
-        invalid_parity,
-        Err(ProductSectorCodecError::ComponentOutOfRange {
-            component: ProductSectorComponent::Left,
-            ..
-        })
-    ));
-
-    type MaliciousCodec = PackedProductCodec<PermissiveOneBitLayout, Fz2SectorLayout>;
-    assert!(matches!(
-        MaliciousCodec::encode_checked(SectorId::new(2), SectorId::new(0)),
-        Err(ProductSectorCodecError::ComponentOutOfRange {
-            component: ProductSectorComponent::Left,
-            ..
-        })
-    ));
-
-    type TripleLayout =
-        ProductSectorLayout<ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>, Su2SectorLayout>;
-    assert_eq!(TripleLayout::BITS, 41);
-    #[cfg(target_pointer_width = "64")]
-    {
-        let invalid_high_bits = SectorId::new(1usize << TripleLayout::BITS);
-        assert!(matches!(
-            TripleLayout::validate(invalid_high_bits),
-            Err(ProductSectorCodecError::InvalidHighBits { .. })
-        ));
-    }
-
-    type TooWide =
-        PackedProductCodec<ProductSectorLayout<U1SectorLayout, U1SectorLayout>, U1SectorLayout>;
-    assert!(matches!(
-        TooWide::encode_checked(SectorId::new(0), SectorId::new(0)),
-        Err(ProductSectorCodecError::WidthOverflow { .. })
-    ));
-
-    type FullThenZero = PackedProductCodec<FullWidthLayout, ZeroBitLayout>;
-    let full = FullThenZero::encode_checked(SectorId::new(usize::MAX), SectorId::new(0)).unwrap();
-    assert_eq!(full, SectorId::new(usize::MAX));
-    assert_eq!(
-        FullThenZero::decode_checked(full).unwrap(),
-        (SectorId::new(usize::MAX), SectorId::new(0))
-    );
-
-    type ZeroThenParity = PackedProductCodec<ZeroBitLayout, Fz2SectorLayout>;
-    assert_eq!(
-        ZeroThenParity::encode_checked(SectorId::new(0), SectorId::new(1)).unwrap(),
-        SectorId::new(1)
-    );
-}
-
-#[test]
-fn packed_and_tensorkit_codecs_remain_distinct_compatible_options() {
-    // What: the expert Cantor codec keeps its Cantor-pairing IDs while the
-    // packed codec has a distinct rule identity and round-trips the same
-    // semantic components.
-    type PackedCodec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type PackedRule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, PackedCodec>;
-    type CantorRule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-
-    let parity = z2_odd();
-    let charge = u1(2);
-    let packed = PackedCodec::encode(parity, charge);
-    let cantor = TensorKitProductCodec::encode(parity, charge);
-    assert_ne!(packed, cantor);
-    assert_eq!(PackedCodec::decode(packed), Some((parity, charge)));
-    assert_eq!(
-        TensorKitProductCodec::decode(cantor),
-        Some((parity, charge))
-    );
-    assert_ne!(
-        PackedRule::try_new(FermionParityFusionRule::new(), U1FusionRule)
-            .unwrap()
-            .rule_identity(),
-        CantorRule::try_new(FermionParityFusionRule::new(), U1FusionRule)
-            .unwrap()
-            .rule_identity()
-    );
 }
 
 #[test]

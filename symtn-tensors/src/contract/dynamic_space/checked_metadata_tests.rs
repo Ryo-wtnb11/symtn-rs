@@ -3,16 +3,13 @@ use crate::test_support::CACHE_TEST_LOCK;
 use std::cell::Cell;
 use symtn_core::{
     structure_cache_info, FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError,
-    FusionProductSpace, FusionTreeKey, Fz2SectorLayout, PackedProductCodec, ProductFusionRule,
-    ProductSectorCodec, ProductSectorLayout, SU2FusionRule, SU2Irrep, SectorId, SectorLeg,
-    StructureCacheKind, Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout,
+    FusionProductSpace, FusionTreeKey, ProductFusionRule, ProductSectorCodec, SU2FusionRule,
+    SU2Irrep, SectorId, SectorLeg, StructureCacheKind, TensorKitProductCodec, U1FusionRule,
+    U1Irrep,
 };
 
-type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
+type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
 
 thread_local! {
     static PRIMER_CALLS: Cell<usize> = const { Cell::new(0) };
@@ -31,8 +28,8 @@ fn rule() -> TripleRule {
 }
 
 fn sector(parity: usize, charge: i32, twice_spin: usize) -> SectorId {
-    TripleCodec::encode(
-        Fz2U1Codec::encode(
+    TensorKitProductCodec::encode(
+        TensorKitProductCodec::encode(
             SectorId::from(FermionParityIrrep::new(parity == 1)),
             SectorId::from(U1Irrep::new(charge).unwrap()),
         ),
@@ -513,16 +510,22 @@ fn metadata_error_maps_to_the_exact_codec_cause() {
     // its codec cause intact rather than as a static message: the checked
     // enumerator preserves the typed cause instead of flattening it to
     // InvalidArgument.
+    let rule = ProductFusionRule::<_, _, crate::product_codec::ParityProductCodec>::try_new(
+        U1FusionRule,
+        FermionParityFusionRule::new(),
+    )
+    .unwrap();
     let malformed = FusionTreeHomSpace::new(
-        FusionProductSpace::new([SectorLeg::new([(SectorId::new(usize::MAX), 1)], false)]),
+        FusionProductSpace::new([SectorLeg::new([(SectorId::new(5), 1)], false)]),
         FusionProductSpace::new(Vec::<SectorLeg>::new()),
     );
-    let error = checked_layout_primer(&rule(), &malformed).unwrap_err();
-    assert!(matches!(
+    let error = checked_layout_primer(&rule, &malformed).unwrap_err();
+    assert_eq!(
         error,
-        OperationError::FusionAlgebra(ref cause)
-            if matches!(**cause, FusionAlgebraError::ProductCodec(_))
-    ));
+        OperationError::FusionAlgebra(Box::new(FusionAlgebraError::ProductCodec(
+            symtn_core::ProductSectorCodecError::CodecRejected
+        )))
+    );
 }
 
 #[test]
@@ -615,7 +618,7 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
         FusionProductSpace::new([
             SectorLeg::new(
                 [(
-                    Fz2U1Codec::encode(
+                    TensorKitProductCodec::encode(
                         SectorId::from(FermionParityIrrep::EVEN),
                         SectorId::from(U1Irrep::new(i32::MAX).unwrap()),
                     ),
@@ -625,7 +628,7 @@ fn failed_lowered_roots_build_and_admit_no_scratch() {
             ),
             SectorLeg::new(
                 [(
-                    Fz2U1Codec::encode(
+                    TensorKitProductCodec::encode(
                         SectorId::from(FermionParityIrrep::ODD),
                         SectorId::from(U1Irrep::new(1).unwrap()),
                     ),
@@ -854,7 +857,7 @@ fn admission_rejects_the_excluded_u1_id_without_publication() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn admission_rejects_a_product_containing_the_excluded_u1_id_without_publication() {
-    // What: a packed product containing the excluded U1 ID is rejected
+    // What: a product containing the excluded U1 ID is rejected
     // before any result layout publication.
     let _guard = CACHE_TEST_LOCK
         .lock()
@@ -870,7 +873,8 @@ fn admission_rejects_a_product_containing_the_excluded_u1_id_without_publication
     )
     .unwrap();
     let excluded_u1 = SectorId::new(u32::MAX as usize);
-    let odd_min = Fz2U1Codec::encode(SectorId::from(FermionParityIrrep::ODD), excluded_u1);
+    let odd_min =
+        TensorKitProductCodec::encode(SectorId::from(FermionParityIrrep::ODD), excluded_u1);
     let rhs_homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(odd_min, 1)], false)]),
         FusionProductSpace::new([]),

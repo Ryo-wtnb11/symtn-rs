@@ -3,7 +3,7 @@
 
 use symtn_sectors::*;
 
-use crate::sector_ids::{excluded_u1_id, su2, u1, z2_even, z2_odd};
+use crate::sector_ids::{su2, u1, z2_even, z2_odd};
 
 #[test]
 fn fusion_style_kind_matches_tensorkit_multiplicity_free_split() {
@@ -71,32 +71,6 @@ fn product_sector_codec_uses_tensorkit_diagonal_component_order() {
     }
 }
 
-#[cfg(target_pointer_width = "64")]
-#[test]
-fn packed_product_codec_is_association_independent() {
-    // What: fixed-width product IDs flatten numerically regardless of the
-    // source-level association used to build the same ordered leaves.
-    type FpU1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type FpU1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type LeftAssociated = PackedProductCodec<FpU1Layout, Su2SectorLayout>;
-    type U1Su2Codec = PackedProductCodec<U1SectorLayout, Su2SectorLayout>;
-    type U1Su2Layout = ProductSectorLayout<U1SectorLayout, Su2SectorLayout>;
-    type RightAssociated = PackedProductCodec<Fz2SectorLayout, U1Su2Layout>;
-
-    for (parity, charge, twice_spin) in [
-        (z2_even(), excluded_u1_id(), 0),
-        (z2_odd(), u1(-1), 1),
-        (z2_even(), u1(0), 2),
-        (z2_odd(), u1(i32::MAX), 254),
-    ] {
-        let left = FpU1Codec::encode(parity, charge);
-        let left_associated = LeftAssociated::encode(left, su2(twice_spin));
-        let right = U1Su2Codec::encode(charge, su2(twice_spin));
-        let right_associated = RightAssociated::encode(parity, right);
-        assert_eq!(left_associated, right_associated);
-    }
-}
-
 #[test]
 fn rigid_symbols_separate_twist_from_frobenius_schur_phase() {
     let fermion = FermionParityFusionRule::new();
@@ -150,29 +124,6 @@ fn public_u1_irrep_roundtrips_compact_ids_and_fuses() {
         .to_vec(),
         vec![SectorId::from(U1Irrep::new(3).unwrap())]
     );
-}
-
-#[cfg(target_pointer_width = "64")]
-#[test]
-fn packed_product_codec_covers_the_builtin_leaf_domains() {
-    // What: the packed codec preserves the full 32-bit U1 component range,
-    // including the raw ID reserved by the semantic label constructor,
-    // together with every currently supported SU2 label.
-    type FpU1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type FpU1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type TripleCodec = PackedProductCodec<FpU1Layout, Su2SectorLayout>;
-
-    for charge in [excluded_u1_id(), u1(-1), u1(0), u1(1), u1(i32::MAX)] {
-        for twice_spin in [0, 1, 127, 254] {
-            let inner = FpU1Codec::encode(z2_odd(), charge);
-            let encoded = TripleCodec::encode(inner, su2(twice_spin));
-            let (decoded_inner, decoded_spin) = TripleCodec::decode(encoded).unwrap();
-            let (decoded_parity, decoded_charge) = FpU1Codec::decode(decoded_inner).unwrap();
-            assert_eq!(decoded_parity, z2_odd());
-            assert_eq!(decoded_charge, charge);
-            assert_eq!(decoded_spin, su2(twice_spin));
-        }
-    }
 }
 
 #[test]

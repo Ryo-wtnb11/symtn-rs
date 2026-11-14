@@ -7,9 +7,8 @@ instead. Equal numeric IDs from different rules need not mean the same sector.
 ## Product-sector codecs
 
 `ProductFusionRule` defaults to `TensorKitProductCodec` (Cantor pairing).
-`PackedProductCodec` is an explicit fixed-width alternative. Codec choice
-changes `RuleIdentity`: spaces and plans from the two codecs cannot mix even
-when their decoded labels agree.
+Custom implementations of `ProductSectorCodec` change `RuleIdentity`: spaces
+and plans from different codecs cannot mix even when their decoded labels agree.
 
 Changing a codec preserves fusion, duality, coefficients, degeneracies and
 results matched by semantic tree labels. It can change numeric IDs, sector
@@ -92,9 +91,10 @@ transforms.
 
 ## Target width
 
-Packed `U(1) × fZ2` and `fZ2 × U(1) × SU(2)` reserve 33 and 41 bits
-respectively. They require a 64-bit target, as does the complete encoded U(1)
-label set. Checked constructors return a width error on narrower targets.
+U(1) leaf IDs fit in 32 bits. Product labels share the target's `usize` budget
+through Cantor pairing, whose representable component domain shrinks as pairing
+is nested. An unrepresentable pair returns
+`ProductSectorCodecError::CodecRejected`.
 
 U(1) charges range from `i32::MIN + 1` through `i32::MAX`. The label is
 fusion-symbols' `U1Irrep`, whose `new(i32::MIN)` returns an error because that

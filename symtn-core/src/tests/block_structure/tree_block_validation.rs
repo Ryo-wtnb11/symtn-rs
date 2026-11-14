@@ -242,18 +242,16 @@ fn checked_rank_one_validates_ids_by_unit_fusion() {
             FusionAlgebraError::InvalidSector { sector: invalid_u1 },
         );
 
-        type Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-        type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-        type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
+        type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
         let rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
-        let invalid_product = SectorId::new(1usize << Layout::BITS);
+        let invalid_parity = SectorId::new(2);
+        let invalid_product = TensorKitProductCodec::encode(invalid_parity, u1(0));
         assert_invalid_rank_one_checked(
             &rule,
             invalid_product,
-            FusionAlgebraError::ProductCodec(ProductSectorCodecError::InvalidHighBits {
-                sector: invalid_product,
-                total_bits: Layout::BITS,
-            }),
+            FusionAlgebraError::InvalidSector {
+                sector: invalid_parity,
+            },
         );
     }
 

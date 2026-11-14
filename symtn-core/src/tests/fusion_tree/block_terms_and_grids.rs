@@ -343,28 +343,29 @@ fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
         ],
     );
 
-    type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
-    type Fz2U1Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
-    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
-    type TripleCodec = PackedProductCodec<Fz2U1Layout, Su2SectorLayout>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
+    type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
 
     let triple_rule = TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
-    let vacuum = TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(0)), su2(0));
-    let external = TripleCodec::encode(Fz2U1Codec::encode(z2_odd(), u1(0)), su2(1));
-    let second_channel = TripleCodec::encode(Fz2U1Codec::encode(z2_even(), u1(0)), su2(2));
+    let vacuum =
+        TensorKitProductCodec::encode(TensorKitProductCodec::encode(z2_even(), u1(0)), su2(0));
+    let external =
+        TensorKitProductCodec::encode(TensorKitProductCodec::encode(z2_odd(), u1(0)), su2(1));
+    let second_channel =
+        TensorKitProductCodec::encode(TensorKitProductCodec::encode(z2_even(), u1(0)), su2(2));
     assert_literal_binary_choice_sector_grids(
         &triple_rule,
         vacuum,
         external,
         vec![
+            // Cantor IDs are 0, 3, 8, so the second fusion channel precedes the external sector.
             (vacuum, vec![[vacuum, vacuum], [external, external]]),
-            (external, vec![[external, vacuum], [vacuum, external]]),
             (second_channel, vec![[external, external]]),
+            (external, vec![[external, vacuum], [vacuum, external]]),
         ],
     );
 }

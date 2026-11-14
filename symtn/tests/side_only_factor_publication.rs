@@ -16,7 +16,6 @@ use symtn::sector::{
     product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
     SU2Irrep, U1FusionRule, U1Irrep,
 };
-use symtn::sector::{PackedProductCodec, U1SectorLayout};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn::typed::{Lq, Qr, Svd};
 
@@ -32,8 +31,7 @@ fn domain_axes<R, D, S>(t: &symtn::typed::TensorMap<R, D, S>) -> Vec<usize> {
     (t.codomain_rank()..t.rank()).collect()
 }
 
-type Fz2U1Codec = PackedProductCodec<symtn::sector::Fz2SectorLayout, U1SectorLayout>;
-type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
+type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 
 macro_rules! assert_close {
     ($engine:ident, $actual:expr, $expected:expr) => {{

@@ -16,11 +16,10 @@
 //!   `checked_rigid_dimension_accepts_the_largest_su2_dynkin_label`.
 //! - Table one-based labels and out-of-rank rejection: `tests/table_rule.rs`
 //!   `codec_round_trips_and_rejects_labels_outside_the_rank`.
-//! - Cantor pairing order and packed association independence:
-//!   `tests/builtin_rules.rs` `product_sector_codec_uses_tensorkit_diagonal_component_order`,
-//!   `packed_product_codec_is_association_independent`.
-//! - Packed U(1) x fZ2 high-bit rejection: `tests/sector_labels.rs`
-//!   `product_codec_reports_the_packing_failure_it_hit`.
+//! - Cantor pairing order:
+//!   `tests/builtin_rules.rs` `product_sector_codec_uses_tensorkit_diagonal_component_order`.
+//! - Custom product codec rejection: `tests/sector_labels.rs`
+//!   `product_codec_reports_the_codec_rejection_it_hit`.
 
 use symtn_sectors::*;
 
@@ -255,60 +254,6 @@ fn cantor_product_rejects_the_first_unpairable_ids() {
         Err(FusionAlgebraError::ProductCodec(
             ProductSectorCodecError::CodecRejected
         ))
-    );
-}
-
-#[cfg(target_pointer_width = "64")]
-#[test]
-fn packed_product_ids_place_the_left_factor_in_the_low_bits() {
-    type U1Fz2 = ProductFusionRule<
-        U1FusionRule,
-        FermionParityFusionRule,
-        PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
-    >;
-    let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
-    let label = product_sector(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD);
-    assert_eq!(rule.encode_sector(&label), Ok(s(0x1_0000_0001)));
-    assert_eq!(rule.decode_sector(s(0x1_0000_0001)), Ok(label));
-
-    type Fz2Su2 = ProductFusionRule<
-        FermionParityFusionRule,
-        SU2FusionRule,
-        PackedProductCodec<Fz2SectorLayout, Su2SectorLayout>,
-    >;
-    let rule = Fz2Su2::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap();
-    let label = product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(254));
-    assert_eq!(rule.encode_sector(&label), Ok(s(509)));
-    // 510 = spin component 255: inside the 8-bit width, outside SU(2)'s range.
-    assert_eq!(
-        rule.decode_sector(s(510)),
-        Err(FusionAlgebraError::ProductCodec(
-            ProductSectorCodecError::ComponentOutOfRange {
-                component: ProductSectorComponent::Right,
-                sector: s(255),
-                bits: 8,
-            }
-        ))
-    );
-    assert_eq!(
-        rule.decode_sector(s(1 << 9)),
-        Err(FusionAlgebraError::ProductCodec(
-            ProductSectorCodecError::InvalidHighBits {
-                sector: s(1 << 9),
-                total_bits: 9,
-            }
-        ))
-    );
-
-    type TooWide =
-        PackedProductCodec<U1SectorLayout, ProductSectorLayout<U1SectorLayout, U1SectorLayout>>;
-    assert_eq!(
-        TooWide::encode_checked(s(0), s(0)),
-        Err(ProductSectorCodecError::WidthOverflow {
-            left_bits: 32,
-            right_bits: 64,
-            available_bits: 64,
-        })
     );
 }
 
