@@ -68,6 +68,6 @@ pub use symtn_core::{
     ProductSectorCodecError, ProductSectorLayout, Su2SectorLayout, TensorKitProductCodec,
     U1SectorLayout,
 };
-pub use symtn_core::{LieGroupFusionRule, LieGroupFusionRuleError};
+pub use symtn_core::{LieGroupFusionRule, LieGroupFusionRuleError, LieIrrep};
 /// Vocabulary the rule traits' signatures use.
 pub use symtn_core::{PhysicalBasisError, ProductSectorComponent, SymbolShapeError};

@@ -204,27 +204,40 @@ fn checked_generic_rule_instance_alone_separates_signatures() {
     // What: SU(3) and SU(4) trivial legs give the same hom space and
     // block structure content, so the rule identity alone separates them.
     use std::sync::Arc;
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
     let rule = |rank: usize| {
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap()).unwrap())
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(rank).unwrap(),
+            )
+            .unwrap(),
+        )
     };
     // Why the rules outlive their signatures: a rule identity holds its group
     // weakly, so signatures of dropped rules equal nothing but their clones.
     let (first_su3, second_su3, su4_rule) = (rule(3), rule(3), rule(4));
-    let mut signature = |rule: &Arc<LieGroupFusionRule>, trivial: Vec<i64>| {
+    let mut signature = |rule: &Arc<LieGroupFusionRule>, trivial: symtn_core::LieIrrep| {
         let leg = GradedSpace::try_new(Arc::clone(rule), [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg])
             .unwrap()
             .structure_signature()
     };
-    let su3 = signature(&first_su3, vec![0, 0]);
-    let su4 = signature(&su4_rule, vec![0, 0, 0]);
+    let su3 = signature(&first_su3, su_irrep(&[0, 0]));
+    let su4 = signature(&su4_rule, su_irrep(&[0, 0, 0]));
     assert!(su3.homspace == su4.homspace);
     assert!(*su3.structure == *su4.structure);
     assert!(su3.placement == su4.placement && su3.runtime == su4.runtime);
     assert!(su3.rule != su4.rule);
     assert!(su3 != su4);
-    assert!(su3 == signature(&second_su3, vec![0, 0]));
+    assert!(su3 == signature(&second_su3, su_irrep(&[0, 0])));
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn_core::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

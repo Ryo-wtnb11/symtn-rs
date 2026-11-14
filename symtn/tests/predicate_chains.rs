@@ -212,12 +212,16 @@ fn checked_generic_su3_chains_decide_true_and_false_cases() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     use std::cell::Cell;
 
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let rt = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 2)]).unwrap();
     let materialized_adjoint =
         |engine: &mut dyn symtn::typed::Engine, t: &TensorMap<LieGroupFusionRule, f64>| {
             let logical = t
@@ -323,4 +327,12 @@ fn checked_generic_su3_chains_decide_true_and_false_cases() {
     // `q` of a square QR is unitary; whether it is also Hermitian depends on
     // the reflectors, so only unitarity is asserted.
     assert!(is_unitary(engine, &unitary, tol));
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

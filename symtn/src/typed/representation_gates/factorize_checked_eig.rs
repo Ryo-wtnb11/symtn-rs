@@ -4,22 +4,29 @@ use super::*;
 #[test]
 fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![
                     Complex64::new(2.0, 0.0),
                     Complex64::new(-2.0, 0.0),
@@ -27,7 +34,7 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
                 ],
             },
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![Complex64::new(-4.0, 0.0), Complex64::new(0.0, 0.0)],
             },
         ],
@@ -41,11 +48,11 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
         got,
         vec![
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![-4.0, 0.0],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![-2.0, 1.0, 2.0],
             },
         ]
@@ -84,11 +91,11 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![2.0, -2.0, 1.0],
             },
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![-4.0, 0.0],
             },
         ],
@@ -111,7 +118,7 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![
                     num_complex::Complex32::new(2.0, 0.0),
                     num_complex::Complex32::new(-2.0, 0.0),
@@ -119,7 +126,7 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
                 ],
             },
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![
                     num_complex::Complex32::new(-4.0, 0.0),
                     num_complex::Complex32::new(0.0, 0.0),
@@ -141,7 +148,7 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     calls.reset();
 
-    let dual_leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)])
+    let dual_leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 0]), 2)])
         .unwrap()
         .try_dual()
         .unwrap();
@@ -173,23 +180,28 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
 #[test]
 fn checked_compact_diagonal_eigh_vals_rejects_inconsistent_spectrum_admission() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![1.0, -1.0],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![2.0],
             },
         ],
@@ -233,20 +245,24 @@ fn checked_compact_diagonal_eigh_vals_rejects_inconsistent_spectrum_admission() 
 #[test]
 fn checked_compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 1)]).unwrap();
     let near: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: vec![0, 0],
+            sector: su_irrep(&[0, 0]),
             values: vec![Complex64::new(1.0, 1e-15)],
         }],
     )
@@ -268,7 +284,7 @@ fn checked_compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_direct
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: vec![0, 0],
+            sector: su_irrep(&[0, 0]),
             values: vec![f64::NAN],
         }],
     )
@@ -316,22 +332,29 @@ fn assert_same_complex_multisets<S: PartialEq + std::fmt::Debug>(
 #[test]
 fn checked_compact_diagonal_eig_vals_reads_stored_complex_spectrum() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![
                     Complex64::new(1.0, 1.0),
                     Complex64::new(-3.0, 4.0),
@@ -339,7 +362,7 @@ fn checked_compact_diagonal_eig_vals_reads_stored_complex_spectrum() {
                 ],
             },
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![Complex64::new(-0.25, 0.0), Complex64::new(2.0, -2.0)],
             },
         ],
@@ -352,11 +375,11 @@ fn checked_compact_diagonal_eig_vals_reads_stored_complex_spectrum() {
         got,
         vec![
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![Complex64::new(-0.25, 0.0), Complex64::new(2.0, -2.0)],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![
                     Complex64::new(-3.0, 4.0),
                     Complex64::new(0.0, 0.5),
@@ -406,15 +429,22 @@ fn checked_compact_diagonal_eig_vals_reads_stored_complex_spectrum() {
 #[test]
 fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 2)],
+    )
+    .unwrap();
     let c = |re: f64, im: f64| Complex64::new(re, im);
     let r32 = |value: f32| f64::from(value);
 
@@ -424,11 +454,11 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![0.1, -0.7],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![1.3, 0.2],
             },
         ],
@@ -440,11 +470,11 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
         got,
         vec![
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![c(r32(-0.7), 0.0), c(r32(0.1), 0.0)],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![c(r32(0.2), 0.0), c(r32(1.3), 0.0)],
             },
         ]
@@ -464,11 +494,11 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![0.1, -0.7],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![1.3, 0.2],
             },
         ],
@@ -492,14 +522,14 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![
                     num_complex::Complex32::new(0.1, -0.3),
                     num_complex::Complex32::new(-0.7, 0.0),
                 ],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![
                     num_complex::Complex32::new(0.0, 1.3),
                     num_complex::Complex32::new(0.2, 0.2),
@@ -514,11 +544,11 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
         got,
         vec![
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![c(r32(-0.7), 0.0), c(r32(0.1), r32(-0.3))],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![c(0.0, r32(1.3)), c(r32(0.2), r32(0.2))],
             },
         ]
@@ -537,21 +567,25 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
 #[test]
 fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let c = |re: f64, im: f64| Complex64::new(re, im);
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 4)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 4)]).unwrap();
     let ties: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: vec![1, 1],
+            sector: su_irrep(&[1, 1]),
             values: vec![c(3.0, 0.0), c(0.0, -3.0), c(-3.0, 0.0), c(1.0, 0.0)],
         }],
     )
@@ -563,7 +597,7 @@ fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
     assert_same_complex_multisets(
         &got,
         &[SectorSpectrum {
-            sector: vec![1, 1],
+            sector: su_irrep(&[1, 1]),
             values: vec![c(-3.0, 0.0), c(0.0, -3.0), c(3.0, 0.0), c(1.0, 0.0)],
         }],
         0.0,
@@ -579,7 +613,7 @@ fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
     );
     calls.reset();
 
-    let dual_leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)])
+    let dual_leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 0]), 2)])
         .unwrap()
         .try_dual()
         .unwrap();
@@ -620,23 +654,28 @@ fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
 #[test]
 fn checked_compact_diagonal_eig_vals_rejects_inconsistent_spectrum_admission() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![Complex64::new(1.0, 2.0), Complex64::new(-1.0, 0.0)],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![Complex64::new(0.0, 2.0)],
             },
         ],
@@ -678,14 +717,19 @@ fn checked_compact_diagonal_eig_vals_rejects_inconsistent_spectrum_admission() {
 #[test]
 fn checked_compact_diagonal_eig_vals_refuses_nonfinite_values() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1), (vec![1, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 1), (su_irrep(&[1, 0]), 1)]).unwrap();
     for bad in [
         Complex64::new(f64::NAN, 0.0),
         Complex64::new(0.0, f64::INFINITY),
@@ -697,11 +741,11 @@ fn checked_compact_diagonal_eig_vals_refuses_nonfinite_values() {
             &leg,
             [
                 SectorSpectrum {
-                    sector: vec![0, 0],
+                    sector: su_irrep(&[0, 0]),
                     values: vec![Complex64::new(1.0, 0.0)],
                 },
                 SectorSpectrum {
-                    sector: vec![1, 0],
+                    sector: su_irrep(&[1, 0]),
                     values: vec![bad],
                 },
             ],
@@ -738,15 +782,22 @@ fn checked_compact_diagonal_eig_vals_refuses_nonfinite_values() {
 #[test]
 fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     macro_rules! check {
         ($engine:ident, $dtype:ty, $from:expr) => {{
             let from: fn(f64) -> $dtype = $from;
@@ -756,11 +807,11 @@ fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() 
                 &leg,
                 [
                     SectorSpectrum {
-                        sector: vec![1, 0],
+                        sector: su_irrep(&[1, 0]),
                         values: vec![from(2.0), from(-2.0), from(1.0)],
                     },
                     SectorSpectrum {
-                        sector: vec![0, 0],
+                        sector: su_irrep(&[0, 0]),
                         values: vec![from(0.0), from(-4.0)],
                     },
                 ],
@@ -780,11 +831,11 @@ fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() 
                 d.diagview($engine).unwrap(),
                 vec![
                     SectorSpectrum {
-                        sector: vec![0, 0],
+                        sector: su_irrep(&[0, 0]),
                         values: vec![from(-4.0), from(0.0)],
                     },
                     SectorSpectrum {
-                        sector: vec![1, 0],
+                        sector: su_irrep(&[1, 0]),
                         values: vec![from(-2.0), from(1.0), from(2.0)],
                     },
                 ]
@@ -799,7 +850,7 @@ fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() 
                 v.codomain().iter(),
                 v.domain().iter(),
                 |trees, ij| {
-                    let order: &[usize] = if trees.coupled() == &vec![0, 0] {
+                    let order: &[usize] = if trees.coupled() == &su_irrep(&[0, 0]) {
                         &[1, 0]
                     } else {
                         &[1, 2, 0]
@@ -819,13 +870,20 @@ fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() 
 #[test]
 fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let dual_leg = leg.try_dual().unwrap();
     let dual_sectors = dual_leg.sectors().unwrap();
     macro_rules! check {
@@ -841,7 +899,7 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
                 };
             let build = |$engine: &mut dyn Engine,
                          space: &GradedSpace<_>,
-                         sectors: [Vec<i64>; 2],
+                         sectors: [symtn_core::LieIrrep; 2],
                          values: [Vec<f64>; 2]| {
                 let [first, second] = values;
                 let [s0, s1] = sectors;
@@ -864,7 +922,7 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
             };
             let distinct = [vec![-2.0, 5.0], vec![3.0, -1.0, 0.5]];
             for (space, sectors) in [
-                (&leg, [vec![0, 0], vec![1, 0]]),
+                (&leg, [su_irrep(&[0, 0]), su_irrep(&[1, 0])]),
                 (
                     &dual_leg,
                     [dual_sectors[0].clone(), dual_sectors[1].clone()],
@@ -934,7 +992,7 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
             let input = build(
                 $engine,
                 &leg,
-                [vec![0, 0], vec![1, 0]],
+                [su_irrep(&[0, 0]), su_irrep(&[1, 0])],
                 [vec![1.0, 1.0], vec![2.0, -2.0, 2.0]],
             );
             let dense = input.materialize($engine).unwrap();
@@ -950,16 +1008,16 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
                 d.diagview($engine).unwrap(),
                 vec![
                     SectorSpectrum {
-                        sector: vec![0, 0],
+                        sector: su_irrep(&[0, 0]),
                         values: vec![from(1.0), from(1.0)],
                     },
                     SectorSpectrum {
-                        sector: vec![1, 0],
+                        sector: su_irrep(&[1, 0]),
                         values: vec![from(-2.0), from(2.0), from(2.0)],
                     },
                 ]
             );
-            let multiset = |spectrum: Vec<SectorSpectrum<Vec<i64>, $dtype>>| {
+            let multiset = |spectrum: Vec<SectorSpectrum<symtn_core::LieIrrep, $dtype>>| {
                 spectrum
                     .into_iter()
                     .map(|entry| {
@@ -1023,16 +1081,23 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
 #[test]
 fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let svd_vals_calls = Arc::clone(&calls);
     let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let c = |re: f64, im: f64| Complex64::new(re, im);
     macro_rules! check {
         ($engine:ident, $dtype:ty, $from:expr, [$($a:expr),*], [$($b:expr),*], [$($da:expr),*], [$($db:expr),*], $order:expr) => {{
@@ -1042,11 +1107,11 @@ fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
                 &leg,
                 [
                     SectorSpectrum {
-                        sector: vec![1, 0],
+                        sector: su_irrep(&[1, 0]),
                         values: vec![$(from($b)),*],
                     },
                     SectorSpectrum {
-                        sector: vec![0, 0],
+                        sector: su_irrep(&[0, 0]),
                         values: vec![$(from($a)),*],
                     },
                 ],
@@ -1066,11 +1131,11 @@ fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
                 d.diagview($engine).unwrap(),
                 vec![
                     SectorSpectrum {
-                        sector: vec![0, 0],
+                        sector: su_irrep(&[0, 0]),
                         values: vec![$($da),*],
                     },
                     SectorSpectrum {
-                        sector: vec![1, 0],
+                        sector: su_irrep(&[1, 0]),
                         values: vec![$($db),*],
                     },
                 ]
@@ -1084,7 +1149,7 @@ fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
                 v.codomain().iter(),
                 v.domain().iter(),
                 |trees, ij| {
-                    let order: &[usize] = if trees.coupled() == &vec![0, 0] {
+                    let order: &[usize] = if trees.coupled() == &su_irrep(&[0, 0]) {
                         &[0, 1]
                     } else {
                         &$order
@@ -1133,13 +1198,20 @@ fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
 #[test]
 fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let dual_leg = leg.try_dual().unwrap();
     let dual_sectors = dual_leg.sectors().unwrap();
     macro_rules! check {
@@ -1161,7 +1233,7 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
                 };
             let build = |$engine: &mut dyn Engine,
                          space: &GradedSpace<_>,
-                         sectors: [Vec<i64>; 2],
+                         sectors: [symtn_core::LieIrrep; 2],
                          values: [Vec<(f64, f64)>; 2]| {
                 let [first, second] = values;
                 let [s0, s1] = sectors;
@@ -1222,7 +1294,7 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
                 ]
             };
             for (space, sectors, dual) in [
-                (&leg, [vec![0, 0], vec![1, 0]], false),
+                (&leg, [su_irrep(&[0, 0]), su_irrep(&[1, 0])], false),
                 (
                     &dual_leg,
                     [dual_sectors[0].clone(), dual_sectors[1].clone()],
@@ -1248,7 +1320,7 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
                     let by = |sector: &[i64]| {
                         stored
                             .iter()
-                            .find(|entry| entry.sector == sector)
+                            .find(|entry| entry.sector == su_irrep(sector))
                             .unwrap()
                             .values
                             .clone()
@@ -1258,11 +1330,11 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
                         got.d.diagview($engine).unwrap(),
                         vec![
                             SectorSpectrum {
-                                sector: vec![0, 0],
+                                sector: su_irrep(&[0, 0]),
                                 values: lexicographic(&a),
                             },
                             SectorSpectrum {
-                                sector: vec![1, 0],
+                                sector: su_irrep(&[1, 0]),
                                 values: lexicographic(&b),
                             },
                         ]
@@ -1296,12 +1368,12 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
                     vec![(-3.0, 0.0), (1.0, 0.0), (3.0, 0.0)],
                 ]
             };
-            let input = build($engine, &leg, [vec![0, 0], vec![1, 0]], ties);
+            let input = build($engine, &leg, [su_irrep(&[0, 0]), su_irrep(&[1, 0])], ties);
             let stored = input.diagview($engine).unwrap();
             let by = |sector: &[i64]| {
                 stored
                     .iter()
-                    .find(|entry| entry.sector == sector)
+                    .find(|entry| entry.sector == su_irrep(sector))
                     .unwrap()
                     .values
                     .clone()
@@ -1316,16 +1388,16 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
                 d.diagview($engine).unwrap(),
                 vec![
                     SectorSpectrum {
-                        sector: vec![0, 0],
+                        sector: su_irrep(&[0, 0]),
                         values: lexicographic(&a),
                     },
                     SectorSpectrum {
-                        sector: vec![1, 0],
+                        sector: su_irrep(&[1, 0]),
                         values: lexicographic(&b),
                     },
                 ]
             );
-            let widen = |spectrum: Vec<SectorSpectrum<Vec<i64>, $eig>>| {
+            let widen = |spectrum: Vec<SectorSpectrum<symtn_core::LieIrrep, $eig>>| {
                 spectrum
                     .into_iter()
                     .map(|entry| SectorSpectrum {
@@ -1388,14 +1460,19 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
 #[test]
 fn checked_compact_diagonal_eig_full_refuses_nonfinite_values() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1), (vec![1, 0], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 1), (su_irrep(&[1, 0]), 2)]).unwrap();
     for bad in [
         Complex64::new(f64::NAN, 0.0),
         Complex64::new(0.0, f64::INFINITY),
@@ -1407,11 +1484,11 @@ fn checked_compact_diagonal_eig_full_refuses_nonfinite_values() {
             &leg,
             [
                 SectorSpectrum {
-                    sector: vec![0, 0],
+                    sector: su_irrep(&[0, 0]),
                     values: vec![Complex64::new(1.0, 0.0)],
                 },
                 SectorSpectrum {
-                    sector: vec![1, 0],
+                    sector: su_irrep(&[1, 0]),
                     values: vec![bad, Complex64::new(3.0, 0.0)],
                 },
             ],
@@ -1440,11 +1517,11 @@ fn checked_compact_diagonal_eig_full_refuses_nonfinite_values() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![1.0],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![f64::NAN, 2.0],
             },
         ],
@@ -1469,23 +1546,28 @@ fn checked_compact_diagonal_eig_full_refuses_nonfinite_values() {
 #[test]
 fn checked_compact_diagonal_eig_full_rejects_inconsistent_spectrum_admission() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![Complex64::new(1.0, 2.0), Complex64::new(-1.0, 0.0)],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![Complex64::new(0.0, 2.0)],
             },
         ],
@@ -1533,14 +1615,19 @@ fn checked_compact_diagonal_eig_full_rejects_inconsistent_spectrum_admission() {
 #[test]
 fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_directly() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 1), (vec![1, 0], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 1), (su_irrep(&[1, 0]), 2)]).unwrap();
     let complex = |engine: &mut dyn Engine, values: [Complex64; 2]| {
         TensorMap::<_, Complex64>::diagonal(
             engine,
@@ -1548,11 +1635,11 @@ fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_direct
             &leg,
             [
                 SectorSpectrum {
-                    sector: vec![0, 0],
+                    sector: su_irrep(&[0, 0]),
                     values: vec![values[0]],
                 },
                 SectorSpectrum {
-                    sector: vec![1, 0],
+                    sector: su_irrep(&[1, 0]),
                     values: vec![values[1], Complex64::new(3.0, 0.0)],
                 },
             ],
@@ -1598,11 +1685,11 @@ fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_direct
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![1.0],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![f64::NAN, 2.0],
             },
         ],
@@ -1624,23 +1711,28 @@ fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_direct
 #[test]
 fn checked_compact_diagonal_eigh_full_rejects_inconsistent_spectrum_admission() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![1.0, -1.0],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![2.0],
             },
         ],

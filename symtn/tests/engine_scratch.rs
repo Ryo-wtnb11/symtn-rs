@@ -229,12 +229,12 @@ fn warm_checked_generic_contract_allocates_no_route_scratch() {
     let leg = |n| {
         GradedSpace::try_new(
             Arc::new(
-                symtn::sector::LieGroupFusionRule::new(
+                symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
                     fusion_symbols::lie::GroupId::su(3).unwrap(),
                 )
                 .unwrap(),
             ),
-            [(vec![1i64, 1], n)],
+            [(su_irrep(&[1i64, 1]), n)],
         )
         .unwrap()
     };
@@ -620,4 +620,12 @@ fn stale_engine_scratch_never_reaches_the_output() {
             crate::numerics::assert_slices_close(&format!("{what}: into"), &dense(&dst), &want, 16);
         }
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

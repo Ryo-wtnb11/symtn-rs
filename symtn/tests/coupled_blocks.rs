@@ -673,16 +673,25 @@ mod su3 {
     use symtn::typed::Engine;
 
     use super::*;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     pub(super) fn legs() -> [GradedSpace<LieGroupFusionRule>; 3] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
-        let octet =
-            GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 1], 2), (vec![0, 0], 1)])
-                .unwrap();
-        let chiral = GradedSpace::try_new(provider, [(vec![1i64, 0], 2), (vec![0, 1], 1)]).unwrap();
+        let octet = GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(su_irrep(&[1i64, 1]), 2), (su_irrep(&[0, 0]), 1)],
+        )
+        .unwrap();
+        let chiral = GradedSpace::try_new(
+            provider,
+            [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
+        )
+        .unwrap();
         let dual = chiral.try_dual().unwrap();
         [octet, chiral, dual]
     }
@@ -708,10 +717,12 @@ mod su3 {
         // Only a label the provider cannot encode is an error.
         assert!(
             matches!(
-                a.block(&vec![1i64]),
+                a.block(&su_irrep(&[1i64])),
                 Err(symtn::typed::GenericTensorError::Structure(
                     symtn::typed::CheckedGenericStructureError::Provider(
-                        symtn::sector::LieGroupFusionRuleError::LabelLength { found: 1, .. }
+                        symtn::sector::LieGroupFusionRuleError::Provider(
+                            fusion_symbols::lie::LieError::InvalidLabel
+                        )
                     )
                 ))
             ),
@@ -725,17 +736,17 @@ mod su3 {
             &octet,
             [
                 SectorSpectrum {
-                    sector: vec![1i64, 1],
+                    sector: su_irrep(&[1i64, 1]),
                     values: values(2),
                 },
                 SectorSpectrum {
-                    sector: vec![0, 0],
+                    sector: su_irrep(&[0, 0]),
                     values: values(1),
                 },
             ],
         )
         .unwrap();
-        for (sector, n) in [(vec![1i64, 1], 2), (vec![0, 0], 1)] {
+        for (sector, n) in [(su_irrep(&[1i64, 1]), 2), (su_irrep(&[0, 0]), 1)] {
             let block = d.block(&sector).unwrap();
             let CoupledBlockPayload::Diagonal(stored) = block.payload() else {
                 panic!("{what}: a compact diagonal block must borrow its spectrum");
@@ -876,4 +887,12 @@ mod cuda {
         device_case("SU(3) c64", &t);
         device_case("SU(3) c64 adjoint", &t.adjoint().unwrap());
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

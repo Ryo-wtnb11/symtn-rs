@@ -1026,7 +1026,8 @@ where
 
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
-    let fundamental = || vec![1_i64];
+    let irrep = provider.category().irrep(&[1]).unwrap();
+    let fundamental = || irrep.clone();
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi)]).unwrap();
     let left = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi + 1)]).unwrap();
     let right = GradedSpace::try_new(provider, [(fundamental(), chi + 1)]).unwrap();
@@ -1087,7 +1088,8 @@ where
         },
     );
     let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
-    let leg = GradedSpace::try_new(provider, [(vec![1_i64], chi + 1)]).unwrap();
+    let fundamental = provider.category().irrep(&[1]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(fundamental, chi + 1)]).unwrap();
     let leg_dual = leg.try_dual().unwrap();
     let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let codomain = if index == 2 { &leg_dual } else { &leg };

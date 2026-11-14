@@ -2,9 +2,10 @@
 
 use std::fmt::Debug;
 use std::sync::Arc;
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
-use symtn::sector::LieGroupFusionRule;
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn::typed::{Complex64, Error, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -49,16 +50,24 @@ fn copy_prefix<D: Copy>(
 fn assert_absorb_case<D>(
     engine: &mut dyn Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     value: impl Fn(usize) -> D,
 ) where
     D: Copy + Debug + PartialEq + symtn::typed::TensorScalar,
 {
     let runtime = Runtime::builder().build().unwrap();
-    let destination_provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
-    let source_provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let destination_provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
+    let source_provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let destination_legs = [3, 4, 2].map(|degeneracy| {
         GradedSpace::try_new(
             Arc::clone(&destination_provider),
@@ -164,12 +173,12 @@ fn checked_generic_absorb_matches_su3_su4_vertex_keys_prefixes_and_lazy_adjoint(
     // What: exact Generic fusion-tree keys (including multiplicity vertices),
     // distinct equal-identity provider Arcs, asymmetric min-prefix copies, and
     // direct/lazy-adjoint parity for f64 and c64 on both SU(3) and SU(4).
-    assert_absorb_case(engine, 3, vec![2, 2], |value| value as f64);
-    assert_absorb_case(engine, 3, vec![2, 2], |value| {
+    assert_absorb_case(engine, 3, su_irrep(&[2, 2]), |value| value as f64);
+    assert_absorb_case(engine, 3, su_irrep(&[2, 2]), |value| {
         Complex64::new(value as f64, -(value as f64))
     });
-    assert_absorb_case(engine, 4, vec![2, 0, 2], |value| value as f64);
-    assert_absorb_case(engine, 4, vec![2, 0, 2], |value| {
+    assert_absorb_case(engine, 4, su_irrep(&[2, 0, 2]), |value| value as f64);
+    assert_absorb_case(engine, 4, su_irrep(&[2, 0, 2]), |value| {
         Complex64::new(value as f64, -(value as f64))
     });
 }
@@ -181,19 +190,32 @@ fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
     // copying; the input payloads remain the caller-owned originals.
     let runtime = Runtime::builder().build().unwrap();
     let other_runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let equal_identity =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let wrong_identity =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
-    let equal_leg = GradedSpace::try_new(Arc::clone(&equal_identity), [(vec![1, 1], 2)]).unwrap();
-    let dual_leg = GradedSpace::try_new(Arc::clone(&equal_identity), [(vec![1, 1], 2)])
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let equal_identity = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let wrong_identity = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(4).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 2)]).unwrap();
+    let equal_leg =
+        GradedSpace::try_new(Arc::clone(&equal_identity), [(su_irrep(&[1, 1]), 2)]).unwrap();
+    let dual_leg = GradedSpace::try_new(Arc::clone(&equal_identity), [(su_irrep(&[1, 1]), 2)])
         .and_then(|space| space.try_dual())
         .unwrap();
     let wrong_leg =
-        GradedSpace::try_new(Arc::clone(&wrong_identity), [(vec![1, 0, 1], 2)]).unwrap();
+        GradedSpace::try_new(Arc::clone(&wrong_identity), [(su_irrep(&[1, 0, 1]), 2)]).unwrap();
     let destination: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg, &leg], [], |_, indices| {
             indices.iter().sum::<usize>() as f64
@@ -234,4 +256,11 @@ fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
         matches!(destination.absorb(engine, &bad_duality), Err(Error::InvalidArgument(message)) if message.contains("equal duality"))
     );
     assert_eq!(destination.dense_data().unwrap(), before);
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

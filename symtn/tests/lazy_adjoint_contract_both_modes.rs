@@ -18,7 +18,7 @@
 //! - (i) reference steps: `copy(t')` (the uncached `materialize`), then the
 //!   same operation on owned operands;
 //! - (ii) cross-mode agreement: SU(2) admitted multiplicity-free
-//!   (`SU2FusionRule`) against checked Generic (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two
+//!   (`SU2FusionRule`) against checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two
 //!   adapters to the same exact A1 provider on one input;
 //! - SU(3) (checked only) with outer multiplicity two (`8 ⊗ 8 → 8`) and a
 //!   dual leg against (i).
@@ -30,9 +30,10 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
-use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::__network::{network_reuse_class, NetworkReuseClass};
 use symtn::typed::{BlockFusionTrees, Complex64, ContractSpec, GradedSpace, TensorMap};
 
@@ -290,9 +291,8 @@ macro_rules! contract_rows {
     }};
 }
 
-#[expect(clippy::ptr_arg, reason = "the SU(N) sector label is a `Vec<i64>`")]
-fn sun_spin(sector: &Vec<i64>) -> usize {
-    sector[0] as usize
+fn sun_spin(sector: &LieIrrep) -> usize {
+    sector.dynkin().next().unwrap() as usize
 }
 
 fn su2_sources(
@@ -308,8 +308,13 @@ fn su2_sources(
     )
     .unwrap();
     let checked = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
-        SECTORS.map(|(s, k)| (vec![s as i64], k)),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
+        SECTORS.map(|(s, k)| (su_irrep(&[s as i64]), k)),
     )
     .unwrap();
     (
@@ -345,7 +350,7 @@ fn su2_adjoint_transforms_stay_lazy_and_agree_across_modes_f64() {
     let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
         t, su2_spin
     ));
-    let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+    let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));
     assert_modes_agree(mf, checked);
@@ -371,7 +376,7 @@ fn su2_adjoint_transforms_stay_lazy_and_agree_across_modes_c64() {
     let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
         t, su2_spin
     ));
-    let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+    let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));
     assert_modes_agree(mf, checked);
@@ -382,8 +387,17 @@ fn su3_adjoint_transforms_with_outer_multiplicity_stay_lazy() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
     let source: TensorMap<_, f64> =
@@ -391,7 +405,7 @@ fn su3_adjoint_transforms_with_outer_multiplicity_stay_lazy() {
             value(&format!("{trees:?}"), index)
         })
         .unwrap();
-    let key = |t: &BlockFusionTrees<Vec<i64>>| format!("{t:?}");
+    let key = |t: &BlockFusionTrees<LieIrrep>| format!("{t:?}");
     let f64_rows = transform_rows!(engine, source, key);
     let c64 = source
         .convert::<Complex64>(engine)
@@ -410,7 +424,7 @@ fn su2_adjoint_operands_contract_and_agree_across_modes_f64() {
     let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
         t, su2_spin
     ));
-    let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+    let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));
     assert_modes_agree(mf, checked);
@@ -435,7 +449,7 @@ fn su2_adjoint_operands_contract_and_agree_across_modes_c64() {
     let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
         t, su2_spin
     ));
-    let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<Vec<i64>>| twice(
+    let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));
     assert_modes_agree(mf, checked);
@@ -446,8 +460,17 @@ fn su3_adjoint_operands_with_outer_multiplicity_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
     let source: TensorMap<_, f64> =
@@ -455,7 +478,7 @@ fn su3_adjoint_operands_with_outer_multiplicity_contract() {
             value(&format!("{trees:?}"), index)
         })
         .unwrap();
-    let key = |t: &BlockFusionTrees<Vec<i64>>| format!("{t:?}");
+    let key = |t: &BlockFusionTrees<LieIrrep>| format!("{t:?}");
     let f64_rows = contract_rows!(engine, source, key);
     let c64 = source
         .convert::<Complex64>(engine)
@@ -471,8 +494,17 @@ fn su3_adjoint_transforms_with_a_dual_leg_stay_lazy() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
     let v = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
     let dual = v.try_dual().unwrap();
@@ -481,7 +513,7 @@ fn su3_adjoint_transforms_with_a_dual_leg_stay_lazy() {
             value(&format!("{trees:?}"), index)
         })
         .unwrap();
-    let key = |t: &BlockFusionTrees<Vec<i64>>| format!("{t:?}");
+    let key = |t: &BlockFusionTrees<LieIrrep>| format!("{t:?}");
     let f64_rows = transform_rows!(engine, source, key);
     let c64 = source
         .convert::<Complex64>(engine)
@@ -491,4 +523,11 @@ fn su3_adjoint_transforms_with_a_dual_leg_stay_lazy() {
     let c64_rows = transform_rows!(engine, c64, key);
     assert_eq!(f64_rows.len(), c64_rows.len());
     assert!(f64_rows.iter().all(|(_, entries)| !entries.is_empty()));
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

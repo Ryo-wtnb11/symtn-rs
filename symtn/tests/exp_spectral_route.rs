@@ -232,7 +232,7 @@ fn multiplicity_free_exp_route_switches_at_the_predicate_boundary() {
 #[test]
 fn checked_and_multiplicity_free_exp_take_the_same_route() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 
     let runtime = Runtime::builder().build().unwrap();
     let mf = GradedSpace::try_new(
@@ -241,8 +241,13 @@ fn checked_and_multiplicity_free_exp_take_the_same_route() {
     )
     .unwrap();
     let checked = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
-        [0i64, 1, 2].map(|twice| (vec![twice], N)),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [0i64, 1, 2].map(|twice| (su_irrep(&[twice]), N)),
     )
     .unwrap();
     macro_rules! both {
@@ -278,4 +283,12 @@ fn checked_and_multiplicity_free_exp_take_the_same_route() {
         false,
         "above the predicate"
     );
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

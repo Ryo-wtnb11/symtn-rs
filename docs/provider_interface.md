@@ -113,14 +113,19 @@ category's `frobenius_schur_phase`.
 | Lie wrapper | symtn codec and admission | mathematical authority |
 | --- | --- | --- |
 | `SU2FusionRule` | doubled spin `0..=254`, ascending channels, checked fusion-closure rejection above 254, multiplicity-free `Simple`; physical indices descend from `m=j` to `m=-j` | exact A1 `LieGroup` category; symtn checks admission, multiplicity and carrier indices, then evaluates each physical entry with fusion-symbols' scalar `clebsch_gordan`, whose exact zero is the projection-sum structural zero |
-| `LieGroupFusionRule` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, checked `Generic` at every rank, labels as representable as fusion-symbols makes them; no physical expansion | every `GroupId` that `LieGroup::new` executes (every simple type A–G, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
+| `LieGroupFusionRule<M>` | graded-lexicographic ids over Dynkin labels then zigzag torus charges, TensorKit `ProductSector` order keys per factor, channels sorted by encoded id, fusion-symbols' `LieIrrep` as the typed label, labels as representable as fusion-symbols makes them; `M` = checked `Generic` at every rank (the default) or multiplicity-free for a `Unique`/`Simple` group; no physical expansion | every `GroupId` that `LieGroup::new` executes (every simple type A–G, semisimple products, tori, U(n) and central quotients), with full character-lattice admission; exact A1/B1/C1 symbols |
 
 Both keep their identities, sector order, typed errors and validation order.
 `LieGroupFusionRule` keeps shaped empty F/R blocks for absent channels and rejects
 nonfinite dimensions. It constructs the category eagerly, so unsupported
-groups fail at construction, and reuses its bounded irrep interner: a warm hit clones
-the provider's allocation-free handle, without a Dynkin-label `Vec`. The adapter
-has no separate object cache. Encoding interns the irrep on a miss, so fusion-symbols checks
+groups fail at construction. A group with one coordinate (a rank-one simple
+factor or a rank-one torus) has no interner: fusion-symbols stores its irrep
+inline, so the codec converts between the id (`2j`, or the zigzag charge) and
+the irrep arithmetically, with one fusion-symbols admission check per
+conversion and no hash, lock or allocation. Every other group reuses its
+bounded irrep interner: a warm hit clones the provider's allocation-free
+handle, without a Dynkin-label `Vec`. The adapter has no separate object
+cache. Encoding interns the irrep on a miss, so fusion-symbols checks
 representability once per interned sector; while the sector is interned, a
 warm encode is arithmetic and one lookup, without allocation; admission runs
 in fusion-symbols on a miss. The interner holds at most `IRREP_TABLE_CAPACITY` (65,536)
@@ -133,8 +138,25 @@ overflows `usize`, return `LieGroupFusionRuleError::UnrepresentableLabel`, both
 on encoding and when a fusion produces them; a fusion overflow names the
 coordinate-wise sum of its inputs, the product's highest weight.
 
-Construct it with `LieGroupFusionRule::new(group)`, where `group` is a
-`fusion_symbols::lie::GroupId`; `group_id()` borrows that complete metadata.
+Construct it with `LieGroupFusionRule::<M>::new(group)`, where `group` is a
+`fusion_symbols::lie::GroupId` and `M` is `CheckedGenericAdmissionMode` or
+`MultiplicityFreeAdmissionMode`; `group_id()` borrows that complete metadata
+and `category()` the `LieGroup`. Checked Generic mode reports `Generic`
+fusion and `LieGroupFusionRuleError`. Multiplicity-free mode admits a group
+whose fusion-symbols `fusion_style()` is `Unique` or `Simple` (tori, SU(2),
+SO(3), Sp(2), D2, U(2) and their products), reports that style, answers the
+multiplicity-free traits with `FusionAlgebraError` (an id outside the domain
+is `InvalidSector`, a label without an id `UnrepresentableSectorLabel`, an
+unrepresentable fusion outcome `FusionNotRepresentable`), and refuses any other
+group with `LieGroupFusionRuleError::IncompatibleFusionStyle`. Over SU(2) it
+equals `SU2FusionRule` bit for bit wherever the compact rule admits the
+inputs: ids, labels, duals, dimensions, twists and FS phases on every
+`2j ∈ 0..=254`, and channels, N, F, R, A and B on every input the compact
+rule admits: labels `<= 254`, with the fusion closure `a + b <= 254` for
+channels, N and R only (F, A and B admit each label alone, so their
+vertices may fuse past 254). Its own domain is wider: labels up to
+`u32::MAX` and no closure bound, so for example `N(254, 1, 253)` is `1` where
+`SU2FusionRule` reports `FusionNotRepresentable`.
 Supported families are SU(n), Sp(m), Spin(n), SO(n), their adjoint forms and
 fs's supported central quotients, including half-spin forms, and the
 exceptional groups G2, F4, E6, E7 and E8, so every simple type, A–G, is
@@ -157,7 +179,9 @@ Dynkin labels as `LieGroup::irrep` does and serves groups without a torus;
 `encode_irrep` on a group with a torus, and `encode_spin` on any other group,
 return `LieGroupFusionRuleError::Provider(LieError::InvalidLabel)`.
 `decode_irrep(id)` returns the Dynkin labels and the charges; the typed label is
-the single vector of Dynkin labels followed by charges. The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
+fusion-symbols' `LieIrrep`, built with `rule.category().irrep(..)`,
+`irrep_with_charges(..)` or `irrep_spin(..)`, and a label of another group is
+rejected. The codec maps each charge by zigzag (`0, 1, -1, 2, -2, …`
 to `0, 1, 2, 3, 4, …`) and ranks the whole coordinate vector by total grade
 then lexicographically, so a single simple factor keeps its Dynkin-only ids.
 `sector_order_key` does not use that rank: it lists one TensorKit position per
@@ -176,7 +200,7 @@ holes in that numbering: encoding or decoding an excluded label returns
 label's id already overflows, which returns
 `LieGroupFusionRuleError::UnrepresentableLabel`. Object conversion
 checks the complete category membership before using an interned label.
-The identity is the `GroupId` value under the rule type: codec, admission and
+The identity is the `GroupId` value under the rule type, mode included: codec, admission and
 scalar conventions are fixed by the type, and the category data by the group
 and the build. Construction hashes the sparse canonical `GroupId` once
 and comparison uses its equality, without building the character lattice.
@@ -186,8 +210,9 @@ weakly: after all rules over it are dropped, old cache identities are not
 reused. Persist semantic labels and rebuild caches when provider identity or
 codec conventions change.
 
-symtn retains only the bounded codec interner (65,536 label/object pairs and
-its dual lookup), with uncached conversion after capacity is reached. It
+symtn retains only the bounded codec interner of a group with more than one
+coordinate (65,536 label/object pairs and its dual lookup), with uncached
+conversion after capacity is reached. It
 computes no symbols and stores no symbol cache. fusion-symbols owns generated
 coefficients in process-wide tiers, one retained-charge limit per data kind
 (`fusion_symbols::cache`); irrep modules, completed channels and computed
@@ -196,7 +221,8 @@ coefficient data and does not reject a group by rank: generation is deferred
 to the first query that needs it. The tier limits bound retained cache
 entries, not temporary generation memory. The categorical scalar is
 `f64`, and tensor execution uses the ordinary supported real/complex Host
-payloads; physical expansion and CUDA execution are not provided by this rule.
+payloads; physical expansion is not provided by this rule, and CUDA execution
+only in multiplicity-free mode.
 Sp fundamental representations have FS indicator -1 and twist +1; this is
 bosonic braiding, not fermionic parity.
 
@@ -211,7 +237,7 @@ construction must establish representability first.
 **Styles are claims the engine acts on.** `Unique` means every product has
 exactly one channel; `Simple` means several channels but no multiplicity;
 `Generic` admits multiplicity and may also be selected conservatively, as
-a `LieGroupFusionRule` over `GroupId::su(2)` does. Declaring `Unique` when a product has two channels
+a checked Generic `LieGroupFusionRule` over `GroupId::su(2)` does. Declaring `Unique` when a product has two channels
 selects a lowering that silently drops terms. `Bosonic`/`Fermionic` assert
 symmetric braiding; `Anyonic` and
 `NoBraiding` do not, so ordinary `contract` (and network contraction) rejects

@@ -57,7 +57,7 @@ pub use enumerated::{CU1FusionRule, FermionParityFusionRule, ZNFusionRule};
 pub use fusion_symbols::{
     fermion::FermionParityIrrep,
     finite::ZNIrrep,
-    lie::{CU1Irrep, U1Irrep},
+    lie::{CU1Irrep, LieIrrep, U1Irrep},
 };
 
 mod table_rule;

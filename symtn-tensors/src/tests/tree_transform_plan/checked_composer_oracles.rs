@@ -14,8 +14,9 @@ use super::*;
 use num_complex::Complex64;
 use symtn_core::{
     generic_braid_tree_pair_checked, generic_permute_tree_pair_checked,
-    generic_transpose_tree_pair_checked, BraidingStyleKind, CategoricalScalar, FusionStyleKind,
-    LieGroupFusionRule, LieGroupFusionRuleError, SectorVec,
+    generic_transpose_tree_pair_checked, BraidingStyleKind, CategoricalScalar,
+    CheckedGenericAdmissionMode, FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError,
+    SectorVec,
 };
 
 trait Near: Copy {
@@ -261,7 +262,10 @@ fn all_transposes(codomain_rank: usize, domain_rank: usize) -> Vec<TreeTransform
 }
 
 fn sun3() -> (LieGroupFusionRule, SectorId, SectorId, SectorId) {
-    let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(3).unwrap(),
+    )
+    .unwrap();
     let vacuum = rule.encode_irrep(&[0, 0]).unwrap();
     let three = rule.encode_irrep(&[1, 0]).unwrap();
     let adjoint = rule.encode_irrep(&[1, 1]).unwrap();
@@ -278,7 +282,10 @@ fn sun3() -> (LieGroupFusionRule, SectorId, SectorId, SectorId) {
 fn checked_composer_matches_original_step_composition_on_sun() {
     let (rule, _, three, adjoint) = sun3();
     let a = (adjoint, false);
-    let su4 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap();
+    let su4 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(4).unwrap(),
+    )
+    .unwrap();
     let su4_adjoint = (su4.encode_irrep(&[1, 0, 1]).unwrap(), false);
     let mut multis = 0;
     let cases: Vec<(&LieGroupFusionRule, Legs, Legs)> = vec![
@@ -844,7 +851,10 @@ impl CheckedGenericRigidSymbols for GaugedSun {
 fn checked_composer_is_covariant_under_complex_vertex_gauge() {
     let (rule, _, _, adjoint) = sun3();
     let gauged = GaugedSun {
-        inner: LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        inner: LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
         adjoint,
         phases: [
             Complex64::from_polar(1.0, 0.7),

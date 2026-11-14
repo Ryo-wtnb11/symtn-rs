@@ -42,11 +42,14 @@ into `lie-generated` for every other simple factor.
 
 Built-in rules retain their own types over the shared adapter; they are not
 `CategoryRule` aliases. SU2 retains its compact doubled-spin codec and checked
-scalar CGC entries in descending magnetic order. `LieGroupFusionRule` retains
-its graded codec over Dynkin labels then zigzag torus charges and its bounded irrep interner, constructs its `LieGroup`
-eagerly, validates complete `GroupId` admission and uses checked `Generic`
-admission at every rank. Its identity is the `GroupId` value, held weakly as
-for `CategoryRule`, so isomorphic groups do not merge. Warm interner hits clone allocation-free
+scalar CGC entries in descending magnetic order. `LieGroupFusionRule<M>` retains
+its graded codec over Dynkin labels then zigzag torus charges (arithmetic for a
+one-coordinate group, with a bounded irrep interner otherwise), constructs its `LieGroup`
+eagerly, validates complete `GroupId` admission and takes its admission mode
+`M` as a type parameter: checked `Generic` at every rank, or multiplicity-free
+for a group whose fusion-symbols style is `Unique` or `Simple`. Its identity
+is the mode and `GroupId` value, held weakly as for `CategoryRule`, so
+isomorphic groups do not merge. Warm interner hits clone allocation-free
 provider handles; returned blocks and channels have separate allocation costs.
 See the [provider interface](provider_interface.md) for admission and error bounds.
 

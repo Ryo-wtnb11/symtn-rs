@@ -56,15 +56,25 @@ fn warm_generic_product_queries() {
     let _serial = crate::counting_alloc::serial();
     use fusion_symbols::category::{FusionCategory, SymbolBlock};
     use symtn_sectors::{
-        CategoryProvider, CheckedGenericRigidSymbols, LieGroupFusionRule, TypedSectorAdmission,
+        CategoryProvider, CheckedGenericAdmissionMode, CheckedGenericRigidSymbols,
+        LieGroupFusionRule, TypedSectorAdmission,
     };
 
     let rule = ProductFusionRule::<_, _>::try_new(
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
-    let octet = vec![1, 1];
+    let octet = fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+        .unwrap()
+        .irrep(&[1, 1])
+        .unwrap();
     let id = rule
         .try_encode_label(&ProductSector::new(octet.clone(), octet))
         .unwrap();
@@ -139,19 +149,32 @@ fn warm_nested_generic_product_queries() {
     let _serial = crate::counting_alloc::serial();
     use fusion_symbols::category::{FusionCategory, SymbolBlock};
     use symtn_sectors::{
-        CategoryProvider, CheckedGenericRigidSymbols, LieGroupFusionRule, TypedSectorAdmission,
+        CategoryProvider, CheckedGenericAdmissionMode, CheckedGenericRigidSymbols,
+        LieGroupFusionRule, TypedSectorAdmission,
     };
 
     let rule = ProductFusionRule::<_, _>::try_new(
         ProductFusionRule::<_, _>::try_new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         )
         .unwrap(),
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
-    let octet = vec![1, 1];
+    let octet = fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(3).unwrap())
+        .unwrap()
+        .irrep(&[1, 1])
+        .unwrap();
     let id = rule
         .try_encode_label(&ProductSector::new(
             ProductSector::new(octet.clone(), octet.clone()),
@@ -217,9 +240,14 @@ fn warm_nested_generic_product_queries() {
         );
     }
     // The non-self-dual first/second input selects different retained duals.
-    let label = |x: Vec<i64>| ProductSector::new(ProductSector::new(x.clone(), x.clone()), x);
-    let three = rule.try_encode_label(&label(vec![1, 0])).unwrap();
-    let unit = rule.try_encode_label(&label(vec![0, 0])).unwrap();
+    let su3 =
+        fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let label = |x: &[i64]| {
+        let x = su3.irrep(x).unwrap();
+        ProductSector::new(ProductSector::new(x.clone(), x.clone()), x)
+    };
+    let three = rule.try_encode_label(&label(&[1, 0])).unwrap();
+    let unit = rule.try_encode_label(&label(&[0, 0])).unwrap();
     for block in [
         rule.try_a_symbol_generic(three, unit, three).unwrap(),
         rule.try_b_symbol_generic(unit, three, three).unwrap(),

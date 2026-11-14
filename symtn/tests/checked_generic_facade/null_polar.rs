@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 #[cfg(feature = "cgc-gen")]
 fn multiply_2x2<D: symtn::typed::TensorScalar>(
@@ -291,7 +293,7 @@ fn checked_generic_null_spaces_cover_shape_zero_disjoint_and_side_only_sectors()
 fn assert_sun_checked_generic_null_spaces<D>(
     engine: &mut dyn Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     vertex_weights: [D; 2],
     close: impl Fn(D, D) -> f64,
 ) where
@@ -301,11 +303,15 @@ fn assert_sun_checked_generic_null_spaces<D>(
         + PartialEq
         + numerics::Numeric,
 {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), 2)]).unwrap();
     // `V ⊗ V <- V` with `V` the adjoint irrep: its coupled sector `V` has
     // outer multiplicity 2, so that block is `(2 * 2 * 2) x 2`, its rows
@@ -423,7 +429,7 @@ fn sun_checked_generic_null_spaces_resolve_cross_mu_for_both_dtypes() {
     // directions annihilating a rank-deficient input whose rows mix both
     // vertices, and the composed rank-revealing null space adds the rank
     // deficit, for real and complex payloads.
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_checked_generic_null_spaces::<f64>(
             engine,
             n,
@@ -445,18 +451,22 @@ fn sun_checked_generic_null_spaces_resolve_cross_mu_for_both_dtypes() {
 fn assert_sun_checked_generic_polar_qh<D>(
     engine: &mut dyn Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     q: [[D; 2]; 2],
     h: [[D; 2]; 2],
     close: impl Fn(D, D) -> f64 + Copy,
 ) where
     D: symtn::typed::FactorizationScalar + fmt::Debug + PartialEq,
 {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), 2)]).unwrap();
     let build = |engine: &mut dyn Engine, matrix: [[D; 2]; 2], fallback: D| {
         let cross_sector = label.clone();
@@ -526,7 +536,7 @@ fn sun_checked_generic_polar_cross_mu_qh_oracles_for_both_dtypes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let s = std::f64::consts::FRAC_1_SQRT_2;
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_checked_generic_polar_qh::<f64>(
             engine,
             n,

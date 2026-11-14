@@ -1045,14 +1045,18 @@ fn assert_checked_generic_solve_acceptance<D>(engine: &mut dyn Engine)
 where
     D: AdvancedLinalgScalar + core::fmt::Debug,
 {
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(solve_spy(&calls, None)));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 2)]).unwrap();
     let divisor: TensorMap<_, D> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
             let row = ij[0] + 2 * ij[1];
@@ -1139,7 +1143,7 @@ fn checked_generic_solves_are_owned_uncached_and_one_call_per_route() {
 #[test]
 fn checked_generic_left_solve_preserves_injected_backend_provenance() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(solve_spy(
@@ -1147,9 +1151,13 @@ fn checked_generic_left_solve_preserves_injected_backend_provenance() {
         Some("injected checked solve failure"),
     )));
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
             f64::from(ij[0] == ij[1])

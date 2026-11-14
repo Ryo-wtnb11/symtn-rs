@@ -12,7 +12,7 @@
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
-use symtn::sector::LieGroupFusionRule;
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, LegSelection, TensorMap};
 
@@ -20,9 +20,13 @@ use symtn::typed::{GradedSpace, LegSelection, TensorMap};
 fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let adjoint = vec![2i64, 2];
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let adjoint = su_irrep(&[2i64, 2]);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
@@ -75,9 +79,13 @@ fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
 fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let adjoint = vec![2i64, 2];
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let adjoint = su_irrep(&[2i64, 2]);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
@@ -129,11 +137,15 @@ fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
 fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(vec![0i64, 0], 3), (vec![2i64, 2], 4)],
+        [(su_irrep(&[0i64, 0]), 3), (su_irrep(&[2i64, 2]), 4)],
     )
     .unwrap();
     let mut state = 0x5eed_u64;
@@ -155,7 +167,7 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
         .unwrap()
         .is_some());
     let bond = d.domain()[0].clone();
-    let kept = [(vec![0i64, 0], 1..3), (vec![2i64, 2], 0..1)];
+    let kept = [(su_irrep(&[0i64, 0]), 1..3), (su_irrep(&[2i64, 2]), 0..1)];
     let selection = LegSelection::try_new(&bond, kept.iter().cloned()).unwrap();
     let restricted = d
         .restrict_leg(engine, &[(1, &selection), (0, &selection)])
@@ -198,9 +210,13 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
 fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let adjoint = vec![2i64, 2];
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let adjoint = su_irrep(&[2i64, 2]);
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 4)]).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
@@ -240,7 +256,7 @@ fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices
     let mut state = 0x5eed_u64;
     let square = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(vec![0i64, 0], 3), (adjoint.clone(), 4)],
+        [(su_irrep(&[0i64, 0]), 3), (adjoint.clone(), 4)],
     )
     .unwrap();
     let raw: TensorMap<_, f64> =
@@ -259,7 +275,7 @@ fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices
         .d;
     let bond = d.domain()[0].clone();
     let kept = [
-        (vec![0i64, 0], vec![0, 2]),
+        (su_irrep(&[0i64, 0]), vec![0, 2]),
         (adjoint.clone(), vec![0, 1, 3]),
     ];
     let selection = LegSelection::try_new(&bond, kept.iter().cloned()).unwrap();
@@ -388,4 +404,11 @@ fn for_each_index(shape: &[usize], mut visit: impl FnMut(&[usize])) {
             axis += 1;
         }
     }
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

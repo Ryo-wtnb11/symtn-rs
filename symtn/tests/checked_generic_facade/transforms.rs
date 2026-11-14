@@ -1,17 +1,23 @@
 use super::*;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let legs =
-        [2, 3, 5].map(|n| GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], n)]).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let legs = [2, 3, 5]
+        .map(|n| GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), n)]).unwrap());
     let source = TensorMap::<_, f64>::from_subblock_fn(
         engine,
         &runtime,
@@ -99,7 +105,7 @@ fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
 fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::sector::{U1FusionRule, U1Irrep};
 
     fn bits<R: TypedSectorAdmission>(
@@ -135,9 +141,17 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     };
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![2i64, 1], 3), (vec![0, 0], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        provider,
+        [(su_irrep(&[2i64, 1]), 3), (su_irrep(&[0, 0]), 2)],
+    )
+    .unwrap();
     let big = [(1.5, 0.5), (-2.0, -1.0), (0.25, 3.0)];
     let small = [(3.0, -0.75), (-0.5, 2.0)];
     let su3 = |engine: &mut dyn Engine, conj: bool| {
@@ -147,11 +161,11 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
             &leg,
             [
                 SectorSpectrum {
-                    sector: vec![2i64, 1],
+                    sector: su_irrep(&[2i64, 1]),
                     values: conj_if(conj, &big),
                 },
                 SectorSpectrum {
-                    sector: vec![0, 0],
+                    sector: su_irrep(&[0, 0]),
                     values: conj_if(conj, &small),
                 },
             ],
@@ -218,11 +232,11 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![2i64, 1],
+                sector: su_irrep(&[2i64, 1]),
                 values: norms(&big),
             },
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: norms(&small),
             },
         ],
@@ -248,12 +262,19 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     // Non-self-dual SU(3) irreps on a dual leg (`[1,0]^2 + [0,1]` dualized to
     // `[0,1]^2 + [1,0]`): the adjoint keeps the space, not its dual, and
     // conjugates the values.
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let chiral = GradedSpace::try_new(provider, [(vec![1i64, 0], 2), (vec![0, 1], 1)])
-        .unwrap()
-        .try_dual()
-        .unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let chiral = GradedSpace::try_new(
+        provider,
+        [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
+    )
+    .unwrap()
+    .try_dual()
+    .unwrap();
     let triplets = [(0.5, -1.25), (2.0, 0.75)];
     let antitriplet = [(-1.0, 4.0)];
     let chiral_diagonal = |engine: &mut dyn Engine, conj: bool| {
@@ -263,11 +284,11 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
             &chiral,
             [
                 SectorSpectrum {
-                    sector: vec![0i64, 1],
+                    sector: su_irrep(&[0i64, 1]),
                     values: conj_if(conj, &triplets),
                 },
                 SectorSpectrum {
-                    sector: vec![1, 0],
+                    sector: su_irrep(&[1, 0]),
                     values: conj_if(conj, &antitriplet),
                 },
             ],
@@ -296,11 +317,11 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         &chiral,
         [
             SectorSpectrum {
-                sector: vec![0i64, 1],
+                sector: su_irrep(&[0i64, 1]),
                 values: vec![0.5, 2.0],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![-1.0],
             },
         ],
@@ -380,14 +401,21 @@ fn checked_only_cold_permute_surfaces_a_provider_algebra_failure() {
 fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
     for n in [3, 4] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
-        let label = if n == 3 { vec![1, 1] } else { vec![1, 0, 1] };
+        let label = if n == 3 {
+            su_irrep(&[1, 1])
+        } else {
+            su_irrep(&[1, 0, 1])
+        };
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 1)]).unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
@@ -1200,7 +1228,7 @@ fn checked_generic_cat_rule_check_and_admission_failure_are_typed_nonpublishing(
 }
 
 #[cfg(feature = "cgc-gen")]
-fn sun_cat_marker(trees: &symtn::typed::BlockFusionTrees<Vec<i64>>) -> usize {
+fn sun_cat_marker(trees: &symtn::typed::BlockFusionTrees<LieIrrep>) -> usize {
     trees
         .codomain_vertices()
         .iter()
@@ -1275,18 +1303,26 @@ fn assert_sun_cat_values<D>(
 fn assert_sun_cat_case<D>(
     engine: &mut dyn Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     value: impl Fn(usize) -> D + Copy,
 ) where
     D: Copy + fmt::Debug + PartialEq + symtn::typed::TensorScalar,
 {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let left_provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
-    let right_provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let left_provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
+    let right_provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let left_common =
         GradedSpace::try_new(Arc::clone(&left_provider), [(label.clone(), 1)]).unwrap();
     let right_common =
@@ -1295,7 +1331,7 @@ fn assert_sun_cat_case<D>(
         GradedSpace::try_new(Arc::clone(&left_provider), [(label.clone(), 1)]).unwrap();
     let right_changed =
         GradedSpace::try_new(Arc::clone(&right_provider), [(label.clone(), 2)]).unwrap();
-    let fill = |base, trees: &symtn::typed::BlockFusionTrees<Vec<i64>>, indices: &[usize]| {
+    let fill = |base, trees: &symtn::typed::BlockFusionTrees<LieIrrep>, indices: &[usize]| {
         value(
             base + sun_cat_marker(trees)
                 + indices
@@ -1391,7 +1427,7 @@ fn sun_checked_generic_cat_covers_both_directions_dtypes_and_mu_two_keys() {
     let _serial = crate::counting_alloc::serial();
     // What: exact TensorKit direct-sum slab values, μ=2 full-key matching,
     // distinct equal-identity Arcs, left authority, and lazy-adjoint parity.
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_cat_case(engine, n, label.clone(), |value| value as f64);
         assert_sun_cat_case(engine, n, label, |value| {
             Complex64::new(value as f64, -(value as f64))
@@ -1404,12 +1440,15 @@ fn sun_checked_generic_cat_covers_both_directions_dtypes_and_mu_two_keys() {
 fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 1)]).unwrap();
         let tensor: TensorMap<_, f64> =
@@ -1583,7 +1622,7 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
 fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     if crate::checked_generic_facade::run_isolated_or_return(
         "SYMTN_CHECKED_FACADE_COMPLETED_STORE",
         "transforms::sun_checked_generic_transforms_reuse_the_runtime_completed_store",
@@ -1592,9 +1631,12 @@ fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
     }
 
     let runtime = Runtime::builder().build().unwrap();
-    for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 1)]).unwrap();
         let source: TensorMap<_, f64> =
@@ -1899,15 +1941,22 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
 fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let adjoint = vec![1, 1];
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let adjoint = su_irrep(&[1, 1]);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
-    let other =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 1), (adjoint, 1)]).unwrap();
+    let other = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 1), (adjoint, 1)],
+    )
+    .unwrap();
     let complex = TensorMap::from_subblock_fn(
         engine,
         &runtime,

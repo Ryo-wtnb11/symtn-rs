@@ -34,6 +34,7 @@ pub use symtn_core::GenericRigidSymbols
 pub use symtn_core::InfallibleGeneric
 pub use symtn_core::LieGroupFusionRule
 pub use symtn_core::LieGroupFusionRuleError
+pub use symtn_core::LieIrrep
 pub use symtn_core::MultiplicityFreeAdmissionMode
 pub use symtn_core::MultiplicityFreeFusionRule
 pub use symtn_core::MultiplicityFreeFusionSymbols

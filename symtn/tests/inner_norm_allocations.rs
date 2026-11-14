@@ -338,12 +338,16 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
 fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 0]), 2)]).unwrap();
     let lhs: TensorMap<LieGroupFusionRule, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -657,4 +661,12 @@ fn warmed_complex_symbol_reductions_do_not_allocate() {
     ] {
         assert_eq!(allocations, 0, "{row}");
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

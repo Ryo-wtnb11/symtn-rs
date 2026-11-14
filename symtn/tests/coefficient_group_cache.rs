@@ -212,14 +212,20 @@ fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = |sectors: &[([i64; 2], usize)]| {
         GradedSpace::try_new(
             Arc::clone(&provider),
-            sectors.iter().map(|&(labels, d)| (labels.to_vec(), d)),
+            sectors
+                .iter()
+                .map(|&(labels, d)| (provider.category().irrep(&labels).unwrap(), d)),
         )
         .unwrap()
     };
@@ -242,7 +248,7 @@ fn equal_lie_groups_share_structure_cache_entries() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let totals = || {
         symtn::cache::stats()
@@ -252,15 +258,29 @@ fn equal_lie_groups_share_structure_cache_entries() {
             })
     };
     let leg = |provider: &Arc<LieGroupFusionRule>| {
-        GradedSpace::try_new(Arc::clone(provider), [(vec![1i64, 0], 2), (vec![1, 1], 1)]).unwrap()
+        GradedSpace::try_new(
+            Arc::clone(provider),
+            [
+                (provider.category().irrep(&[1, 0]).unwrap(), 2),
+                (provider.category().irrep(&[1, 1]).unwrap(), 1),
+            ],
+        )
+        .unwrap()
     };
     // The quotient by the trivial subgroup is the same group from another
     // constructor.
     let (first, second) = (
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
         Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su_quotient(3, 1).unwrap())
-                .unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su_quotient(3, 1).unwrap(),
+            )
+            .unwrap(),
         ),
     );
     symtn::cache::clear();
@@ -280,8 +300,12 @@ fn equal_lie_groups_share_structure_cache_entries() {
     // The identity holds its group weakly: once both rules are dropped, a new
     // rule over an equal group no longer reaches their entries.
     drop((first, second));
-    let third =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let third = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let _ = tensor!(engine, &runtime, &leg(&third))
         .permute(engine, &[2, 0], &[3, 1])
         .unwrap();

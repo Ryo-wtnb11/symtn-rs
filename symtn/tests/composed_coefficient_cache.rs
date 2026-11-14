@@ -243,14 +243,20 @@ fn checked_generic_su3_degeneracy_change_reuses_the_composed_coefficients() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = |sectors: &[([i64; 2], usize)]| {
         GradedSpace::try_new(
             Arc::clone(&provider),
-            sectors.iter().map(|&(labels, d)| (labels.to_vec(), d)),
+            sectors
+                .iter()
+                .map(|&(labels, d)| (provider.category().irrep(&labels).unwrap(), d)),
         )
         .unwrap()
     };

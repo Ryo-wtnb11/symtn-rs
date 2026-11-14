@@ -369,6 +369,36 @@ fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
         transposed.dense_data().unwrap(),
         "SU2/f64 transpose",
     );
+
+    // The multiplicity-free Lie rule over SU(2) takes the same device path.
+    let lie = Arc::new(
+        symtn::sector::LieGroupFusionRule::<symtn::sector::MultiplicityFreeAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap(),
+        )
+        .unwrap(),
+    );
+    let label = |dj: i64| lie.category().irrep(&[dj]).unwrap();
+    let lie_leg = GradedSpace::try_new(
+        Arc::clone(&lie),
+        [(label(0), 2), (label(1), 2), (label(2), 1)],
+    )
+    .unwrap();
+    let lie_real: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&lie_leg, &lie_leg],
+        [&lie_leg, &lie_leg],
+        real_fill,
+    )
+    .unwrap();
+    let permuted =
+        device_matches_host!(engine, cuda, "MF Lie SU2/f64 permute", lie_real, |e, t| t
+            .permute(e, &[1, 2], &[3, 0]));
+    assert_not_a_reordering(
+        lie_real.dense_data().unwrap(),
+        permuted.dense_data().unwrap(),
+        "MF Lie SU2/f64 permute",
+    );
 }
 
 /// Unique fusion is `NoCache`, so a degeneracy-only change misses

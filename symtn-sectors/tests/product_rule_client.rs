@@ -1,7 +1,9 @@
 //! Downstream view of the product API: public bounds, nesting, and execution.
 #![cfg(feature = "cgc-gen")]
 use symtn_sectors::{CategoryProvider, ProductAdmission, ProductFusionRule};
-use symtn_sectors::{CheckedGenericFusion, FusionRule, LieGroupFusionRule, U1FusionRule};
+use symtn_sectors::{
+    CheckedGenericAdmissionMode, CheckedGenericFusion, FusionRule, LieGroupFusionRule, U1FusionRule,
+};
 
 fn channels_mf<T: FusionRule>(rule: &T) -> usize {
     rule.fusion_channels(rule.vacuum(), rule.vacuum()).len()
@@ -28,7 +30,10 @@ fn product_type_checks() {
     channels_mf(&u1u1);
     let nested = ProductFusionRule::<_, _>::try_new(
         u1u1,
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
     channels_cg(&nested);
@@ -40,7 +45,10 @@ fn product_runs_through_fs_product() {
     use symtn_sectors::ProductFusionRuleError;
     let rule = ProductFusionRule::<_, _>::try_new(
         U1FusionRule,
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     )
     .unwrap();
     let vacuum = rule.vacuum();

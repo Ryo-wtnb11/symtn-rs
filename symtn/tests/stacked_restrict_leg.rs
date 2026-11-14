@@ -7,6 +7,8 @@
 
 use num_complex::Complex64;
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use symtn::typed::{GradedSpace, LegSelection, StackedTensorMap, TensorMap};
 
@@ -199,15 +201,17 @@ fn restrict_leg_rejects_what_eager_rejects() {
 fn a_selection_of_another_rule_instance_is_a_rule_mismatch() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
-    let leg = |rank: usize, trivial: Vec<i64>| {
+    let leg = |rank: usize, trivial: LieIrrep| {
         let rule = Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(rank).unwrap(),
+            )
+            .unwrap(),
         );
         GradedSpace::try_new(rule, [(trivial, 2)]).unwrap()
     };
-    let su3 = leg(3, vec![0, 0]);
-    let su4 = leg(4, vec![0, 0, 0]);
+    let su3 = leg(3, su_irrep(&[0, 0]));
+    let su4 = leg(4, su_irrep(&[0, 0, 0]));
     let member = TensorMap::<_, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -217,7 +221,7 @@ fn a_selection_of_another_rule_instance_is_a_rule_mismatch() {
     )
     .unwrap();
     let stack = StackedTensorMap::pack(&[&member, &member]).unwrap();
-    let foreign = LegSelection::try_new(&su4, [(vec![0i64, 0, 0], 0..1)]).unwrap();
+    let foreign = LegSelection::try_new(&su4, [(su_irrep(&[0i64, 0, 0]), 0..1)]).unwrap();
     let expected = member.restrict_leg(engine, &[(0, &foreign)]).err().unwrap();
     let actual = stack.restrict_leg(engine, &[(0, &foreign)]).err().unwrap();
     assert!(
@@ -256,4 +260,12 @@ fn restrict_leg_of_a_blockless_structure_is_empty() {
         .dense_data()
         .unwrap()
         .is_empty());
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

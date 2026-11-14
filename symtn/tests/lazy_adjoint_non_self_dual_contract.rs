@@ -21,6 +21,8 @@
 //!   whose `8 ⊗ 8 → 8` has outer multiplicity two.
 
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use num_complex::Complex64;
 use symtn::sector::{U1FusionRule, U1Irrep};
@@ -232,12 +234,12 @@ mod u1 {
 #[cfg(feature = "cgc-gen")]
 mod su3 {
     use super::*;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::Engine;
 
     type Matrix = Vec<Vec<Complex64>>;
 
-    fn block(t: &TensorMap<LieGroupFusionRule, Complex64>, c: &Vec<i64>) -> Matrix {
+    fn block(t: &TensorMap<LieGroupFusionRule, Complex64>, c: &LieIrrep) -> Matrix {
         let b = t.block(c).unwrap();
         (0..b.rows())
             .map(|i| (0..b.cols()).map(|j| b.get(i, j).unwrap()).collect())
@@ -269,18 +271,21 @@ mod su3 {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
         let rule = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
         // Dynkin labels: `3 = [1, 0]` and `3̄ = [0, 1]` at different
         // degeneracies, so `V ≠ V'`; `8 = [1, 1]`.
-        let fundamental = vec![1i64, 0];
+        let fundamental = su_irrep(&[1i64, 0]);
         let v = GradedSpace::try_new(
             rule,
             [
-                (vec![0i64, 0], 1),
+                (su_irrep(&[0i64, 0]), 1),
                 (fundamental.clone(), 2),
-                (vec![0, 1], 1),
-                (vec![1, 1], 2),
+                (su_irrep(&[0, 1]), 1),
+                (su_irrep(&[1, 1]), 2),
             ],
         )
         .unwrap();
@@ -303,7 +308,7 @@ mod su3 {
             domain: &[1],
         };
         let (p_adj, r_adj) = (p.adjoint(engine).unwrap(), r.adjoint(engine).unwrap());
-        type Oracle<'a> = &'a dyn Fn(&Vec<i64>) -> Matrix;
+        type Oracle<'a> = &'a dyn Fn(&LieIrrep) -> Matrix;
         let cases: [(&str, _, _, Oracle); 3] = [
             ("lhs adjoint", &p_adj, &q, &|c| {
                 product(&adjoint(&block(&p, c)), &block(&q, c))
@@ -317,7 +322,7 @@ mod su3 {
         ];
         for (what, a, b, oracle) in cases {
             let result = a.contract(engine, b, &spec).unwrap();
-            let sectors: Vec<Vec<i64>> = p.blocks().unwrap().map(|(c, _)| c).collect();
+            let sectors: Vec<LieIrrep> = p.blocks().unwrap().map(|(c, _)| c).collect();
             assert_eq!(result.blocks().unwrap().len(), sectors.len(), "{what}");
             assert!(sectors.contains(&fundamental), "{what}: 3 is coupled");
             let (mut actual, mut expected) = (Vec::new(), Vec::new());
@@ -330,4 +335,12 @@ mod su3 {
             assert_close(what, &actual, &expected);
         }
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

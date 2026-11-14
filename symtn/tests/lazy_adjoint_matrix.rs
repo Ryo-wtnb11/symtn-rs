@@ -442,12 +442,16 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_su3_multiplicity_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let adjoint = vec![2i64, 2];
-    let trivial = vec![0i64, 0];
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let adjoint = su_irrep(&[2i64, 2]);
+    let trivial = su_irrep(&[0i64, 0]);
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2), (trivial, 1)]).unwrap();
     let other = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 3)]).unwrap();
@@ -479,6 +483,8 @@ mod factorizations {
     //! ordinary owned path. The lazy receiver reaches each op with identity leg
     //! roles, so it is factored as a lazy adjoint rather than permuted into an
     //! owned tensor first.
+    #[cfg(feature = "cgc-gen")]
+    use super::su_irrep;
 
     use std::sync::Arc;
 
@@ -840,19 +846,29 @@ mod factorizations {
     #[test]
     fn checked_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        use symtn::sector::LieGroupFusionRule;
+        use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
         let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
         );
         let a = GradedSpace::try_new(
             Arc::clone(&provider),
-            [(vec![0i64], 2), (vec![1], 2), (vec![2], 1)],
+            [
+                (su_irrep(&[0i64]), 2),
+                (su_irrep(&[1]), 2),
+                (su_irrep(&[2]), 1),
+            ],
         )
         .unwrap();
-        let b =
-            GradedSpace::try_new(Arc::clone(&provider), [(vec![0i64], 1), (vec![1], 2)]).unwrap();
+        let b = GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(su_irrep(&[0i64]), 1), (su_irrep(&[1]), 2)],
+        )
+        .unwrap();
         assert_all_ops!(engine, "checked SU(2)", runtime, a, b);
     }
 
@@ -863,15 +879,21 @@ mod factorizations {
     #[test]
     fn checked_su3_multiplicity_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        use symtn::sector::LieGroupFusionRule;
+        use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
         let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
-        let a = GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 1), (vec![0, 0], 1)])
-            .unwrap();
-        let b = GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 2)]).unwrap();
+        let a = GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(su_irrep(&[2i64, 2]), 1), (su_irrep(&[0, 0]), 1)],
+        )
+        .unwrap();
+        let b = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[2i64, 2]), 2)]).unwrap();
         let probe =
             TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&a, &a], [&a, &a], 0).unwrap();
         assert!(
@@ -884,12 +906,16 @@ mod factorizations {
             "fixture must carry a Generic vertex key mu = 2"
         );
         assert_all_ops!(engine, "checked SU(3)", runtime, a, b);
-        let three =
-            GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 0], 2), (vec![0, 0], 1)])
-                .unwrap();
-        let three_bar =
-            GradedSpace::try_new(Arc::clone(&provider), [(vec![0i64, 1], 3), (vec![1, 0], 1)])
-                .unwrap();
+        let three = GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 0]), 1)],
+        )
+        .unwrap();
+        let three_bar = GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(su_irrep(&[0i64, 1]), 3), (su_irrep(&[1, 0]), 1)],
+        )
+        .unwrap();
         assert_all_ops!(engine, "checked SU(3) 3", runtime, three, three_bar);
     }
 
@@ -900,18 +926,25 @@ mod factorizations {
     #[test]
     fn checked_su3_seams_keep_non_self_dual_sectors_and_dual_legs() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        use symtn::sector::LieGroupFusionRule;
+        use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
         let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
-        let three =
-            GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 0], 2), (vec![0, 0], 1)])
-                .unwrap();
-        let three_bar =
-            GradedSpace::try_new(Arc::clone(&provider), [(vec![0i64, 1], 3), (vec![1, 0], 1)])
-                .unwrap();
+        let three = GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 0]), 1)],
+        )
+        .unwrap();
+        let three_bar = GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(su_irrep(&[0i64, 1]), 3), (su_irrep(&[1, 0]), 1)],
+        )
+        .unwrap();
         let dual = three.try_dual().unwrap();
         assert!(dual.is_dual() && !three.is_dual());
 
@@ -955,4 +988,12 @@ mod factorizations {
         seams!(engine, f64, 35, [dual, three_bar], [dual]);
         seams!(engine, Complex64, 36, [dual, three_bar], [dual]);
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

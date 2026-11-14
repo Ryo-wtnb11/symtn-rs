@@ -116,14 +116,16 @@ fn su3_leg(leg: usize, sectors: usize) -> GradedSpace<symtn::sector::LieGroupFus
     static RULE: OnceLock<Arc<symtn::sector::LieGroupFusionRule>> = OnceLock::new();
     let rule = RULE.get_or_init(|| {
         Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         )
     });
     let labels: [[i64; 2]; 6] = [[0, 0], [1, 0], [0, 1], [1, 1], [2, 0], [0, 2]];
     GradedSpace::try_new(
         Arc::clone(rule),
-        (0..sectors).map(|s| (labels[s].to_vec(), 1 + (leg + s) % 2)),
+        (0..sectors).map(|s| (su_irrep(&labels[s]), 1 + (leg + s) % 2)),
     )
     .unwrap()
 }
@@ -302,4 +304,12 @@ fn a_warm_trace_equals_the_uncached_and_cold_traces() {
         check_values!(engine, "SU(3) f64", su3_leg, 3, f64);
         check_values!(engine, "SU(3) c64", su3_leg, 3, Complex64);
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

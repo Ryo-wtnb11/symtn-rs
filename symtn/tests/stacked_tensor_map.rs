@@ -2,6 +2,8 @@
 
 use num_complex::Complex64;
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use symtn::typed::Error;
 use symtn::typed::{
@@ -108,17 +110,19 @@ fn runtime_drift_names_the_member_and_field() {
 fn rule_instance_drift_names_the_member_and_field() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
-    let mut tensor = |rank: usize, trivial: Vec<i64>| {
+    let mut tensor = |rank: usize, trivial: LieIrrep| {
         let rule = Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(rank).unwrap(),
+            )
+            .unwrap(),
         );
         let leg = GradedSpace::try_new(rule, [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg]).unwrap()
     };
-    let su3 = tensor(3, vec![0, 0]);
+    let su3 = tensor(3, su_irrep(&[0, 0]));
     assert_drift(
-        StackedTensorMap::pack(&[&su3, &su3, &tensor(4, vec![0, 0, 0])]),
+        StackedTensorMap::pack(&[&su3, &su3, &tensor(4, su_irrep(&[0, 0, 0]))]),
         SignatureField::Rule,
     );
 }
@@ -261,4 +265,12 @@ fn select_of_a_blockless_structure_is_empty() {
         .dense_data()
         .unwrap()
         .is_empty());
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

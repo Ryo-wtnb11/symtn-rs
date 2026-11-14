@@ -5,15 +5,16 @@
 //! (`src/factorizations/truncation.jl:187,239`), an `Int` for SU(N), so its
 //! budgets and cross-sector ties compare exactly. The oracles here are the
 //! Weyl dimension formula and SU(2) as both a multiplicity-free
-//! (`SU2FusionRule`) and a checked Generic (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) provider:
+//! (`SU2FusionRule`) and a checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) provider:
 //! the same spectra must take the same decision in either mode.
 
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
+use symtn::sector::LieIrrep;
 
 use num_complex::Complex64;
-use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, SectorSpectrum, SpectrumMagnitude, Truncation};
 
 /// Weyl dimension of the SU(3) irrep with Dynkin labels `(p, q)`.
@@ -32,19 +33,23 @@ macro_rules! kept {
 fn su3_quantum_dimension_is_exact() {
     // What: a weighted dimension is the Weyl dimension, not `sqrt(dim)^2`
     // (`sqrt(8)^2 = 8.000000000000002`).
-    let rule =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let rule = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     for p in 0..4 {
         for q in 0..4 {
-            let leg = GradedSpace::try_new(Arc::clone(&rule), [(vec![p, q], 2)]).unwrap();
+            let leg = GradedSpace::try_new(Arc::clone(&rule), [(su_irrep(&[p, q]), 2)]).unwrap();
             assert_eq!(leg.dim().unwrap(), 2.0 * su3_dim(p, q), "({p}, {q})");
         }
     }
 
     // The discarded weight of a unit spectrum is `sqrt(sum_c dim(c))`.
-    let leg = GradedSpace::try_new(Arc::clone(&rule), [(vec![1, 1], 1)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&rule), [(su_irrep(&[1, 1]), 1)]).unwrap();
     let spectra = [SectorSpectrum {
-        sector: vec![1, 1],
+        sector: su_irrep(&[1, 1]),
         values: vec![1.0],
     }];
     let found = leg.find_truncated(&spectra, &Truncation::rank(0)).unwrap();
@@ -52,9 +57,9 @@ fn su3_quantum_dimension_is_exact() {
     // A budget of exactly `dim(c)` keeps the state (TensorKit `totaldim >
     // howmany` breaks only past the budget); one less keeps nothing.
     let found = leg.find_truncated(&spectra, &Truncation::rank(8)).unwrap();
-    assert_eq!(kept!(found.selection.subspace(), &vec![1, 1]), 1);
+    assert_eq!(kept!(found.selection.subspace(), &su_irrep(&[1, 1])), 1);
     let found = leg.find_truncated(&spectra, &Truncation::rank(7)).unwrap();
-    assert_eq!(kept!(found.selection.subspace(), &vec![1, 1]), 0);
+    assert_eq!(kept!(found.selection.subspace(), &su_irrep(&[1, 1])), 0);
 }
 
 #[test]
@@ -63,15 +68,19 @@ fn su3_exact_dimension_tie_breaks_in_tensorkit_order() {
     // to SUNRepresentations' `isless` order, `(0, 1)` before `(1, 0)`: kept
     // first by a rank budget, discarded first by an error budget, whatever
     // order the caller lists the spectra in.
-    let rule =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let (three, three_bar) = (vec![1, 0], vec![0, 1]);
+    let rule = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let (three, three_bar) = (su_irrep(&[1, 0]), su_irrep(&[0, 1]));
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [(three.clone(), 2), (three_bar.clone(), 2)],
     )
     .unwrap();
-    let spectrum = |sector: &Vec<i64>| SectorSpectrum {
+    let spectrum = |sector: &LieIrrep| SectorSpectrum {
         sector: sector.clone(),
         values: vec![1.0, 0.5],
     };
@@ -150,10 +159,15 @@ fn assert_modes_agree<V: SpectrumMagnitude + Clone>(to_value: impl Fn(f64) -> V)
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
         spectra
             .iter()
-            .map(|(twice, v)| (vec![*twice as i64], v.len())),
+            .map(|(twice, v)| (su_irrep(&[*twice as i64]), v.len())),
     )
     .unwrap();
     let mf_spectra: Vec<_> = spectra
@@ -166,7 +180,7 @@ fn assert_modes_agree<V: SpectrumMagnitude + Clone>(to_value: impl Fn(f64) -> V)
     let checked_spectra: Vec<_> = spectra
         .iter()
         .map(|(twice, v)| SectorSpectrum {
-            sector: vec![*twice as i64],
+            sector: su_irrep(&[*twice as i64]),
             values: v.iter().copied().map(&to_value).collect(),
         })
         .collect();
@@ -179,7 +193,7 @@ fn assert_modes_agree<V: SpectrumMagnitude + Clone>(to_value: impl Fn(f64) -> V)
         for (twice, _) in &spectra {
             assert_eq!(
                 kept!(mf.selection.subspace(), &SU2Irrep::from_twice_spin(*twice)),
-                kept!(checked.selection.subspace(), &vec![*twice as i64]),
+                kept!(checked.selection.subspace(), &su_irrep(&[*twice as i64])),
                 "2j = {twice} under {policy:?}"
             );
         }
@@ -203,4 +217,11 @@ fn multiplicity_free_and_checked_su2_take_one_decision_f64() {
 fn multiplicity_free_and_checked_su2_take_one_decision_c64() {
     // What: the same for complex spectra, selected by magnitude.
     assert_modes_agree(|value| Complex64::from_polar(value, 0.7));
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

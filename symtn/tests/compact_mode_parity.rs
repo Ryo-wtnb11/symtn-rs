@@ -39,6 +39,8 @@ use report::{cause, report};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
 use symtn::sector::{
@@ -495,8 +497,13 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
-        su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
+        su2.iter().map(|&(twice, k)| (su_irrep(&[twice as i64]), k)),
     )
     .unwrap();
     let values = |twice: usize, k: usize| (0..k).map(|i| 0.5 + (twice * 4 + i) as f64).collect();
@@ -515,7 +522,7 @@ fn bosonic_su2_compact_twist_is_the_identity_in_both_modes() {
         &runtime,
         &checked_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
-            sector: vec![twice as i64],
+            sector: su_irrep(&[twice as i64]),
             values: values(twice, k),
         }),
     )
@@ -1088,12 +1095,17 @@ fn su2_compact_compose_and_contract_agree_across_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
-        su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
+        su2.iter().map(|&(twice, k)| (su_irrep(&[twice as i64]), k)),
     )
     .unwrap();
     let mf_label = |sector: &SU2Irrep| sector.twice_spin() as f64;
-    let checked_label = |sector: &Vec<i64>| sector[0] as f64;
+    let checked_label = |sector: &LieIrrep| sector.dynkin().next().unwrap() as f64;
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
     let real = |x: f64| x;
     assert_rows_close(
@@ -1667,8 +1679,13 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
-        su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
+        su2.iter().map(|&(twice, k)| (su_irrep(&[twice as i64]), k)),
     )
     .unwrap();
     let mf = TensorMap::<_, f64>::diagonal(
@@ -1686,7 +1703,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
         &host_runtime(),
         &checked_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
-            sector: vec![twice as i64],
+            sector: su_irrep(&[twice as i64]),
             values: values(twice, k),
         }),
     )
@@ -1705,7 +1722,7 @@ fn su2_compact_swap_and_braid_agree_across_modes() {
                 .unwrap();
             let checked_entry = checked_swapped
                 .iter()
-                .find(|e| e.sector == vec![twice as i64])
+                .find(|e| e.sector == su_irrep(&[twice as i64]))
                 .unwrap();
             for (i, want) in values(twice, k).into_iter().enumerate() {
                 let want = Complex64::from(want * tensorkit_coefficient[index]);
@@ -1732,8 +1749,13 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
     // read from the staged destination, and equals the dense route.
     use symtn::sector::LieGroupFusionRule;
     let leg = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
-        [(vec![1i64, 0], 2), (vec![0, 1], 1)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap()
     .try_dual()
@@ -1746,11 +1768,11 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
             &leg,
             [
                 SectorSpectrum {
-                    sector: vec![0i64, 1],
+                    sector: su_irrep(&[0i64, 1]),
                     values: vec![conv(0.5), conv(-1.25)],
                 },
                 SectorSpectrum {
-                    sector: vec![1i64, 0],
+                    sector: su_irrep(&[1i64, 0]),
                     values: vec![conv(2.0)],
                 },
             ],
@@ -2059,8 +2081,13 @@ fn su2_compact_full_trace_agrees_across_modes() {
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
-        su2.iter().map(|&(twice, k)| (vec![twice as i64], k)),
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
+        su2.iter().map(|&(twice, k)| (su_irrep(&[twice as i64]), k)),
     )
     .unwrap();
     let mf = TensorMap::<_, f64>::diagonal(
@@ -2078,7 +2105,7 @@ fn su2_compact_full_trace_agrees_across_modes() {
         &host_runtime(),
         &checked_leg,
         su2.iter().map(|&(twice, k)| SectorSpectrum {
-            sector: vec![twice as i64],
+            sector: su_irrep(&[twice as i64]),
             values: values(twice, k),
         }),
     )
@@ -3409,4 +3436,12 @@ fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
         drop(black_box(source.trace_pairs(engine, &[(1, 3)]).unwrap()));
     }
     assert_eq!(seen[0], seen[1]);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

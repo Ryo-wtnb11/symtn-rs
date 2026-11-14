@@ -970,11 +970,15 @@ fn converted_lazy_adjoints_are_owned() {
 fn checked_generic_su3_conversions_are_exact_and_keep_structure() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![2i64, 2], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(provider, [(su_irrep(&[2i64, 2]), 2)]).unwrap();
     let source = filled!(engine, [&leg, &leg], [&leg, &leg]);
     assert!(
         (0..source.subblock_count()).any(|index| source
@@ -1014,18 +1018,26 @@ fn checked_generic_su3_conversions_are_exact_and_keep_structure() {
 fn checked_generic_diagonal_adjoint_converts_to_an_owned_compact_diagonal() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(provider, [(vec![2i64, 1], 3), (vec![0, 0], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        provider,
+        [(su_irrep(&[2i64, 1]), 3), (su_irrep(&[0, 0]), 2)],
+    )
+    .unwrap();
     let spectra = [
         SectorSpectrum {
-            sector: vec![2i64, 1],
+            sector: su_irrep(&[2i64, 1]),
             values: vec![f32::INFINITY, f32::from_bits(0x7fc0_1234), -0.0],
         },
         SectorSpectrum {
-            sector: vec![0, 0],
+            sector: su_irrep(&[0, 0]),
             values: vec![f32::NEG_INFINITY, f32::from_bits(1)],
         },
     ];
@@ -1103,11 +1115,11 @@ fn checked_generic_diagonal_adjoint_converts_to_an_owned_compact_diagonal() {
         &leg,
         [
             SectorSpectrum {
-                sector: vec![2i64, 1],
+                sector: su_irrep(&[2i64, 1]),
                 values: vec![1.5, -2.0, 0.25],
             },
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![3.0, -0.5],
             },
         ],
@@ -1128,4 +1140,12 @@ fn checked_generic_diagonal_adjoint_converts_to_an_owned_compact_diagonal() {
         c64_bits(&expected)
     );
     converted.qr_compact(engine, &[0], &[1]).unwrap();
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

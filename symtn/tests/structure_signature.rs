@@ -9,6 +9,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 
@@ -151,13 +153,15 @@ fn fixtures_are_equal_iff_structure_is_equal() {
     #[cfg(feature = "cgc-gen")]
     check_fixture!(engine, "SU3 checked Generic", |variant| {
         let rule = Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
         let pairs = match variant {
-            0 => [(vec![0i64, 0], 1), (vec![1, 1], 2)],
-            1 => [(vec![0i64, 0], 1), (vec![1, 1], 3)],
-            _ => [(vec![0i64, 0], 1), (vec![1, 0], 2)],
+            0 => [(su_irrep(&[0i64, 0]), 1), (su_irrep(&[1, 1]), 2)],
+            1 => [(su_irrep(&[0i64, 0]), 1), (su_irrep(&[1, 1]), 3)],
+            _ => [(su_irrep(&[0i64, 0]), 1), (su_irrep(&[1, 0]), 2)],
         };
         GradedSpace::try_new(rule, pairs).unwrap()
     });
@@ -173,22 +177,28 @@ fn checked_generic_rule_instance_separates_signatures() {
     let runtime = Runtime::builder().build().unwrap();
     let rule = |rank: usize| {
         Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(rank).unwrap(),
+            )
+            .unwrap(),
         )
     };
     // Why the rules outlive their signatures: a rule identity holds its group
     // weakly, so signatures of dropped rules equal nothing but their clones.
     let (first_su3, second_su3, su4) = (rule(3), rule(3), rule(4));
-    let mut signature = |rule: &Arc<symtn::sector::LieGroupFusionRule>, trivial: Vec<i64>| {
+    let mut signature = |rule: &Arc<symtn::sector::LieGroupFusionRule>, trivial: LieIrrep| {
         let leg = GradedSpace::try_new(Arc::clone(rule), [(trivial, 2)]).unwrap();
         TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg])
             .unwrap()
             .structure_signature()
     };
-    let su3 = signature(&first_su3, vec![0, 0]);
-    assert_same(&su3, &signature(&second_su3, vec![0, 0]), "SU3 instances");
-    assert_differ(&su3, &signature(&su4, vec![0, 0, 0]), "SU3 vs SU4");
+    let su3 = signature(&first_su3, su_irrep(&[0, 0]));
+    assert_same(
+        &su3,
+        &signature(&second_su3, su_irrep(&[0, 0])),
+        "SU3 instances",
+    );
+    assert_differ(&su3, &signature(&su4, su_irrep(&[0, 0, 0])), "SU3 vs SU4");
 }
 
 fn u1_leg(charges: std::ops::RangeInclusive<i32>, degeneracy: usize) -> GradedSpace<U1FusionRule> {
@@ -313,4 +323,12 @@ fn shared_structure_comparison_does_not_allocate() {
     assert_eq!(allocations, 0, "pointer fast path");
     let (_, allocations) = measured(|| hash_of(&first));
     assert_eq!(allocations, 0, "hash");
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

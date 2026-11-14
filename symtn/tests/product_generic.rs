@@ -1,7 +1,10 @@
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
-use symtn::sector::{LieGroupFusionRule, ProductFusionRule, ProductSector, U1FusionRule, U1Irrep};
+use symtn::sector::{
+    CheckedGenericAdmissionMode, LieGroupFusionRule, ProductFusionRule, ProductSector,
+    U1FusionRule, U1Irrep,
+};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 #[test]
@@ -10,12 +13,15 @@ fn product_braid_moves_unequal_degeneracies_and_multiplicity_vertices() {
     let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(
         ProductFusionRule::<_, _>::try_new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
             U1FusionRule,
         )
         .unwrap(),
     );
-    let label = ProductSector::new(vec![1, 1], U1Irrep::new(0).unwrap());
+    let label = ProductSector::new(su_irrep(&[1, 1]), U1Irrep::new(0).unwrap());
     let legs =
         [2, 3, 2].map(|n| GradedSpace::try_new(Arc::clone(&rule), [(label.clone(), n)]).unwrap());
     let value = |mu: usize, i: &[usize]| (100 * mu + 10 * i[0] + 3 * i[1] + i[2]) as f64;
@@ -78,4 +84,11 @@ fn product_braid_moves_unequal_degeneracies_and_multiplicity_vertices() {
             assert!((actual - expected).abs() < 1e-10);
         }
     }
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

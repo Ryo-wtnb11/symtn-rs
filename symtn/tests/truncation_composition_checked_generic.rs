@@ -20,10 +20,11 @@
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
+use symtn::sector::LieIrrep;
 use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
-use symtn::sector::LieGroupFusionRule;
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn::typed::TensorMap;
 use symtn::typed::{Eig, Eigh, GradedSpace, SectorSpectrum, Svd, Truncation};
 
@@ -91,11 +92,15 @@ macro_rules! assert_isometry {
 }
 
 fn su3_legs() -> (Arc<LieGroupFusionRule>, GradedSpace<LieGroupFusionRule>) {
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(vec![1i64, 0], 3), (vec![2i64, 2], 2)],
+        [(su_irrep(&[1i64, 0]), 3), (su_irrep(&[2i64, 2]), 2)],
     )
     .unwrap();
     (provider, leg)
@@ -103,7 +108,7 @@ fn su3_legs() -> (Arc<LieGroupFusionRule>, GradedSpace<LieGroupFusionRule>) {
 
 /// A smaller space on the same provider, used as a `truncspace` target.
 fn su3_target(provider: &Arc<LieGroupFusionRule>) -> GradedSpace<LieGroupFusionRule> {
-    GradedSpace::try_new(Arc::clone(provider), [(vec![2i64, 2], 2)]).unwrap()
+    GradedSpace::try_new(Arc::clone(provider), [(su_irrep(&[2i64, 2]), 2)]).unwrap()
 }
 
 macro_rules! assert_su3_svd_composition {
@@ -283,11 +288,11 @@ macro_rules! assert_su3_eig_composition {
     ($engine:ident, $source:expr, $complex:expr, $target:expr, $tag:expr) => {{
         let source = $source;
         let complex = $complex;
-        let references: Vec<(Vec<i64>, Vec<Complex64>)> = sector_matrices!($engine, source)
+        let references: Vec<(LieIrrep, Vec<Complex64>)> = sector_matrices!($engine, source)
             .iter()
             .map(|(sector, matrix)| (sector.clone(), triangular_eigenvalues(matrix)))
             .collect();
-        let offers: Vec<Offer<Vec<i64>>> = references
+        let offers: Vec<Offer<LieIrrep>> = references
             .iter()
             .map(|(sector, values)| Offer {
                 sector: sector.clone(),
@@ -467,11 +472,11 @@ fn checked_generic_decision_keeps_stored_positions() {
     let (_, leg) = su3_legs();
     let spectra = [
         SectorSpectrum {
-            sector: vec![1i64, 0],
+            sector: su_irrep(&[1i64, 0]),
             values: vec![0.5, -3.0, 2.0],
         },
         SectorSpectrum {
-            sector: vec![2i64, 2],
+            sector: su_irrep(&[2i64, 2]),
             values: vec![1.5, 1.0],
         },
     ];
@@ -489,4 +494,11 @@ fn checked_generic_decision_keeps_stored_positions() {
         positions(Truncation::relative_error(1.0 / 127.5f64.sqrt()).unwrap()),
         [vec![1, 2], vec![0, 1]]
     );
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -60,22 +60,48 @@ fn table_identities_follow_the_table() {
     );
 }
 
+/// The admission mode is part of a Lie rule's identity: the two modes answer
+/// different provider traits and must not share structure-cache entries.
+#[test]
+fn multiplicity_free_lie_identity_is_the_mode_and_group() {
+    let su2 = || fusion_symbols::lie::GroupId::su(2).unwrap();
+    let mf = LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(su2()).unwrap();
+    let generic = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(su2()).unwrap();
+    let mf_identity = FusionRule::rule_identity(&mf);
+    assert_eq!(
+        mf_identity,
+        FusionRule::rule_identity(
+            &LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(su2()).unwrap()
+        )
+    );
+    assert_ne!(mf_identity, CheckedGenericFusion::rule_identity(&generic));
+    assert_ne!(mf_identity, SU2FusionRule.rule_identity());
+    assert_eq!(mf.typed_rule_identity(), mf_identity);
+}
+
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lie_group_su2_and_compact_su2_are_different_rules() {
-    let sun2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
+    let sun2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(2).unwrap(),
+    )
+    .unwrap();
     assert_ne!(sun2.rule_identity(), SU2FusionRule.rule_identity());
     assert_eq!(
         sun2.rule_identity(),
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
-            .unwrap()
-            .rule_identity()
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap()
+        )
+        .unwrap()
+        .rule_identity()
     );
     assert_ne!(
         sun2.rule_identity(),
-        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-            .unwrap()
-            .rule_identity()
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap()
+        )
+        .unwrap()
+        .rule_identity()
     );
     assert_eq!(sun2.typed_rule_identity(), sun2.rule_identity());
 }
@@ -187,7 +213,12 @@ fn table_identity_is_the_uuid_under_the_table_tag() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lie_group_identity_shares_only_while_a_rule_is_alive() {
-    let su3 = || LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let su3 = || {
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap()
+    };
     let rule = su3();
     let clone = rule.clone();
     let identity = rule.rule_identity();

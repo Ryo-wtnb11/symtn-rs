@@ -101,3 +101,7 @@ path = "tests/serial.rs"
 name = "checked_generic_transform"
 harness = false
 required-features = ["cgc-gen"]
+
+[[bench]]
+name = "su2_rule_provider"
+harness = false

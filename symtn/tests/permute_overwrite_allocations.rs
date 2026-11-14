@@ -1,12 +1,14 @@
 use std::hint::black_box;
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
 #[cfg(feature = "cgc-gen")]
-use symtn::sector::LieGroupFusionRule;
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
 use crate::counting_alloc;
 
@@ -163,9 +165,13 @@ fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() 
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let mut warm = |labels: &[Vec<i64>]| {
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let mut warm = |labels: &[LieIrrep]| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
             labels.iter().map(|label| (label.clone(), 2)),
@@ -183,8 +189,9 @@ fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() 
         black_box(destination.dense_data().unwrap());
         (source.subblock_count(), calls)
     };
-    let (small_blocks, small_calls) = warm(&[vec![1, 0], vec![0, 1]]);
-    let (large_blocks, large_calls) = warm(&[vec![1, 0], vec![0, 1], vec![1, 1]]);
+    let (small_blocks, small_calls) = warm(&[su_irrep(&[1, 0]), su_irrep(&[0, 1])]);
+    let (large_blocks, large_calls) =
+        warm(&[su_irrep(&[1, 0]), su_irrep(&[0, 1]), su_irrep(&[1, 1])]);
     assert!(large_blocks > 3 * small_blocks);
     assert_eq!(large_calls, small_calls);
 }
@@ -200,9 +207,13 @@ fn warm_checked_generic_permute_of_an_evicted_source_does_not_readmit_its_trees(
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let mut warm = |labels: &[Vec<i64>]| {
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let mut warm = |labels: &[LieIrrep]| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
             labels.iter().map(|label| (label.clone(), 2)),
@@ -216,8 +227,9 @@ fn warm_checked_generic_permute_of_an_evicted_source_does_not_readmit_its_trees(
             warm_calls(|| drop(black_box(source.permute(engine, &[1, 3], &[0, 2]).unwrap())));
         (source.subblock_count(), calls)
     };
-    let (small_blocks, small_calls) = warm(&[vec![1, 0], vec![0, 1]]);
-    let (large_blocks, large_calls) = warm(&[vec![1, 0], vec![0, 1], vec![1, 1]]);
+    let (small_blocks, small_calls) = warm(&[su_irrep(&[1, 0]), su_irrep(&[0, 1])]);
+    let (large_blocks, large_calls) =
+        warm(&[su_irrep(&[1, 0]), su_irrep(&[0, 1]), su_irrep(&[1, 1])]);
     assert!(large_blocks > 3 * small_blocks);
     assert_eq!(large_calls, small_calls);
 }
@@ -283,4 +295,12 @@ fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
     assert!(std::ptr::eq(full.provider(), provider.as_ref()));
     assert!(std::ptr::eq(explicit.provider(), provider.as_ref()));
     assert!(std::ptr::eq(repartitioned.provider(), provider.as_ref()));
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

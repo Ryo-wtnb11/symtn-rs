@@ -209,7 +209,7 @@ fn checked_su2_spaces(
     let space = |degs: [usize; 3]| {
         GradedSpace::try_new(
             Arc::new(
-                symtn::sector::LieGroupFusionRule::new(
+                symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
                     fusion_symbols::lie::GroupId::su(2).unwrap(),
                 )
                 .unwrap(),
@@ -217,7 +217,7 @@ fn checked_su2_spaces(
             [0i64, 1, 2]
                 .into_iter()
                 .zip(degs)
-                .map(|(twice, deg)| (vec![twice], deg * scale)),
+                .map(|(twice, deg)| (su_irrep(&[twice]), deg * scale)),
         )
         .unwrap()
     };
@@ -266,4 +266,12 @@ fn checked_su2_selection_prices_a_borrowable_identity_adjoint_as_free() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     assert_borrowed!(engine, "checked SU(2)", reversed, checked_su2_spaces);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -121,7 +121,10 @@ fn su2_ids_are_doubled_spins() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lie_group_ids_are_graded_then_lexicographic_through_the_typed_path() {
-    let su4 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap();
+    let su4 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(4).unwrap(),
+    )
+    .unwrap();
     for (labels, id) in [
         (vec![0, 0, 0], 0),
         (vec![0, 0, 1], 1),
@@ -134,13 +137,18 @@ fn lie_group_ids_are_graded_then_lexicographic_through_the_typed_path() {
         (vec![1, 1, 0], 8),
         (vec![2, 0, 0], 9),
     ] {
-        assert_eq!(su4.try_encode_label(&labels).unwrap(), s(id), "{labels:?}");
-        assert_eq!(su4.try_decode_label(s(id)).unwrap(), labels);
+        let label = su4.category().irrep(&labels).unwrap();
+        assert_eq!(su4.try_encode_label(&label).unwrap(), s(id), "{labels:?}");
+        assert_eq!(su4.try_decode_label(s(id)).unwrap(), label);
     }
-    let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
+    let su2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(2).unwrap(),
+    )
+    .unwrap();
     for twice_spin in [0, 1, 7] {
         assert_eq!(
-            su2.try_encode_label(&vec![twice_spin]).unwrap(),
+            su2.try_encode_label(&su2.category().irrep(&[twice_spin]).unwrap())
+                .unwrap(),
             s(twice_spin as usize)
         );
     }
@@ -302,4 +310,51 @@ fn packed_product_ids_place_the_left_factor_in_the_low_bits() {
             available_bits: 64,
         })
     );
+}
+
+/// The three multiplicity-free Lie codec routes: a rank-one factor (id =
+/// `2j`), a rank-one torus (id = zigzag charge `0, 1, -1, 2, -2`), and a
+/// multi-coordinate group through the interner. U(2) = (SU(2) x U(1))/Z2
+/// admits `2j = q (mod 2)` and ranks `(2j, zigzag(q))` by total then
+/// lexicographically, so excluded labels are holes in the id space.
+#[test]
+fn multiplicity_free_lie_ids_cover_every_codec_route() {
+    use fusion_symbols::lie::GroupId;
+    let mf = |group| LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(group).unwrap();
+    let su2 = mf(GroupId::su(2).unwrap());
+    for twice_spin in [0, 1, 2, 3, 254, 255, i64::from(u32::MAX)] {
+        let label = su2.category().irrep(&[twice_spin]).unwrap();
+        let id = s(twice_spin as usize);
+        assert_eq!(su2.encode_sector(&label), Ok(id));
+        assert_eq!(su2.decode_sector(id), Ok(label));
+        assert_eq!(su2.dual(id), id);
+    }
+    let u1 = mf(GroupId::u(1).unwrap());
+    let charge = |q: i64| u1.category().irrep_with_charges(&[], &[q]).unwrap();
+    for (q, id) in [(0, 0), (1, 1), (-1, 2), (2, 3), (-2, 4)] {
+        assert_eq!(u1.encode_sector(&charge(q)), Ok(s(id)));
+        assert_eq!(u1.decode_sector(s(id)), Ok(charge(q)));
+        assert_eq!(u1.encode_sector(&charge(-q)), Ok(u1.dual(s(id))));
+    }
+    let u2 = mf(GroupId::u(2).unwrap());
+    let label = |dj: i64, q: i64| u2.category().irrep_with_charges(&[dj], &[q]).unwrap();
+    // (2j, q) -> id, and the dual (2j, -q).
+    for (dj, q, id, dual) in [
+        (0, 0, 0, 0),
+        (1, 1, 4, 7),
+        (2, 0, 5, 5),
+        (0, 2, 6, 10),
+        (1, -1, 7, 4),
+        (2, 2, 17, 23),
+    ] {
+        assert_eq!(u2.encode_sector(&label(dj, q)), Ok(s(id)), "({dj}, {q})");
+        assert_eq!(u2.decode_sector(s(id)), Ok(label(dj, q)));
+        assert_eq!(u2.dual(s(id)), s(dual), "dual of ({dj}, {q})");
+    }
+    for hole in [1, 2, 3] {
+        assert_eq!(
+            u2.decode_sector(s(hole)),
+            Err(FusionAlgebraError::InvalidSector { sector: s(hole) })
+        );
+    }
 }
