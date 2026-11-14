@@ -6,9 +6,10 @@
 //!
 //! The device keeps the raw cuSOLVER gauge, and with `B > 1` the batched
 //! solver may differ from eager's in the last ULPs, so eigenvectors are
-//! checked through gauge-invariant quantities against device eager, the Host
-//! eager decomposition and the Jacobi oracle. At `B = 1` the handle must be
-//! bit-identical (IEEE `==`) to device eager.
+//! checked through gauge-invariant quantities: real members against device
+//! eager, the Host eager decomposition and the Jacobi oracle, complex members
+//! against a hand-made `U diag(λ) Uᴴ` and the Host prepared plan. At `B = 1`
+//! the handle must be bit-identical (IEEE `==`) to device eager.
 
 #![cfg(feature = "cuda")]
 
@@ -23,13 +24,16 @@ use symtn::typed::HermitianTol;
 use num_complex::{Complex32, Complex64};
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{SU2FusionRule, SU2Irrep};
-use symtn::typed::Error;
 use symtn::typed::{
     BatchError, Eigh, EighFullPlan, EighFullWorkspace, GradedSpace, MemberFault, Runtime,
     StackedTensorMap, TensorMap,
 };
 
-use common::DeviceRule;
+use crate::prepared_complex_eigh::{
+    check_spectral, complex_hermitian_members, spectral_members, spectral_reference,
+    ComplexPayload, SectorOracle,
+};
+use common::{DeviceRule, Payload};
 use prepared::eigh::{
     check_member, degenerate_entry, has_degenerate_group, has_plus_minus_tie, hermitian_members,
     plus_minus_entry, sector_matrices, single_leg,
@@ -51,7 +55,6 @@ fn check_device_batch<R>(
     R: DeviceRule,
     <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
-    let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
     let device: Vec<_> = inputs.iter().map(|t| t.to_cuda(cuda).unwrap()).collect();
     let stack = StackedTensorMap::pack(inputs)
         .unwrap()
@@ -480,53 +483,293 @@ fn non_finite_entries_and_eigenvalues_reject_their_members() {
     );
 }
 
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn complex_device_payloads_are_unsupported() {
+/// One device execute of `inputs` through `ws`, every member checked
+/// gauge-free ([`check_spectral`]) against `oracles` when given and against
+/// the Host prepared plan on the same members, every stored entry of `d`
+/// against the spectra ([`assert_diagonal_only`]),
+/// and at `B = 1` bit for bit against device eager, whose raw cuSOLVER gauge
+/// the plan keeps.
+fn check_complex_device_batch<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    what: &str,
+    plan: &EighFullPlan<R, D, symtn::typed::CudaStorage<D>>,
+    ws: &mut EighFullWorkspace<R, D, symtn::typed::CudaStorage<D>>,
+    inputs: &[TensorMap<R, D>],
+    oracles: Option<&[Vec<SectorOracle<<R as symtn::sector::SectorCodec>::Sector>>]>,
+) where
+    R: DeviceRule,
+    <R as symtn::sector::SectorCodec>::Sector: Clone + PartialEq + Debug,
+    D: ComplexPayload + symtn::typed::CudaFactorizationPayload,
+{
+    let host_stack = StackedTensorMap::pack(inputs).unwrap();
+    let rows = codomain_axes(&inputs[0]);
+    let cols = domain_axes(&inputs[0]);
+    let host_plan =
+        EighFullPlan::new(engine, &host_stack, &rows, &cols, HermitianTol::DEFAULT).unwrap();
+    let mut host_ws = host_plan.workspace().unwrap();
+    let host = host_plan
+        .execute(engine, &host_stack, &mut host_ws)
+        .unwrap();
+
+    let stack = host_stack.to_cuda(cuda).unwrap();
+    let output = plan.execute(cuda, &stack, ws).unwrap();
+    assert_diagonal_only(engine, cuda, what, &output);
+    let d_stack = output.d.to_host(cuda).unwrap();
+    let v_stack = output.v.to_host(cuda).unwrap();
+    for (member, input) in inputs.iter().enumerate() {
+        let what = format!("{what} {} member {member}/{}", D::NAME, inputs.len());
+        let d = d_stack.member(engine, member).unwrap();
+        let v = v_stack.member(engine, member).unwrap();
+        if let Some(oracles) = oracles {
+            check_spectral(
+                &format!("{what} vs oracle"),
+                input,
+                &d,
+                &v,
+                Some(&oracles[member]),
+            );
+        }
+        let reference = spectral_reference(
+            &host.d.member(engine, member).unwrap(),
+            &host.v.member(engine, member).unwrap(),
+        );
+        check_spectral(&format!("{what} vs Host"), input, &d, &v, Some(&reference));
+        if inputs.len() == 1 {
+            let Eigh {
+                d: eager_d,
+                v: eager_v,
+            } = input
+                .to_cuda(cuda)
+                .unwrap()
+                .eigh_full(cuda, &rows, &cols, HermitianTol::DEFAULT)
+                .unwrap();
+            assert!(
+                d.dense_data().unwrap() == eager_d.to_host(cuda).unwrap().dense_data().unwrap(),
+                "{what}: d bit-identical to device eager"
+            );
+            assert!(
+                v.dense_data().unwrap() == eager_v.to_host(cuda).unwrap().dense_data().unwrap(),
+                "{what}: v bit-identical to device eager"
+            );
+        }
+    }
+}
+
+/// Through one workspace and two different single-member inputs (a complex
+/// device stack holds one member), the member passes
+/// [`check_complex_device_batch`] against the hand-made spectral oracle.
+fn complex_device_case<R, D>(label: &str, leg: GradedSpace<R>)
+where
+    R: DeviceRule,
+    <R as symtn::sector::SectorCodec>::Sector: Clone + PartialEq + Debug,
+    D: ComplexPayload + symtn::typed::CudaFactorizationPayload,
+{
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
-    let (leg, _) = u1_legs();
-    let complex = members::<_, Complex64>(&runtime, &[&leg], &[&leg], 2, 1);
-    let stack = StackedTensorMap::pack(&complex)
-        .unwrap()
-        .to_cuda(cuda)
-        .unwrap();
+    let (first, _) = spectral_members::<R, D>(&runtime, &leg, 1, 0);
     let plan = EighFullPlan::new(
         engine,
-        &stack,
-        &codomain_axes(&complex[0]),
-        &domain_axes(&complex[0]),
+        &StackedTensorMap::pack(&first)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap(),
+        &[0],
+        &[1],
         HermitianTol::DEFAULT,
     )
     .unwrap();
     let mut ws = plan.workspace().unwrap();
-    let before = cuda_transfer_stats();
-    assert!(matches!(
-        plan.execute(cuda, &stack, &mut ws).map(|_| ()),
-        Err(BatchError::Operation(Error::Operation(error))) if matches!(
-            *error,
-            symtn::typed::OperationError::Dense(symtn_dense::DenseError::Unsupported { .. })
-        )
-    ));
-    assert_eq!(
-        delta(cuda_transfer_stats(), before),
-        Default::default(),
-        "refused before any device work"
-    );
-    assert!(ws.take_output().is_none());
+    for salt in [0, 1] {
+        let (inputs, oracles) = spectral_members::<R, D>(&runtime, &leg, 1, salt);
+        check_complex_device_batch(
+            engine,
+            cuda,
+            &format!("{label} input {salt}"),
+            &plan,
+            &mut ws,
+            &inputs,
+            Some(&oracles),
+        );
+    }
 }
 
-/// Every member's `d` is exactly zero off its diagonal and carries the
-/// member's spectra on it.
-fn assert_diagonal_only<R>(
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn complex_device_members_equal_the_spectral_oracle_and_host_prepared() {
+    // Coupled-sector orders on both sides of 32, where the batched solver
+    // changes its internal algorithm; a dual non-self-dual U(1) leg and a
+    // non-Abelian SU(2) leg.
+    let u1 = crate::legs::u1_leg(&[(-1, 4), (0, 31), (1, 33), (2, 48)])
+        .try_dual()
+        .unwrap();
+    let su2 = crate::legs::su2_leg(&[(0, 5), (1, 33), (2, 3)]);
+    complex_device_case::<_, Complex64>("dual u1", u1.clone());
+    complex_device_case::<_, Complex32>("dual u1", u1);
+    complex_device_case::<_, Complex64>("su2", su2.clone());
+    complex_device_case::<_, Complex32>("su2", su2);
+}
+
+fn complex_device_multi_tree_case<R, D>(label: &str, codomain: &[&GradedSpace<R>])
+where
+    R: DeviceRule,
+    <R as symtn::sector::SectorCodec>::Sector: Clone + PartialEq + Debug,
+    D: ComplexPayload + symtn::typed::CudaFactorizationPayload,
+{
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
+    for salt in [3, 4] {
+        let inputs = complex_hermitian_members::<R, D>(&runtime, codomain, 1, salt);
+        assert!(inputs[0].subblock_count() > 3, "{label}: several blocks");
+        let plan = EighFullPlan::new(
+            engine,
+            &StackedTensorMap::pack(&inputs)
+                .unwrap()
+                .to_cuda(cuda)
+                .unwrap(),
+            &codomain_axes(&inputs[0]),
+            &domain_axes(&inputs[0]),
+            HermitianTol::DEFAULT,
+        )
+        .unwrap();
+        let mut ws = plan.workspace().unwrap();
+        check_complex_device_batch(
+            engine,
+            cuda,
+            &format!("{label} input {salt}"),
+            &plan,
+            &mut ws,
+            &inputs,
+            None,
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn complex_device_members_with_several_trees_per_sector_equal_host_prepared() {
+    let (su2, _) = su2_legs();
+    let (fz2u1, _) = fz2u1_legs();
+    let fz2u1_dual = fz2u1.try_dual().unwrap();
+    complex_device_multi_tree_case::<_, Complex64>("su2", &[&su2, &su2]);
+    complex_device_multi_tree_case::<_, Complex32>("su2", &[&su2, &su2]);
+    complex_device_multi_tree_case::<_, Complex64>("fz2u1", &[&fz2u1, &fz2u1_dual]);
+    complex_device_multi_tree_case::<_, Complex32>("fz2u1", &[&fz2u1, &fz2u1_dual]);
+}
+
+fn complex_symmetric_device_member_is_rejected<D>()
+where
+    D: ComplexPayload + symtn::typed::CudaFactorizationPayload,
+{
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
+    let (leg, _) = u1_legs();
+    // `Sᵀ = S` with imaginary off-diagonal entries: equal to its transpose,
+    // not to its conjugate transpose.
+    let inputs =
+        [
+            TensorMap::<_, D>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
+                let (lo, hi) = (index[0].min(index[1]), index[0].max(index[1]));
+                D::entry(1.0 + lo as f64, (hi - lo) as f64 / 2.0)
+            })
+            .unwrap(),
+        ];
+    let stack = StackedTensorMap::pack(&inputs)
+        .unwrap()
+        .to_cuda(cuda)
+        .unwrap();
+    let plan = EighFullPlan::new(engine, &stack, &[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let mut ws = plan.workspace().unwrap();
+    let before = cuda_transfer_stats();
+    let got = rejected(plan.execute(cuda, &stack, &mut ws).map(|_| ()));
+    let counts = delta(cuda_transfer_stats(), before);
+    assert_eq!(got, vec![(0, MemberFault::NotHermitian)], "{}", D::NAME);
+    assert_eq!(counts.solver_calls, 0, "{}: no solver launch", D::NAME);
+    assert!(ws.take_output().is_none(), "{}: no output", D::NAME);
+}
+
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_complex_symmetric_device_member_is_rejected_before_any_solver_launch() {
+    complex_symmetric_device_member_is_rejected::<Complex64>();
+    complex_symmetric_device_member_is_rejected::<Complex32>();
+}
+
+/// Through one plan and workspace: complex stacks of `B = 2` and `17` are
+/// refused as unsupported with no device work and no observable output, and
+/// the single-member stack of the same signature (the control) succeeds.
+fn complex_device_batches_are_refused<D>()
+where
+    D: ComplexPayload + symtn::typed::CudaFactorizationPayload,
+{
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
+    let (leg, _) = u1_legs();
+    let stack = |cuda: &mut dyn symtn::typed::Engine, count| {
+        let (inputs, _) = spectral_members::<_, D>(&runtime, &leg, count, 0);
+        StackedTensorMap::pack(&inputs)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap()
+    };
+    let single = stack(cuda, 1);
+    let plan = EighFullPlan::new(engine, &single, &[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let mut ws = plan.workspace().unwrap();
+    for count in [2, 17] {
+        let batch = stack(cuda, count);
+        let before = cuda_transfer_stats();
+        let result = plan.execute(cuda, &batch, &mut ws).map(|_| ());
+        let counts = delta(cuda_transfer_stats(), before);
+        assert!(
+            matches!(
+                &result,
+                Err(BatchError::Operation(symtn::typed::Error::Operation(error))) if matches!(
+                    **error,
+                    symtn::typed::OperationError::Dense(symtn_dense::DenseError::Unsupported { .. })
+                )
+            ),
+            "{} B={count}: {result:?}",
+            D::NAME
+        );
+        assert_eq!(
+            counts,
+            Default::default(),
+            "{} B={count}: no device work",
+            D::NAME
+        );
+        assert!(
+            ws.take_output().is_none(),
+            "{} B={count}: no output",
+            D::NAME
+        );
+    }
+    plan.execute(cuda, &single, &mut ws).unwrap();
+    assert!(ws.take_output().is_some(), "{}: B=1 control", D::NAME);
+}
+
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn complex_device_stacks_of_more_than_one_member_are_unsupported() {
+    complex_device_batches_are_refused::<Complex64>();
+    complex_device_batches_are_refused::<Complex32>();
+}
+
+/// Every stored entry of every member's `d`: the member's real spectrum on
+/// the diagonal (a zero imaginary part for a complex payload) and exactly
+/// zero elsewhere, in every coupled sector.
+fn assert_diagonal_only<R, D>(
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
     what: &str,
-    output: &symtn::typed::EighStackOutput<'_, R, f64, symtn::typed::CudaStorage<f64>>,
+    output: &symtn::typed::EighStackOutput<'_, R, D, symtn::typed::CudaStorage<D>>,
 ) where
     R: DeviceRule,
-    <R as symtn::sector::SectorCodec>::Sector: Debug,
+    <R as symtn::sector::SectorCodec>::Sector: Clone + PartialEq + Debug,
+    D: Payload + symtn::typed::CudaFactorizationPayload,
 {
     let d = output.d.to_host(cuda).unwrap();
     assert_eq!(
@@ -535,17 +778,23 @@ fn assert_diagonal_only<R>(
         "{what}: one spectrum per member"
     );
     for (member, spectrum) in output.spectra.iter().enumerate() {
-        let matrices = sector_matrices(&d.member(engine, member).unwrap());
+        let matrices = crate::sector_matrices!(engine, &d.member(engine, member).unwrap());
+        assert_eq!(
+            matrices.len(),
+            spectrum.len(),
+            "{what}: one spectrum per sector"
+        );
         for entry in spectrum {
-            let m = &matrices[&format!("{:?}", entry.sector)];
+            let (_, m) = matrices.iter().find(|(s, _)| s == &entry.sector).unwrap();
             for j in 0..m.cols {
                 for i in 0..m.rows {
-                    let value = m.data[i + m.rows * j];
-                    if i == j {
-                        assert!(value == entry.values[i], "{what}: diagonal");
-                    } else {
-                        assert!(value.to_bits() == 0, "{what}: off-diagonal {value}");
-                    }
+                    let value = m.at(i, j);
+                    let re = if i == j { entry.values[i] } else { 0.0 };
+                    assert!(
+                        value.re.to_bits() == re.to_bits() && value.im.to_bits() == 0,
+                        "{what}: member {member} {:?} d[{i},{j}] = {value}",
+                        entry.sector
+                    );
                 }
             }
         }

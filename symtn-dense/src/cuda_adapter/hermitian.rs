@@ -53,18 +53,22 @@ pub fn cuda_hermitian_regions<D: CudaScalar>(
 /// regions, member `b` of region `(offset, n)` at `offset + b *
 /// member_stride`. Returns one decision per (member, region), member-major:
 /// `decisions[b * regions.len() + r]`. Zero members is an empty stack: no
-/// decisions, no transfers (after the complex check below).
+/// decisions, no transfers.
 /// The caller must supply a finite, non-negative `relative_tolerance`.
 ///
 /// Each (member, region) pair is decided by exactly the rule and the three
 /// scalar stages of [`cuda_hermitian_regions`] — the same [`admit_regions`]
 /// pipeline — with its own power-of-two normalizers: members of one batch may
 /// differ by many orders of magnitude, and a normalizer shared across members
-/// would change the acceptance of the small ones.
+/// would change the acceptance of the small ones. A complex member is scaled
+/// by `(s, 0)` (see `MemberScale`) and compared with its conjugate transpose.
 ///
-/// Real payloads only: a complex payload returns [`DenseError::Unsupported`].
-/// The scaling itself has a complex form (see `MemberScale`), but the complex
-/// stack has no device coverage yet, so it stays refused at this boundary.
+/// A complex stack of more than one member returns [`DenseError::Unsupported`]
+/// before any device work. Why not admit it: the batched Hermitian solver it
+/// feeds falls back inside Tenferro to one solver launch per member when
+/// cuSOLVER lacks `XsyevBatched` (older than 11.7.1), and Tenferro offers no
+/// public way to require or detect the batched routine, so a complex batch
+/// could not keep its one-launch contract. Real stacks keep that fallback.
 #[doc(hidden)]
 pub fn cuda_hermitian_regions_batched<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
@@ -79,10 +83,12 @@ pub fn cuda_hermitian_regions_batched<D: CudaScalar>(
         stride: member_stride,
     };
     ensure_cuda_device(ctx.device, members.op(), &[("src", src.device)])?;
-    if D::IS_COMPLEX {
+    if D::IS_COMPLEX && members.count() > 1 {
         return Err(DenseError::Unsupported {
             op: members.op(),
-            message: "per-member normalizers of a complex payload".into(),
+            message: "a complex stack of more than one member: Tenferro exposes no way to \
+                      require the batched Hermitian solver"
+                .into(),
         });
     }
     if members.count() == 0 {

@@ -40,7 +40,8 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 ///   and assembles `v` by one batched column gather per coupled sector
 ///   followed by one strided copy per aligned sector (per codomain tree
 ///   otherwise). Submissions, host syncs and
-///   downloads per call do not depend on the member count `B`. The raw
+///   downloads per call do not depend on the member count `B` (see the
+///   cuSOLVER requirement under *Supported scope*). The raw
 ///   cuSOLVER gauge is kept, as eager keeps it; with `B > 1` the batched
 ///   solver may differ from the eager one in the last ULPs, so results are
 ///   deterministic for a fixed `B` but not bit-stable across `B`. At `B = 1`
@@ -54,10 +55,14 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 /// # Supported scope
 ///
 /// Endomorphisms with packed coupled-sector regions (every structure a
-/// public constructor builds), real or complex on Host, real on CUDA: a
-/// complex CUDA stack is refused by [`Self::execute`] with
-/// `OperationError::Dense(DenseError::Unsupported)` before any device
-/// work. A batch fails as a whole
+/// public constructor builds), real or complex. On CUDA a complex stack
+/// supports one member only: a complex stack of `B > 1` is refused by
+/// [`Self::execute`] with `OperationError::Dense(DenseError::Unsupported)`
+/// before any device work, because Tenferro offers no public way to require
+/// its batched solver. The one batched solver call per coupled sector needs
+/// cuSOLVER 11.7.1 or newer (`XsyevBatched`); with an older library Tenferro
+/// solves a real batch with one launch per member instead, which symtn's
+/// `solver_calls` counter does not see. A batch fails as a whole
 /// ([`BatchError`]): on any error no output is returned, and none is
 /// observable afterwards ([`EighFullWorkspace::take_output`] returns `None`)
 /// until the next successful call, which rewrites every member.
@@ -413,8 +418,11 @@ where
     /// # CUDA
     ///
     /// Per call, independent of `B`: at most three admission downloads and
-    /// one spectra download; one batched solver call per coupled sector
-    /// (each reads its solver status, a host barrier, inside the backend);
+    /// one spectra download; one Tenferro solver call per coupled sector
+    /// (each reads its solver status, a host barrier, inside the backend).
+    /// That call is one cuSOLVER `XsyevBatched` launch only on cuSOLVER
+    /// 11.7.1 or newer; on an older library Tenferro launches one `syevd`
+    /// per member (see the supported scope on [`EighFullPlan`]);
     /// one column gather per coupled sector, then one strided copy per
     /// aligned coupled sector (per codomain tree otherwise); one strided copy
     /// per coupled sector onto `d`'s diagonals. Host to device, per call:

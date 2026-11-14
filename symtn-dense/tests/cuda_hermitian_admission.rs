@@ -474,7 +474,8 @@ fn member_stacks_decide_every_member_as_the_single_rule_with_bounded_downloads()
         );
     }
 
-    // The explicit complex boundary, before any device work.
+    // A complex stack of more than one member is refused before any device
+    // work; a single complex member is decided as the per-region rule.
     let (data, regions, stride) = stacked::<Complex64>(2, 0);
     let src = CudaDenseStorage::upload::<Complex64>(&ctx, &data).expect("upload");
     let (result, stats) = counted(|| {
@@ -492,17 +493,18 @@ fn member_stacks_decide_every_member_as_the_single_rule_with_bounded_downloads()
         "{result:?}"
     );
     assert_eq!(stats, CudaTransferStats::default());
-    let (data, regions, stride) = stacked::<Complex32>(1, 0);
-    let src = CudaDenseStorage::upload::<Complex32>(&ctx, &data).expect("upload");
-    assert!(matches!(
-        cuda_hermitian_regions_batched::<Complex32>(
-            &mut ctx,
-            &src,
-            &regions,
-            1,
-            stride,
-            default_tolerance::<Complex32>(),
-        ),
-        Err(DenseError::Unsupported { .. })
-    ));
+    single_complex_member::<Complex32>(&mut ctx, "c32");
+    single_complex_member::<Complex64>(&mut ctx, "c64");
+}
+
+fn single_complex_member<D: Payload>(ctx: &mut CudaDenseContext, name: &str) {
+    let (data, regions, stride) = stacked::<D>(1, 0);
+    let src = CudaDenseStorage::upload::<D>(ctx, &data).expect("upload");
+    let tolerance = default_tolerance::<D>();
+    assert_eq!(
+        cuda_hermitian_regions_batched::<D>(ctx, &src, &regions, 1, stride, tolerance)
+            .expect("one complex member"),
+        oracle_decisions(&data, &regions, tolerance),
+        "{name}"
+    );
 }

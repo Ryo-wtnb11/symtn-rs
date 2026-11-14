@@ -25,6 +25,9 @@ mod nonfinite_factor_input;
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
 mod prepared;
+// Only the eigh suites of this binary use the complex spectral fixtures.
+#[path = "prepared/complex_eigh.rs"]
+mod prepared_complex_eigh;
 #[path = "support/report.rs"]
 mod report;
 #[macro_use]

@@ -524,14 +524,17 @@ pub fn cuda_eigh_region<D: CudaScalar>(
 }
 /// [`cuda_eigh_region`] of `members` stacked `n x n` regions, member `b` at
 /// `offset + b * member_stride`, as one backend call on the `[n, n, members]`
-/// view. Tenferro's `Auto` driver solves a batch of more than one matrix with
-/// one `XsyevBatched` launch and a single matrix with `syevd`, exactly as
-/// [`cuda_eigh_region`] does; the batched routine may differ from the
-/// per-matrix one in the last ULPs.
+/// view. Tenferro's `Auto` driver solves a single matrix with `syevd`, exactly
+/// as [`cuda_eigh_region`] does, and a batch of more than one matrix with one
+/// `XsyevBatched` launch when cuSOLVER is 11.7.1 or newer; with an older
+/// library it launches one `syevd` per matrix inside this one backend call,
+/// and offers no public way to require or detect which. The batched routine
+/// may differ from the per-matrix one in the last ULPs.
 ///
 /// Returns the eigenvalues as one `[n, members]` spectrum (ascending per
 /// member) and the eigenvectors as a compact `[n, n, members]` buffer. One
-/// `solver_calls` count whatever `members` is. Tenferro reads the solver
+/// `solver_calls` count (one backend call) whatever `members` is, not one
+/// per vendor launch. Tenferro reads the solver
 /// status of the whole batch once and reports the first failure, without its
 /// member: a positive status is [`DenseError::NumericalFailure`]; argument,
 /// bounds and backend failures keep their own variants.
