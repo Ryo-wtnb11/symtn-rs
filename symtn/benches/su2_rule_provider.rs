@@ -1,7 +1,5 @@
-//! Provider-query timing of the SU(2) rules: `SU2FusionRule` (MF, scalar
-//! symbols) against `LieGroupFusionRule(su(2))` in checked Generic mode
-//! (`su2cg`, block symbols) and in multiplicity-free mode (`su2mf`, scalar
-//! symbols). Run with `cargo bench -p symtn --bench su2_rule_provider`.
+//! Provider-query timing of multiplicity-free Lie SU(2) (`su2`, scalar
+//! symbols) against checked Generic Lie SU(2) (`su2cg`, block symbols). Run with `cargo bench -p symtn --bench su2_rule_provider`.
 //!
 //! One child process per (rule, query), so the codec's irrep table and the
 //! fusion-symbols caches start cold; the first pass is cold, the next
@@ -16,8 +14,8 @@ mod counting_alloc;
 
 use symtn::sector::{
     CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols, FusionRule,
-    LieGroupFusionRule, MultiplicityFreeAdmissionMode, MultiplicityFreeFusionSymbols,
-    SU2FusionRule, SU2Irrep, SectorCodec, SectorId, TypedSectorAdmission,
+    LieGroupFusionRule, MultiplicityFreeAdmissionMode, MultiplicityFreeFusionSymbols, SectorCodec,
+    SectorId, TypedSectorAdmission,
 };
 
 #[global_allocator]
@@ -33,22 +31,6 @@ trait Queries {
     fn channels(&self, left: SectorId, right: SectorId) -> Vec<SectorId>;
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize;
     fn f(&self, ids: [SectorId; 6]) -> f64;
-}
-
-impl Queries for SU2FusionRule {
-    fn encode(&self, twice: usize) -> SectorId {
-        self.encode_sector(&SU2Irrep::from_twice_spin(twice))
-            .unwrap()
-    }
-    fn channels(&self, left: SectorId, right: SectorId) -> Vec<SectorId> {
-        self.fusion_channels(left, right).into_iter().collect()
-    }
-    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        FusionRule::nsymbol(self, left, right, coupled)
-    }
-    fn f(&self, [a, b, c, d, e, f]: [SectorId; 6]) -> f64 {
-        self.f_symbol_scalar(a, b, c, d, e, f)
-    }
 }
 
 impl Queries for LieGroupFusionRule<MultiplicityFreeAdmissionMode> {
@@ -193,7 +175,7 @@ fn main() {
         .ok()
         .map_or(40, |value| value.parse().unwrap());
     let Some(case) = std::env::var_os(CASE_ENV) else {
-        for rule in ["su2", "su2cg", "su2mf"] {
+        for rule in ["su2", "su2cg"] {
             for query in ["channels", "nsymbol", "f"] {
                 let case = format!("{rule}/{query}");
                 let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -215,15 +197,14 @@ fn main() {
     let (rule, query) = case.split_once('/').unwrap();
     println!("case={case} max_twice_spin={max} allocation_scope=caller_thread_requested");
     match rule {
-        "su2" => run(case, query, max, || SU2FusionRule),
-        "su2cg" => run(case, query, max, || {
-            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        "su2" => run(case, query, max, || {
+            LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(2).unwrap(),
             )
             .unwrap()
         }),
-        "su2mf" => run(case, query, max, || {
-            LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(
+        "su2cg" => run(case, query, max, || {
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(2).unwrap(),
             )
             .unwrap()

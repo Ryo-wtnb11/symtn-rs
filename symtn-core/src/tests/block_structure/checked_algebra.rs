@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 #[test]
 fn checked_u1_rejects_the_unlabelled_id_and_preserves_valid_boundaries() {
@@ -41,22 +43,20 @@ fn checked_u1_rejects_the_unlabelled_id_and_preserves_valid_boundaries() {
 
 #[test]
 fn checked_su2_distinguishes_invalid_inputs_from_unrepresentable_fusion() {
-    // What: valid SU2 inputs whose output exceeds the supported algebra
-    // report closure failure, while the exact boundary matches the hot path.
-    let rule = SU2FusionRule;
-    let boundary = rule.try_fusion_channels(su2(127), su2(127)).unwrap();
-    assert_eq!(boundary, rule.fusion_channels(su2(127), su2(127)));
+    // What: checked construction preserves the Lie codec admission errors.
+    let rule = su2_rule();
     assert_eq!(
-        rule.try_fusion_channels(su2(128), su2(127)),
+        rule.try_fusion_channels(su2(u32::MAX as usize), su2(1)),
         Err(FusionAlgebraError::FusionNotRepresentable {
-            left: su2(128),
-            right: su2(127),
+            left: su2(u32::MAX as usize),
+            right: su2(1),
         })
     );
+    #[cfg(target_pointer_width = "64")]
     assert_eq!(
-        rule.try_fusion_channels(SectorId::new(255), su2(0)),
+        rule.try_fusion_channels(SectorId::new(u32::MAX as usize + 1), su2(0)),
         Err(FusionAlgebraError::InvalidSector {
-            sector: SectorId::new(255),
+            sector: SectorId::new(u32::MAX as usize + 1),
         })
     );
 }
@@ -100,7 +100,7 @@ fn checked_products_preserve_child_u1_errors_and_distinguish_codec_errors() {
     // What: recursive products retain the exact U1 closure cause, while
     // custom codec rejection remains a distinct failure.
     type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type Fz2Su2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+    type Fz2Su2Rule = ProductFusionRule<FermionParityFusionRule, Su2Rule>;
     type TripleRule = ProductFusionRule<Fz2Su2Rule, U1FusionRule>;
 
     let pair = Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
@@ -127,7 +127,7 @@ fn checked_products_preserve_child_u1_errors_and_distinguish_codec_errors() {
 
     // Keep the large U1 ID at the outer pairing so the fixture is representable.
     let triple = TripleRule::try_new(
-        Fz2Su2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap(),
+        Fz2Su2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap(),
         U1FusionRule,
     )
     .unwrap();
@@ -158,6 +158,7 @@ fn checked_products_preserve_child_u1_errors_and_distinguish_codec_errors() {
 
 #[test]
 fn checked_fusion_algebra_is_object_safe_and_matches_closed_builtins() {
+    let su2_provider_rule = su2_rule();
     // What: callers can use checked algebra through one provider object,
     // and closed built-ins retain their infallible results exactly.
     let checked: &dyn CheckedFusionAlgebra = &U1FusionRule;
@@ -165,7 +166,7 @@ fn checked_fusion_algebra_is_object_safe_and_matches_closed_builtins() {
     for rule in [
         &ZNFusionRule::new(2).unwrap() as &dyn CheckedFusionAlgebra,
         &FermionParityFusionRule::new(),
-        &SU2FusionRule,
+        &su2_provider_rule,
     ] {
         let left = rule.vacuum();
         let right = rule.vacuum();

@@ -1,6 +1,8 @@
 //! Public label, codec, style and symbol contracts of the built-in fusion
 //! rules and their products.
 
+use crate::su2::{su2_rule, Su2Rule};
+
 use symtn_sectors::*;
 
 use crate::sector_ids::{su2, u1, z2_even, z2_odd};
@@ -79,8 +81,8 @@ fn rigid_symbols_separate_twist_from_frobenius_schur_phase() {
     assert_eq!(fermion.twist_scalar(odd), -1.0);
     assert_eq!(fermion.frobenius_schur_phase_scalar(odd), 1.0);
 
-    let su2 = SU2FusionRule;
-    let half = SU2Irrep::from_twice_spin(1).sector_id();
+    let su2 = su2_rule();
+    let half = crate::sector_ids::su2(1);
     assert_eq!(su2.dim_scalar(half), 2.0);
     assert_eq!(su2.twist_scalar(half), 1.0);
     assert_eq!(su2.frobenius_schur_phase_scalar(half), -1.0);
@@ -145,7 +147,7 @@ fn product_sector_api_exposes_only_generic_composition() {
             U1FusionRule,
         )
         .unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let left_sector = |parity, charge| left_rule.encode_component_ids(parity, u1(charge));
@@ -191,11 +193,11 @@ fn product_fusion_rule_combines_fermion_parity_and_u1_componentwise() {
 #[test]
 fn product_fusion_rule_nested_fz2_u1_su2_channels_and_symbols_match_tensorkit() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type FpU1Su2Rule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let left_sector = |parity, charge| left_rule.encode_component_ids(parity, u1(charge));
@@ -240,17 +242,11 @@ fn product_fusion_rule_panics_on_an_invalid_component_sector() {
 
 #[test]
 fn public_su2_irrep_fusion_channels_match_doubled_spin_order() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
 
     assert_eq!(
-        rule.fusion_channels(
-            SU2Irrep::from_twice_spin(1).sector_id(),
-            SU2Irrep::from_twice_spin(2).sector_id(),
-        )
-        .to_vec(),
-        vec![
-            SU2Irrep::from_twice_spin(1).sector_id(),
-            SU2Irrep::from_twice_spin(3).sector_id(),
-        ]
+        rule.fusion_channels(crate::sector_ids::su2(1), crate::sector_ids::su2(2),)
+            .to_vec(),
+        vec![crate::sector_ids::su2(1), crate::sector_ids::su2(3),]
     );
 }

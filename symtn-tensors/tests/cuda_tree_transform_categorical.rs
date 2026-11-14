@@ -16,6 +16,7 @@
 #![cfg(feature = "cuda")]
 
 use crate::categorical_recoupling;
+use crate::su2::su2_rule;
 
 use std::sync::Arc;
 
@@ -24,7 +25,7 @@ use categorical_recoupling::{
     host_replay, host_replay_scaled, non_symmetric_fixture, su2_space, Compiled, TestScalar,
 };
 use num_complex::Complex64;
-use symtn_core::SU2FusionRule;
+
 use symtn_dense::{cuda_transfer_stats, CudaDenseContext, CudaScalar, CudaTransferStats};
 use symtn_operations::cuda::CudaStorage;
 use symtn_operations::{
@@ -313,9 +314,11 @@ fn check_scales<T: DeviceScalar>(
 /// different layouts and one shared coefficient payload, as a degeneracy-only
 /// rebinding of a cached group set produces.
 fn degeneracy_pair() -> (Compiled, Compiled) {
+    let su2_provider_rule = su2_rule();
     let operation = TreeTransformOperation::permute([0usize, 2, 1, 3], []);
     let space = |degeneracy| su2_space(&[1usize; 4], &four_leg_channels(), degeneracy);
-    let plan = build_tree_pair_transform_group_plan(&SU2FusionRule, operation, &space(2)).unwrap();
+    let plan =
+        build_tree_pair_transform_group_plan(&su2_provider_rule, operation, &space(2)).unwrap();
     let bind = |degeneracy| {
         let space = space(degeneracy);
         Compiled {
@@ -340,9 +343,10 @@ fn degeneracy_pair() -> (Compiled, Compiled) {
 /// The same degeneracy-2 transform from a plan of its own: equal values, an
 /// independent payload.
 fn independent_small() -> Compiled {
+    let su2_provider_rule = su2_rule();
     compile(
         "su2_permute_independent",
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([0usize, 2, 1, 3], []),
         &su2_space(&[1usize; 4], &four_leg_channels(), 2),
         false,

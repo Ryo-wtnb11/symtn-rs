@@ -19,6 +19,11 @@ mod oriented_elementwise;
 mod physical;
 #[cfg(test)]
 mod probe;
+#[cfg(test)]
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+#[cfg(test)]
+use symtn_core as sector_types;
 mod tensortrace;
 #[cfg(test)]
 mod test_support;

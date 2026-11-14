@@ -57,14 +57,11 @@ pub use enumerated::{CU1FusionRule, FermionParityFusionRule, ZNFusionRule};
 pub use fusion_symbols::{
     fermion::FermionParityIrrep,
     finite::ZNIrrep,
-    lie::{CU1Irrep, LieIrrep, U1Irrep},
+    lie::{CU1Irrep, GroupId, LieIrrep, U1Irrep},
 };
 
 mod table_rule;
 pub use table_rule::{TableRule, TableRuleError, TableSector};
-
-mod su2;
-pub use su2::{SU2FusionRule, SU2Irrep, SU2_MAX_DOUBLED_SPIN};
 
 mod lie;
 pub use lie::{LieGroupFusionRule, LieGroupFusionRuleError};

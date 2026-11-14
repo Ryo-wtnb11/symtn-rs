@@ -19,13 +19,14 @@
 
 #![allow(dead_code)]
 
+use crate::su2::{su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn_core::{
     BlockKey, BlockStructure, DegeneracyStructure, FermionParityFusionRule, FusionRule,
-    FusionTreeKey, FusionTreePairKey, MultiplicityIndex, ProductFusionRule, RuleIdentity,
-    SU2FusionRule, SectorId, SectorStructure,
+    FusionTreeKey, FusionTreePairKey, MultiplicityIndex, ProductFusionRule, RuleIdentity, SectorId,
+    SectorStructure,
 };
 use symtn_operations::{TreeTransformBlock, TreeTransformStructure};
 use symtn_tensors::{build_tree_pair_transform_group_plan, TreeTransformOperation};
@@ -125,24 +126,25 @@ impl TestScalar for Complex64 {
 /// combination of *several* source trees — so the compiled structure carries a
 /// `Multi` block with a genuine recoupling matrix.
 pub fn su2_space(legs: &[usize], inners: &[Vec<usize>], degeneracy: usize) -> Arc<BlockStructure> {
+    let su2_provider_rule = su2_rule();
     let rank = legs.len();
     let keys: Vec<BlockKey> = inners
         .iter()
         .map(|inner| {
             BlockKey::from(FusionTreePairKey::pair(
                 FusionTreeKey::try_new_for_rule(
-                    &SU2FusionRule,
+                    &su2_provider_rule,
                     legs.iter().copied().map(SectorId::new).collect::<Vec<_>>(),
-                    SU2FusionRule.vacuum(),
+                    su2_provider_rule.clone().vacuum(),
                     vec![false; rank],
                     inner.iter().copied().map(SectorId::new).collect::<Vec<_>>(),
                     vec![MultiplicityIndex::ONE; rank - 1],
                 )
                 .unwrap(),
                 FusionTreeKey::try_new_for_rule(
-                    &SU2FusionRule,
+                    &su2_provider_rule,
                     [],
-                    SU2FusionRule.vacuum(),
+                    su2_provider_rule.clone().vacuum(),
                     [],
                     [],
                     [],
@@ -170,10 +172,10 @@ pub fn su2_space(legs: &[usize], inners: &[Vec<usize>], degeneracy: usize) -> Ar
 /// `Unique ⊞ Simple = Simple` supplies the several fusion channels a recoupling
 /// needs, so this is the one rule in the workspace whose recoupling matrix
 /// carries fermionic signs.
-pub type FermionicSu2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+pub type FermionicSu2Rule = ProductFusionRule<FermionParityFusionRule, Su2Rule>;
 
 pub fn fermionic_su2_rule() -> FermionicSu2Rule {
-    symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
+    symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), su2_rule())
         .unwrap()
 }
 
@@ -399,6 +401,7 @@ where
 /// six-leg five-channel ones are not, and the fermionic six-leg fixture is the
 /// one that carries fermionic signs inside a non-symmetric `U`.
 pub fn fixtures() -> Vec<Compiled> {
+    let su2_provider_rule = su2_rule();
     let rule = fermionic_su2_rule();
     let halves_4 = [1usize; 4];
     let halves_6 = [1usize; 6];
@@ -413,21 +416,21 @@ pub fn fixtures() -> Vec<Compiled> {
     vec![
         compile(
             "su2_permute",
-            &SU2FusionRule,
+            &su2_provider_rule,
             TreeTransformOperation::permute(swap_4, []),
             &su2_4,
             false,
         ),
         compile(
             "su2_braid",
-            &SU2FusionRule,
+            &su2_provider_rule,
             TreeTransformOperation::braid(swap_4, [], 0..4, []),
             &su2_4,
             false,
         ),
         compile(
             "su2_transpose",
-            &SU2FusionRule,
+            &su2_provider_rule,
             // Planar: `Transpose` rejects a non-planar permutation, so a cyclic
             // rotation is the F move this kind can express here.
             TreeTransformOperation::transpose([1usize, 2, 3, 0], []),
@@ -436,7 +439,7 @@ pub fn fixtures() -> Vec<Compiled> {
         ),
         compile(
             "su2_braid_conjugated",
-            &SU2FusionRule,
+            &su2_provider_rule,
             TreeTransformOperation::braid(swap_4, [], 0..4, []),
             &su2_4,
             true,
@@ -445,21 +448,21 @@ pub fn fixtures() -> Vec<Compiled> {
         // are not all the same shape.
         compile(
             "su2_braid_scalar_degeneracy",
-            &SU2FusionRule,
+            &su2_provider_rule,
             TreeTransformOperation::braid(swap_4, [], 0..4, []),
             &su2_space(&halves_4, &four, 1),
             false,
         ),
         compile(
             "su2_rank6_permute",
-            &SU2FusionRule,
+            &su2_provider_rule,
             TreeTransformOperation::permute(swap_6, []),
             &su2_6,
             false,
         ),
         compile(
             "su2_rank6_rotate",
-            &SU2FusionRule,
+            &su2_provider_rule,
             TreeTransformOperation::permute([1usize, 2, 0, 3, 4, 5], []),
             &su2_6,
             false,

@@ -431,27 +431,6 @@ where
     Ok((objects, dual))
 }
 
-/// `N`'s inputs decoded once each, the coupled (last) sector first and then
-/// the others in argument order, returned in argument order.
-pub(crate) fn admit_coupled_first<'a, C, K, const N: usize>(
-    codec: &K,
-    category: impl Fn() -> &'a C + Copy,
-    ids: [SectorId; N],
-) -> Result<[C::Object; N], K::Error>
-where
-    C: FusionCategory + 'static,
-    C::Error: Send + Sync + 'static,
-    K: CategoryCodec<C> + ?Sized,
-{
-    let mut objects: [Option<C::Object>; N] = core::array::from_fn(|_| None);
-    for step in 0..N {
-        let position = (step + N - 1) % N;
-        objects[position] = Some(member_object(codec, category, ids[position])?);
-    }
-    // The loop visits every position once.
-    Ok(objects.map(|object| object.expect("every input was decoded")))
-}
-
 /// The object `id` names, rejected if it is not a member of the category.
 pub(crate) fn member_object<'a, C, K>(
     codec: &K,
@@ -1070,7 +1049,6 @@ macro_rules! category_provider_via_adapter {
 }
 category_provider_via_adapter!(
     crate::U1FusionRule => fusion_symbols::lie::U1,
-    crate::SU2FusionRule => fusion_symbols::lie::LieGroup,
     crate::TableRule => fusion_symbols::table::TableCategory
 );
 

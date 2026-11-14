@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn coupled_layout_embeds_subblocks_into_sector_matrices() {
@@ -207,6 +209,8 @@ where
 
 #[test]
 fn checked_rank_one_validates_ids_by_unit_fusion() {
+    #[cfg(target_pointer_width = "64")]
+    let su2_provider_rule = su2_rule();
     // What: rank-one raw imports reject every unrepresentable built-in ID,
     // including the zigzag ID reserved for the excluded U1 charge.
     let invalid = SectorId::new(2);
@@ -225,14 +229,17 @@ fn checked_rank_one_validates_ids_by_unit_fusion() {
         invalid,
         FusionAlgebraError::InvalidSector { sector: invalid },
     );
-    let invalid_su2 = SectorId::new(255);
-    assert_invalid_rank_one_checked(
-        &SU2FusionRule,
-        invalid_su2,
-        FusionAlgebraError::InvalidSector {
-            sector: invalid_su2,
-        },
-    );
+    #[cfg(target_pointer_width = "64")]
+    {
+        let invalid_su2 = SectorId::new(u32::MAX as usize + 1);
+        assert_invalid_rank_one_checked(
+            &su2_provider_rule,
+            invalid_su2,
+            FusionAlgebraError::InvalidSector {
+                sector: invalid_su2,
+            },
+        );
+    }
     #[cfg(target_pointer_width = "64")]
     {
         let invalid_u1 = SectorId::new(u32::MAX as usize + 1);
@@ -1103,11 +1110,12 @@ fn multiplicity_free_block_boundaries_reject_misreported_style_before_empty_iden
 
 #[test]
 fn borrowed_block_execution_rejects_prepared_family_and_source_split_mismatch() {
+    let su2_provider_rule = su2_rule();
     let vacuum = su2(0);
     let half = su2(1);
     let pair = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [half, half],
             vacuum,
             [false; 2],
@@ -1115,18 +1123,18 @@ fn borrowed_block_execution_rejects_prepared_family_and_source_split_mismatch() 
             [MultiplicityIndex::ONE],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&SU2FusionRule, [], vacuum, [], [], []).unwrap(),
+        FusionTreeKey::try_new_for_rule(&su2_provider_rule, [], vacuum, [], [], []).unwrap(),
     );
     let structure = packed_fixture_structure(2, [(pair, vec![1, 1])]).unwrap();
     let proof =
-        LocallyValidatedFusionTreeBlockStructure::try_new(&SU2FusionRule, &structure).unwrap();
+        LocallyValidatedFusionTreeBlockStructure::try_new(&su2_provider_rule, &structure).unwrap();
     let transpose = PreparedTreePairOperation::prepare_transpose(2, 0, &[1], &[0]).unwrap();
     let transpose_identity =
         PreparedTreePairOperation::prepare_transpose(2, 0, &[0, 1], &[]).unwrap();
     let braid =
-        PreparedTreePairOperation::prepare_permute(&SU2FusionRule, 2, 0, &[1, 0], &[]).unwrap();
+        PreparedTreePairOperation::prepare_permute(&su2_provider_rule, 2, 0, &[1, 0], &[]).unwrap();
     let wrong_split =
-        PreparedTreePairOperation::prepare_permute(&SU2FusionRule, 1, 1, &[1], &[0]).unwrap();
+        PreparedTreePairOperation::prepare_permute(&su2_provider_rule, 1, 1, &[1], &[0]).unwrap();
 
     // What: safe borrowed block executors reject a prepared operation from
     // the other family before its private plan variant reaches execution.

@@ -3,7 +3,10 @@
 //! recording, key-selective failure wrapper.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use std::cell::{Cell, RefCell};
+use symtn_core::TypedSectorAdmission;
 use symtn_core::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
     CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray, GenericRMatrix, LieGroupFusionRule,
@@ -191,9 +194,9 @@ fn fixture() -> Fixture {
         fusion_symbols::lie::GroupId::su(3).unwrap(),
     )
     .unwrap();
-    let vacuum = inner.encode_irrep(&[0, 0]).unwrap();
-    let adjoint = inner.encode_irrep(&[1, 1]).unwrap();
-    let fundamental = inner.encode_irrep(&[1, 0]).unwrap();
+    let vacuum = inner.encode_irrep_with_charges(&[0, 0], &[]).unwrap();
+    let adjoint = inner.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+    let fundamental = inner.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
     let provider = Arc::new(Ledger {
         inner,
         identity: RefCell::new(RuleIdentity::new_unique::<Ledger>()),
@@ -733,12 +736,16 @@ fn checked_trace_channel_factor_is_the_exact_dimension_quotient() {
     .unwrap();
     // Hand Weyl formula for SU(3) `(p, q)`, independent of the provider.
     let weyl = |sector: SectorId| {
-        let label = rule.decode_irrep(sector).unwrap().0;
+        let label = rule
+            .try_decode_label(sector)
+            .unwrap()
+            .dynkin()
+            .collect::<Vec<_>>();
         let (p, q) = (label[0], label[1]);
         ((p + 1) * (q + 1) * (p + q + 2) / 2) as f64
     };
-    let fundamental = rule.encode_irrep(&[1, 0]).unwrap();
-    let adjoint = rule.encode_irrep(&[1, 1]).unwrap();
+    let fundamental = rule.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
+    let adjoint = rule.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
     let provider = Arc::new(rule.clone());
     let v = || SectorLeg::new([(fundamental, 2), (adjoint, 1)], false);
     let src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
@@ -791,7 +798,7 @@ fn checked_trace_channel_factor_is_the_exact_dimension_quotient() {
 }
 
 /// SU(2) `V ⊗ V ← V ⊗ V`, `V = 1 ⊕ 2²` (dims 3, 5), traced over the second
-/// leg pair, once through the multiplicity-free `SU2FusionRule` and once
+/// leg pair, once through the multiplicity-free `MF Lie SU(2)` and once
 /// through the checked `LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`. The permutation is the
 /// identity and SU(2) twists are 1, so each term is the bare factor of its
 /// source tree `(a, b) → c`, and both modes must return the hand quotient
@@ -809,13 +816,10 @@ fn multiplicity_free_and_checked_trace_factors_agree_bitwise() {
         )
     };
 
-    let mf_provider = Arc::new(SU2FusionRule);
+    let mf_provider = Arc::new(su2_rule());
     let mf_src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
         Arc::clone(&mf_provider),
-        homspace(
-            SU2Irrep::from_twice_spin(2).sector_id(),
-            SU2Irrep::from_twice_spin(4).sector_id(),
-        ),
+        homspace(symtn_core::SectorId::new(2), symtn_core::SectorId::new(4)),
     )
     .unwrap();
     let mf_dst = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
@@ -835,8 +839,8 @@ fn multiplicity_free_and_checked_trace_factors_agree_bitwise() {
     let checked_src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
         Arc::new(sun.clone()),
         homspace(
-            sun.encode_irrep(&[2]).unwrap(),
-            sun.encode_irrep(&[4]).unwrap(),
+            sun.encode_irrep_with_charges(&[2], &[]).unwrap(),
+            sun.encode_irrep_with_charges(&[4], &[]).unwrap(),
         ),
     )
     .unwrap();
@@ -856,8 +860,14 @@ fn multiplicity_free_and_checked_trace_factors_agree_bitwise() {
     .unwrap();
 
     // Hand dimensions `2j + 1`, independent of either provider.
-    let mf_dim = |s: SectorId| (SU2Irrep::from_sector_id(s).twice_spin() + 1) as f64;
-    let sun_dim = |s: SectorId| (sun.decode_irrep(s).unwrap().0[0] + 1) as f64;
+    let mf_dim = |s: SectorId| (s.id() + 1) as f64;
+    let sun_dim = |s: SectorId| {
+        (sun.try_decode_label(s)
+            .unwrap()
+            .dynkin()
+            .collect::<Vec<_>>()[0]
+            + 1) as f64
+    };
     let factors = |structure: &TensorTraceFusionStructure<f64>,
                    src: &BlockStructure,
                    dim: &dyn Fn(SectorId) -> f64| {

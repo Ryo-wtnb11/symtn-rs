@@ -4,11 +4,12 @@
 //! The sector structure is never consulted on a warm call. Every test in this
 //! target takes the shared serial guard.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Eigh, GradedSpace, HermitianTol, Qr, Svd, TensorMap};
 
 use crate::fixtures::host_runtime;
@@ -140,8 +141,8 @@ fn warm_derived_spaces_skip_the_sector_structure() {
         engine,
         "SU2",
         GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            [(0, 2), (1, 2), (2, 1)].map(|(twice, n)| (SU2Irrep::from_twice_spin(twice), n)),
+            Arc::new(su2_rule()),
+            [(0, 2), (1, 2), (2, 1)].map(|(twice, n)| (su2_irrep(twice), n)),
         )
         .unwrap(),
         3

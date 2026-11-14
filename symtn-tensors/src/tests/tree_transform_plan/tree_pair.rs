@@ -1,8 +1,11 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn tree_pair_plan_builder_handles_su2_one_by_one_domain_crossing() {
+    let su2_provider_rule = su2_rule();
     let src_key = BlockKey::from(
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap(),
@@ -16,7 +19,7 @@ fn tree_pair_plan_builder_handles_su2_one_by_one_domain_crossing() {
         packed_fixture_structure(2, [(expected_dst_key.clone(), vec![1, 1])]).unwrap();
 
     let plan = build_tree_pair_transform_group_plan(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([1], [0]),
         &src_structure,
     )
@@ -34,6 +37,7 @@ fn tree_pair_plan_builder_handles_su2_one_by_one_domain_crossing() {
 
 #[test]
 fn tree_pair_transform_public_helper_executes_su2_domain_crossing() {
+    let su2_provider_rule = su2_rule();
     let src_key = BlockKey::from(
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap(),
@@ -52,7 +56,7 @@ fn tree_pair_transform_public_helper_executes_su2_domain_crossing() {
     let mut dst =
         TestTensor::<f64>::from_vec_with_structure(vec![2.0], dst_space, dst_structure).unwrap();
     eager_tree_transform_into(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([1], [0]),
         &mut dst,
         &src,
@@ -67,6 +71,7 @@ fn tree_pair_transform_public_helper_executes_su2_domain_crossing() {
 
 #[test]
 fn tree_pair_transform_public_helper_executes_su2_with_complex_data() {
+    let su2_provider_rule = su2_rule();
     let src_key = BlockKey::from(
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap(),
@@ -95,7 +100,7 @@ fn tree_pair_transform_public_helper_executes_su2_with_complex_data() {
     let operation = TreeTransformOperation::permute([1], [0]);
 
     eager_tree_transform_into(
-        &SU2FusionRule,
+        &su2_provider_rule,
         operation,
         &mut dst,
         &src,
@@ -473,6 +478,7 @@ fn eager_product_tree_pair_plan_bypasses_row_callback_assembly() {
 
 #[test]
 fn eager_simple_plan_prepares_once_per_distinct_source_split() {
+    let su2_provider_rule = su2_rule();
     use crate::tree_transform::{
         build_tree_pair_transform_group_plan_validated_with_threads,
         validate_multiplicity_free_tree_pair_preflight,
@@ -481,11 +487,11 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
     let half_id = 1usize;
     let one_id = 2usize;
     let vacuum_id = 0usize;
-    let half = SU2Irrep::from_twice_spin(half_id).sector_id();
-    let vacuum = SU2FusionRule.vacuum();
+    let half = symtn_core::SectorId::new(half_id);
+    let vacuum = su2_provider_rule.clone().vacuum();
     let group_a = [[vacuum_id, half_id], [one_id, half_id]].map(|inner| {
         all_codomain_fusion_tree_test_key_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [half_id; 4],
             vacuum_id,
             [false; 4],
@@ -494,7 +500,7 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
         )
     });
     let group_b = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [half_id, half_id, one_id, one_id],
         vacuum_id,
         [false; 4],
@@ -503,7 +509,7 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
     );
     let split_group = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [half; 3],
             half,
             [false; 3],
@@ -511,7 +517,7 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
             [MultiplicityIndex::ONE; 2],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&SU2FusionRule, [half], half, [false], [], []).unwrap(),
+        FusionTreeKey::try_new_for_rule(&su2_provider_rule, [half], half, [false], [], []).unwrap(),
     );
     let source_order = [group_a[0].clone(), group_b, group_a[1].clone(), split_group];
     let structure = packed_fixture_structure(
@@ -531,19 +537,23 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
         vec![&[0, 2][..], &[1][..], &[3][..]]
     );
     let operation = TreeTransformOperation::permute([1, 0, 2], [3]);
-    let oracle =
-        build_tree_transform_group_plan(&SU2FusionRule, operation.clone(), &structure, |source| {
+    let oracle = build_tree_transform_group_plan(
+        &su2_provider_rule,
+        operation.clone(),
+        &structure,
+        |source| {
             symtn_core::multiplicity_free_permute_tree_pair(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 source,
                 &[1, 0, 2],
                 &[3],
             )
             .map_err(OperationError::from_core_preserving_context)
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let proof =
-        validate_multiplicity_free_tree_pair_preflight(&SU2FusionRule, &operation, &structure)
+        validate_multiplicity_free_tree_pair_preflight(&su2_provider_rule, &operation, &structure)
             .unwrap();
 
     for threads in [1, 4] {
@@ -585,6 +595,7 @@ fn eager_simple_plan_prepares_once_per_distinct_source_split() {
 
 #[test]
 fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: runtime-rank operation storage preserves the per-source tree,
     // coefficient, compiled-layout, and replay oracle above the old boundary.
@@ -593,14 +604,14 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
         validate_multiplicity_free_tree_pair_preflight,
     };
 
-    let vacuum = SU2FusionRule.vacuum();
+    let vacuum = su2_provider_rule.clone().vacuum();
     let keys = [0usize, 1, 2].map(|twice_spin| {
         let mut uncoupled = [vacuum; 9];
         uncoupled[0] = SectorId::new(twice_spin);
         uncoupled[1] = SectorId::new(twice_spin);
         BlockKey::from(FusionTreePairKey::pair(
             FusionTreeKey::try_new_for_rule(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 uncoupled,
                 vacuum,
                 [false; 9],
@@ -614,10 +625,13 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
     let structure =
         packed_fixture_structure(9, keys.into_iter().map(|key| (key, vec![1usize; 9]))).unwrap();
     let operation = TreeTransformOperation::braid([1, 0, 2, 3, 4, 5, 6, 7, 8], [], 0..9, []);
-    let oracle =
-        build_tree_transform_group_plan(&SU2FusionRule, operation.clone(), &structure, |source| {
+    let oracle = build_tree_transform_group_plan(
+        &su2_provider_rule,
+        operation.clone(),
+        &structure,
+        |source| {
             symtn_core::multiplicity_free_braid_tree_pair(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 source,
                 &[1, 0, 2, 3, 4, 5, 6, 7, 8],
                 &[],
@@ -625,10 +639,11 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
                 &[],
             )
             .map_err(OperationError::from_core_preserving_context)
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let proof =
-        validate_multiplicity_free_tree_pair_preflight(&SU2FusionRule, &operation, &structure)
+        validate_multiplicity_free_tree_pair_preflight(&su2_provider_rule, &operation, &structure)
             .unwrap();
 
     let tree_pair_operation_preparations_rec = probe::record();
@@ -739,9 +754,10 @@ fn rank_nine_same_split_groups_prepare_once_and_lower_once_each() {
 
 #[test]
 fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let source0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -749,7 +765,7 @@ fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
         [1, 1, 1],
     );
     let source1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -762,10 +778,13 @@ fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
     )
     .unwrap();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
-    let row_callback =
-        build_tree_transform_group_plan(&SU2FusionRule, operation.clone(), &structure, |source| {
+    let row_callback = build_tree_transform_group_plan(
+        &su2_provider_rule,
+        operation.clone(),
+        &structure,
+        |source| {
             symtn_core::multiplicity_free_braid_tree_pair(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 source,
                 &[0, 2, 1, 3],
                 &[],
@@ -773,12 +792,13 @@ fn eager_su2_dense_tree_pair_plan_matches_row_callback_replay() {
                 &[],
             )
             .map_err(OperationError::from_core_preserving_context)
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
     let tree_pair_lowering_calls_rec = probe::record();
     let direct =
-        build_tree_pair_transform_group_plan(&SU2FusionRule, operation, &structure).unwrap();
+        build_tree_pair_transform_group_plan(&su2_provider_rule, operation, &structure).unwrap();
     // The per-source core oracle and the prepared lowering compute the F-move
     // coefficients by different routes, so the entry form, keys and axes
     // match exactly and the coefficients within the tolerance rule (a rank-4
@@ -1385,7 +1405,7 @@ fn tree_transform_execution_context_replays_product_tree_pair_transforms() {
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
     let equivalent_rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     type RuleKey = <FpU1Su2Rule as TreeTransformRuleCacheKey>::Key;
@@ -1610,7 +1630,7 @@ macro_rules! assert_rank5_compact_transpose_replays_like_per_pair {
 #[test]
 fn rank5_compact_transpose_with_trailing_bend_replays_like_per_pair() {
     assert_rank5_compact_transpose_replays_like_per_pair!(
-        SU2FusionRule,
+        su2_rule(),
         f64,
         [SectorId::new(0), SectorId::new(1), SectorId::new(2)],
         |x: f64| x

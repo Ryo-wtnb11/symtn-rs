@@ -12,6 +12,7 @@
 
 use super::*;
 use num_complex::Complex64;
+use symtn_core::TypedSectorAdmission;
 use symtn_core::{
     generic_braid_tree_pair_checked, generic_permute_tree_pair_checked,
     generic_transpose_tree_pair_checked, BraidingStyleKind, CategoricalScalar,
@@ -266,9 +267,9 @@ fn sun3() -> (LieGroupFusionRule, SectorId, SectorId, SectorId) {
         fusion_symbols::lie::GroupId::su(3).unwrap(),
     )
     .unwrap();
-    let vacuum = rule.encode_irrep(&[0, 0]).unwrap();
-    let three = rule.encode_irrep(&[1, 0]).unwrap();
-    let adjoint = rule.encode_irrep(&[1, 1]).unwrap();
+    let vacuum = rule.encode_irrep_with_charges(&[0, 0], &[]).unwrap();
+    let three = rule.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
+    let adjoint = rule.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
     (rule, vacuum, three, adjoint)
 }
 
@@ -286,7 +287,10 @@ fn checked_composer_matches_original_step_composition_on_sun() {
         fusion_symbols::lie::GroupId::su(4).unwrap(),
     )
     .unwrap();
-    let su4_adjoint = (su4.encode_irrep(&[1, 0, 1]).unwrap(), false);
+    let su4_adjoint = (
+        su4.encode_irrep_with_charges(&[1, 0, 1], &[]).unwrap(),
+        false,
+    );
     let mut multis = 0;
     let cases: Vec<(&LieGroupFusionRule, Legs, Legs)> = vec![
         (&rule, vec![a, a], vec![a]),
@@ -434,7 +438,13 @@ fn sun_irrep(
     sector: SectorId,
 ) -> fusion_symbols::lie::LieIrrep {
     category
-        .irrep(&rule.decode_irrep(sector).unwrap().0)
+        .irrep(
+            &rule
+                .try_decode_label(sector)
+                .unwrap()
+                .dynkin()
+                .collect::<Vec<_>>(),
+        )
         .unwrap()
 }
 

@@ -3,6 +3,7 @@
 //! admission modes share are in `admission_modes/matrix_fn.rs`.
 
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 
 fn bits_f64(values: &[f64]) -> Vec<u64> {
     values.iter().map(|value| value.to_bits()).collect()
@@ -137,9 +138,9 @@ fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
     // physical-basis expansion repeats each result `2j + 1` times on the
     // diagonal. Oracle: the hand-listed physical diagonal.
     let runtime = runtime();
-    let j = SU2Irrep::from_twice_spin;
+    let j = su2_irrep;
     let bond =
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 2), (j(1), 1), (j(2), 2)]).unwrap();
+        GradedSpace::try_new(Arc::new(su2_rule()), [(j(0), 2), (j(1), 1), (j(2), 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,

@@ -5,16 +5,17 @@
 //! (`src/factorizations/truncation.jl:187,239`), an `Int` for SU(N), so its
 //! budgets and cross-sector ties compare exactly. The oracles here are the
 //! Weyl dimension formula and SU(2) as both a multiplicity-free
-//! (`SU2FusionRule`) and a checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) provider:
+//! (`MF Lie SU(2)`) and a checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) provider:
 //! the same spectra must take the same decision in either mode.
 
 #![cfg(feature = "cgc-gen")]
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::sector::LieIrrep;
 
 use num_complex::Complex64;
-use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn::typed::{GradedSpace, SectorSpectrum, SpectrumMagnitude, Truncation};
 
 /// Weyl dimension of the SU(3) irrep with Dynkin labels `(p, q)`.
@@ -152,10 +153,10 @@ fn boundary_policies(spectra: &[(usize, Vec<f64>)]) -> Vec<Truncation> {
 fn assert_modes_agree<V: SpectrumMagnitude + Clone>(to_value: impl Fn(f64) -> V) {
     let spectra = su2_spectra();
     let mf_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         spectra
             .iter()
-            .map(|(twice, v)| (SU2Irrep::from_twice_spin(*twice), v.len())),
+            .map(|(twice, v)| (su2_irrep(*twice), v.len())),
     )
     .unwrap();
     let checked_leg = GradedSpace::try_new(
@@ -173,7 +174,7 @@ fn assert_modes_agree<V: SpectrumMagnitude + Clone>(to_value: impl Fn(f64) -> V)
     let mf_spectra: Vec<_> = spectra
         .iter()
         .map(|(twice, v)| SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(*twice),
+            sector: su2_irrep(*twice),
             values: v.iter().copied().map(&to_value).collect(),
         })
         .collect();
@@ -192,7 +193,7 @@ fn assert_modes_agree<V: SpectrumMagnitude + Clone>(to_value: impl Fn(f64) -> V)
             .unwrap();
         for (twice, _) in &spectra {
             assert_eq!(
-                kept!(mf.selection.subspace(), &SU2Irrep::from_twice_spin(*twice)),
+                kept!(mf.selection.subspace(), &su2_irrep(*twice)),
                 kept!(checked.selection.subspace(), &su_irrep(&[*twice as i64])),
                 "2j = {twice} under {policy:?}"
             );

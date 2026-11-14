@@ -6,8 +6,6 @@
 //! - CU(1) fusion overflow and its argument-order precedence:
 //!   `tests/abelian_cu1_values.rs` `cu1_fusion_leaving_the_charge_range_is_an_error`;
 //!   `tests/sector_labels.rs` `cu1_checked_validation_follows_argument_order`.
-//! - SU(2) fusion closure beyond 254 and its validation order:
-//!   `src/su2.rs` `checked_su2_preserves_validation_order_and_domain`.
 //! - Lie-group label limits, fallible codec allocation, and absent-channel
 //!   shaped-empty F/R blocks: `src/lie.rs` `validation_and_identity_are_typed_and_stable`,
 //!   `checked_rigid_dimension_accepts_the_largest_su2_dynkin_label`,
@@ -76,26 +74,6 @@ fn u1_validates_every_label_before_reporting_overflow() {
             left: u1(i32::MIN + 1),
             right: u1(-1),
         })
-    );
-}
-
-#[test]
-fn su2_n_rejects_unrepresentable_closure_after_validating_labels() {
-    let closure = Err(FusionAlgebraError::FusionNotRepresentable {
-        left: s(128),
-        right: s(127),
-    });
-    // Even for a coupled sector that is not in the closure at all.
-    assert_eq!(SU2FusionRule.try_nsymbol(s(128), s(127), s(1)), closure);
-    assert_eq!(SU2FusionRule.try_nsymbol(s(128), s(127), s(254)), closure);
-    assert_eq!(
-        SU2FusionRule.try_nsymbol(s(128), s(127), s(255)),
-        invalid(255)
-    );
-    assert_eq!(SU2FusionRule.try_nsymbol(s(127), s(127), s(254)), Ok(1));
-    assert_eq!(
-        SU2FusionRule.try_dual_sector(s(255)),
-        Err(FusionAlgebraError::InvalidSector { sector: s(255) })
     );
 }
 
@@ -173,14 +151,14 @@ fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
     )
     .unwrap();
     assert!(matches!(
-        su3.encode_irrep(&[1, 0, 0]),
+        su3.encode_irrep_with_charges(&[1, 0, 0], &[]),
         Err(LieGroupFusionRuleError::LabelLength {
             expected: 2,
             found: 3
         })
     ));
     assert!(matches!(
-        su3.encode_irrep(&[0, -1]),
+        su3.encode_irrep_with_charges(&[0, -1], &[]),
         Err(LieGroupFusionRuleError::NegativeLabel {
             index: 1,
             value: -1

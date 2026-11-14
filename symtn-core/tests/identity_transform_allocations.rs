@@ -1,3 +1,4 @@
+use crate::su2::su2_rule;
 use std::hint::black_box;
 
 use symtn_core::testing::{
@@ -10,7 +11,7 @@ use symtn_core::{
     FusionStyleKind, FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey,
     FusionTreePairOrientation, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
     MultiplicityFreeRigidSymbols, MultiplicityIndex, PreparedTreePairOperation, ProductFusionRule,
-    RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec, ZNFusionRule, ZNIrrep,
+    RuleIdentity, SectorId, SectorLeg, SectorVec, ZNFusionRule, ZNIrrep,
 };
 
 use crate::counting_alloc;
@@ -314,13 +315,14 @@ fn indexed_adjoint_identity_allocates_only_owned_output() {
 /// group of `½^⊗legs ← ½^⊗legs`, after checking its columns, and the
 /// group's source count.
 fn indexed_adjoint_simple_group_calls(legs: usize) -> (usize, usize) {
-    let half = SU2Irrep::from_twice_spin(1).sector_id();
+    let su2_provider_rule = su2_rule();
+    let half = symtn_core::SectorId::new(1);
     let leg = || SectorLeg::new([(half, 1)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new((0..legs).map(|_| leg())),
         FusionProductSpace::new((0..legs).map(|_| leg())),
     );
-    let sources = homspace.fusion_tree_keys(&SU2FusionRule);
+    let sources = homspace.fusion_tree_keys(&su2_provider_rule);
     let structure = BlockStructure::from_blocks(
         sources
             .iter()
@@ -338,7 +340,7 @@ fn indexed_adjoint_simple_group_calls(legs: usize) -> (usize, usize) {
     let domain = (legs..2 * legs).collect::<Vec<_>>();
     let run = || {
         multiplicity_free_permute_tree_pair_block_indexed(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &structure,
             indices,
             FusionTreePairOrientation::Adjoint,
@@ -415,17 +417,21 @@ where
 /// the per-move contract is `compact_moves_allocate_per_move_not_per_row`.
 #[test]
 fn compact_block_warm_allocations_do_not_grow_with_sources() {
+    let su2_provider_rule = su2_rule();
     let _serial = crate::counting_alloc::serial();
-    let spin = |twice| SU2Irrep::from_twice_spin(twice).sector_id();
-    let fermionic_su2 =
-        ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap();
+    let spin = |twice| symtn_core::SectorId::new(twice);
+    let fermionic_su2 = ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        su2_provider_rule.clone(),
+    )
+    .unwrap();
     let odd_half =
         fermionic_su2.encode_component_ids(SectorId::from(FermionParityIrrep::ODD), spin(1));
     let even_one =
         fermionic_su2.encode_component_ids(SectorId::from(FermionParityIrrep::EVEN), spin(2));
 
     let bosonic = |sources| {
-        compact_block_warm_calls_beyond_owned_rows(&SU2FusionRule, spin(2), spin(2), sources)
+        compact_block_warm_calls_beyond_owned_rows(&su2_provider_rule, spin(2), spin(2), sources)
     };
     let fermionic = |sources| {
         compact_block_warm_calls_beyond_owned_rows(&fermionic_su2, odd_half, even_one, sources)
@@ -695,10 +701,19 @@ fn borrowed_unique_execution_allocations_do_not_scale_with_artin_schedule() {
 
 #[test]
 fn direct_simple_preparation_does_not_freeze_compiler_owners() {
+    let su2_provider_rule = su2_rule();
     let _serial = crate::counting_alloc::serial();
     let prepare = || {
-        PreparedTreePairOperation::prepare_braid(&SU2FusionRule, 2, 0, &[1, 0], &[], &[0, 1], &[])
-            .unwrap()
+        PreparedTreePairOperation::prepare_braid(
+            &su2_provider_rule,
+            2,
+            0,
+            &[1, 0],
+            &[],
+            &[0, 1],
+            &[],
+        )
+        .unwrap()
     };
 
     let _ = prepare();
@@ -713,9 +728,10 @@ fn direct_simple_preparation_does_not_freeze_compiler_owners() {
 /// growth (logarithmic in the entries), never an allocation per block.
 #[test]
 fn coupled_matricization_builder_allocates_per_map_growth_not_per_block() {
+    let su2_provider_rule = su2_rule();
     let _serial = crate::counting_alloc::serial();
     let leg = SectorLeg::new(
-        (0..5).map(|spin| (SU2Irrep::from_twice_spin(spin).sector_id(), spin + 1)),
+        (0..5).map(|spin| (symtn_core::SectorId::new(spin), spin + 1)),
         false,
     );
     let homspace = FusionTreeHomSpace::new(
@@ -723,7 +739,7 @@ fn coupled_matricization_builder_allocates_per_map_growth_not_per_block() {
         FusionProductSpace::new([leg.clone(), leg]),
     );
     let structure = homspace
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
     let blocks = (0..structure.block_count())
         .map(|index| {

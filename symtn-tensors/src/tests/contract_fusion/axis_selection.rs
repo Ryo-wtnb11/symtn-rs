@@ -1,6 +1,8 @@
 use super::*;
 use crate::contract::FusionContractOrientation;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::su2_rule;
 use symtn_dense::Engine;
 
 fn scored_candidates(lhs: &[usize], rhs: &[usize]) -> usize {
@@ -274,8 +276,8 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = SU2FusionRule;
-    let leg = || SectorLeg::new([(SU2Irrep::from_twice_spin(0).sector_id(), 1)], false);
+    let rule = su2_rule();
+    let leg = || SectorLeg::new([(symtn_core::SectorId::new(0), 1)], false);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),
         FusionProductSpace::new([leg(), leg()]),
@@ -865,12 +867,12 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let sector = rule.encode_component_ids(
         left_rule.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(0).unwrap())),
-        SU2Irrep::from_twice_spin(1).sector_id(),
+        symtn_core::SectorId::new(1),
     );
     let build_space = |dimensions: [usize; 4]| {
         let leg = |dimension| SectorLeg::new([(sector, dimension)], false);

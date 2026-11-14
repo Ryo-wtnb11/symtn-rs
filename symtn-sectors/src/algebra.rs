@@ -657,10 +657,10 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     /// TensorKitSectors differs only in that most of its providers multiply
     /// by the `Nsymbol`s (Abelian irreps, `FermionParity`, `CU1Irrep`) or
     /// gate on them (`FibonacciAnyon`, `IsingAnyon`), so their off-shell value
-    /// is `0`; `SU2Irrep` does not gate and defers to `WignerSymbols.racahW`.
+    /// is `0`; the SU(2) irrep does not gate and defers to `WignerSymbols.racahW`.
     /// Every shipped symtn provider returns `0` off-shell as well: the
     /// Abelian rules and `CU1FusionRule` return the `fusion-symbols` value,
-    /// `SU2FusionRule` too (`0` for an inadmissible 6j), and `TableRule`
+    /// the Lie rule too (`0` for an inadmissible 6j), and `TableRule`
     /// its table entry (`0`). A label outside a provider's sector domain
     /// panics for every shipped provider.
     /// `ProductFusionRule` uses the `fusion-symbols` product value after
@@ -688,9 +688,7 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     /// `su2irrep.jl`, `anyons.jl`), so its off-shell value is `0`. Every
     /// shipped symtn provider returns `0` as well (the Abelian, CU(1) and
     /// SU(2) rules through `fusion-symbols`, `TableRule` from its table).
-    /// Out-of-domain labels panic for every shipped provider, and
-    /// `SU2FusionRule` also panics when the closure of `left x right` leaves
-    /// its supported spin range, even for an admissible `coupled`.
+    /// Out-of-domain labels panic for every shipped provider.
     /// `ProductFusionRule` uses the `fusion-symbols` product value after
     /// admitting the factor ids; a rejected id panics.
     ///

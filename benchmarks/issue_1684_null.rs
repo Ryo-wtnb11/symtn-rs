@@ -1,12 +1,16 @@
 //! Copy into symtn/examples/issue_1684_null.rs and build with --release.
 //! Every measured call includes public factor publication and output drop.
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+use symtn_core as sector_types;
+use su2::{su2_rule, su2_irrep};
 use num_complex::Complex64;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Instant;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, LinalgBackend, Runtime, SectorSpectrum, TensorMap};
 
 struct Allocator;
@@ -119,8 +123,8 @@ fn main() {
                 $make,
                 $eps,
                 "SU2",
-                SU2FusionRule,
-                |c: i32, _dual| SU2Irrep::from_twice_spin(c as usize)
+                su2_rule(),
+                |c: i32, _dual| su2_irrep(c as usize)
             );
         };
     }

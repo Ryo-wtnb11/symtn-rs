@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 fn fibonacci_multi_associator_counterexample() -> (FusionTreeKey, FusionTreeKey) {
     let long =
@@ -244,6 +246,7 @@ fn tree_pair_block_apis_reject_mixed_product_sector_components() {
 
 #[test]
 fn tree_pair_block_empty_and_valid_group_identity_policies_are_stable() {
+    let su2_provider_rule = su2_rule();
     let rule = IdentitySymbolPanicRule;
     let empty: &[FusionTreePairKey] = &[];
     // What: an empty block remains a valid empty coefficient transform.
@@ -287,7 +290,7 @@ fn tree_pair_block_empty_and_valid_group_identity_policies_are_stable() {
     // coefficients on the symbol-free identity path.
     assert_eq!(
         multiplicity_free_braid_tree_pair_block(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &keys,
             &[0, 1],
             &[2, 3],
@@ -301,6 +304,7 @@ fn tree_pair_block_empty_and_valid_group_identity_policies_are_stable() {
 
 #[test]
 fn indexed_adjoint_tree_pair_block_reuses_parent_group_order() {
+    let su2_provider_rule = su2_rule();
     let half = su2(1).id();
     let keys = [
         tree_pair_group_fixture(
@@ -364,7 +368,7 @@ fn indexed_adjoint_tree_pair_block_reuses_parent_group_order() {
 
     for group in structure.fusion_tree_group_slice() {
         let columns = multiplicity_free_permute_tree_pair_block_indexed(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &structure,
             group.block_indices(),
             FusionTreePairOrientation::Adjoint,
@@ -393,10 +397,10 @@ fn indexed_adjoint_tree_pair_block_reuses_parent_group_order() {
         );
 
         let prepared =
-            PreparedTreePairOperation::prepare_permute(&SU2FusionRule, 2, 2, &[0, 1], &[2, 3])
+            PreparedTreePairOperation::prepare_permute(&su2_provider_rule, 2, 2, &[0, 1], &[2, 3])
                 .unwrap();
         let ordered = multiplicity_free_braid_tree_pair_block_ordered_indexed(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &structure,
             group.block_indices(),
             FusionTreePairOrientation::Adjoint,
@@ -418,7 +422,7 @@ fn indexed_adjoint_tree_pair_block_reuses_parent_group_order() {
         let prepared =
             PreparedTreePairOperation::prepare_transpose(2, 2, &[0, 1], &[2, 3]).unwrap();
         let transposed = multiplicity_free_transpose_tree_pair_block_ordered_indexed(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &structure,
             group.block_indices(),
             FusionTreePairOrientation::Adjoint,
@@ -491,11 +495,11 @@ fn split_only_nested_product_braid_matches_composition_oracle() {
     // bend sign and duality bookkeeping of the all-codomain reference route in
     // both split directions.
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type ProductRule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let coupled =
@@ -547,6 +551,7 @@ fn split_only_nested_product_braid_matches_composition_oracle() {
 
 #[test]
 fn identity_braid_rows_are_exact_for_supported_symmetry_families_and_rank_zero() {
+    let su2_provider_rule = su2_rule();
     // What: identity rows preserve their exact source key and unit
     // coefficient for fermionic, non-abelian, product, and scalar spaces.
     let pair = |sector: SectorId| {
@@ -580,17 +585,17 @@ fn identity_braid_rows_are_exact_for_supported_symmetry_families_and_rank_zero()
 
     let su2_source = pair(su2(1));
     assert_eq!(
-        multiplicity_free_braid_tree_pair(&SU2FusionRule, &su2_source, &[0], &[1], &[13], &[5],)
+        multiplicity_free_braid_tree_pair(&su2_provider_rule, &su2_source, &[0], &[1], &[13], &[5],)
             .unwrap(),
         vec![(su2_source, 1.0)]
     );
 
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type FpU1Su2Rule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let product_rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_provider_rule.clone(),
     )
     .unwrap();
     let product_sector =

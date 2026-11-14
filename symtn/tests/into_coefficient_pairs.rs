@@ -13,13 +13,14 @@
 //! shared-destination error, and (with `--features cuda -- --ignored`) the
 //! device against the Host.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{ContractSpec, Error, GradedSpace, Runtime, TensorMap, TensorScalar};
 
@@ -541,14 +542,14 @@ fn u1() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     (v, bond)
 }
 
-fn su2() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let rule = Arc::new(SU2FusionRule);
+fn su2() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
+    let rule = Arc::new(su2_rule());
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
-        [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (SU2Irrep::from_twice_spin(s), n)),
+        [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (su2_irrep(s), n)),
     )
     .unwrap();
-    let bond = GradedSpace::try_new(rule, [(SU2Irrep::from_twice_spin(1), 2)]).unwrap();
+    let bond = GradedSpace::try_new(rule, [(su2_irrep(1), 2)]).unwrap();
     (v, bond)
 }
 

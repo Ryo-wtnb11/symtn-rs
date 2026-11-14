@@ -1,16 +1,20 @@
 //! Same-process cold/warm measurements for public basic tensor operations.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use std::{
     convert::Infallible,
     hint::black_box,
     sync::Arc,
     time::{Duration, Instant},
 };
+use su2::{su2_irrep, su2_rule, Su2Rule};
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
+use symtn_core as sector_types;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{
     Complex64, ContractSpec, CpuEngine, Eig, Error, GradedSpace, Pool, Runtime, TensorMap,
     TensorScalar,
@@ -3474,13 +3478,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_provider!(
         engine,
         "SU2",
-        SU2FusionRule,
+        Su2Rule,
         GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
+            Arc::new(su2_rule()),
             [
-                (SU2Irrep::from_twice_spin(0), degeneracy),
-                (SU2Irrep::from_twice_spin(1), degeneracy),
-                (SU2Irrep::from_twice_spin(2), degeneracy),
+                (su2_irrep(0), degeneracy),
+                (su2_irrep(1), degeneracy),
+                (su2_irrep(2), degeneracy),
             ]
         )?,
         min_time

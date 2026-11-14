@@ -12,12 +12,12 @@
 //! literals checked against TensorKit 0.17.1. The block-identity checks pin
 //! the block structure for fixtures whose storage order is TensorKit's.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use symtn::sector::{
-    ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep, TypedSectorAdmission, U1FusionRule,
-    U1Irrep,
+    ProductFusionRule, ProductSector, TypedSectorAdmission, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Complex64, GradedSpace, PhysicalDense, Runtime, TensorMap, TensorScalar};
 
@@ -138,14 +138,12 @@ fn su2_isomorphism_and_isometry_are_block_identities_between_different_spaces() 
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
-                Arc::new(SU2FusionRule),
-                pairs
-                    .iter()
-                    .map(|&(s, n)| (SU2Irrep::from_twice_spin(s), n)),
+                Arc::new(su2_rule()),
+                pairs.iter().map(|&(s, n)| (su2_irrep(s), n)),
             )
             .unwrap()
         };
-        let j = SU2Irrep::from_twice_spin;
+        let j = su2_irrep;
         let v = space(&[(0, 1), (1, 2)]);
         // V ⊗ V, twice-spin labels: 0: 0⊗0 (1) + ½⊗½ (4) = 5 (two trees);
         // ½: 0⊗½ (2) + ½⊗0 (2) = 4 (two trees); 1: ½⊗½ (4).
@@ -243,10 +241,8 @@ fn su2_three_leg_isometry_matches_tensorkit_dense() {
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
-                Arc::new(SU2FusionRule),
-                pairs
-                    .iter()
-                    .map(|&(s, n)| (SU2Irrep::from_twice_spin(s), n)),
+                Arc::new(su2_rule()),
+                pairs.iter().map(|&(s, n)| (su2_irrep(s), n)),
             )
             .unwrap()
         };
@@ -290,10 +286,8 @@ fn su2_three_leg_isometry_follows_tensorkit_inner_line_order() {
         let rt = Runtime::builder().build().unwrap();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
-                Arc::new(SU2FusionRule),
-                pairs
-                    .iter()
-                    .map(|&(s, n)| (SU2Irrep::from_twice_spin(s), n)),
+                Arc::new(su2_rule()),
+                pairs.iter().map(|&(s, n)| (su2_irrep(s), n)),
             )
             .unwrap()
         };
@@ -342,14 +336,12 @@ fn su2_three_leg_isometry_follows_tensorkit_inner_line_order() {
 #[test]
 fn su2_product_isometry_follows_tensorkit_inner_line_order() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    type Su2Su2 = ProductFusionRule<SU2FusionRule, SU2FusionRule>;
+    type Su2Su2 = ProductFusionRule<Su2Rule, Su2Rule>;
     let rt = Runtime::builder().build().unwrap();
-    let p = |a: usize, b: usize| {
-        ProductSector::new(SU2Irrep::from_twice_spin(a), SU2Irrep::from_twice_spin(b))
-    };
+    let p = |a: usize, b: usize| ProductSector::new(su2_irrep(a), su2_irrep(b));
     let space = |pairs: &[((usize, usize), usize)]| {
         GradedSpace::try_new(
-            Arc::new(Su2Su2::try_new(SU2FusionRule, SU2FusionRule).unwrap()),
+            Arc::new(Su2Su2::try_new(su2_rule(), su2_rule()).unwrap()),
             pairs.iter().map(|&((a, b), n)| (p(a, b), n)),
         )
         .unwrap()
@@ -364,8 +356,8 @@ fn su2_product_isometry_follows_tensorkit_inner_line_order() {
             let value = *block.get(&[0, 0, 0, column]).unwrap();
             if value != 0.0 {
                 assert_eq!(value, 1.0);
-                let line = trees.codomain_innerlines()[0];
-                got.push((*trees.coupled(), line, column));
+                let line = trees.codomain_innerlines()[0].clone();
+                got.push((trees.coupled().clone(), line, column));
             }
         }
     }

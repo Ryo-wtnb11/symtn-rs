@@ -22,8 +22,8 @@ use num_complex::Complex64;
 use symtn::expert::HostReadableStorage;
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, CoupledBlock, CoupledBlockPayload};
 use symtn::typed::{
@@ -565,7 +565,7 @@ fn su2_blocks_match_label_physical_adjoint_and_composition_oracles() {
         engine,
         "SU(2)",
         t,
-        |c: &SU2Irrep| c.twice_spin() + 1
+        |c: &symtn_core::LieIrrep| usize::try_from(c.dynkin().next().unwrap()).unwrap() + 1
     ));
 }
 

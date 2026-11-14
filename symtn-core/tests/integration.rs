@@ -6,4 +6,7 @@ mod export_scan;
 mod key_identity;
 mod rule_identity;
 mod sector_vocabulary_compat;
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+use symtn_core as sector_types;
 mod unique_scratch_reuse;

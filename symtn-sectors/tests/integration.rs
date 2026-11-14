@@ -1,5 +1,7 @@
 //! Behavior tests neither observe nor reset process-global state and run concurrently.
 
+use symtn_sectors as sector_types;
+
 use num_complex::{Complex32, Complex64};
 
 #[path = "../../tests/support/numerics.rs"]
@@ -21,7 +23,6 @@ mod lie_group_adapter_contracts;
 mod lie_group_cross_process_determinism;
 mod lie_group_feature_contract;
 mod lie_group_oracles;
-mod lie_multiplicity_free_equivalence;
 mod lie_physical_basis;
 mod product_oracles;
 mod product_rule_client;
@@ -31,3 +32,6 @@ mod rule_identity;
 mod sector_labels;
 mod semantic_axioms;
 mod table_rule;
+
+#[path = "../../tests/support/su2.rs"]
+mod su2;

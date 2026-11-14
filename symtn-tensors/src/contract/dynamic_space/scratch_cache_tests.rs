@@ -1,5 +1,7 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use crate::test_support::CACHE_TEST_LOCK;
 use crate::tests::GenericMultiplicityRule;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -837,12 +839,9 @@ fn bound_layout_strategy_propagates_without_heap_ownership() {
     // What: clone, validated-layout rebind, derived construction, transform,
     // and contraction retain one opaque lowered strategy, while an expert
     // encoded root remains distinct and a mixed binary result follows lhs.
-    assert!(
-        std::mem::size_of::<LayoutBuildCapability<symtn_core::SU2FusionRule>>()
-            <= std::mem::size_of::<usize>()
-    );
-    let provider = Arc::new(symtn_core::SU2FusionRule);
-    let half = symtn_core::SU2Irrep::from_twice_spin(1).sector_id();
+    assert!(std::mem::size_of::<LayoutBuildCapability<Su2Rule>>() <= std::mem::size_of::<usize>());
+    let provider = Arc::new(su2_rule());
+    let half = symtn_core::SectorId::new(1);
     let leg = || FusionProductSpace::new([symtn_core::SectorLeg::new([(half, 1)], false)]);
     let make_hom = || FusionTreeHomSpace::new(leg(), leg());
     let hom = make_hom();
@@ -870,26 +869,28 @@ fn bound_layout_strategy_propagates_without_heap_ownership() {
         BoundDynamicFusionMapSpace::contracted_multiplicity_free(&lowered, &cloned, &[], &[])
             .unwrap();
 
-    let malformed = FusionTreeHomSpace::new(
-        FusionProductSpace::new([SectorLeg::new([(SectorId::new(255), 1)], false)]),
-        FusionProductSpace::new([]),
-    );
-    for output in [&cloned, &rebound, &derived, &transformed, &contracted] {
-        // The checked enumerator reports the codec cause rather than the
-        // lowered path's flattened static message.
+    if let Some(past) = (u32::MAX as usize).checked_add(1) {
+        let malformed = FusionTreeHomSpace::new(
+            FusionProductSpace::new([SectorLeg::new([(SectorId::new(past), 1)], false)]),
+            FusionProductSpace::new([]),
+        );
+        for output in [&cloned, &rebound, &derived, &transformed, &contracted] {
+            // The checked enumerator reports the codec cause rather than the
+            // lowered path's flattened static message.
+            assert!(matches!(
+                output.prime_derived_homspace(&malformed),
+                Err(OperationError::FusionAlgebra(_))
+            ));
+        }
+        assert!(encoded.prime_derived_homspace(&malformed).is_ok());
+        let mixed =
+            BoundDynamicFusionMapSpace::contracted_multiplicity_free(&lowered, &encoded, &[], &[])
+                .unwrap();
         assert!(matches!(
-            output.prime_derived_homspace(&malformed),
+            mixed.prime_derived_homspace(&malformed),
             Err(OperationError::FusionAlgebra(_))
         ));
     }
-    assert!(encoded.prime_derived_homspace(&malformed).is_ok());
-    let mixed =
-        BoundDynamicFusionMapSpace::contracted_multiplicity_free(&lowered, &encoded, &[], &[])
-            .unwrap();
-    assert!(matches!(
-        mixed.prime_derived_homspace(&malformed),
-        Err(OperationError::FusionAlgebra(_))
-    ));
 }
 
 #[test]
@@ -897,8 +898,8 @@ fn root_constructor_builds_from_checked_keys() {
     // What: the lowered root builds the complete key set of a non-abelian
     // space, here spin-1/2 x spin-1/2 coupling to spin 0 and spin 1 on both
     // sides with one tree each, and rejects a sector its codec cannot name.
-    let provider = Arc::new(symtn_core::SU2FusionRule);
-    let half = symtn_core::SU2Irrep::from_twice_spin(1).sector_id();
+    let provider = Arc::new(su2_rule());
+    let half = symtn_core::SectorId::new(1);
     let side = || {
         FusionProductSpace::new([
             SectorLeg::new([(half, 1)], false),
@@ -927,7 +928,7 @@ fn root_constructor_builds_from_checked_keys() {
     // inner line.
     let mut expected = [0, 2]
         .map(|twice_spin| {
-            let coupled = symtn_core::SU2Irrep::from_twice_spin(twice_spin).sector_id();
+            let coupled = symtn_core::SectorId::new(twice_spin);
             BlockKey::FusionTree(
                 FusionTreePairKey::try_pair_from_sector_ids(
                     [half.id(), half.id()],
@@ -947,16 +948,18 @@ fn root_constructor_builds_from_checked_keys() {
     expected.sort();
     assert_eq!(actual, expected);
 
-    let malformed = FusionTreeHomSpace::new(
-        FusionProductSpace::new([SectorLeg::new([(SectorId::new(255), 1)], false)]),
-        FusionProductSpace::new([]),
-    );
-    assert!(matches!(
-        BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
-            provider, malformed,
-        ),
-        Err(OperationError::FusionAlgebra(_))
-    ));
+    if let Some(past) = (u32::MAX as usize).checked_add(1) {
+        let malformed = FusionTreeHomSpace::new(
+            FusionProductSpace::new([SectorLeg::new([(SectorId::new(past), 1)], false)]),
+            FusionProductSpace::new([]),
+        );
+        assert!(matches!(
+            BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(
+                provider, malformed,
+            ),
+            Err(OperationError::FusionAlgebra(_))
+        ));
+    }
 }
 
 #[test]

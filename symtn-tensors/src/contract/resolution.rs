@@ -4,6 +4,8 @@
 //! prepared handles own the returned [`StorageContractResolution`] for
 //! lookup-free replay.
 
+#[cfg(test)]
+use crate::su2::su2_rule;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -943,7 +945,7 @@ mod tests {
     use super::*;
     use symtn_core::{
         FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, ProductFusionRule,
-        SU2FusionRule, SU2Irrep, SectorId, SectorLeg, U1FusionRule, U1Irrep,
+        SectorId, SectorLeg, U1FusionRule, U1Irrep,
     };
 
     fn single_sector_matrix_space<R>(
@@ -988,9 +990,8 @@ mod tests {
             ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap();
         let odd_charge = fp_u1.encode_component_ids(odd, SectorId::from(U1Irrep::new(0).unwrap()));
-        let product = ProductFusionRule::<_, _>::try_new(fp_u1, SU2FusionRule).unwrap();
-        let odd_product =
-            product.encode_component_ids(odd_charge, SU2Irrep::from_twice_spin(0).sector_id());
+        let product = ProductFusionRule::<_, _>::try_new(fp_u1, su2_rule()).unwrap();
+        let odd_product = product.encode_component_ids(odd_charge, symtn_core::SectorId::new(0));
         let rhs = single_sector_matrix_space(&product, odd_product, true, false);
         // What: a bosonic U(1) x SU(2) component does not erase the odd fZ2
         // twist on an externally dual product-sector axis.

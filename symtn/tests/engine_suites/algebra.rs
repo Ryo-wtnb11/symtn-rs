@@ -4,11 +4,10 @@
 //! not, and a lazy adjoint contracts as the conjugate transpose.
 
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 use num_complex::Complex64;
 use std::sync::Arc;
-use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime};
 
 use crate::numerics;
@@ -31,10 +30,10 @@ on_each_engine! {
 
         for (sectors, seed) in [(0_usize, 1.0_f64), (1, 7.0)] {
             let su2 = GradedSpace::try_new(
-                Arc::new(SU2FusionRule),
+                Arc::new(su2_rule()),
                 [
-                    (SU2Irrep::from_twice_spin(0), 1 + sectors),
-                    (SU2Irrep::from_twice_spin(1), 2),
+                    (su2_irrep(0), 1 + sectors),
+                    (su2_irrep(1), 2),
                 ],
             )
             .unwrap();

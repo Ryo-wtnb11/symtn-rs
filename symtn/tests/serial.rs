@@ -1,6 +1,9 @@
 //! Global-state and allocation tests each take the shared serial guard first.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use num_complex::{Complex32, Complex64};
+use symtn_core as sector_types;
 
 mod braiding_probe;
 #[macro_use]

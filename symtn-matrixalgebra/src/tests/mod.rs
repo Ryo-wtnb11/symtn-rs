@@ -7,8 +7,7 @@ use symtn_core::{
     FusionProductSpace, FusionRule, FusionStyleKind, FusionTreeHomSpace, FusionTreeKey,
     GenericFArray, GenericFusionSymbols, GenericRMatrix, GenericRigidSymbols, InfallibleGeneric,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec, U1FusionRule, U1Irrep,
-    ZNFusionRule,
+    RuleIdentity, SectorId, SectorLeg, SectorVec, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, OperationError,

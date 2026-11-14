@@ -9,6 +9,7 @@
 //! `gaugefix!` rule. A batch fails as a whole and names every failing member.
 
 use crate::backend;
+use crate::su2::{su2_irrep, su2_rule};
 
 use crate::numerics;
 use crate::prepared;
@@ -21,7 +22,6 @@ use symtn::typed::HermitianTol;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{
     BatchError, Eigh, EighFullPlan, EighFullWorkspace, GradedSpace, MemberFault, Runtime,
     SignatureField, StackedTensorMap, TensorMap,
@@ -274,9 +274,9 @@ fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let leg = u1_legs().0;
-    let j = SU2Irrep::from_twice_spin;
+    let j = su2_irrep;
     let su2 =
-        GradedSpace::try_new(std::sync::Arc::new(SU2FusionRule), [(j(0), 3), (j(1), 4)]).unwrap();
+        GradedSpace::try_new(std::sync::Arc::new(su2_rule()), [(j(0), 3), (j(1), 4)]).unwrap();
     for count in [1, 5] {
         let pm = single_leg(&runtime, &leg, count, plus_minus_entry);
         let Eigh { d, .. } = pm[0]

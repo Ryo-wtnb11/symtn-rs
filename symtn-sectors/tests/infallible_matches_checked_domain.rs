@@ -14,12 +14,14 @@
 //! `tests/fibonacci_providers.rs`; the abelian and CU(1) one is
 //! `infallible_symbols_reject_out_of_domain_ids` below.
 
+use crate::su2::su2_rule;
+
 use std::panic::{self, AssertUnwindSafe};
 
 use symtn_sectors::{
     CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FermionParityIrrep,
-    FusionRule, MultiplicityFreeRigidSymbols, SU2FusionRule, SectorCodec, SectorId, TableRule,
-    U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
+    FusionRule, MultiplicityFreeRigidSymbols, SectorCodec, SectorId, TableRule, U1FusionRule,
+    U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 fn assert_dual_forwards<R: FusionRule + CheckedFusionAlgebra>(rule: &R, ids: &[SectorId]) {
@@ -157,25 +159,17 @@ fn u1_infallible_entry_points_match_checked_domain() {
 
 #[test]
 fn su2_infallible_entry_points_match_checked_domain() {
-    let rule = SU2FusionRule;
-    // A sample of the representable doubled-spin domain, including the pair
-    // (128, 127) whose fusion *closure* escapes the 254 catalog bound even
-    // though both inputs are individually representable.
+    let rule = su2_rule();
+    // Sample finite fusions; extreme labels belong to codec and overflow tests.
     let valid: Vec<SectorId> = [0, 1, 2, 127, 128, 253, 254]
         .into_iter()
         .map(SectorId::new)
         .collect();
-    let invalid = [
-        SectorId::new(255),
-        SectorId::new(256),
-        SectorId::new(usize::MAX),
-    ];
+    let invalid = (u32::MAX as usize).checked_add(1).map(SectorId::new);
     let ids: Vec<SectorId> = valid.iter().copied().chain(invalid).collect();
 
     assert_dual_forwards(&rule, &ids);
     assert_fusion_channels_forwards(&rule, &all_pairs(&ids));
-    // Full triples over `ids` are O(10^3) fusion-symbols calls; keep it, this suite is
-    // not a hot path.
     assert_nsymbol_forwards(&rule, &all_triples(&ids));
 }
 

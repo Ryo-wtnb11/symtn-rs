@@ -49,10 +49,11 @@
 //! to `1e40`, far past the `f32` maximum of about `3.4e38`. `norm` must be
 //! finite in every storage form.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
 use crate::numerics;
@@ -773,14 +774,7 @@ fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
                 $dtype,
                 $cast
             );
-            check!(
-                $engine,
-                SU2FusionRule,
-                SU2Irrep::from_twice_spin(1),
-                2.0,
-                $dtype,
-                $cast
-            );
+            check!($engine, su2_rule(), su2_irrep(1), 2.0, $dtype, $cast);
         };
     }
     providers!(engine, f64, |v: Complex64| v.re);
@@ -834,14 +828,7 @@ fn dense_inner_cancellation_accumulates_wide() {
         f32,
         |v| v
     );
-    check!(
-        engine,
-        SU2FusionRule,
-        SU2Irrep::from_twice_spin(1),
-        2.0,
-        f32,
-        |v| v
-    );
+    check!(engine, su2_rule(), su2_irrep(1), 2.0, f32, |v| v);
     check!(
         engine,
         U1FusionRule,
@@ -850,14 +837,9 @@ fn dense_inner_cancellation_accumulates_wide() {
         Complex32,
         |v| { Complex32::new(v, 0.0) }
     );
-    check!(
-        engine,
-        SU2FusionRule,
-        SU2Irrep::from_twice_spin(1),
-        2.0,
-        Complex32,
-        |v| Complex32::new(v, 0.0)
-    );
+    check!(engine, su2_rule(), su2_irrep(1), 2.0, Complex32, |v| {
+        Complex32::new(v, 0.0)
+    });
 }
 
 #[cfg(feature = "cgc-gen")]

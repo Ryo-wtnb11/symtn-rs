@@ -21,6 +21,7 @@
 
 #![allow(dead_code)]
 
+use crate::su2::Su2Rule;
 use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -250,7 +251,7 @@ pub fn u1_cases<D: Payload>(runtime: &Runtime) -> Vec<TraceCase<symtn::sector::U
     cases
 }
 
-pub fn su2_cases<D: Payload>(runtime: &Runtime) -> Vec<TraceCase<symtn::sector::SU2FusionRule, D>> {
+pub fn su2_cases<D: Payload>(runtime: &Runtime) -> Vec<TraceCase<Su2Rule, D>> {
     let s = su2();
     let mut cases: Vec<_> = unbent(
         runtime,

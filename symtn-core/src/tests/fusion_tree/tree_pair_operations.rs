@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn linearize_tree_pair_permutation_matches_tensorkit_zero_based_formula() {
@@ -126,6 +128,7 @@ fn indexed_ordered_identity_preserves_duplicate_sources_and_skips_symbols() {
 
 #[test]
 fn indexed_ordered_identity_preserves_distinct_and_reordered_columns() {
+    let su2_provider_rule = su2_rule();
     let keys: Vec<_> = [0, 2]
         .into_iter()
         .map(|coupled| {
@@ -153,7 +156,8 @@ fn indexed_ordered_identity_preserves_distinct_and_reordered_columns() {
     )
     .unwrap();
     let prepared =
-        PreparedTreePairOperation::prepare_permute(&SU2FusionRule, 2, 2, &[0, 1], &[2, 3]).unwrap();
+        PreparedTreePairOperation::prepare_permute(&su2_provider_rule, 2, 2, &[0, 1], &[2, 3])
+            .unwrap();
     for (indices, destinations, rows) in [
         (
             vec![0, 1],
@@ -172,7 +176,7 @@ fn indexed_ordered_identity_preserves_distinct_and_reordered_columns() {
         ),
     ] {
         let map = multiplicity_free_braid_tree_pair_block_ordered_indexed(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &structure,
             &indices,
             FusionTreePairOrientation::Adjoint,
@@ -195,7 +199,7 @@ fn indexed_ordered_identity_preserves_distinct_and_reordered_columns() {
 fn braid_tree_block_matches_per_source_su2_rows() {
     use std::collections::BTreeMap;
 
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let sources = [
         FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, false, false], [0], [1, 1])
             .unwrap(),
@@ -294,6 +298,7 @@ fn tree_block_admits_every_source_before_group_check_and_symbols() {
 
 #[test]
 fn tree_block_empty_and_identity_contracts_preserve_source_order() {
+    let su2_provider_rule = su2_rule();
     let empty: &[FusionTreeKey] = &[];
     assert_eq!(
         multiplicity_free_braid_tree_block(&IdentitySymbolPanicRule, empty, &[], &[],).unwrap(),
@@ -331,11 +336,12 @@ fn tree_block_empty_and_identity_contracts_preserve_source_order() {
     // What: distinct coupled labels remain one external-sector group and
     // the symbol-free identity path returns exact rows in source order.
     assert_eq!(
-        multiplicity_free_braid_tree_block(&SU2FusionRule, &sources, &[0, 1], &[13, 5],).unwrap(),
+        multiplicity_free_braid_tree_block(&su2_provider_rule, &sources, &[0, 1], &[13, 5],)
+            .unwrap(),
         expected
     );
     assert_eq!(
-        multiplicity_free_permute_tree_block(&SU2FusionRule, &sources, &[0, 1],).unwrap(),
+        multiplicity_free_permute_tree_block(&su2_provider_rule, &sources, &[0, 1],).unwrap(),
         expected
     );
 }
@@ -367,6 +373,7 @@ fn tree_pair_block_apis_reject_invalid_later_vertex_before_symbols() {
 
 #[test]
 fn split_only_su2_braid_matches_composition_oracle_in_both_directions() {
+    let su2_provider_rule = su2_rule();
     // What: SU(2) 2|2 -> 3|1 and 2|2 -> 1|3 retain the exact tree keys,
     // dual flags, and bend coefficients of the all-codomain reference route.
     let source = FusionTreePairKey::try_pair_from_sector_ids(
@@ -386,7 +393,7 @@ fn split_only_su2_braid_matches_composition_oracle_in_both_directions() {
         [(&[0, 1, 3][..], &[2][..], 3), (&[0][..], &[2, 3, 1][..], 1)]
     {
         let actual = multiplicity_free_braid_tree_pair(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &source,
             codomain_axes,
             domain_axes,
@@ -395,7 +402,7 @@ fn split_only_su2_braid_matches_composition_oracle_in_both_directions() {
         )
         .unwrap();
         let expected =
-            split_only_tree_pair_route_composition_oracle(&SU2FusionRule, &source, target_rank)
+            split_only_tree_pair_route_composition_oracle(&su2_provider_rule, &source, target_rank)
                 .unwrap();
         assert_eq!(actual.len(), expected.len());
         for ((actual_key, actual_coefficient), (expected_key, expected_coefficient)) in
@@ -409,6 +416,7 @@ fn split_only_su2_braid_matches_composition_oracle_in_both_directions() {
 
 #[test]
 fn split_only_tree_pair_braid_handles_empty_split_boundaries() {
+    let su2_provider_rule = su2_rule();
     // What: the two extreme repartitions 0|2 -> 2|0 and 2|0 -> 0|2
     // preserve the same keys, dual flags, and coefficients as the direct
     // primitive, including an empty codomain or domain tree.
@@ -424,19 +432,31 @@ fn split_only_tree_pair_braid_handles_empty_split_boundaries() {
         [1],
     )
     .unwrap();
-    let to_codomain =
-        multiplicity_free_braid_tree_pair(&SU2FusionRule, &all_domain, &[1, 0], &[], &[], &[0, 1])
-            .unwrap();
+    let to_codomain = multiplicity_free_braid_tree_pair(
+        &su2_provider_rule,
+        &all_domain,
+        &[1, 0],
+        &[],
+        &[],
+        &[0, 1],
+    )
+    .unwrap();
     let expected_codomain =
-        multiplicity_free_repartition_tree_pair(&SU2FusionRule, &all_domain, 2).unwrap();
+        multiplicity_free_repartition_tree_pair(&su2_provider_rule, &all_domain, 2).unwrap();
     assert_eq!(to_codomain, expected_codomain);
 
     let all_codomain = &to_codomain[0].0;
-    let to_domain =
-        multiplicity_free_braid_tree_pair(&SU2FusionRule, all_codomain, &[], &[1, 0], &[0, 1], &[])
-            .unwrap();
+    let to_domain = multiplicity_free_braid_tree_pair(
+        &su2_provider_rule,
+        all_codomain,
+        &[],
+        &[1, 0],
+        &[0, 1],
+        &[],
+    )
+    .unwrap();
     let expected_domain =
-        multiplicity_free_repartition_tree_pair(&SU2FusionRule, all_codomain, 0).unwrap();
+        multiplicity_free_repartition_tree_pair(&su2_provider_rule, all_codomain, 0).unwrap();
     assert_eq!(to_domain, expected_domain);
 }
 
@@ -518,6 +538,7 @@ fn identity_braid_tree_pair_validates_levels_before_symbol_free_return() {
 
 #[test]
 fn unique_identity_tree_operations_reject_simple_fusion_rules() {
+    let su2_provider_rule = su2_rule();
     // What: identity axes do not let a Simple rule enter an API whose
     // contract requires Unique fusion.
     //
@@ -533,7 +554,7 @@ fn unique_identity_tree_operations_reject_simple_fusion_rules() {
     };
 
     assert_eq!(
-        unique_permute_tree(&SU2FusionRule, &tree, &[0]).unwrap_err(),
+        unique_permute_tree(&su2_provider_rule, &tree, &[0]).unwrap_err(),
         expected
     );
 }
@@ -1014,17 +1035,26 @@ fn prepared_transpose_fixes_both_cycle_directions_once() {
 
 #[test]
 fn unique_prepared_executor_rejects_simple_for_every_plan_variant() {
+    let su2_provider_rule = su2_rule();
     // What: a general multiplicity-free plan never becomes a Unique plan
     // merely because its operation variant is an identity or repartition.
     let source =
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap();
     let plans = [
-        PreparedTreePairOperation::prepare_braid(&SU2FusionRule, 1, 1, &[0], &[1], &[0], &[1])
+        PreparedTreePairOperation::prepare_braid(&su2_provider_rule, 1, 1, &[0], &[1], &[0], &[1])
             .unwrap(),
-        PreparedTreePairOperation::prepare_braid(&SU2FusionRule, 1, 1, &[0, 1], &[], &[0], &[1])
-            .unwrap(),
-        PreparedTreePairOperation::prepare_braid(&SU2FusionRule, 1, 1, &[1], &[0], &[0], &[1])
+        PreparedTreePairOperation::prepare_braid(
+            &su2_provider_rule,
+            1,
+            1,
+            &[0, 1],
+            &[],
+            &[0],
+            &[1],
+        )
+        .unwrap(),
+        PreparedTreePairOperation::prepare_braid(&su2_provider_rule, 1, 1, &[1], &[0], &[0], &[1])
             .unwrap(),
         PreparedTreePairOperation::prepare_transpose(1, 1, &[1], &[0]).unwrap(),
     ];
@@ -1038,7 +1068,7 @@ fn unique_prepared_executor_rejects_simple_for_every_plan_variant() {
 
     for prepared in plans {
         assert_eq!(
-            prepared.execute_unique_rigid(&SU2FusionRule, &source),
+            prepared.execute_unique_rigid(&su2_provider_rule, &source),
             Err(CoreError::UnsupportedFusionStyle {
                 expected: FusionStyleKind::Unique,
                 actual: FusionStyleKind::Simple,
@@ -1049,10 +1079,11 @@ fn unique_prepared_executor_rejects_simple_for_every_plan_variant() {
 
 #[test]
 fn prepared_operation_preserves_validation_error_precedence() {
+    let su2_provider_rule = su2_rule();
     // What: level dimensions still fail before identity short-circuiting,
     // while transpose still reports the original unlinearized permutation.
     assert_eq!(
-        PreparedTreePairOperation::prepare_braid(&SU2FusionRule, 1, 1, &[0], &[1], &[], &[1],),
+        PreparedTreePairOperation::prepare_braid(&su2_provider_rule, 1, 1, &[0], &[1], &[], &[1],),
         Err(CoreError::DimensionMismatch {
             expected: 1,
             actual: 0,

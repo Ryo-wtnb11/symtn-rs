@@ -27,6 +27,7 @@
 
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.
+use crate::su2::{su2_irrep, su2_rule};
 macro_rules! full_rotation {
     ($tensor:expr) => {{
         let tensor = &$tensor;
@@ -65,8 +66,7 @@ use std::sync::Arc;
 use num_complex::Complex64;
 use symtn::sector::CheckedFusionAlgebra;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::sector::{MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{GradedSpace, TensorMap};
@@ -562,25 +562,16 @@ fn device_product_providers_match_the_host_for_signs_and_recoupling() {
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
-                2,
-            ),
-            (
-                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
-                1,
-            ),
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
-                1,
-            ),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
         ],
     )
     .unwrap();
@@ -1208,25 +1199,16 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
-                2,
-            ),
-            (
-                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
-                1,
-            ),
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
-                1,
-            ),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
         ],
     )
     .unwrap();

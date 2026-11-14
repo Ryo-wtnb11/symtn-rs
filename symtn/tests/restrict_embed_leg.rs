@@ -14,6 +14,7 @@
 
 use crate::common::ErrorKind as _;
 use crate::report;
+use crate::su2::{su2_irrep, su2_rule};
 use report::Report;
 use symtn::typed::Engine;
 
@@ -23,8 +24,8 @@ use symtn::typed::ContractSpec;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    ZNFusionRule,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, LegSelection, Runtime, TensorMap};
@@ -193,9 +194,9 @@ impl TensorKitPosition for U1Irrep {
     }
 }
 
-impl TensorKitPosition for SU2Irrep {
+impl TensorKitPosition for symtn_core::LieIrrep {
     fn tensorkit_position(&self, _is_dual: bool) -> u64 {
-        self.twice_spin() as u64
+        usize::try_from(self.dynkin().next().unwrap()).unwrap() as u64
     }
 }
 
@@ -285,7 +286,7 @@ fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
 fn restrict_keeps_su2_multiplets_intact_for_a_middle_sector_with_offset() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     // Three sectors so that dropping the middle one shifts the dense offsets
     // of the last, and j = 1/2, 1 carry nontrivial multiplet dimensions.
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 2)]);
@@ -293,10 +294,7 @@ fn restrict_keeps_su2_multiplets_intact_for_a_middle_sector_with_offset() {
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&other, &other], 11).unwrap();
 
-    let selected = [
-        (SU2Irrep::from_twice_spin(0), 1..2),
-        (SU2Irrep::from_twice_spin(2), 0..1),
-    ];
+    let selected = [(su2_irrep(0), 1..2), (su2_irrep(2), 0..1)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     assert_eq!(restricted.codomain()[0].degeneracies(), &[1, 1]);
@@ -305,14 +303,16 @@ fn restrict_keeps_su2_multiplets_intact_for_a_middle_sector_with_offset() {
         &leg.sectors().unwrap(),
         leg.degeneracies(),
         leg.is_dual(),
-        |sector: &SU2Irrep| sector.twice_spin() + 1,
+        |sector: &symtn_core::LieIrrep| {
+            usize::try_from(sector.dynkin().next().unwrap()).unwrap() + 1
+        },
         &selected,
     );
-    let (other_layout, _) = dense_plan::<SU2Irrep, Range<usize>>(
+    let (other_layout, _) = dense_plan::<symtn_core::LieIrrep, Range<usize>>(
         &other.sectors().unwrap(),
         other.degeneracies(),
         other.is_dual(),
-        |sector| sector.twice_spin() + 1,
+        |sector| usize::try_from(sector.dynkin().next().unwrap()).unwrap() + 1,
         &[],
     );
     let dense = source.to_physical_dense(engine).unwrap();
@@ -540,7 +540,7 @@ fn restrict_commutes_with_adjoint_under_the_codomain_domain_axis_map() {
 fn full_selection_is_the_identity_and_round_trips_are_exact() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 2), (2, 1)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     let source: TensorMap<_, f64> =
@@ -564,7 +564,7 @@ fn full_selection_is_the_identity_and_round_trips_are_exact() {
     );
 
     // restrict ∘ embed = id, bitwise.
-    let partial = LegSelection::try_new(&leg, [(SU2Irrep::from_twice_spin(1), 1..2)]).unwrap();
+    let partial = LegSelection::try_new(&leg, [(su2_irrep(1), 1..2)]).unwrap();
     let small = source.restrict_leg(engine, &[(0, &partial)]).unwrap();
     let embedded = small.embed_leg(engine, 0, &partial).unwrap();
     assert_eq!(embedded.codomain()[0], leg);
@@ -1392,7 +1392,7 @@ fn restrict_and_embed_are_exact_block_copies_on_u1_legs() {
 #[test]
 fn restrict_and_embed_are_exact_block_copies_on_su2_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 3), (1, 4), (2, 3)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2), (2, 1)]);
     let ranges = [Some(Place::End), Some(Place::Middle), Some(Place::Start)];
@@ -1583,7 +1583,7 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
     );
     assert_exact_multi_restrict!(engine, f64, [&leg], [&leg], [(1, ranges), (0, ranges)]);
 
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 3), (1, 4), (2, 3)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2), (2, 1)]);
     assert_exact_multi_restrict!(
@@ -1757,7 +1757,7 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
     assert_compact_stays_compact!(engine, f64, leg.clone(), gaps);
     assert_compact_stays_compact!(engine, Complex64, leg.try_dual().unwrap(), places);
 
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 3), (1, 4), (2, 3)]);
     assert_compact_stays_compact!(engine, Complex64, leg.clone(), places);
     assert_compact_stays_compact!(engine, Complex64, leg.clone(), gaps);
@@ -1807,19 +1807,21 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
 fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 4), (1, 5), (2, 3)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     let source: TensorMap<_, Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&other, &leg, &other], [&other], 23).unwrap();
     let selected = [
-        (SU2Irrep::from_twice_spin(0), vec![0, 3]),
-        (SU2Irrep::from_twice_spin(1), vec![1, 2, 4]),
-        (SU2Irrep::from_twice_spin(2), vec![0, 2]),
+        (su2_irrep(0), vec![0, 3]),
+        (su2_irrep(1), vec![1, 2, 4]),
+        (su2_irrep(2), vec![0, 2]),
     ];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     assert_eq!(selection.subspace().degeneracies(), &[2, 3, 2]);
-    let carrier = |sector: &SU2Irrep| sector.twice_spin() + 1;
+    let carrier = |sector: &symtn_core::LieIrrep| {
+        usize::try_from(sector.dynkin().next().unwrap()).unwrap() + 1
+    };
     let (layout, kept) = dense_plan(
         &leg.sectors().unwrap(),
         leg.degeneracies(),
@@ -1827,7 +1829,7 @@ fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_
         carrier,
         &selected,
     );
-    let (other_layout, _) = dense_plan::<SU2Irrep, Vec<usize>>(
+    let (other_layout, _) = dense_plan::<symtn_core::LieIrrep, Vec<usize>>(
         &other.sectors().unwrap(),
         other.degeneracies(),
         other.is_dual(),

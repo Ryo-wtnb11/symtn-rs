@@ -8,10 +8,11 @@
 //! deficit, and the result is checked by dense relations — it annihilates the
 //! input and has orthonormal columns (rows).
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Svd, TensorMap, Truncation};
 
 use crate::fixtures;
@@ -214,11 +215,12 @@ fn su2_composed_null_space_counts_reduced_rank_deficits() {
     // `2 x 2` block of rank one (nullity 1), so the shape-based default
     // keeps `[2, 0]` and the composition `[2, 1]` reduced directions.
     let runtime = host_runtime();
-    let rule = Arc::new(SU2FusionRule);
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let half = SU2Irrep::from_twice_spin(1);
-    let codomain = GradedSpace::try_new(Arc::clone(&rule), [(spin0, 3), (half, 2)]).unwrap();
-    let domain = GradedSpace::try_new(rule, [(spin0, 1), (half, 2)]).unwrap();
+    let rule = Arc::new(su2_rule());
+    let spin0 = su2_irrep(0);
+    let half = su2_irrep(1);
+    let codomain =
+        GradedSpace::try_new(Arc::clone(&rule), [(spin0.clone(), 3), (half.clone(), 2)]).unwrap();
+    let domain = GradedSpace::try_new(rule, [(spin0.clone(), 1), (half.clone(), 2)]).unwrap();
     let a: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, i| {
             ((i[0] + 1) * (i[1] + 2)) as f64

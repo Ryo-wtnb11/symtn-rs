@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct UncertifiedCustomSymbolsRule;
@@ -115,7 +117,7 @@ impl MultiplicityFreeFusionSymbols for ComplexAsymmetricUniqueRule {
 #[test]
 fn fusion_rule_exposes_unique_outputs_and_nsymbol_separately() {
     let z2 = ZNFusionRule::new(2).unwrap();
-    let su2 = SU2FusionRule;
+    let su2 = su2_rule();
 
     assert_eq!(z2.fusion_style(), FusionStyleKind::Unique);
     assert_eq!(
@@ -220,13 +222,15 @@ fn merge_fusion_trees_treats_rank_zero_as_the_tensor_unit() {
 
 #[test]
 fn merge_fusion_trees_pins_nontrivial_su2_f_coefficients() {
+    let su2_provider_rule = su2_rule();
     // What: merging a spin-1 tree into three spin-1/2 leaves is a genuine
     // associator expansion, not a pointed-rule relabelling.
     let lhs = FusionTreeKey::try_from_sector_ids([1, 1], 2, [false, false], [], [1]).unwrap();
     let rhs = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false; 3], [0], [1, 1]).unwrap();
 
     let terms =
-        merge_fusion_trees_multiplicity_free(&SU2FusionRule, &lhs, &rhs, SectorId::new(1)).unwrap();
+        merge_fusion_trees_multiplicity_free(&su2_provider_rule, &lhs, &rhs, SectorId::new(1))
+            .unwrap();
 
     assert_eq!(terms.len(), 2);
     assert_eq!(

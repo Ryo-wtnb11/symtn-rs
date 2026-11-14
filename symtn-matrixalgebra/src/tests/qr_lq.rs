@@ -1,6 +1,8 @@
 //! QR and LQ factorization tests.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn compact_qr_canonical_layout_skips_input_pack_and_factor_scatter() {
@@ -521,10 +523,10 @@ fn compact_qr_reconstructs_u1_fermion_parity_and_product_rules() {
     ];
     assert_compact_qr_reconstructs_rule(&product, &product_sectors);
 
-    let nested = symtn_core::ProductFusionRule::<_, _>::try_new(product, SU2FusionRule).unwrap();
+    let nested = symtn_core::ProductFusionRule::<_, _>::try_new(product, su2_rule()).unwrap();
     let nested_sectors = [
-        nested.encode_component_ids(product_sectors[0], SU2Irrep::from_twice_spin(0).sector_id()),
-        nested.encode_component_ids(product_sectors[1], SU2Irrep::from_twice_spin(1).sector_id()),
+        nested.encode_component_ids(product_sectors[0], symtn_core::SectorId::new(0)),
+        nested.encode_component_ids(product_sectors[1], symtn_core::SectorId::new(1)),
     ];
     let compact_qr_copy_rec = crate::probe::record();
     assert_compact_qr_reconstructs_rule(&nested, &nested_sectors);
@@ -554,6 +556,7 @@ where
 
 #[test]
 fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
+    let su2_provider_rule = su2_rule();
     // What: direct LQ routes preserve non-Abelian, abelian, fermionic, and nested product sector labels.
     assert_compact_lq_reconstructs_rule(
         &U1FusionRule,
@@ -564,11 +567,8 @@ fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
         ],
     );
     assert_compact_lq_reconstructs_rule(
-        &SU2FusionRule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        &su2_provider_rule,
+        &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
     assert_compact_lq_reconstructs_rule(
         &FermionParityFusionRule::new(),
@@ -585,10 +585,11 @@ fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
     ];
     assert_compact_lq_reconstructs_rule(&product, &product_sectors);
 
-    let nested = symtn_core::ProductFusionRule::<_, _>::try_new(product, SU2FusionRule).unwrap();
+    let nested =
+        symtn_core::ProductFusionRule::<_, _>::try_new(product, su2_provider_rule.clone()).unwrap();
     let nested_sectors = [
-        nested.encode_component_ids(product_sectors[0], SU2Irrep::from_twice_spin(0).sector_id()),
-        nested.encode_component_ids(product_sectors[1], SU2Irrep::from_twice_spin(1).sector_id()),
+        nested.encode_component_ids(product_sectors[0], symtn_core::SectorId::new(0)),
+        nested.encode_component_ids(product_sectors[1], symtn_core::SectorId::new(1)),
     ];
     let compact_lq_copy_rec = crate::probe::record();
     assert_compact_lq_reconstructs_rule(&nested, &nested_sectors);
@@ -823,19 +824,16 @@ fn full_and_compact_qr_lq_match_for_rank_deficient_no_completion_shapes() {
 #[test]
 fn qr_full_gives_square_unitary_and_reconstructs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let tensor = tsvd_test_tensor(
         &rule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let Qr { q, r } = qr_full(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
 
@@ -948,13 +946,10 @@ fn qr_compact_positive_gauge_idempotent_on_isometry() {
             assert_svd_blocks_match(&q, &q2);
             assert_identity_sector_matrices(&dense_sector_matrices(1, &r2));
         } else {
-            let rule = SU2FusionRule;
+            let rule = su2_rule();
             let tensor = tsvd_test_tensor(
                 &rule,
-                &[
-                    SU2Irrep::from_twice_spin(0).sector_id(),
-                    SU2Irrep::from_twice_spin(1).sector_id(),
-                ],
+                &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
             );
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let input = bound_tensor(Arc::new(rule), &tensor);

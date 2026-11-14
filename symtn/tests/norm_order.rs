@@ -7,9 +7,10 @@
 //! Recorded TensorKit values of the same fixtures are asserted in
 //! `tk_norm_p.rs` and `tk_norm_range.rs`.
 
+use crate::su2::{su2_irrep, Su2Rule};
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64, Error, Runtime};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
@@ -30,11 +31,11 @@ fn complex_fill(indices: &[usize]) -> Complex64 {
     )
 }
 
-fn compact_su2(rt: &Runtime) -> TensorMap<SU2FusionRule, f64> {
+fn compact_su2(rt: &Runtime) -> TensorMap<Su2Rule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (bond, _) = su2_norm_legs();
     let spectrum = |twice_spin, values: &[f64]| SectorSpectrum {
-        sector: SU2Irrep::from_twice_spin(twice_spin),
+        sector: su2_irrep(twice_spin),
         values: values.to_vec(),
     };
     TensorMap::diagonal(
@@ -124,12 +125,12 @@ fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
         TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
     let u1_c64: TensorMap<U1FusionRule, Complex64> =
         TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| complex_fill(i)).unwrap();
-    let su2_f64: TensorMap<SU2FusionRule, f64> =
+    let su2_f64: TensorMap<Su2Rule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| real_fill(i)).unwrap();
-    let su2_c64: TensorMap<SU2FusionRule, Complex64> =
+    let su2_c64: TensorMap<Su2Rule, Complex64> =
         TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| complex_fill(i)).unwrap();
     // Every fill entry is dyadic, so the `f32` payload holds it exactly.
-    let su2_c32: TensorMap<SU2FusionRule, Complex32> =
+    let su2_c32: TensorMap<Su2Rule, Complex32> =
         TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| {
             let z = complex_fill(i);
             Complex32::new(z.re as f32, z.im as f32)
@@ -137,7 +138,7 @@ fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
         .unwrap();
     // Squares leave the f64 range in both directions, so `p = 2` and the
     // power sums take their rescaling passes; the norm scales linearly.
-    let huge: TensorMap<SU2FusionRule, f64> =
+    let huge: TensorMap<Su2Rule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| 1e200 * real_fill(i))
             .unwrap();
     let tiny: TensorMap<U1FusionRule, Complex64> =
@@ -224,7 +225,7 @@ fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
     let (sv, sw) = su2_norm_legs();
     let u1_f64: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
-    let su2_c64: TensorMap<SU2FusionRule, Complex64> =
+    let su2_c64: TensorMap<Su2Rule, Complex64> =
         TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| complex_fill(i)).unwrap();
 
     let real = u1_f64.to_cuda(cuda).unwrap();
@@ -289,7 +290,7 @@ fn compact_host_reductions_match_the_device_frobenius_arm() {
     };
     let spectrum = |shift: f64| {
         [(0, 2), (1, 3), (2, 4)].map(|(twice, degeneracy)| SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(twice),
+            sector: su2_irrep(twice),
             values: (0..degeneracy).map(|k| value(twice, k, shift)).collect(),
         })
     };

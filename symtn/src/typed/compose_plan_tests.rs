@@ -2,14 +2,14 @@
 //! composition's route, the errors of corrupted stacks, and the CUDA zero
 //! regions of the inactive destination blocks against a hand derivation.
 
+#[cfg(feature = "cuda")]
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use super::*;
 use crate::sector::{
     product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
-#[cfg(feature = "cuda")]
-use crate::sector::{SU2FusionRule, SU2Irrep};
 use crate::typed::GradedSpace;
 #[cfg(feature = "cuda")]
 use std::collections::HashSet;
@@ -24,9 +24,9 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
 }
 
 #[cfg(feature = "cuda")]
-fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let j = SU2Irrep::from_twice_spin;
-    let rule = Arc::new(SU2FusionRule);
+fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
+    let j = su2_irrep;
+    let rule = Arc::new(su2_rule());
     (
         GradedSpace::try_new(Arc::clone(&rule), [(j(0), 2), (j(1), 2), (j(2), 1)]).unwrap(),
         GradedSpace::try_new(rule, [(j(0), 1), (j(2), 2)]).unwrap(),

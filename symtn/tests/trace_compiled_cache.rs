@@ -9,13 +9,14 @@
 //! `NoCache`). The hit must change nothing observable: values bit for bit,
 //! and the structure lookups every call makes.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 
@@ -85,10 +86,10 @@ fn u1_leg(leg: usize, sectors: usize) -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2_leg(leg: usize, sectors: usize) -> GradedSpace<SU2FusionRule> {
+fn su2_leg(leg: usize, sectors: usize) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        (0..sectors).map(|s| (SU2Irrep::from_twice_spin(s), 2 + (leg + s) % 3)),
+        Arc::new(su2_rule()),
+        (0..sectors).map(|s| (su2_irrep(s), 2 + (leg + s) % 3)),
     )
     .unwrap()
 }

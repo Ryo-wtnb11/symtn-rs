@@ -4,6 +4,7 @@
 //! out of the null spaces, so the factors must stay exactly unitary /
 //! complementary on the complete fused spaces.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
@@ -13,8 +14,8 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn::typed::{Lq, Qr, Svd};
@@ -176,10 +177,10 @@ macro_rules! all_symmetries {
             $value
         );
         // SU(2): codomain-only spin 1, domain-only spin 2.
-        let j = SU2Irrep::from_twice_spin;
+        let j = su2_irrep;
         side_only_case!(
             $engine,
-            SU2FusionRule,
+            su2_rule(),
             [(j(1), 2)],
             [(j(1), 1)],
             [(j(0), 1), (j(4), 2)],

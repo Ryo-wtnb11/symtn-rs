@@ -4,11 +4,10 @@
 //! cached plan.
 
 use crate::errors::Rejection as _;
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
-use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 use symtn_network::{
     clear_plan_cache, load_plan_cache, plan_cache_stats, save_plan_cache, GreedyDenseOptimizer,
@@ -196,12 +195,8 @@ paths!(
 paths!(
     su2_paths_agree,
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 1), (su2_irrep(2), 1),],
     )
     .unwrap()
 );

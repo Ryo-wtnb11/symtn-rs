@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 use symtn_dense::{DenseDType, DenseView};
 
 /// Owned EIGH entries; the destination form is refused, so a checked
@@ -306,7 +308,6 @@ fn checked_generic_eigh_preflights_all_sectors_and_runs_once_per_sector() {
 #[test]
 fn eig_full_accepts_finite_defective_sectors_in_both_modes_without_a_rank_svd() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     let counts = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(SpyExecutor::counting(&counts)));
@@ -327,14 +328,8 @@ fn eig_full_accepts_finite_defective_sectors_in_both_modes_without_a_rank_svd() 
         [(Label::Vacuum, 2), (Label::X, 3)],
     )
     .unwrap();
-    let mf_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 3),
-        ],
-    )
-    .unwrap();
+    let mf_leg =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), 2), (su2_irrep(2), 3)]).unwrap();
     macro_rules! check {
         ($leg:expr, $first:expr, $dtype:ty, $from:expr, $lambda:expr) => {{
             let from: fn(Complex64) -> $dtype = $from;
@@ -369,7 +364,7 @@ fn eig_full_accepts_finite_defective_sectors_in_both_modes_without_a_rank_svd() 
     let complex = [Complex64::new(2.0, 1.0), Complex64::new(-0.5, -0.25)];
     check!(checked_leg, Label::Vacuum, f64, |z| z.re, real);
     check!(checked_leg, Label::Vacuum, Complex64, |z| z, complex);
-    let spin_half = SU2Irrep::from_twice_spin(1);
+    let spin_half = su2_irrep(1);
     check!(mf_leg, spin_half, f64, |z| z.re, real);
     check!(mf_leg, spin_half, Complex64, |z| z, complex);
 }
@@ -447,13 +442,11 @@ impl DenseExecutor for NonfiniteEigenvectors {
 #[test]
 fn eig_full_rejects_provider_nonfinite_eigenvectors_in_both_modes() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn::sector::{SU2FusionRule, SU2Irrep};
 
     let runtime = Runtime::builder().build().unwrap();
     let checked_leg =
         GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(0)), [(Label::Vacuum, 3)]).unwrap();
-    let mf_leg =
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 3)]).unwrap();
+    let mf_leg = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), 3)]).unwrap();
     // `2 I + N`: finite, with finite eigenvalues.
     let jordan = |row: usize, col: usize| match col.checked_sub(row) {
         Some(0) => 2.0,

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn tensorcontract_fusion_granular_caches_handle_output_axes() {
@@ -6,7 +8,7 @@ fn tensorcontract_fusion_granular_caches_handle_output_axes() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let lhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2), (1, 2), (1, 2)], [(1, 2)]);
     let rhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2)], [(1, 2), (1, 2), (1, 2)]);
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
@@ -77,7 +79,7 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let mut context = TensorContractFusionExecutionContext::<Complex64, RuleIdentity>::default();
     let alpha = Complex64::new(-1.5, 0.25);
     let beta = Complex64::new(0.25, -0.125);

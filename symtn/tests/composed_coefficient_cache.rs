@@ -8,11 +8,12 @@
 //! Unique fusion is `NoCache`, as in TensorKit: it never enters the cache,
 //! and its degeneracy-only rebuild must still equal a cold Runtime's.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::Engine;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -186,10 +187,8 @@ fn su2_degeneracy_change_reuses_the_composed_coefficients() {
     let _serial = serial();
     let leg = |sectors: &[(usize, usize)]| {
         GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            sectors
-                .iter()
-                .map(|&(j, d)| (SU2Irrep::from_twice_spin(j), d)),
+            Arc::new(su2_rule()),
+            sectors.iter().map(|&(j, d)| (su2_irrep(j), d)),
         )
         .unwrap()
     };

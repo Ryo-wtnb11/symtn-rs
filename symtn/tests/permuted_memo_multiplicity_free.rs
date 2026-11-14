@@ -2,9 +2,10 @@
 //! permuted memo, without deriving it (no sector-structure lookup), and is
 //! bit-identical to the cold derivation; a cleared cache serves no memo.
 
+use crate::su2::{su2_irrep, su2_rule};
 use symtn::cache::StructureCacheKind;
 use symtn::sector::ZNIrrep;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule};
+use symtn::sector::{U1FusionRule, U1Irrep, ZNFusionRule};
 use symtn::typed::Engine;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
@@ -93,8 +94,8 @@ fn warm_multiplicity_free_permute_reuses_the_memoized_destination() {
     .unwrap();
     assert_memoized!(engine, "Z3", &runtime, z3_leg);
     let su2 = GradedSpace::try_new(
-        std::sync::Arc::new(SU2FusionRule),
-        (0..3).map(|twice| (SU2Irrep::from_twice_spin(twice), 2)),
+        std::sync::Arc::new(su2_rule()),
+        (0..3).map(|twice| (su2_irrep(twice), 2)),
     )
     .unwrap();
     assert_memoized!(engine, "SU2", &runtime, su2);

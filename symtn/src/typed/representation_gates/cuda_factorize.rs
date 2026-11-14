@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 use crate::typed::probe::{Fault, Gauge};
 
 /// `(qr calls, factor copies, selector uploads, output uploads, assembly
@@ -330,13 +332,10 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
         1.0e-10,
     );
 
-    let su2_provider = Arc::new(SU2FusionRule);
+    let su2_provider = Arc::new(su2_rule());
     let su2_leg = GradedSpace::try_new(
         Arc::clone(&su2_provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 2)],
     )
     .unwrap();
     let su2_source =
@@ -544,13 +543,10 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 2)],
     )
     .unwrap();
     let source = TensorMap::from_subblock_fn(cpu, &runtime, [&leg, &leg], [&leg], |_, indices| {
@@ -660,13 +656,10 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 2)],
     )
     .unwrap();
     let source = TensorMap::from_subblock_fn(cpu, &runtime, [&leg, &leg], [&leg], |_, indices| {
@@ -986,14 +979,8 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
         ],
     )
     .unwrap();
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(1), 2)]).unwrap();
     fn cases<R>(runtime: &Runtime, leg: &GradedSpace<R>) -> usize
     where
         R: symtn_core::TypedSectorAdmission<
@@ -1377,15 +1364,9 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
     let wide = u1_leg(&[(-1, 3), (0, 4), (1, 2), (3, 2)]);
     assert_device_svd_diagonal_every_dtype(&runtime, &[&small, &small], &[&wide]);
 
-    let su2 = Arc::new(SU2FusionRule);
-    let su2_leg = GradedSpace::try_new(
-        Arc::clone(&su2),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 = Arc::new(su2_rule());
+    let su2_leg =
+        GradedSpace::try_new(Arc::clone(&su2), [(su2_irrep(0), 2), (su2_irrep(1), 2)]).unwrap();
     // Spin 3/2 occurs in the codomain only.
     assert_device_svd_diagonal_every_dtype(&runtime, &[&su2_leg, &su2_leg, &su2_leg], &[&su2_leg]);
 

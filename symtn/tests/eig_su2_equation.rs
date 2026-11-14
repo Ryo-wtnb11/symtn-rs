@@ -9,10 +9,10 @@
 //! an arbitrary non-symmetric fill; the oracle reads the coupled blocks back
 //! and multiplies them densely here, with no symtn contraction.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{Eig, GradedSpace, TensorMap};
 
 use crate::fixtures;
@@ -20,13 +20,12 @@ use crate::numerics;
 
 use fixtures::host_runtime;
 
-type Map<D> = TensorMap<SU2FusionRule, D>;
+type Map<D> = TensorMap<Su2Rule, D>;
 
-fn leg() -> GradedSpace<SU2FusionRule> {
+fn leg() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [(0, 2), (1, 1), (2, 1)]
-            .map(|(twice, degeneracy)| (SU2Irrep::from_twice_spin(twice), degeneracy)),
+        Arc::new(su2_rule()),
+        [(0, 2), (1, 1), (2, 1)].map(|(twice, degeneracy)| (su2_irrep(twice), degeneracy)),
     )
     .unwrap()
 }
@@ -68,7 +67,7 @@ fn matmul(a: &[Complex64], b: &[Complex64], n: usize) -> Vec<Complex64> {
     out
 }
 
-fn dense_block(t: &Map<Complex64>, sector: &SU2Irrep) -> (usize, Vec<Complex64>) {
+fn dense_block(t: &Map<Complex64>, sector: &symtn_core::LieIrrep) -> (usize, Vec<Complex64>) {
     let block = t.block(sector).unwrap();
     let n = block.rows();
     assert_eq!(block.cols(), n, "an endomorphism block is square");
@@ -81,9 +80,10 @@ fn dense_block(t: &Map<Complex64>, sector: &SU2Irrep) -> (usize, Vec<Complex64>)
 fn assert_eig_full(t: &Map<Complex64>, Eig { d, v }: Eig<Map<Complex64>>) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let spectra = d.diagview(engine).unwrap();
-    let sectors: Vec<SU2Irrep> = t.blocks().unwrap().map(|(sector, _)| sector).collect();
+    let sectors: Vec<symtn_core::LieIrrep> =
+        t.blocks().unwrap().map(|(sector, _)| sector).collect();
     assert_eq!(
-        spectra.iter().map(|s| s.sector).collect::<Vec<_>>(),
+        spectra.iter().map(|s| s.sector.clone()).collect::<Vec<_>>(),
         sectors,
         "one spectrum per coupled sector"
     );

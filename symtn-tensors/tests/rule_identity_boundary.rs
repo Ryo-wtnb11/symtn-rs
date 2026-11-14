@@ -1,8 +1,9 @@
+use crate::su2::su2_rule;
 use std::sync::Arc;
 use symtn_core::{
     BraidingStyleKind, CoreError, FusionRule, FusionStyleKind, FusionTreeHomSpace,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    RuleIdentity, SU2FusionRule, SectorId, SectorVec, U1FusionRule, ZNFusionRule,
+    RuleIdentity, SectorId, SectorVec, U1FusionRule, ZNFusionRule,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, ContractDestinationInit, FusionOperand,
@@ -18,7 +19,7 @@ struct SymbolOnlyRule {
 
 #[test]
 fn su2_tree_transform_key_contains_the_rule_identity() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     assert_eq!(rule.tree_transform_rule_cache_key(), rule.rule_identity());
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 
 const VACUUM: TableSector = TableSector::new(1);
 const TAU: TableSector = TableSector::new(2);
@@ -671,24 +672,18 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         .report()
         .contains("fuse: degeneracy multiplication overflow"));
 
-    let su2_provider = Arc::new(SU2FusionRule);
-    let half = SU2Irrep::from_twice_spin(1);
-    let su2_left = GradedSpace::try_new(Arc::clone(&su2_provider), [(half, 2)])
+    let su2_provider = Arc::new(su2_rule());
+    let half = su2_irrep(1);
+    let su2_left = GradedSpace::try_new(Arc::clone(&su2_provider), [(half.clone(), 2)])
         .and_then(|space| space.try_dual())
         .unwrap();
-    let su2_right = GradedSpace::try_new(Arc::clone(&su2_provider), [(half, 3)]).unwrap();
+    let su2_right = GradedSpace::try_new(Arc::clone(&su2_provider), [(half.clone(), 3)]).unwrap();
     assert_eq!(su2_left.sectors().unwrap(), [half]);
     assert!(su2_left.is_dual());
     assert_eq!(su2_left.dim().unwrap(), 4.0);
     let su2_fused = su2_left.fuse(&su2_right).unwrap();
-    assert_eq!(
-        su2_fused.degeneracy(&SU2Irrep::from_twice_spin(0)).unwrap(),
-        6
-    );
-    assert_eq!(
-        su2_fused.degeneracy(&SU2Irrep::from_twice_spin(2)).unwrap(),
-        6
-    );
+    assert_eq!(su2_fused.degeneracy(&su2_irrep(0)).unwrap(), 6);
+    assert_eq!(su2_fused.degeneracy(&su2_irrep(2)).unwrap(), 6);
 
     let z2_provider = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let z2_dual = GradedSpace::try_new(
@@ -864,7 +859,7 @@ fn graded_space_carries_a_simple_fusion_provider_too() {
     let provider = Arc::new(external_su2());
     let space = su2_leg(&provider, true);
 
-    assert_eq!(space.sectors().unwrap(), vec![SU2Irrep::from_twice_spin(1)]);
+    assert_eq!(space.sectors().unwrap(), vec![su2_irrep(1)]);
     assert!(space.is_dual());
     assert_eq!(crate::typed_facade::completed_transformers().entries(), 0);
 }

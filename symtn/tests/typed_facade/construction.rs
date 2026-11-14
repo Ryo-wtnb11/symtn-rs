@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 
 #[test]
 fn tensor_map_zeros_carries_a_complex_payload() {
@@ -326,6 +327,7 @@ fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
 
 #[test]
 fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
@@ -392,18 +394,21 @@ fn labelled_subblocks_borrow_u1_and_su2_values_in_canonical_order() {
     assert_eq!(su2_blocks.len(), su2.subblock_count());
     for (index, (trees, values)) in su2_blocks.enumerate() {
         let raw = su2.subblock(index).unwrap();
-        assert_eq!(trees.coupled(), &SU2Irrep::from_twice_spin(0));
+        assert_eq!(trees.coupled(), &su2_irrep(0));
         assert!(trees.domain_uncoupled().is_empty());
-        assert!(SU2FusionRule
+        assert!(su2_provider_rule
+            .clone()
             .fusion_channels(
-                SU2FusionRule
+                su2_provider_rule
+                    .clone()
                     .encode_sector(&trees.codomain_uncoupled()[0])
                     .unwrap(),
-                SU2FusionRule
+                su2_provider_rule
+                    .clone()
                     .encode_sector(&trees.codomain_uncoupled()[1])
                     .unwrap(),
             )
-            .contains(&SU2FusionRule.encode_sector(trees.coupled()).unwrap()));
+            .contains(&su2_provider_rule.encode_sector(trees.coupled()).unwrap()));
         assert_eq!(values.shape(), raw.shape());
         assert_eq!(values.strides(), raw.strides());
         assert_eq!(values.data().as_ptr(), su2.dense_data().unwrap().as_ptr());
@@ -467,7 +472,7 @@ fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
         [&leg, &leg],
         |sectors, indices| {
             Complex64::new(
-                sectors.coupled().twice_spin() as f64,
+                usize::try_from(sectors.coupled().dynkin().next().unwrap()).unwrap() as f64,
                 indices.iter().sum::<usize>() as f64,
             )
         },
@@ -482,7 +487,9 @@ fn simple_fusion_provider_round_trips_construction_fill_and_inspection() {
                 .subblock_fusion_trees(index)
                 .unwrap()
                 .coupled()
-                .twice_spin()
+                .dynkin()
+                .next()
+                .unwrap() as usize
         })
         .collect();
     assert!(coupled.contains(&0) && coupled.contains(&2));

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 
 /// `(zero uploads, kernels)` of the device arithmetic in `recording`.
 #[cfg(feature = "cuda")]
@@ -667,13 +669,10 @@ fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
 
-    let su2_provider = Arc::new(SU2FusionRule);
+    let su2_provider = Arc::new(su2_rule());
     let su2 = GradedSpace::try_new(
         Arc::clone(&su2_provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        [(su2_irrep(0), 1), (su2_irrep(1), 2)],
     )
     .unwrap();
     let su2_lhs = TensorMap::from_subblock_fn(
@@ -1133,22 +1132,12 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     }
     let fsu2 = GradedSpace::try_new(
         Arc::new(
-            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
-                .unwrap(),
+            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap(),
         ),
         [
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
-                2,
-            ),
-            (
-                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
-                1,
-            ),
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
-                1,
-            ),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
         ],
     )
     .unwrap();
@@ -1162,14 +1151,8 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     }
 
     // A bosonic provider is the identity before any block walk: no lowering.
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1), (su2_irrep(1), 2)]).unwrap();
     let t: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&su2, &su2], [&su2], fill).unwrap();
     let twisted = t.twist(cpu, &[0, 2], Direction::Forward).unwrap();
@@ -1335,12 +1318,8 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
     // SU(2): several fusion-tree blocks per coupled sector, each a strided
     // view into its coupled-sector matrix.
     let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 3),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 3), (su2_irrep(2), 1)],
     )
     .unwrap();
     let real: TensorMap<_, f64> =

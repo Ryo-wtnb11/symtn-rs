@@ -1,7 +1,7 @@
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::hint::black_box;
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -14,16 +14,13 @@ fn repartition_to_current_split_does_not_allocate() {
     // What: a repartition which leaves the boundary unchanged only clones Arc
     // handles, preserves provider authority, and performs no heap allocation.
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        [(su2_irrep(0), 1), (su2_irrep(1), 2)],
     )
     .unwrap();
-    let source: TensorMap<SU2FusionRule, f64> =
+    let source: TensorMap<Su2Rule, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 191).unwrap();
 
     black_box(source.repartition(engine, source.codomain_rank()).unwrap());

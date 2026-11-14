@@ -1,7 +1,10 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 #[test]
 fn coupled_sector_dimensions_cover_empty_and_multiplicity_free_products() {
+    let su2_provider_rule = su2_rule();
     // What: product-space dimensions use the tensor unit for rank zero,
     // annihilate on an empty leg, and reproduce U1/SU2 fusion dimensions.
     let empty = FusionProductSpace::new(std::iter::empty::<SectorLeg>());
@@ -34,7 +37,7 @@ fn coupled_sector_dimensions_cover_empty_and_multiplicity_free_products() {
     let su2_product = FusionProductSpace::new([half.clone(), half]);
     assert_eq!(
         su2_product
-            .coupled_sector_block_dimensions(&SU2FusionRule)
+            .coupled_sector_block_dimensions(&su2_provider_rule)
             .unwrap(),
         BTreeMap::from([(su2(0), 1), (su2(2), 1)])
     );
@@ -148,6 +151,7 @@ pub(super) fn fusion_tree_pair_order(
 
 #[test]
 fn canonical_coupled_layouts_pass_checked_subset_proof() {
+    let su2_provider_rule = su2_rule();
     // What: canonical built-in coupled layouts pass the finite-algebra
     // subset proof.
     fn assert_rule<R>(rule: &R, sector: SectorId)
@@ -166,13 +170,13 @@ fn canonical_coupled_layouts_pass_checked_subset_proof() {
     assert_rule(&ZNFusionRule::new(2).unwrap(), z2_even());
     assert_rule(&FermionParityFusionRule::new(), z2_odd());
     assert_rule(&U1FusionRule, u1(7));
-    assert_rule(&SU2FusionRule, su2(3));
+    assert_rule(&su2_provider_rule, su2(3));
     assert_rule(&TableRule::fibonacci(), SectorId::new(1));
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type Triple = ProductFusionRule<Fz2U1, SU2FusionRule>;
+    type Triple = ProductFusionRule<Fz2U1, Su2Rule>;
     let pair = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let pair_sector = pair.encode_component_ids(z2_odd(), u1(2));
-    let triple = Triple::try_new(pair, SU2FusionRule).unwrap();
+    let triple = Triple::try_new(pair, su2_provider_rule.clone()).unwrap();
     let triple_sector = triple.encode_component_ids(pair_sector, su2(1));
     assert_rule(&triple, triple_sector);
 }
@@ -203,13 +207,14 @@ fn tree_pair_block_apis_reject_mixed_fusion_tree_groups_before_symbols() {
 
 #[test]
 fn simple_prepared_braid_has_runtime_rank_schedule() {
+    let su2_provider_rule = su2_rule();
     // What: a nontrivial SimpleFusion braid keeps the complete high-rank
     // Artin schedule through compilation without a rank-specialized plan.
     let rank = 19;
     let permutation = (0..rank).rev().collect::<Vec<_>>();
     let levels = (0..rank).collect::<Vec<_>>();
     let prepared = PreparedTreePairOperation::prepare_braid(
-        &SU2FusionRule,
+        &su2_provider_rule,
         rank,
         0,
         &permutation,

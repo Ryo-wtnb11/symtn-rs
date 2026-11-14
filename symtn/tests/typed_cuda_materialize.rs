@@ -13,6 +13,7 @@
 #![cfg(feature = "cuda")]
 
 use crate::report;
+use crate::su2::{su2_irrep, su2_rule};
 use report::Report;
 
 use std::sync::Arc;
@@ -20,8 +21,7 @@ use std::sync::Arc;
 use num_complex::{Complex32, Complex64};
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{GradedSpace, TensorMap};
@@ -286,12 +286,8 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
     )
     .unwrap();
     let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-            (SU2Irrep::from_twice_spin(2), 2),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 1), (su2_irrep(2), 2)],
     )
     .unwrap();
     let fz2_u1 = GradedSpace::try_new(

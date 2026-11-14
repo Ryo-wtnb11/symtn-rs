@@ -13,12 +13,13 @@
 //! Exact counts and bytes are printed, not pinned: they move with platform
 //! and dependency internals.
 
+use crate::su2::su2_rule;
 use std::sync::Arc;
 use symtn_dense::Engine;
 
 use symtn_core::{
-    FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols, SU2FusionRule, SU2Irrep,
-    SectorId, SectorLeg, StructureCacheKind, U1FusionRule, U1Irrep,
+    FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols, SectorId, SectorLeg,
+    StructureCacheKind, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DirectCoreExecutor, FusionOperand, HostContractMembersWorkspace,
@@ -70,7 +71,7 @@ fn su2_leg(reach: i32) -> SectorLeg {
     SectorLeg::new(
         (0..=reach).map(|twice| {
             (
-                SU2Irrep::from_twice_spin(twice as _).sector_id(),
+                symtn_core::SectorId::new(twice as _),
                 if twice == 0 { 2 } else { 1 },
             )
         }),
@@ -261,10 +262,10 @@ fn dynamic_tree_route_allocations_follow_their_contracts() {
             row(engine, &identity_output(U1FusionRule, || u1_leg(reach)))
         }),
         ("SU2 transformed", |engine, reach| {
-            row(engine, &transformed(SU2FusionRule, || su2_leg(reach)))
+            row(engine, &transformed(su2_rule(), || su2_leg(reach)))
         }),
         ("SU2 identity output", |engine, reach| {
-            row(engine, &identity_output(SU2FusionRule, || su2_leg(reach)))
+            row(engine, &identity_output(su2_rule(), || su2_leg(reach)))
         }),
     ];
     for (name, row) in fixtures {

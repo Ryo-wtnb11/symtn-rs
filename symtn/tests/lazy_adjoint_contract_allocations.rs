@@ -4,12 +4,13 @@
 //! store, and the operand projection reuses the parent's memoized adjoint, so
 //! a warm lazy-adjoint call allocates no more than the owned `contract`.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::hint::black_box;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -132,7 +133,7 @@ fn warm_lazy_adjoint_u1_allocates_like_owned_contract() {
 fn warm_lazy_adjoint_su2_allocates_like_owned_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_warm_lazy_adjoint!(engine, SU2FusionRule, (0..3).map(SU2Irrep::from_twice_spin));
+    assert_warm_lazy_adjoint!(engine, su2_rule(), (0..3).map(su2_irrep));
 }
 
 #[test]

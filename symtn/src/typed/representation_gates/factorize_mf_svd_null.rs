@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 
 #[test]
 fn compact_diagonal_svd_full_preserves_spaces_without_materialization_or_solver() {
@@ -247,20 +249,24 @@ fn compact_diagonal_null_is_empty_by_shape_without_dense_work() {
     check_scalar!(engine, num_complex::Complex32);
     check_scalar!(engine, num_complex::Complex64);
 
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let half = SU2Irrep::from_twice_spin(1);
-    let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 3), (half, 2)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let half = su2_irrep(1);
+    let su2 = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 3), (half.clone(), 2)],
+    )
+    .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
         &su2,
         [
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![3.0, 0.0, -2.0],
             },
             SectorSpectrum {
-                sector: half,
+                sector: half.clone(),
                 values: vec![0.0, 4.0],
             },
         ],
@@ -912,19 +918,19 @@ fn compact_diagonal_svd_other_host_scalars_and_sectors() {
             num_complex::Complex32,
             1e-5
         );
-        let spin0 = SU2Irrep::from_twice_spin(0);
-        let spin_half = SU2Irrep::from_twice_spin(1);
+        let spin0 = su2_irrep(0);
+        let spin_half = su2_irrep(1);
         check!(
             engine,
-            SU2FusionRule,
-            [(spin0, 2), (spin_half, 1)],
+            su2_rule(),
+            [(spin0.clone(), 2), (spin_half.clone(), 1)],
             [
                 SectorSpectrum {
-                    sector: spin_half,
+                    sector: spin_half.clone(),
                     values: vec![-4.0_f64]
                 },
                 SectorSpectrum {
-                    sector: spin0,
+                    sector: spin0.clone(),
                     values: vec![2.0, -3.0]
                 },
             ],

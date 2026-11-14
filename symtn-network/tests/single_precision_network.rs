@@ -10,9 +10,10 @@
 //! and `n` the payload length of the largest operand — the naive-sum bound for
 //! the contraction the network performs.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
@@ -199,11 +200,8 @@ macro_rules! network_suite {
                 let engine = &mut symtn::typed::CpuEngine::serial();
                 let runtime = Runtime::builder().build().unwrap();
                 let leg = GradedSpace::try_new(
-                    Arc::new(SU2FusionRule),
-                    [
-                        (SU2Irrep::from_twice_spin(0), 2),
-                        (SU2Irrep::from_twice_spin(1), 2),
-                    ],
+                    Arc::new(su2_rule()),
+                    [(su2_irrep(0), 2), (su2_irrep(1), 2)],
                 )
                 .unwrap();
                 let (a, wa) = twin!(

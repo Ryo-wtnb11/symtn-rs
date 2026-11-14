@@ -8,12 +8,14 @@
 //! artifact. Independent oracles for the typed lowering live in
 //! `symtn/tests/typed_contract_host_oracle.rs` and `typed_cuda_contract.rs`.
 
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use std::sync::Arc;
 use symtn_dense::Engine;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols,
-    ProductFusionRule, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, U1FusionRule, U1Irrep,
+    ProductFusionRule, SectorId, SectorLeg, U1FusionRule, U1Irrep,
 };
 use symtn_operations::{OutputAxisOrder, TensorContractSpec};
 
@@ -60,9 +62,9 @@ fn u1_leg(dual: bool) -> SectorLeg {
 fn su2_leg() -> SectorLeg {
     SectorLeg::new(
         [
-            (SU2Irrep::from_twice_spin(0).sector_id(), 2),
-            (SU2Irrep::from_twice_spin(1).sector_id(), 1),
-            (SU2Irrep::from_twice_spin(2).sector_id(), 1),
+            (symtn_core::SectorId::new(0), 2),
+            (symtn_core::SectorId::new(1), 1),
+            (symtn_core::SectorId::new(2), 1),
         ],
         false,
     )
@@ -112,8 +114,8 @@ fn u1_case() -> Case<U1FusionRule> {
     }
 }
 
-fn su2_case() -> Case<SU2FusionRule> {
-    let provider = Arc::new(SU2FusionRule);
+fn su2_case() -> Case<Su2Rule> {
+    let provider = Arc::new(su2_rule());
     let s = su2_leg;
     Case {
         lhs: space(&provider, vec![s(), s()], vec![s(), s()]),
@@ -273,8 +275,8 @@ where
     (output_shape, result)
 }
 
-fn su2_rank5_case() -> Case<SU2FusionRule> {
-    let provider = Arc::new(SU2FusionRule);
+fn su2_rank5_case() -> Case<Su2Rule> {
+    let provider = Arc::new(su2_rule());
     let s = su2_leg;
     Case {
         lhs: space(&provider, vec![s(), s(), s()], vec![s(), s()]),
@@ -790,7 +792,7 @@ fn dynamic_artifact_rejects_malformed_twisted_members_before_writes() {
 #[test]
 fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_replay() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let s = su2_leg;
     let case = Case {
         lhs: space(&provider, vec![s(), s(), s()], vec![s(), s()]),
@@ -1050,7 +1052,7 @@ fn orientations() -> [FusionContractOrientation; 2] {
 }
 
 type FermionU1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type FermionSu2 = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+type FermionSu2 = ProductFusionRule<FermionParityFusionRule, Su2Rule>;
 
 const EVEN: SectorId = SectorId::new(0);
 const ODD: SectorId = SectorId::new(1);
@@ -1075,15 +1077,15 @@ fn fermion_su2_leg(rule: &FermionSu2, dual: bool) -> SectorLeg {
     SectorLeg::new(
         [
             (
-                rule.encode_component_ids(EVEN, SU2Irrep::from_twice_spin(0).sector_id()),
+                rule.encode_component_ids(EVEN, symtn_core::SectorId::new(0)),
                 2,
             ),
             (
-                rule.encode_component_ids(ODD, SU2Irrep::from_twice_spin(1).sector_id()),
+                rule.encode_component_ids(ODD, symtn_core::SectorId::new(1)),
                 2,
             ),
             (
-                rule.encode_component_ids(EVEN, SU2Irrep::from_twice_spin(2).sector_id()),
+                rule.encode_component_ids(EVEN, symtn_core::SectorId::new(2)),
                 1,
             ),
         ],
@@ -1233,7 +1235,7 @@ fn fermionic_su2_cases() -> Vec<(&'static str, Case<FermionSu2>)> {
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
@@ -1657,7 +1659,7 @@ fn the_fermionic_twist_rides_on_the_operand_already_copied_or_the_smaller() {
     let fsu2 = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
@@ -1872,7 +1874,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
 #[test]
 fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tree() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let s = su2_leg;
     // Lazy lhs: `X^H` against `rhs` over `X^H`'s whole domain, output bent.
     let x = space(&provider, vec![s(), s()], vec![s(), s()]);
@@ -2656,7 +2658,7 @@ fn square_case<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 #[test]
 fn host_eager_and_the_device_planner_take_the_same_route() {
     let u1 = Arc::new(U1FusionRule);
-    let su2 = Arc::new(SU2FusionRule);
+    let su2 = Arc::new(su2_rule());
     let u1_v = || u1_leg(false);
     let bosonic: Vec<(&str, (RouteKind, RouteKind), RouteKind)> = vec![
         (
@@ -2732,9 +2734,9 @@ fn host_eager_and_the_device_planner_take_the_same_route() {
     let u1_rhs = space(&u1, vec![u1_v(), u1_v()], vec![u1_v()]);
     type Lazy<'a> = (
         &'a str,
-        &'a BoundDynamicFusionMapSpace<SU2FusionRule>,
+        &'a BoundDynamicFusionMapSpace<Su2Rule>,
         FusionOperand<'a>,
-        &'a BoundDynamicFusionMapSpace<SU2FusionRule>,
+        &'a BoundDynamicFusionMapSpace<Su2Rule>,
         FusionOperand<'a>,
         Vec<usize>,
         Vec<usize>,
@@ -2877,7 +2879,7 @@ fn host_eager_and_the_device_planner_take_the_same_route() {
     let fsu2 = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );

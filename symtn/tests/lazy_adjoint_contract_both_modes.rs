@@ -18,7 +18,7 @@
 //! - (i) reference steps: `copy(t')` (the uncached `materialize`), then the
 //!   same operation on owned operands;
 //! - (ii) cross-mode agreement: SU(2) admitted multiplicity-free
-//!   (`SU2FusionRule`) against checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two
+//!   (`MF Lie SU(2)`) against checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two
 //!   adapters to the same exact A1 provider on one input;
 //! - SU(3) (checked only) with outer multiplicity two (`8 ⊗ 8 → 8`) and a
 //!   dual leg against (i).
@@ -28,12 +28,13 @@
 
 #![cfg(feature = "cgc-gen")]
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
-use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn::typed::__network::{network_reuse_class, NetworkReuseClass};
 use symtn::typed::{BlockFusionTrees, Complex64, ContractSpec, GradedSpace, TensorMap};
 
@@ -297,14 +298,11 @@ fn sun_spin(sector: &LieIrrep) -> usize {
 
 fn su2_sources(
     engine: &mut dyn Engine,
-) -> (
-    TensorMap<SU2FusionRule, f64>,
-    TensorMap<LieGroupFusionRule, f64>,
-) {
+) -> (TensorMap<Su2Rule, f64>, TensorMap<LieGroupFusionRule, f64>) {
     let runtime = host_runtime();
     let mf = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
+        Arc::new(su2_rule()),
+        SECTORS.map(|(s, k)| (su2_irrep(s), k)),
     )
     .unwrap();
     let checked = GradedSpace::try_new(
@@ -347,9 +345,9 @@ fn assert_modes_agree(mf: Rows, checked: Rows) {
 fn su2_adjoint_transforms_stay_lazy_and_agree_across_modes_f64() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let (mf, checked) = su2_sources(engine);
-    let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
-        t, su2_spin
-    ));
+    let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<symtn_core::LieIrrep>| {
+        twice(t, su2_spin)
+    });
     let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));
@@ -373,9 +371,9 @@ fn su2_adjoint_transforms_stay_lazy_and_agree_across_modes_c64() {
             .scale(engine, phase)
             .unwrap(),
     );
-    let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
-        t, su2_spin
-    ));
+    let mf = transform_rows!(engine, mf, |t: &BlockFusionTrees<symtn_core::LieIrrep>| {
+        twice(t, su2_spin)
+    });
     let checked = transform_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));
@@ -421,9 +419,9 @@ fn su3_adjoint_transforms_with_outer_multiplicity_stay_lazy() {
 fn su2_adjoint_operands_contract_and_agree_across_modes_f64() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let (mf, checked) = su2_sources(engine);
-    let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
-        t, su2_spin
-    ));
+    let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<symtn_core::LieIrrep>| {
+        twice(t, su2_spin)
+    });
     let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));
@@ -446,9 +444,9 @@ fn su2_adjoint_operands_contract_and_agree_across_modes_c64() {
             .scale(engine, phase)
             .unwrap(),
     );
-    let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
-        t, su2_spin
-    ));
+    let mf = contract_rows!(engine, mf, |t: &BlockFusionTrees<symtn_core::LieIrrep>| {
+        twice(t, su2_spin)
+    });
     let checked = contract_rows!(engine, checked, |t: &BlockFusionTrees<LieIrrep>| twice(
         t, sun_spin
     ));

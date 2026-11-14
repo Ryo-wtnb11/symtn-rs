@@ -1,10 +1,11 @@
 use super::super::scratch::DynamicFusionScratchWorkspace;
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use std::cell::Cell;
 use symtn_core::{
-    FusionProductSpace, FusionRule, SU2FusionRule, SectorId, SectorLeg, U1FusionRule, U1Irrep,
-    ZNFusionRule,
+    FusionProductSpace, FusionRule, SectorId, SectorLeg, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn_operations::TensorContractSpec;
 
@@ -19,7 +20,7 @@ thread_local! {
 }
 
 fn counting_su2_primer(
-    rule: &SU2FusionRule,
+    rule: &Su2Rule,
     request: MetadataRequest<'_>,
 ) -> Result<MetadataOutput, OperationError> {
     EXECUTION_PRIMER_CALLS.with(|calls| calls.set(calls.get() + 1));
@@ -268,14 +269,14 @@ fn execution_layout_primer_runs_once_per_derivation() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let homspace = FusionTreeHomSpace::from_sector_ids([(7, 3); 4], []);
     let source = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let scalar_homspace = FusionTreeHomSpace::from_sector_ids([], []);
     let scalar = DynamicFusionMapSpace::from_final_homspace(&rule, scalar_homspace).unwrap();
     let operation = TreeTransformOperation::permute([0, 2, 1, 3], []);
     let axes = TensorContractSpec::new(&[], &[], OutputAxisOrder::from_axes(&[0, 2, 1, 3]));
-    let provider = Arc::new(rule);
+    let provider = Arc::new(rule.clone());
     let source_bound =
         super::super::dynamic_space::BoundDynamicFusionMapSpace::bind_multiplicity_free(
             source.clone(),

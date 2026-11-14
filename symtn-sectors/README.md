@@ -19,7 +19,9 @@ groups return `Provider(LieError::Unsupported { requires: "lie-generated" })`;
 `cgc-gen` enables fusion-symbols' `lie-generated` for the rest. It validates full
 global-form admission, ranks Dynkin labels then zigzag-mapped torus charges
 by graded lexicographic order, and forwards all symbols to fusion-symbols;
-its typed label is fusion-symbols' `LieIrrep`. Checked Generic mode runs every
+its typed label is fusion-symbols' `LieIrrep`. `GroupId` and `LieIrrep`
+are re-exported here so callers can construct the rule without a direct
+fusion-symbols dependency. Checked Generic mode runs every
 rank on the Host multiplicity path. Multiplicity-free mode
 (`MultiplicityFreeAdmissionMode`) admits a group whose fusion-symbols style is
 `Unique` or `Simple` (tori, rank-one groups, D2, U(2) and their products) and
@@ -30,7 +32,6 @@ A group fusion-symbols rejects fails at construction with
 `LieGroupFusionRuleError::Provider`. Multiplicity-free mode also provides
 `PhysicalFusionBasis`: rank-one factors in TensorKit's descending-`m` SU(2)
 order, composed as TensorKit's `ProductSector`, tori one-dimensional; a
-doubled spin beyond `i32` returns `PhysicalBasisError::Unsupported`. The
-compact `SU2FusionRule` keeps its multiplicity-free and physical-basis
-capabilities, bit for bit equal to the multiplicity-free Lie rule over SU(2).
+doubled spin beyond `i32` returns `PhysicalBasisError::Unsupported`. SU(2) uses
+`LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(GroupId::su(2)?)`.
 Raw `SectorId` values remain rule-local rather than stable wire data.

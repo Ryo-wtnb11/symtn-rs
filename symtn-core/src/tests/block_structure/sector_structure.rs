@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 #[test]
 fn canonical_coupled_grid_matches_literal_u1_sector_matrices() {
@@ -107,6 +109,7 @@ fn canonical_coupled_grid_matches_literal_u1_sector_matrices() {
 
 #[test]
 fn canonical_su2_innerline_grid_matches_literal_sector_matrices() {
+    let su2_provider_rule = su2_rule();
     let half = su2(1);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([
@@ -121,7 +124,7 @@ fn canonical_su2_innerline_grid_matches_literal_sector_matrices() {
         ]),
     );
 
-    let layout = homspace.fusion_tree_layout_data_uncached(&SU2FusionRule);
+    let layout = homspace.fusion_tree_layout_data_uncached(&su2_provider_rule);
     assert_eq!(layout.keys.len(), 5);
     assert_eq!(layout.sectors.len(), 2);
     assert_eq!(
@@ -160,7 +163,7 @@ fn canonical_su2_innerline_grid_matches_literal_sector_matrices() {
     }
 
     let structure = homspace
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
     let expected_offsets = [0, 30, 60060, 60090, 120120];
     for (index, &offset) in expected_offsets.iter().enumerate() {
@@ -255,7 +258,7 @@ fn fusion_layout_lookup_and_reset_are_concurrent_safe() {
 #[test]
 fn braid_tree_pair_block_matches_per_source() {
     use std::collections::BTreeMap;
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let leg = || {
         SectorLeg::new(
             [
@@ -413,7 +416,7 @@ where
 
 #[test]
 fn compact_block_operators_match_su2_cohort_oracles() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let sources = compact_operator_cohort_fixture(&rule, su2(2), su2(2));
 
     assert_compact_operator_cohorts(&rule, &sources);
@@ -422,11 +425,11 @@ fn compact_block_operators_match_su2_cohort_oracles() {
 #[test]
 fn compact_block_operators_match_fermionic_product_cohort_oracles() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type ProductRule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let external = rule.encode_component_ids(left.encode_component_ids(z2_odd(), u1(0)), su2(2));
@@ -477,7 +480,7 @@ where
 
 #[test]
 fn all_codomain_compact_block_matches_su2_cohorts() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let sources = compact_operator_cohort_fixture(&rule, su2(2), su2(2))
         .into_iter()
         .map(|source| source.codomain_tree().clone())
@@ -489,11 +492,11 @@ fn all_codomain_compact_block_matches_su2_cohorts() {
 #[test]
 fn all_codomain_compact_block_matches_fermionic_product_cohorts() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type ProductRule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let external = rule.encode_component_ids(left.encode_component_ids(z2_odd(), u1(0)), su2(2));
@@ -509,7 +512,7 @@ fn all_codomain_compact_block_matches_fermionic_product_cohorts() {
 #[test]
 fn transpose_tree_pair_block_matches_full_key_su2_cycles_and_repartition() {
     use std::collections::BTreeMap;
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let leg = || {
         SectorLeg::new(
             [
@@ -647,7 +650,8 @@ where
 
 #[test]
 fn rank5_transpose_with_trailing_bend_matches_per_pair_by_key() {
-    assert_rank5_transpose_matches_per_pair_by_key(&SU2FusionRule, &[su2(0), su2(1), su2(2)]);
+    let su2_provider_rule = su2_rule();
+    assert_rank5_transpose_matches_per_pair_by_key(&su2_provider_rule, &[su2(0), su2(1), su2(2)]);
     assert_rank5_transpose_matches_per_pair_by_key(
         &TableRule::fibonacci(),
         &[SectorId::new(0), SectorId::new(1)],
@@ -728,7 +732,8 @@ where
 
 #[test]
 fn domainless_block_braid_matches_per_pair() {
-    assert_domainless_block_braid_matches_per_pair(&SU2FusionRule, &[su2(0), su2(1), su2(2)]);
+    let su2_provider_rule = su2_rule();
+    assert_domainless_block_braid_matches_per_pair(&su2_provider_rule, &[su2(0), su2(1), su2(2)]);
     assert_domainless_block_braid_matches_per_pair(
         &TableRule::fibonacci(),
         &[SectorId::new(0), SectorId::new(1)],
@@ -738,11 +743,11 @@ fn domainless_block_braid_matches_per_pair() {
 #[test]
 fn transpose_tree_pair_block_matches_full_key_fermionic_product_cycle() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
+    type ProductRule = ProductFusionRule<FpU1Rule, Su2Rule>;
     let left = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let coupled = rule.encode_component_ids(left.encode_component_ids(z2_even(), u1(0)), su2(1));
@@ -795,7 +800,7 @@ fn transpose_tree_pair_block_matches_low_rank_and_nonselfdual_u1_oracles() {
 
 #[test]
 fn external_sectors_select_all_su2_simple_innerline_blocks() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let half = SectorId::new(1);
     let hom = FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1), (1, 1)], [(1, 1)]);
     let structure = hom
@@ -1173,12 +1178,13 @@ fn a_structure_of_side_swapped_layout_keys_does_not_reuse_their_arena() {
 
 /// Keys of the SU(2) `½^⊗8 ← ½^⊗8` layout: many trees per external tuple.
 fn su2_half_keys() -> Arc<[FusionTreePairKey]> {
-    let half = || SectorLeg::new([(SU2Irrep::from_twice_spin(1).sector_id(), 1)], false);
+    let su2_provider_rule = su2_rule();
+    let half = || SectorLeg::new([(symtn_core::SectorId::new(1), 1)], false);
     FusionTreeHomSpace::new(
         FusionProductSpace::new((0..4).map(|_| half())),
         FusionProductSpace::new((0..4).map(|_| half())),
     )
-    .fusion_tree_keys(&SU2FusionRule)
+    .fusion_tree_keys(&su2_provider_rule)
 }
 
 #[test]

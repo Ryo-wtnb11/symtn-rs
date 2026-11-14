@@ -3,12 +3,13 @@
 //! This deliberately covers ordinary structural operations only.  Factorizations
 //! and matrix functions have their own gates.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 use symtn::typed::{ContractSpec, Direction, Duality, Side};
 
 use symtn::sector::{
     product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
-    SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
+    U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::typed::{Complex64, GradedSpace, TensorMap};
 
@@ -203,15 +204,15 @@ fn nested_fermionic_su2_product_and_complex_adjoint_are_publicly_conformant() {
                 U1FusionRule,
             )
             .unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
     let spin_half = product_sector(
         product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
-        SU2Irrep::from_twice_spin(1),
+        su2_irrep(1),
     );
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(spin_half, 1)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(spin_half.clone(), 1)]).unwrap();
     let source: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             Complex64::new(2.0, 3.0)
@@ -420,7 +421,7 @@ fn su2_and_exact_products_keep_their_provider_through_flip_and_units() {
             assert_eq!(restored.dense_data().unwrap(), source.dense_data().unwrap());
         }};
     }
-    check!(engine, SU2FusionRule, SU2Irrep::from_twice_spin(1));
+    check!(engine, su2_rule(), su2_irrep(1));
     check!(
         engine,
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -438,12 +439,12 @@ fn su2_and_exact_products_keep_their_provider_through_flip_and_units() {
                 U1FusionRule
             )
             .unwrap(),
-            SU2FusionRule
+            su2_rule()
         )
         .unwrap(),
         product_sector(
             product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
-            SU2Irrep::from_twice_spin(1)
+            su2_irrep(1)
         )
     );
 }
@@ -476,14 +477,7 @@ fn dual_nonabelian_flip_pins_the_pivotal_phase() {
         }};
     }
     // Dual SU2 codomain: the forward factor is χθ=-1.
-    check!(
-        engine,
-        SU2FusionRule,
-        SU2Irrep::from_twice_spin(1),
-        0,
-        false,
-        false
-    );
+    check!(engine, su2_rule(), su2_irrep(1), 0, false, false);
     check!(
         engine,
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -492,12 +486,12 @@ fn dual_nonabelian_flip_pins_the_pivotal_phase() {
                 U1FusionRule
             )
             .unwrap(),
-            SU2FusionRule
+            su2_rule()
         )
         .unwrap(),
         product_sector(
             product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
-            SU2Irrep::from_twice_spin(1)
+            su2_irrep(1)
         ),
         // Plain nested domain: its forward factor is θ=-1.
         1,
@@ -565,7 +559,7 @@ fn covered_builtin_multiplicity_free_providers_have_cat_and_absorb_execution() {
         .unwrap(),
         product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap())
     );
-    check!(engine, SU2FusionRule, SU2Irrep::from_twice_spin(1));
+    check!(engine, su2_rule(), su2_irrep(1));
     check!(
         engine,
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -574,12 +568,12 @@ fn covered_builtin_multiplicity_free_providers_have_cat_and_absorb_execution() {
                 U1FusionRule
             )
             .unwrap(),
-            SU2FusionRule
+            su2_rule()
         )
         .unwrap(),
         product_sector(
             product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
-            SU2Irrep::from_twice_spin(1)
+            su2_irrep(1)
         )
     );
 }

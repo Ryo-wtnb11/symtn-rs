@@ -1,8 +1,9 @@
 use crate::common::ErrorKind as _;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Eigh;
 use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
@@ -90,26 +91,20 @@ fn typed_real_c64_eigenvalue_readback_stays_compact() {
 fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_offdiag() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let rule = Arc::new(SU2FusionRule);
-    let bond = GradedSpace::try_new(
-        Arc::clone(&rule),
-        [
-            (SU2Irrep::from_twice_spin(2), 1),
-            (SU2Irrep::from_twice_spin(0), 2),
-        ],
-    )
-    .unwrap();
-    let tensor = TensorMap::<SU2FusionRule, f64>::diagonal(
+    let rule = Arc::new(su2_rule());
+    let bond =
+        GradedSpace::try_new(Arc::clone(&rule), [(su2_irrep(2), 1), (su2_irrep(0), 2)]).unwrap();
+    let tensor = TensorMap::<Su2Rule, f64>::diagonal(
         engine,
         &runtime,
         &bond,
         [
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(2),
+                sector: su2_irrep(2),
                 values: vec![3.0],
             },
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(0),
+                sector: su2_irrep(0),
                 values: vec![1.0, 2.0],
             },
         ],
@@ -120,62 +115,62 @@ fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_off
             .unwrap()
             .unwrap()[0]
             .sector,
-        SU2Irrep::from_twice_spin(0)
+        su2_irrep(0)
     );
     assert!(symtn::expert::is_diagonal(engine, &tensor, 0.0).unwrap());
-    assert!(TensorMap::<SU2FusionRule, f64>::diagonal(
+    assert!(TensorMap::<Su2Rule, f64>::diagonal(
         engine,
         &runtime,
         &bond,
         [SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(0),
+            sector: su2_irrep(0),
             values: vec![1.0, 2.0],
         }],
     )
     .is_invalid_argument("missing a bond sector"));
-    assert!(TensorMap::<SU2FusionRule, f64>::diagonal(
+    assert!(TensorMap::<Su2Rule, f64>::diagonal(
         engine,
         &runtime,
         &bond,
         [
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(0),
+                sector: su2_irrep(0),
                 values: vec![1.0],
             },
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(2),
+                sector: su2_irrep(2),
                 values: vec![3.0],
             },
         ],
     )
     .is_invalid_argument("does not match bond degeneracy"));
-    assert!(TensorMap::<SU2FusionRule, f64>::diagonal(
+    assert!(TensorMap::<Su2Rule, f64>::diagonal(
         engine,
         &runtime,
         &bond,
         [
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(0),
+                sector: su2_irrep(0),
                 values: vec![1.0, 2.0],
             },
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(4),
+                sector: su2_irrep(4),
                 values: vec![3.0],
             },
         ],
     )
     .is_invalid_argument("missing a bond sector"));
-    assert!(TensorMap::<SU2FusionRule, f64>::diagonal(
+    assert!(TensorMap::<Su2Rule, f64>::diagonal(
         engine,
         &runtime,
         &bond,
         [
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(0),
+                sector: su2_irrep(0),
                 values: vec![1.0, 2.0],
             },
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(0),
+                sector: su2_irrep(0),
                 values: vec![3.0, 4.0],
             },
         ],

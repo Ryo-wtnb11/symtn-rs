@@ -1,23 +1,32 @@
 //! Warm label adaptation allocates only storage for returned channel collections.
 
+use crate::su2::su2_rule;
+
 use crate::counting_alloc;
 
-use symtn_sectors::{CheckedFusionAlgebra, FusionRule, SU2FusionRule, SectorId};
+use symtn_sectors::{CheckedFusionAlgebra, FusionRule, SectorId};
 
 #[test]
 fn warm_su2_fusion_and_dual_allocate_only_the_returned_channels() {
     let _serial = crate::counting_alloc::serial();
-    for (spin, calls, bytes) in [(7, 0, 0), (8, 1, 16 * size_of::<SectorId>() as u64)] {
+    let rule = su2_rule();
+    for spin in [7, 8] {
         let sector = SectorId::new(spin);
-        let _ = SU2FusionRule.fusion_channels(sector, sector);
-        let (channels, allocs) =
-            counting_alloc::measure(|| SU2FusionRule.fusion_channels(sector, sector));
+        let _ = rule.fusion_channels(sector, sector);
+        let (channels, allocs) = counting_alloc::measure(|| rule.fusion_channels(sector, sector));
         assert_eq!(channels.len(), spin + 1);
-        // Eight channels fit inline; nine grow the returned SmallVec to 16.
-        assert_eq!((allocs.calls, allocs.bytes), (calls, bytes), "{allocs:?}");
-        let _ = SU2FusionRule.try_dual_sector(sector).unwrap();
-        let (dual, allocs) =
-            counting_alloc::measure(|| SU2FusionRule.try_dual_sector(sector).unwrap());
+        let payload_bytes = if channels.spilled() {
+            (channels.capacity() * size_of::<SectorId>()) as u64
+        } else {
+            0
+        };
+        assert_eq!(
+            (allocs.calls, allocs.bytes),
+            (u64::from(channels.spilled()), payload_bytes),
+            "{allocs:?}"
+        );
+        let _ = rule.try_dual_sector(sector).unwrap();
+        let (dual, allocs) = counting_alloc::measure(|| rule.try_dual_sector(sector).unwrap());
         assert_eq!(dual, sector);
         assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
     }
@@ -70,19 +79,6 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
         let (encoded, allocs) = counting_alloc::measure(encode);
         assert_eq!(encoded, expected);
         assert_eq!((allocs.calls, allocs.bytes), (0, 0), "{allocs:?}");
-        // A warm decode allocates only the returned label vectors.
-        let sector = rule.encode_irrep_with_charges(dynkin, charges).unwrap();
-        let (decoded, allocs) = counting_alloc::measure(|| rule.decode_irrep(sector).unwrap());
-        assert_eq!(decoded, (dynkin.to_vec(), charges.to_vec()));
-        let returned = [dynkin.len(), charges.len()];
-        assert_eq!(
-            (allocs.calls, allocs.bytes),
-            (
-                returned.iter().filter(|&&len| len > 0).count() as u64,
-                (returned.iter().sum::<usize>() * size_of::<i64>()) as u64
-            ),
-            "{allocs:?}"
-        );
     }
 }
 
@@ -104,7 +100,7 @@ fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
         let expected =
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(GroupId::su(n).unwrap())
                 .unwrap()
-                .encode_irrep(labels)
+                .encode_irrep_with_charges(labels, &[])
                 .unwrap();
         let _ = CategoryProvider::category(&rule);
         let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());

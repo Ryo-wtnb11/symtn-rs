@@ -1,11 +1,13 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::su2_rule;
 use num_complex::Complex64;
 use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 use symtn_core::{
-    CheckedFusionAlgebra, FermionParityFusionRule, ProductFusionRule, ProductSectorCodec,
-    SU2FusionRule, SU2Irrep, SectorId, TensorKitProductCodec, U1FusionRule, U1Irrep,
+    CheckedFusionAlgebra, FermionParityFusionRule, ProductFusionRule, ProductSectorCodec, SectorId,
+    TensorKitProductCodec, U1FusionRule, U1Irrep,
 };
 
 use crate::{BoundDynamicFusionMapSpace, OutputAxisOrder};
@@ -22,7 +24,7 @@ fn u1_legs() -> Vec<(SectorId, usize)> {
 fn su2_legs() -> Vec<(SectorId, usize)> {
     [(0, 2), (1, 3), (2, 2)]
         .into_iter()
-        .map(|(twice, deg)| (SU2Irrep::from_twice_spin(twice).sector_id(), deg))
+        .map(|(twice, deg)| (symtn_core::SectorId::new(twice), deg))
         .collect()
 }
 
@@ -181,8 +183,8 @@ fn conjugated_dyn_contract_builds_no_adjoint_structure() {
     let fz2_u1 = || Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     assert_conjugated_contract_builds_no_adjoint::<_, f64>(U1FusionRule, &u1_legs());
     assert_conjugated_contract_builds_no_adjoint::<_, Complex64>(U1FusionRule, &u1_legs());
-    assert_conjugated_contract_builds_no_adjoint::<_, f64>(SU2FusionRule, &su2_legs());
-    assert_conjugated_contract_builds_no_adjoint::<_, Complex64>(SU2FusionRule, &su2_legs());
+    assert_conjugated_contract_builds_no_adjoint::<_, f64>(su2_rule(), &su2_legs());
+    assert_conjugated_contract_builds_no_adjoint::<_, Complex64>(su2_rule(), &su2_legs());
     assert_conjugated_contract_builds_no_adjoint::<_, f64>(fz2_u1(), &fz2_u1_legs());
     assert_conjugated_contract_builds_no_adjoint::<_, Complex64>(fz2_u1(), &fz2_u1_legs());
 }

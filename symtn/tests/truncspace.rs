@@ -9,9 +9,10 @@
 //! hand selection in every `truncation_composition` sweep; this file keeps the
 //! clamping and dual-flag boundaries.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Error, Truncation};
 use symtn::typed::{GradedSpace, Svd, TensorMap};
 
@@ -26,17 +27,17 @@ fn fill(state: &mut u64) -> f64 {
     ((*state >> 33) as f64) / (u32::MAX as f64) - 0.5
 }
 
-fn typed_leg(entries: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
+fn typed_leg(entries: &[(usize, usize)]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         entries
             .iter()
-            .map(|&(twice_spin, deg)| (SU2Irrep::from_twice_spin(twice_spin), deg)),
+            .map(|&(twice_spin, deg)| (su2_irrep(twice_spin), deg)),
     )
     .unwrap()
 }
 
-fn typed_source(seed: u64) -> TensorMap<SU2FusionRule, f64> {
+fn typed_source(seed: u64) -> TensorMap<Su2Rule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = typed_leg(&[(0, 4), (1, 4), (2, 4)]);
     let mut state = seed;

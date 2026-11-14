@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 use symtn::sector::ZNIrrep;
 
 fn assert_direct_contract_and_compose<R>(
@@ -77,13 +78,10 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     .unwrap();
     assert_direct_contract_and_compose(engine, cuda, &u1_lhs, &u1_rhs);
 
-    let su2_rule = Arc::new(SU2FusionRule);
+    let su2_rule = Arc::new(su2_rule());
     let su2 = GradedSpace::try_new(
         Arc::clone(&su2_rule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        [(su2_irrep(0), 1), (su2_irrep(1), 2)],
     )
     .unwrap();
     let su2_lhs = TensorMap::from_subblock_fn(
@@ -491,14 +489,8 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
     .unwrap();
     assert_c64_contract_and_compose(engine, cuda, &host_result, &host_result_2);
 
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1), (su2_irrep(1), 2)]).unwrap();
     let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
         engine,
         &runtime,

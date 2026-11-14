@@ -1,6 +1,8 @@
 //! Restricted binding for one ordinary contraction over owned-dense stacks.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 use crate::typed::ExecContext;
 use crate::typed::PreparedExec;
 use symtn_dense::Engine;
@@ -817,7 +819,7 @@ mod fermionic_unit_tests {
     use super::*;
     use crate::sector::{
         product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule,
-        SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+        U1FusionRule, U1Irrep,
     };
     use crate::typed::GradedSpace;
     use symtn_operations::{fusion_replay::Rank2GemmBatchJob, Rank2Gemm, StridedHostKernelAdapter};
@@ -897,22 +899,13 @@ mod fermionic_unit_tests {
         .unwrap();
         let su2 = GradedSpace::try_new(
             Arc::new(
-                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), su2_rule())
                     .unwrap(),
             ),
             [
-                (
-                    product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
-                    2,
-                ),
-                (
-                    product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
-                    2,
-                ),
-                (
-                    product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
-                    1,
-                ),
+                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
             ],
         )
         .unwrap();
@@ -1042,22 +1035,13 @@ mod fermionic_unit_tests {
         .unwrap();
         let su2 = GradedSpace::try_new(
             Arc::new(
-                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
+                ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), su2_rule())
                     .unwrap(),
             ),
             [
-                (
-                    product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
-                    2,
-                ),
-                (
-                    product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
-                    2,
-                ),
-                (
-                    product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
-                    1,
-                ),
+                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
             ],
         )
         .unwrap();
@@ -1282,12 +1266,8 @@ mod fermionic_unit_tests {
         assert!(dynamic);
         admitted.unwrap();
         let s = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            [
-                (SU2Irrep::from_twice_spin(0), 2),
-                (SU2Irrep::from_twice_spin(1), 2),
-                (SU2Irrep::from_twice_spin(2), 1),
-            ],
+            Arc::new(su2_rule()),
+            [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
         )
         .unwrap();
         let (dynamic, admitted) = cuda_dynamic_admission(

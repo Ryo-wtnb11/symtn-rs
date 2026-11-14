@@ -1,9 +1,12 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 fn malformed_simple_su2_tree_pair_tensors() -> (TestTensor<f64>, TestTensor<f64>) {
+    let su2_provider_rule = su2_rule();
     let valid = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1],
         0,
         [false, false],
@@ -63,34 +66,34 @@ impl symtn_core::testing::Provider for AdmissionCountingSu2Rule {}
 
 impl FusionRule for AdmissionCountingSu2Rule {
     fn rule_identity(&self) -> symtn_core::RuleIdentity {
-        SU2FusionRule.rule_identity()
+        su2_rule().rule_identity()
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
         self.fusion_style
-            .unwrap_or_else(|| SU2FusionRule.fusion_style())
+            .unwrap_or_else(|| su2_rule().fusion_style())
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
         self.braiding_style
-            .unwrap_or_else(|| SU2FusionRule.braiding_style())
+            .unwrap_or_else(|| su2_rule().braiding_style())
     }
 
     fn vacuum(&self) -> SectorId {
-        SU2FusionRule.vacuum()
+        su2_rule().vacuum()
     }
 
     fn dual(&self, sector: SectorId) -> SectorId {
-        SU2FusionRule.dual(sector)
+        su2_rule().dual(sector)
     }
 
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        SU2FusionRule.fusion_channels(left, right)
+        su2_rule().fusion_channels(left, right)
     }
 
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
         self.nsymbol_calls.fetch_add(1, Ordering::Relaxed);
-        SU2FusionRule.nsymbol(left, right, coupled)
+        su2_rule().nsymbol(left, right, coupled)
     }
 }
 
@@ -108,37 +111,37 @@ impl MultiplicityFreeFusionSymbols for AdmissionCountingSu2Rule {
         left_coupled: SectorId,
         right_coupled: SectorId,
     ) -> Self::Scalar {
-        SU2FusionRule.f_symbol_scalar(left, middle, right, coupled, left_coupled, right_coupled)
+        su2_rule().f_symbol_scalar(left, middle, right, coupled, left_coupled, right_coupled)
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
-        SU2FusionRule.r_symbol_scalar(left, right, coupled)
+        su2_rule().r_symbol_scalar(left, right, coupled)
     }
 }
 
 impl MultiplicityFreeRigidSymbols for AdmissionCountingSu2Rule {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.dim_scalar(sector)
+        su2_rule().dim_scalar(sector)
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.inv_dim_scalar(sector)
+        su2_rule().inv_dim_scalar(sector)
     }
 
     fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.sqrt_dim_scalar(sector)
+        su2_rule().sqrt_dim_scalar(sector)
     }
 
     fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.inv_sqrt_dim_scalar(sector)
+        su2_rule().inv_sqrt_dim_scalar(sector)
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.twist_scalar(sector)
+        su2_rule().twist_scalar(sector)
     }
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-        SU2FusionRule.frobenius_schur_phase_scalar(sector)
+        su2_rule().frobenius_schur_phase_scalar(sector)
     }
 }
 
@@ -167,8 +170,9 @@ fn assert_invalid_simple_vertex(error: OperationError) {
 }
 
 fn valid_simple_source_and_nonalias_malformed_destination() -> (TestTensor<f64>, TestTensor<f64>) {
+    let su2_provider_rule = su2_rule();
     let valid = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1],
         0,
         [false, false],
@@ -202,6 +206,7 @@ fn valid_simple_source_and_nonalias_malformed_destination() -> (TestTensor<f64>,
 
 #[test]
 fn callback_builder_admits_whole_source_before_first_callback() {
+    let su2_provider_rule = su2_rule();
     let valid = BlockKey::from(
         FusionTreePairKey::try_pair_from_sector_ids(
             [1, 1],
@@ -235,7 +240,7 @@ fn callback_builder_admits_whole_source_before_first_callback() {
     let callbacks = std::cell::Cell::new(0usize);
 
     let error = build_tree_transform_group_plan(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([0, 1], []),
         &structure,
         |source| {
@@ -253,9 +258,10 @@ fn callback_builder_admits_whole_source_before_first_callback() {
 
 #[test]
 fn callback_builder_rejects_malformed_destination_before_assembly() {
+    let su2_provider_rule = su2_rule();
     let source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(1), SectorId::new(1)],
             SectorId::new(0),
             [false, false],
@@ -263,7 +269,8 @@ fn callback_builder_rejects_malformed_destination_before_assembly() {
             [MultiplicityIndex::ONE],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&SU2FusionRule, [], SectorId::new(0), [], [], []).unwrap(),
+        FusionTreeKey::try_new_for_rule(&su2_provider_rule, [], SectorId::new(0), [], [], [])
+            .unwrap(),
     );
     let malformed_destination = FusionTreePairKey::try_pair_from_sector_ids(
         [1, 1],
@@ -281,7 +288,7 @@ fn callback_builder_rejects_malformed_destination_before_assembly() {
     let structure = packed_fixture_structure(2, [(BlockKey::from(source), vec![1, 1])]).unwrap();
 
     let error = build_tree_transform_group_plan(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([0, 1], []),
         &structure,
         |_| Ok(vec![(malformed_destination.clone(), 1.0)]),
@@ -295,6 +302,7 @@ fn callback_builder_rejects_malformed_destination_before_assembly() {
 
 #[test]
 fn warm_structure_aliases_are_rejected_before_owner_lookup() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -314,7 +322,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &valid_structure,
             &valid_structure,
@@ -326,7 +334,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
     let error = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &invalid_structure,
             &valid_structure,
@@ -342,7 +350,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
     let error = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &valid_structure,
             &invalid_structure,
@@ -356,7 +364,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
     let error = independent
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &invalid_structure,
             &valid_structure,
@@ -427,6 +435,7 @@ fn exact_warm_structure_reuses_prior_local_admission_proof() {
 
 #[test]
 fn completed_structure_miss_and_hit_validate_capability_once() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -440,7 +449,7 @@ fn completed_structure_miss_and_hit_validate_capability_once() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &structure,
             &structure,
@@ -457,7 +466,7 @@ fn completed_structure_miss_and_hit_validate_capability_once() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &structure,
             &structure,
@@ -516,6 +525,7 @@ fn prelowered_same_content_roles_share_one_local_admission() {
 
 #[test]
 fn expert_layout_tree_transform_paths_compile_without_publishing() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -545,7 +555,7 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
         cache
             .resolve_tree_pair(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &operation.clone(),
                 dst.structure(),
                 src.structure(),
@@ -557,7 +567,7 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
         cache
             .resolve_tree_pair(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &operation,
                 &structure,
                 &structure,
@@ -569,7 +579,7 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
         cache
             .get_or_compile_tree_pair_prelowered(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &operation,
                 &structure,
                 &structure,
@@ -591,7 +601,7 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
         cache
             .resolve_tree_pair_oriented(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &operation,
                 &structure,
                 &logical_keys,
@@ -608,12 +618,13 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
 
 #[test]
 fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let make_key = |coupled: usize| {
         let coupled = SectorId::new(coupled);
         FusionTreePairKey::pair(
             FusionTreeKey::try_new_for_rule(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 [SectorId::new(1), SectorId::new(1)],
                 coupled,
                 [false, false],
@@ -622,7 +633,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
             )
             .unwrap(),
             FusionTreeKey::try_new_for_rule(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 [SectorId::new(2), SectorId::new(2)],
                 coupled,
                 [false, false],
@@ -665,7 +676,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
     let old = old_cache
         .get_or_compile_tree_pair_prelowered(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &logical,
             &logical,
@@ -679,7 +690,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
     let oriented = oriented_cache
         .resolve_tree_pair_oriented(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &logical,
             &logical_keys,
@@ -741,13 +752,14 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
 
 #[test]
 fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     // Both trees carry sectors [1, 1], so the parent block set is closed under
     // the adjoint and the ordinary and oriented compilers accept the same
     // destination and parent structures: only the key separates their plans.
     let tree = |coupled: usize| {
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(1), SectorId::new(1)],
             SectorId::new(coupled),
             [false, false],
@@ -792,7 +804,7 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
         cache
             .resolve_tree_pair_oriented(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 operation,
                 &destination,
                 if direct { &storage_keys } else { &logical_keys },
@@ -839,7 +851,7 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
         cache
             .resolve_tree_pair_oriented(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &operation,
                 &destination,
                 &logical_keys,
@@ -859,7 +871,7 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
     let conjugated = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &destination,
             &storage,
@@ -869,7 +881,7 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
     let plain = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &destination,
             &storage,
@@ -908,7 +920,7 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
             cache
                 .resolve_tree_pair_oriented(
                     engine,
-                    &SU2FusionRule,
+                    &su2_provider_rule,
                     &operation,
                     &destination,
                     &storage_keys,
@@ -935,6 +947,7 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
 
 #[test]
 fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -944,7 +957,7 @@ fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
     // equals the uncached eager producer on that layout bit for bit.
     let tree = |coupled: usize| {
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(1), SectorId::new(1)],
             SectorId::new(coupled),
             [false, false],
@@ -979,7 +992,7 @@ fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
             cache
                 .resolve_tree_pair_oriented(
                     engine,
-                    &SU2FusionRule,
+                    &su2_provider_rule,
                     &operation,
                     destination,
                     &logical_keys,
@@ -1020,7 +1033,7 @@ fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
         .collect::<rustc_hash::FxHashMap<_, _>>();
     let eager =
         crate::tree_transform::build_oriented_tree_pair_transform_group_plan_capability_validated(
-            &SU2FusionRule,
+            &su2_provider_rule,
             operation.clone(),
             &logical_keys,
             &wider.0,
@@ -1046,12 +1059,13 @@ fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
 
 #[test]
 fn runtime_bound_adjoint_oriented_projection_errors_match_the_local_path() {
+    let su2_provider_rule = su2_rule();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tree = |coupled: usize| {
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(1), SectorId::new(1)],
             SectorId::new(coupled),
             [false, false],
@@ -1086,7 +1100,7 @@ fn runtime_bound_adjoint_oriented_projection_errors_match_the_local_path() {
             let error = cache
                 .resolve_tree_pair_oriented(
                     engine,
-                    &SU2FusionRule,
+                    &su2_provider_rule,
                     &operation,
                     &storage,
                     logical_keys,
@@ -1118,6 +1132,7 @@ fn runtime_bound_adjoint_oriented_projection_errors_match_the_local_path() {
 
 #[test]
 fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1133,7 +1148,7 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
     let first_a = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_a,
             &structure,
             &structure,
@@ -1143,7 +1158,7 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
     cache
         .get_or_compile_tree_pair_prelowered(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_b,
             &structure,
             &structure,
@@ -1156,7 +1171,7 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
     let warm_a = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_a,
             &structure,
             &structure,
@@ -1168,7 +1183,7 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_c,
             &structure,
             &structure,
@@ -1178,7 +1193,7 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_b,
             &structure,
             &structure,
@@ -1194,6 +1209,7 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
 
 #[test]
 fn failed_structure_compile_publishes_nothing() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1232,7 +1248,7 @@ fn failed_structure_compile_publishes_nothing() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_b,
             &structure,
             &structure,
@@ -1242,7 +1258,7 @@ fn failed_structure_compile_publishes_nothing() {
     let first_a = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_a,
             &structure,
             &structure,
@@ -1252,7 +1268,7 @@ fn failed_structure_compile_publishes_nothing() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_b,
             &wrong_destination,
             &structure,
@@ -1265,7 +1281,7 @@ fn failed_structure_compile_publishes_nothing() {
     let warm_a = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_a,
             &structure,
             &structure,
@@ -1276,7 +1292,7 @@ fn failed_structure_compile_publishes_nothing() {
     cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_c,
             &structure,
             &structure,
@@ -1286,7 +1302,7 @@ fn failed_structure_compile_publishes_nothing() {
     let retained_a = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation_a,
             &structure,
             &structure,
@@ -1302,6 +1318,7 @@ fn failed_structure_compile_publishes_nothing() {
 
 #[test]
 fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1318,7 +1335,7 @@ fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
     cache
         .get_or_compile_tree_pair_prelowered(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &valid,
             &valid,
@@ -1338,7 +1355,7 @@ fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
         let error = cache
             .get_or_compile_tree_pair_prelowered(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &operation,
                 destination,
                 logical_source,
@@ -1358,6 +1375,7 @@ fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
 
 #[test]
 fn invalid_simple_source_does_not_mutate_cached_or_no_cache_state() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1373,7 +1391,7 @@ fn invalid_simple_source_does_not_mutate_cached_or_no_cache_state() {
         let error = cache
             .resolve_tree_pair(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &TreeTransformOperation::braid([0, 1], [], [0, 1], []),
                 dst.structure(),
                 src.structure(),
@@ -1393,6 +1411,7 @@ fn invalid_simple_source_does_not_mutate_cached_or_no_cache_state() {
 
 #[test]
 fn malformed_source_precedes_noncategorical_destination_without_cache_mutation() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1407,7 +1426,7 @@ fn malformed_source_precedes_noncategorical_destination_without_cache_mutation()
     let error = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &TreeTransformOperation::permute([0, 1], []),
             dst.structure(),
             src.structure(),
@@ -1428,6 +1447,7 @@ fn malformed_source_precedes_noncategorical_destination_without_cache_mutation()
 
 #[test]
 fn invalid_operation_precedes_malformed_simple_source_without_cache_mutation() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1443,7 +1463,7 @@ fn invalid_operation_precedes_malformed_simple_source_without_cache_mutation() {
     let error = cache
         .resolve_tree_pair(
             engine,
-            &SU2FusionRule,
+            &su2_provider_rule,
             &TreeTransformOperation::braid([0, 0], [], [0, 1], []),
             dst.structure(),
             src.structure(),
@@ -1467,6 +1487,7 @@ fn invalid_operation_precedes_malformed_simple_source_without_cache_mutation() {
 
 #[test]
 fn invalid_operation_precedes_non_categorical_namespace_without_cache_mutation() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1490,7 +1511,7 @@ fn invalid_operation_precedes_non_categorical_namespace_without_cache_mutation()
         let error = cache
             .resolve_tree_pair(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &TreeTransformOperation::permute([0, 0], []),
                 dst.structure(),
                 src.structure(),
@@ -1509,7 +1530,7 @@ fn invalid_operation_precedes_non_categorical_namespace_without_cache_mutation()
         let error = cache
             .resolve_tree_pair(
                 engine,
-                &SU2FusionRule,
+                &su2_provider_rule,
                 &TreeTransformOperation::permute([0, 1], []),
                 dst.structure(),
                 src.structure(),
@@ -1580,11 +1601,12 @@ fn invalid_unique_source_does_not_count_eager_compile_misses() {
 
 #[test]
 fn direct_tree_pair_rejects_nonalias_malformed_destination_without_writing() {
+    let su2_provider_rule = su2_rule();
     let (mut dst, src) = valid_simple_source_and_nonalias_malformed_destination();
     let before = dst.data().to_vec();
 
     let error = eager_tree_transform_into(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([0, 1], []),
         &mut dst,
         &src,
@@ -1601,6 +1623,7 @@ fn direct_tree_pair_rejects_nonalias_malformed_destination_without_writing() {
 
 #[test]
 fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
+    let su2_provider_rule = su2_rule();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1608,7 +1631,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
     // restriction, so mismatched coupled sectors retain the core error.
     let nonempty_domain = BlockKey::from(FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(1), SectorId::new(1)],
             SectorId::new(0),
             [false, false],
@@ -1617,7 +1640,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
         )
         .unwrap(),
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(0)],
             SectorId::new(0),
             [false],
@@ -1628,7 +1651,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
     ));
     let mismatched = BlockKey::from(FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(1), SectorId::new(1)],
             SectorId::new(0),
             [false, false],
@@ -1637,7 +1660,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
         )
         .unwrap(),
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [SectorId::new(2)],
             SectorId::new(2),
             [false],
@@ -1665,7 +1688,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
         TestTensor::<f64>::from_vec_with_structure(vec![0.0], dst_space, dst_structure).unwrap();
 
     let error = crate::build_all_codomain_tree_transform_group_plan(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([0, 1, 2], []),
         src.structure(),
     )
@@ -1679,7 +1702,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
     );
 
     let error = crate::build_all_codomain_tree_transform_group_plan(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::permute([0, 0, 2], []),
         src.structure(),
     )
@@ -1692,7 +1715,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
     );
 
     let error = crate::build_all_codomain_tree_transform_group_plan(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::transpose([0, 1, 2], []),
         src.structure(),
     )
@@ -1790,6 +1813,7 @@ fn oriented_cold_and_warm_admission_rejects_equal_key_capability_changes() {
 
 #[test]
 fn every_tree_transform_entry_reports_the_operation_fusion_style_error() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1841,7 +1865,7 @@ fn every_tree_transform_entry_reports_the_operation_fusion_style_error() {
     );
     assert_eq!(
         crate::build_unique_tree_pair_transform_group_plan(
-            &SU2FusionRule,
+            &su2_provider_rule,
             operation.clone(),
             &structure
         )
@@ -1850,7 +1874,7 @@ fn every_tree_transform_entry_reports_the_operation_fusion_style_error() {
     );
     assert_eq!(
         crate::build_unique_all_codomain_tree_transform_group_plan(
-            &SU2FusionRule,
+            &su2_provider_rule,
             operation.clone(),
             &structure
         )

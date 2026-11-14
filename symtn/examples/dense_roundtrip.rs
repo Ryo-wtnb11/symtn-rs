@@ -1,13 +1,18 @@
 //! Expand an SU(2) identity into the physical basis and project it back.
 
+use symtn::sector::{GroupId, LieGroupFusionRule, MultiplicityFreeAdmissionMode};
+
 use std::sync::Arc;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build()?;
-    let v = GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 1)])?;
+    let rule = Arc::new(LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(
+        GroupId::su(2)?,
+    )?);
+    let half = rule.category().irrep(&[1])?;
+    let v = GradedSpace::try_new(rule, [(half, 1)])?;
     let id = TensorMap::<_, f64>::isomorphism(engine, &rt, [&v], [&v])?;
     let dense = id.to_physical_dense(engine)?;
     assert_eq!(dense.shape, [2, 2]);

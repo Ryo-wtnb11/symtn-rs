@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use crate::{StridedHostKernelAdapter, TreeTransformBlockSpec};
 use std::time::Duration;
 use symtn_core::{BlockKey, BlockSpec};
@@ -91,7 +93,7 @@ fn block(sector: usize, shape: usize, stride: usize, offset: usize) -> BlockSpec
 /// between them in address order.
 mod su2_interleaved {
     use super::*;
-    use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SU2FusionRule, SU2Irrep, SectorLeg};
+    use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg};
 
     /// `(destination offset, coefficient)` of each Single.
     pub(crate) const SINGLES: [(usize, f64); 7] = [
@@ -120,18 +122,19 @@ mod su2_interleaved {
     }
 
     pub(crate) fn fixture() -> (Arc<BlockStructure>, TreeTransformStructure<f64>) {
+        let su2_provider_rule = su2_rule();
         let w = || {
             SectorLeg::new(
-                (0..=4).map(|twice_spin| (SU2Irrep::from_twice_spin(twice_spin), 2)),
+                (0..=4).map(|twice_spin| (symtn_core::SectorId::new(twice_spin), 2)),
                 false,
             )
         };
-        let p = || SectorLeg::new([(SU2Irrep::from_twice_spin(1), 1)], false);
+        let p = || SectorLeg::new([(symtn_core::SectorId::new(1), 1)], false);
         let structure = FusionTreeHomSpace::new(
             FusionProductSpace::new([w(), p()]),
             FusionProductSpace::new([w(), p()]),
         )
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
         assert_eq!(structure.required_len().unwrap(), 60);
         assert_eq!(structure.block_count(), 15);

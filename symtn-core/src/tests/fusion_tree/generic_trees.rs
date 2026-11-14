@@ -1,10 +1,12 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn split_fusion_tree_matches_tensorkit_front_tail_convention() {
-    let rule = SU2FusionRule;
-    let half = SU2Irrep::from_twice_spin(1).sector_id();
-    let one = SU2Irrep::from_twice_spin(2).sector_id();
+    let rule = su2_rule();
+    let half = symtn_core::SectorId::new(1);
+    let one = symtn_core::SectorId::new(2);
     let tree = FusionTreeKey::new(
         [half, half, one],
         one,

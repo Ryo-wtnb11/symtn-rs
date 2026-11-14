@@ -15,11 +15,12 @@
 //! Run with `--features krylov,blas-openblas` (or another LAPACK provider).
 #![cfg(feature = "krylov")]
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 use symtn::krylov::{self, Lanczos, Vector, Which, Workspace};
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{
     BlockFusionTrees, ContractSpec, CpuEngine, Error, ExecContext, GradedSpace, OperationError,
     Pool, Runtime, SectorSpectrum, TensorMap, TensorScalar,
@@ -224,7 +225,7 @@ fn lazy_and_compact_receivers_are_refused_by_similar() {
         &rt,
         &v,
         [(0, 2), (1, 2), (2, 1)].map(|(s, n)| SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(s),
+            sector: su2_irrep(s),
             values: (0..n)
                 .map(|i| Complex64::new(1.0 + i as f64, 0.5))
                 .collect(),
@@ -297,19 +298,19 @@ fn heisenberg_eigenvalues(twice: usize) -> Vec<f64> {
 fn su2_heisenberg<D: Sample>(
     engine: &mut dyn ExecContext,
     rt: &Runtime,
-    v: &GradedSpace<SU2FusionRule>,
+    v: &GradedSpace<Su2Rule>,
     twice: usize,
-) -> TensorMap<SU2FusionRule, D> {
+) -> TensorMap<Su2Rule, D> {
     let lambda = heisenberg_eigenvalues(twice);
     TensorMap::from_subblock_fn(
         engine,
         rt,
         [v, v],
         [v, v],
-        |trees: &BlockFusionTrees<SU2Irrep>, idx| {
+        |trees: &BlockFusionTrees<symtn_core::LieIrrep>, idx| {
             let diag = idx[0] == idx[2] && idx[1] == idx[3];
             D::real(if diag {
-                lambda[trees.coupled().twice_spin() / 2]
+                lambda[usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() / 2]
             } else {
                 0.0
             })
@@ -415,11 +416,10 @@ fn eigsolve_in_single_precision() {
     // above the f32 rounding of the residual).
     let rt = Runtime::builder().build().unwrap();
     let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
-    let v =
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(2), 2)]).unwrap();
+    let v = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(2), 2)]).unwrap();
     let w = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        (0..=2).map(|big| (SU2Irrep::from_twice_spin(2 * big), 1 + big % 2)),
+        Arc::new(su2_rule()),
+        (0..=2).map(|big| (su2_irrep(2 * big), 1 + big % 2)),
     )
     .unwrap();
     let want = heisenberg_eigenvalues(2);
@@ -449,14 +449,10 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
     for twice in [1usize, 2] {
         let want = heisenberg_eigenvalues(twice);
         // SU(2): spin `s` with degeneracy 2, and W carrying every total spin.
-        let v = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            [(SU2Irrep::from_twice_spin(twice), 2)],
-        )
-        .unwrap();
+        let v = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(twice), 2)]).unwrap();
         let w = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            (0..=twice).map(|big| (SU2Irrep::from_twice_spin(2 * big), 1 + big % 2)),
+            Arc::new(su2_rule()),
+            (0..=twice).map(|big| (su2_irrep(2 * big), 1 + big % 2)),
         )
         .unwrap();
         let h = su2_heisenberg::<f64>(engine, &rt, &v, twice);
@@ -593,14 +589,10 @@ fn exponentiate_matches_the_block_exponential() {
     let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     for twice in [1usize, 2] {
         let lambda = heisenberg_eigenvalues(twice);
-        let v = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            [(SU2Irrep::from_twice_spin(twice), 2)],
-        )
-        .unwrap();
+        let v = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(twice), 2)]).unwrap();
         let w = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            (0..=twice).map(|big| (SU2Irrep::from_twice_spin(2 * big), 2)),
+            Arc::new(su2_rule()),
+            (0..=twice).map(|big| (su2_irrep(2 * big), 2)),
         )
         .unwrap();
         let h = su2_heisenberg::<f64>(engine, &rt, &v, twice);

@@ -5,7 +5,7 @@
 //! [`CategoryRule`] with an [`EnumeratedCodec`] (or a [`CategoryCodec`] of
 //! its own) makes it a provider that uses the same
 //! [`crate::typed::TensorMap`] API as the built-in rules ([`U1FusionRule`],
-//! [`SU2FusionRule`], ...) exported here. The provider traits are sealed
+//! [`LieGroupFusionRule`], ...) exported here. The provider traits are sealed
 //! bounds, not an extension point. This module is the only path to each item
 //! it lists.
 //!
@@ -36,9 +36,8 @@
 /// Built-in fusion rules, their sector labels, and product constructors.
 pub use symtn_core::{
     product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
-    ProductAdmission, ProductFusionRule, ProductFusionRuleError, ProductSector, SU2FusionRule,
-    SU2Irrep, SectorId, TableRule, TableRuleError, TableSector, U1FusionRule, U1Irrep,
-    ZNFusionRule, ZNIrrep,
+    ProductAdmission, ProductFusionRule, ProductFusionRuleError, ProductSector, SectorId,
+    TableRule, TableRuleError, TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 pub use symtn_core::{
     BraidingStyleKind, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
@@ -61,7 +60,7 @@ pub use symtn_core::{
 };
 /// Sealed admission modes: the values of `TypedSectorAdmission::Mode`.
 pub use symtn_core::{CheckedGenericAdmissionMode, MultiplicityFreeAdmissionMode};
-pub use symtn_core::{LieGroupFusionRule, LieGroupFusionRuleError, LieIrrep};
+pub use symtn_core::{GroupId, LieGroupFusionRule, LieGroupFusionRuleError, LieIrrep};
 /// Vocabulary the rule traits' signatures use.
 pub use symtn_core::{PhysicalBasisError, ProductSectorComponent, SymbolShapeError};
 /// Label codecs of a [`ProductFusionRule`], its third type parameter.

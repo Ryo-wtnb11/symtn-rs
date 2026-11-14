@@ -26,15 +26,19 @@
 //! the process call tree into `<path>`; `benchmarks/eager_overhead_phases.py`
 //! folds that tree into phases. No production code carries a hook for this.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use std::{
     hint::black_box,
     time::{Duration, Instant},
 };
+use su2::{su2_irrep, su2_rule};
 use symtn::typed::HermitianTol;
+use symtn_core as sector_types;
 
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{Complex64, ContractSpec, GradedSpace, LegSelection, Runtime, TensorMap};
 
@@ -416,7 +420,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect::<Vec<_>>()
     };
-    let su2 = |n: usize| (0..n).map(SU2Irrep::from_twice_spin).collect::<Vec<_>>();
+    let su2 = |n: usize| (0..n).map(su2_irrep).collect::<Vec<_>>();
     let fz2u1_rule = || Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
 
     ledger!(
@@ -468,7 +472,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &config,
         &runtime,
         "SU2",
-        SU2FusionRule,
+        su2_rule(),
         f64,
         "f64",
         su2,
@@ -479,7 +483,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &config,
         &runtime,
         "SU2",
-        SU2FusionRule,
+        su2_rule(),
         Complex64,
         "c64",
         su2,

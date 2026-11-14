@@ -18,12 +18,13 @@
 
 #![allow(dead_code)]
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime};
 
@@ -255,7 +256,7 @@ pub fn u1_leg_with(degeneracies: [usize; 3]) -> GradedSpace<U1FusionRule> {
 }
 
 pub type FermionU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-pub type FermionSu2Rule = ProductFusionRule<FermionU1Rule, SU2FusionRule>;
+pub type FermionSu2Rule = ProductFusionRule<FermionU1Rule, Su2Rule>;
 
 pub fn fermion_su2_provider() -> Arc<FermionSu2Rule> {
     Arc::new(
@@ -265,7 +266,7 @@ pub fn fermion_su2_provider() -> Arc<FermionSu2Rule> {
                 U1FusionRule,
             )
             .unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     )
@@ -282,7 +283,7 @@ pub fn fermion_su2_leg_with(degeneracies: [usize; 3]) -> GradedSpace<FermionSu2R
     let label = |parity, charge, twice_spin| {
         product_sector(
             product_sector(parity, U1Irrep::new(charge).unwrap()),
-            SU2Irrep::from_twice_spin(twice_spin),
+            su2_irrep(twice_spin),
         )
     };
     GradedSpace::try_new(

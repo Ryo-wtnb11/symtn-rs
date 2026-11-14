@@ -8,11 +8,11 @@
 use super::transform::{complex_fill, real_fill};
 use super::*;
 use crate::legs::u1_leg_2_1_2;
+use crate::su2::{su2_irrep, su2_rule};
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Direction, GradedSpace, Runtime};
 
@@ -115,15 +115,15 @@ on_each_engine! {
         );
 
         let rule = Arc::new(
-            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), su2_rule())
                 .unwrap(),
         );
         let leg_su2 = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)), 1),
-                (product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)), 1),
+                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 1),
+                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
             ],
         )
         .unwrap();

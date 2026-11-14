@@ -1,8 +1,10 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn tensorcontract_fusion_block_specs_enumerates_su2_innerline_blocks_from_homspace() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let half = SectorId::new(1);
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
@@ -145,7 +147,7 @@ fn tensorcontract_fusion_output_recoupling_uses_su2_coefficients() {
     // SU(2) coefficients 1/2 and sqrt(3)/2 (hand values), and contraction
     // with a scalar applies them.
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let homspace = FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1), (1, 1), (1, 1)], []);
     let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let scalar = DynamicFusionMapSpace::from_final_homspace(
@@ -201,7 +203,7 @@ fn tensorcontract_fusion_output_recoupling_uses_su2_coefficients() {
 #[test]
 fn tensorcontract_fusion_su2_keeps_contracted_tree_basis_with_degeneracy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let lhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2)], [(1, 2), (1, 2), (1, 2)]);
     let rhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2), (1, 2), (1, 2)], [(1, 2)]);
     let lhs_keys = lhs_hom.fusion_tree_keys(&rule);
@@ -359,7 +361,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let lhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2), (1, 2), (1, 2)], [(1, 2)]);
     let rhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2)], [(1, 2), (1, 2), (1, 2)]);
     let axes = TensorContractSpec::with_default_output_order(&[0, 1, 2], &[1, 2, 3]);

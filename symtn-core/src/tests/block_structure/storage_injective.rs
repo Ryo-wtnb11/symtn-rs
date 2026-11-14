@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 /// The storage half of caller-layout admission (transform-structure
 /// compilation runs it for a non-canonical destination layout).
@@ -130,17 +132,18 @@ where
 
 #[test]
 fn expert_storage_admission_is_symmetry_independent() {
+    let su2_provider_rule = su2_rule();
     // What: the same exact custom-layout admission and categorical binding
     // succeeds for U(1), SU(2), fZ2, and their nested product.
     assert_expert_storage_admission_for_rule(&U1FusionRule, u1(0));
-    assert_expert_storage_admission_for_rule(&SU2FusionRule, su2(0));
+    assert_expert_storage_admission_for_rule(&su2_provider_rule, su2(0));
     assert_expert_storage_admission_for_rule(&FermionParityFusionRule::new(), z2_even());
 
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type Triple = ProductFusionRule<Fz2U1, SU2FusionRule>;
+    type Triple = ProductFusionRule<Fz2U1, Su2Rule>;
     let pair = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let pair_vacuum = pair.encode_component_ids(z2_even(), u1(0));
-    let triple = Triple::try_new(pair, SU2FusionRule).unwrap();
+    let triple = Triple::try_new(pair, su2_provider_rule.clone()).unwrap();
     let vacuum = triple.encode_component_ids(pair_vacuum, su2(0));
     assert_expert_storage_admission_for_rule(&triple, vacuum);
 }
@@ -152,9 +155,9 @@ fn checked_generic_coupled_storage_is_admitted_by_witness() {
     // the same coupled-sector builder, so both the staged preview and the
     // committed structure carry the witness.
     let rule = symtn_sectors::testing::su_lie_rule(3);
-    let fundamental = rule.encode_irrep(&[1, 0]).unwrap();
-    let adjoint = rule.encode_irrep(&[1, 1]).unwrap();
-    let trivial = rule.encode_irrep(&[0, 0]).unwrap();
+    let fundamental = rule.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
+    let adjoint = rule.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+    let trivial = rule.encode_irrep_with_charges(&[0, 0], &[]).unwrap();
     let leg = |dual| SectorLeg::new([(fundamental, 3), (adjoint, 2), (trivial, 2)], dual);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(false), leg(true)]),

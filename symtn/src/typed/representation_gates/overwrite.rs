@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 use symtn_core::ZNIrrep;
 
 fn poison_destination<R, D>(destination: &mut TensorMap<R, D>)
@@ -531,14 +533,8 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
     .unwrap();
     assert_contract_overwrite_matches(engine, "u1", &u1, &u1, &[1], &[0], &[0, 1], -1.5, false);
 
-    let su2_leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
-    )
-    .unwrap();
+    let su2_leg =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(1), 1)]).unwrap();
     let su2 =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0

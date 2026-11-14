@@ -9,12 +9,13 @@
 //!
 //! Run in release: `cargo test --release -p symtn --lib cache_concurrency`.
 
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rayon::prelude::*;
-use symtn_core::{SU2FusionRule, SU2Irrep};
 use symtn_tensors::{TreeTransformOperation, TreeTransformStructure};
 
 use crate::runtime::Runtime;
@@ -38,15 +39,15 @@ fn watchdog(body: impl FnOnce() + Send + 'static) {
 
 /// An SU(2) `V^2 <- V^2` tensor (non-Unique fusion, so the build runs
 /// recoupling regions) and its permute.
-fn fixture(runtime: &Runtime) -> TensorMap<SU2FusionRule, f64> {
+fn fixture(runtime: &Runtime) -> TensorMap<Su2Rule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let space = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 3),
-            (SU2Irrep::from_twice_spin(2), 2),
-            (SU2Irrep::from_twice_spin(3), 1),
+            (su2_irrep(0), 2),
+            (su2_irrep(1), 3),
+            (su2_irrep(2), 2),
+            (su2_irrep(3), 1),
         ],
     )
     .unwrap();
@@ -62,7 +63,7 @@ fn operation() -> TreeTransformOperation {
 /// on a pool worker).
 fn resolve(
     engine: &mut dyn Engine,
-    source: &TensorMap<SU2FusionRule, f64>,
+    source: &TensorMap<Su2Rule, f64>,
 ) -> TreeTransformStructure<f64> {
     let source = source.test_bound_space();
     let mut lease = crate::runtime::ContextLease::new();
@@ -96,7 +97,7 @@ fn group_info() -> crate::cache::StructureCacheInfo {
 
 /// The fixture's source fusion-tree groups: one composed-coefficient key
 /// each.
-fn source_groups(source: &TensorMap<SU2FusionRule, f64>) -> u64 {
+fn source_groups(source: &TensorMap<Su2Rule, f64>) -> u64 {
     source
         .test_bound_space()
         .space()
@@ -131,7 +132,7 @@ fn runtime() -> Runtime {
 
 /// Resolves the fixture's transformer from `TASKS` threads at once, each on
 /// its own two-thread engine over the shared tensor and caches.
-fn resolve_on_threads(source: &TensorMap<SU2FusionRule, f64>) -> Vec<TreeTransformStructure<f64>> {
+fn resolve_on_threads(source: &TensorMap<Su2Rule, f64>) -> Vec<TreeTransformStructure<f64>> {
     std::thread::scope(|scope| {
         let tasks: Vec<_> = (0..TASKS)
             .map(|_| {

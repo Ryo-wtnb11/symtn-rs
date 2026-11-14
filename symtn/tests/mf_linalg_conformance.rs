@@ -3,6 +3,7 @@
 //! These are deliberately public-API tests. They cover the residual provider
 //! fixtures, not every constructible `FusionRule` implementation.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 include!("common/predicate_chains.rs");
 include!("common/predicate_chain_coefficients.rs");
 
@@ -11,15 +12,15 @@ use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{Complex64, GradedSpace, TensorMap, Truncation};
 use symtn::typed::{Eig, Eigh, LeftPolar, Lq, Qr, RightPolar, Svd};
 
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+type Fz2U1Su2Rule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
 use crate::fixtures;
 
@@ -390,12 +391,7 @@ fn public_multiplicity_free_linalg_conformance() {
         FermionParityFusionRule::new(),
         [(FermionParityIrrep::ODD, 2)]
     );
-    factor_conformance!(
-        engine,
-        "SU2 nonzero spin",
-        SU2FusionRule,
-        [(SU2Irrep::from_twice_spin(1), 2)]
-    );
+    factor_conformance!(engine, "SU2 nonzero spin", su2_rule(), [(su2_irrep(1), 2)]);
     factor_conformance!(
         engine,
         "fZ2xU1",
@@ -416,13 +412,13 @@ fn public_multiplicity_free_linalg_conformance() {
         "fZ2xU1xSU2",
         Fz2U1Su2Rule::try_new(
             Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
         [(
             product_sector(
                 product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
-                SU2Irrep::from_twice_spin(1),
+                su2_irrep(1),
             ),
             2,
         )]

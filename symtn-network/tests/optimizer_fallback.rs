@@ -3,9 +3,9 @@
 //! falling back down the auto-hq -> auto -> dp -> greedy chain.
 #![cfg(feature = "opt-path")]
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::{configure_plan_cache, Optimizer, PlanCacheConfig};
 
@@ -47,8 +47,7 @@ fn mf_optimizers_fall_back_on_all_dim1_gram_topology() {
                 ..PlanCacheConfig::default()
             },
         );
-        let v = GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 1)])
-            .unwrap();
+        let v = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1)]).unwrap();
         let cne = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v], 1).unwrap();
         let sne = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v], 2).unwrap();
         let ev = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 3).unwrap();

@@ -3,12 +3,13 @@
 //! Already pinned elsewhere:
 //! - U(1) and SU(2) single pairs: `tests/builtin_rules.rs`
 //!   `public_u1_irrep_roundtrips_compact_ids_and_fuses`,
-//!   `public_su2_irrep_fusion_channels_match_doubled_spin_order`; `src/su2.rs`
-//!   `frozen_su2_symbol_and_channel_oracle`.
+//!   `public_su2_irrep_fusion_channels_match_doubled_spin_order`.
 //! - CU(1) complete small-label order: `tests/abelian_cu1_values.rs`
 //!   `cu1_unary_data_and_fusion_order_follow_tensorkitsectors`.
 //! - SU(3) octet channels sorted by id: `src/lie.rs`
 //!   `su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities`.
+
+use crate::su2::{su2_irrep, su2_rule};
 
 use symtn_sectors::*;
 
@@ -36,8 +37,8 @@ fn abelian_rules_have_one_channel() {
 
 #[test]
 fn su2_channels_ascend_in_doubled_spin() {
-    assert_eq!(ids(SU2FusionRule.fusion_channels(s(2), s(3))), [1, 3, 5]);
-    assert_eq!(ids(SU2FusionRule.fusion_channels(s(3), s(2))), [1, 3, 5]);
+    assert_eq!(ids(su2_rule().fusion_channels(s(2), s(3))), [1, 3, 5]);
+    assert_eq!(ids(su2_rule().fusion_channels(s(3), s(2))), [1, 3, 5]);
 }
 
 #[cfg(feature = "cgc-gen")]
@@ -81,12 +82,9 @@ fn table_channels_follow_the_object_order() {
 fn product_channels_enumerate_the_left_factor_fastest() {
     // x = (1/2, 1): left SU(2) channels [0, 2], right [0, 2, 4] (doubled).
     let su2_su2 =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(SU2FusionRule, SU2FusionRule).unwrap();
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(su2_rule(), su2_rule()).unwrap();
     let x = su2_su2
-        .encode_sector(&product_sector(
-            SU2Irrep::from_twice_spin(1),
-            SU2Irrep::from_twice_spin(2),
-        ))
+        .encode_sector(&product_sector(su2_irrep(1), su2_irrep(2)))
         .unwrap();
     let channels = su2_su2.try_fusion_channels(x, x).unwrap();
     // Cantor ids of (0,0), (2,0), (0,2), (2,2), (0,4), (2,4).
@@ -95,7 +93,9 @@ fn product_channels_enumerate_the_left_factor_fastest() {
         .iter()
         .map(|&sector| {
             let label = su2_su2.decode_sector(sector).unwrap();
-            (label.left().twice_spin(), label.right().twice_spin())
+            let left = label.left().dynkin().next().unwrap();
+            let right = label.right().dynkin().next().unwrap();
+            (left, right)
         })
         .collect();
     assert_eq!(labels, [(0, 0), (2, 0), (0, 2), (2, 2), (0, 4), (2, 4)]);
@@ -108,17 +108,17 @@ fn nested_product_channels_enumerate_the_inner_product_fastest() {
     // outer right channels 0, 2.
     let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
-            SU2FusionRule,
+            su2_rule(),
             ZNFusionRule::new(2).unwrap(),
         )
         .unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let x = rule
         .encode_sector(&product_sector(
-            product_sector(SU2Irrep::from_twice_spin(1), ZNIrrep::new(1, 2).unwrap()),
-            SU2Irrep::from_twice_spin(1),
+            product_sector(su2_irrep(1), ZNIrrep::new(1, 2).unwrap()),
+            su2_irrep(1),
         ))
         .unwrap();
     // Cantor ids of (0,0), (5,0), (0,2), (5,2).

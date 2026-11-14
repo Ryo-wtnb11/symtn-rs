@@ -90,6 +90,11 @@
 //! - [contract](https://github.com/Ryo-wtnb11/symtn-rs/blob/main/symtn-network/examples/contract.rs): index notation and explicit labeled networks.
 
 pub mod cache;
+#[cfg(test)]
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+#[cfg(test)]
+use symtn_core as sector_types;
 // Compiles the repository README quickstart as a doctest (never part of the
 // shipped API; the README sits outside the package directory).
 #[cfg(doctest)]

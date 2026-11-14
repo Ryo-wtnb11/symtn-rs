@@ -8,6 +8,8 @@
 //! derived from either mode.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 use num_complex::Complex64;
 use symtn_core::ZNFusionRule;
 use symtn_core::ZNIrrep;
@@ -248,13 +250,11 @@ fn misuse_reports_one_first_error_in_both_modes() {
         )
         .unwrap()
     };
-    let su2 = Arc::new(SU2FusionRule);
+    let su2 = Arc::new(su2_rule());
     let su2_leg = |pairs: &[(usize, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&su2),
-            pairs
-                .iter()
-                .map(|&(j, d)| (SU2Irrep::from_twice_spin(j), d)),
+            pairs.iter().map(|&(j, d)| (su2_irrep(j), d)),
         )
         .unwrap()
     };

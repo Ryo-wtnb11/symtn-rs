@@ -1,3 +1,5 @@
+use crate::su2::{su2_irrep, su2_rule};
+
 use std::collections::BTreeSet;
 
 use crate::product_codec::ParityProductCodec;
@@ -5,9 +7,8 @@ use crate::product_codec::ParityProductCodec;
 use symtn_sectors::{
     product_sector, BraidingStyleKind, CU1FusionRule, CU1Irrep, CheckedFusionAlgebra,
     FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError, FusionRule, FusionStyleKind,
-    ProductFusionRule, ProductSector, ProductSectorCodecError, RuleIdentity, SU2FusionRule,
-    SU2Irrep, SectorCodec, SectorId, SectorVec, TableRule, TableSector, U1FusionRule, U1Irrep,
-    ZNFusionRule, ZNIrrep, SU2_MAX_DOUBLED_SPIN,
+    ProductFusionRule, ProductSector, ProductSectorCodecError, RuleIdentity, SectorCodec, SectorId,
+    SectorVec, TableRule, TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 #[test]
@@ -143,8 +144,8 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
     assert_decode_total(&TableRule::fibonacci(), [TableSector::new(2)], 2);
     assert_decode_total(&TableRule::ising(), [TableSector::new(3)], 2);
     assert_decode_total(
-        &SU2FusionRule,
-        [1, 2, SU2_MAX_DOUBLED_SPIN - 1, SU2_MAX_DOUBLED_SPIN].map(SU2Irrep::from_twice_spin),
+        &su2_rule(),
+        [1, 2, u32::MAX as usize - 1, u32::MAX as usize].map(su2_irrep),
         2,
     );
     assert_decode_total(
@@ -280,16 +281,15 @@ fn parity_codecs_round_trip_and_reject_non_parity_ids() {
 #[test]
 fn su2_codec_round_trips_up_to_the_supported_doubled_spin() {
     // What: the label domain ends exactly at the provider's maximum 2j.
-    assert_round_trip(
-        &SU2FusionRule,
-        [0, 1, 2, 5, SU2_MAX_DOUBLED_SPIN].map(SU2Irrep::from_twice_spin),
-    );
+    assert_round_trip(&su2_rule(), [0, 1, 2, 5, u32::MAX as usize].map(su2_irrep));
 
-    let sector = SectorId::new(SU2_MAX_DOUBLED_SPIN + 1);
-    assert_eq!(
-        SectorCodec::decode_sector(&SU2FusionRule, sector),
-        Err(FusionAlgebraError::InvalidSector { sector })
-    );
+    if let Some(id) = (u32::MAX as usize).checked_add(1) {
+        let sector = SectorId::new(id);
+        assert_eq!(
+            SectorCodec::decode_sector(&su2_rule(), sector),
+            Err(FusionAlgebraError::InvalidSector { sector })
+        );
+    }
 }
 
 type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule>;

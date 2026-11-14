@@ -1,5 +1,7 @@
 //! Product symbols against independent TensorKitSectors coefficients and hand values.
 
+use crate::su2::su2_rule;
+
 use crate::product_codec::ParityProductCodec;
 #[cfg(feature = "cgc-gen")]
 use num_complex::Complex64;
@@ -215,7 +217,7 @@ fn product_admission_maps_adapter_errors_without_erasing_sources() {
 fn mf_product_inverse_dimension_rejects_a_foreign_factor_id() {
     // docs/provider_interface.md: infallible queries may panic outside their domain.
     let rule =
-        ProductFusionRule::<_, _>::try_new(SU2FusionRule, ZNFusionRule::new(2).unwrap()).unwrap();
+        ProductFusionRule::<_, _>::try_new(su2_rule(), ZNFusionRule::new(2).unwrap()).unwrap();
     assert_eq!(
         rule.inv_dim_scalar(rule.encode_component_ids(s(1), s(1))),
         0.5
@@ -227,7 +229,7 @@ fn mf_product_inverse_dimension_rejects_a_foreign_factor_id() {
 #[test]
 fn su2_fermion_product_has_the_independent_spin_and_parity_signs() {
     let rule =
-        ProductFusionRule::<_, _>::try_new(SU2FusionRule, FermionParityFusionRule::new()).unwrap();
+        ProductFusionRule::<_, _>::try_new(su2_rule(), FermionParityFusionRule::new()).unwrap();
     let half_odd = rule.encode_component_ids(s(1), s(1));
     let singlet = rule.encode_component_ids(s(0), s(0));
     let triplet = rule.encode_component_ids(s(2), s(0));
@@ -244,8 +246,8 @@ fn su2_fermion_product_has_the_independent_spin_and_parity_signs() {
     assert_eq!(rule.twist_scalar(half_odd), -1.0);
     assert_eq!(rule.dim_scalar(half_odd), 2.0);
     // Negative control: omitting the parity braid reverses both R signs.
-    assert_eq!(SU2FusionRule.r_symbol_scalar(s(1), s(1), s(0)), -1.0);
-    assert_eq!(SU2FusionRule.r_symbol_scalar(s(1), s(1), s(2)), 1.0);
+    assert_eq!(su2_rule().r_symbol_scalar(s(1), s(1), s(0)), -1.0);
+    assert_eq!(su2_rule().r_symbol_scalar(s(1), s(1), s(2)), 1.0);
 }
 
 #[test]
@@ -271,7 +273,7 @@ fn fermions_in_different_factors_have_no_cross_braid() {
 #[should_panic(expected = "MultiplicityFreeFusionSymbols::r_symbol_scalar")]
 fn zero_left_r_still_rejects_an_invalid_right_mf_sector() {
     let rule =
-        ProductFusionRule::<_, _>::try_new(SU2FusionRule, ZNFusionRule::new(2).unwrap()).unwrap();
+        ProductFusionRule::<_, _>::try_new(su2_rule(), ZNFusionRule::new(2).unwrap()).unwrap();
     let vacuum = rule.encode_component_ids(s(0), s(0));
     let absent = rule.encode_component_ids(s(2), s(0));
     // Negative control: a valid right factor preserves the absent SU(2) channel.
@@ -303,8 +305,8 @@ mod generated {
             fusion_symbols::lie::GroupId::su(3).unwrap(),
         )
         .unwrap();
-        let [octet, fifteen, fifteen_bar, twenty_seven] =
-            [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_irrep(&labels).unwrap());
+        let [octet, fifteen, fifteen_bar, twenty_seven] = [[1, 1], [2, 1], [1, 2], [2, 2]]
+            .map(|labels| su3.encode_irrep_with_charges(&labels, &[]).unwrap());
         for block in [
             su3.try_a_symbol_generic(octet, octet, octet).unwrap(),
             su3.try_b_symbol_generic(octet, octet, octet).unwrap(),
@@ -530,20 +532,18 @@ mod generated {
             fusion_symbols::lie::GroupId::su(3).unwrap(),
         )
         .unwrap();
-        let three = su3.encode_irrep(&[1, 0]).unwrap();
-        let anti_three = su3.encode_irrep(&[0, 1]).unwrap();
-        let six = su3.encode_irrep(&[2, 0]).unwrap();
-        let rule = ProductFusionRule::<_, _>::try_new(SU2FusionRule, su3.clone()).unwrap();
-        let swapped = ProductFusionRule::<_, _>::try_new(su3, SU2FusionRule).unwrap();
+        let three = su3.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
+        let anti_three = su3.encode_irrep_with_charges(&[0, 1], &[]).unwrap();
+        let six = su3.encode_irrep_with_charges(&[2, 0], &[]).unwrap();
+        let rule = ProductFusionRule::<_, _>::try_new(su2_rule(), su3.clone()).unwrap();
+        let swapped = ProductFusionRule::<_, _>::try_new(su3, su2_rule()).unwrap();
         assert_eq!(rule.rule_identity(), rule.clone().rule_identity());
         assert_ne!(rule.rule_identity(), swapped.rule_identity());
         assert_eq!(rule.fusion_style(), FusionStyleKind::Generic);
         assert_eq!(rule.braiding_style(), BraidingStyleKind::Bosonic);
         assert_eq!(rule.vacuum(), s(0));
         let debug = format!("{rule:?}");
-        assert!(
-            debug.starts_with("ProductFusionRule { left: SU2FusionRule, right: LieGroupFusionRule")
-        );
+        assert!(debug.starts_with("ProductFusionRule { left: LieGroupFusionRule"));
         assert!(debug.contains(&format!("identity: {:?}", rule.rule_identity())));
         assert_ne!(debug, format!("{swapped:?}"));
 
@@ -588,22 +588,24 @@ mod generated {
         // Negative control: neither the input nor the unit is in x tensor x.
         assert_eq!(rule.try_nsymbol(x, x, x).unwrap(), 0);
         assert_eq!(rule.try_nsymbol(x, x, rule.vacuum()).unwrap(), 0);
-        let invalid = rule.encode_component_ids(s(255), three);
-        for error in [
-            rule.try_dual(invalid).unwrap_err(),
-            rule.try_fusion_channels(invalid, x).unwrap_err(),
-            rule.try_fusion_channels_in_table(invalid, x).unwrap_err(),
-            rule.try_nsymbol(invalid, x, channels[0]).unwrap_err(),
-            rule.try_dim_scalar(invalid).unwrap_err(),
-            rule.try_sqrt_dim_scalar(invalid).unwrap_err(),
-            rule.try_inv_sqrt_dim_scalar(invalid).unwrap_err(),
-            rule.try_frobenius_schur_phase_scalar(invalid).unwrap_err(),
-            rule.try_twist_scalar(invalid).unwrap_err(),
-        ] {
-            assert!(matches!(error,
-                ProductFusionRuleError::Left(FusionAlgebraError::InvalidSector { sector })
-                    if sector == s(255)
-            ));
+        if let Some(past) = (u32::MAX as usize).checked_add(1) {
+            let invalid = rule.encode_component_ids(s(past), three);
+            for error in [
+                rule.try_dual(invalid).unwrap_err(),
+                rule.try_fusion_channels(invalid, x).unwrap_err(),
+                rule.try_fusion_channels_in_table(invalid, x).unwrap_err(),
+                rule.try_nsymbol(invalid, x, channels[0]).unwrap_err(),
+                rule.try_dim_scalar(invalid).unwrap_err(),
+                rule.try_sqrt_dim_scalar(invalid).unwrap_err(),
+                rule.try_inv_sqrt_dim_scalar(invalid).unwrap_err(),
+                rule.try_frobenius_schur_phase_scalar(invalid).unwrap_err(),
+                rule.try_twist_scalar(invalid).unwrap_err(),
+            ] {
+                assert!(matches!(error,
+                    ProductFusionRuleError::Left(FusionAlgebraError::InvalidSector { sector })
+                        if sector == s(past)
+                ));
+            }
         }
 
         let nested =
@@ -681,7 +683,7 @@ mod generated {
     #[test]
     fn zero_left_r_still_rejects_an_invalid_right_generic_sector() {
         let rule = ProductFusionRule::<_, _>::try_new(
-            SU2FusionRule,
+            su2_rule(),
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(2).unwrap(),
             )
@@ -711,8 +713,8 @@ mod generated {
             fusion_symbols::lie::GroupId::su(3).unwrap(),
         )
         .unwrap();
-        let octet = su3.encode_irrep(&[1, 1]).unwrap();
-        let three = su3.encode_irrep(&[1, 0]).unwrap();
+        let octet = su3.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+        let three = su3.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, U1FusionRule).unwrap();
         let oq = |q| rule.encode_component_ids(octet, SectorId::from(U1Irrep::new(q).unwrap()));
         let f = rule
@@ -774,7 +776,7 @@ mod generated {
             fusion_symbols::lie::GroupId::su(3).unwrap(),
         )
         .unwrap();
-        let octet = su3.encode_irrep(&[1, 1]).unwrap();
+        let octet = su3.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, FermionParityFusionRule::new()).unwrap();
         let odd = rule.encode_component_ids(octet, s(1));
         let even = rule.encode_component_ids(octet, s(0));
@@ -798,7 +800,7 @@ mod generated {
             fusion_symbols::lie::GroupId::su(3).unwrap(),
         )
         .unwrap();
-        let octet = su3.encode_irrep(&[1, 1]).unwrap();
+        let octet = su3.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let x = rule.encode_component_ids(octet, octet);
         assert_eq!(rule.try_nsymbol(x, x, x).unwrap(), 4);
@@ -843,11 +845,11 @@ mod generated {
             fusion_symbols::lie::GroupId::su(3).unwrap(),
         )
         .unwrap();
-        let octet = su3.encode_irrep(&[1, 1]).unwrap();
-        let twenty_seven = su3.encode_irrep(&[2, 2]).unwrap();
-        let anti_three = su3.encode_irrep(&[0, 1]).unwrap();
-        let twenty_four = su3.encode_irrep(&[3, 1]).unwrap();
-        let forty_two = su3.encode_irrep(&[2, 3]).unwrap();
+        let octet = su3.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+        let twenty_seven = su3.encode_irrep_with_charges(&[2, 2], &[]).unwrap();
+        let anti_three = su3.encode_irrep_with_charges(&[0, 1], &[]).unwrap();
+        let twenty_four = su3.encode_irrep_with_charges(&[3, 1], &[]).unwrap();
+        let forty_two = su3.encode_irrep_with_charges(&[2, 3], &[]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let pair = |right| rule.encode_component_ids(octet, right);
         // TensorKitSectors Fsymbol(p,p,b,b,o,c), with p=(2,2), b=(0,1),
@@ -1086,14 +1088,23 @@ mod generated {
             product.rule_identity()
         );
         let to_product = |id| {
-            let (dynkin, _) = lie.decode_irrep(id).unwrap();
+            let (dynkin, _) = lie
+                .try_decode_label(id)
+                .map(|label| {
+                    (
+                        label.dynkin().collect::<Vec<_>>(),
+                        label.charges().collect::<Vec<_>>(),
+                    )
+                })
+                .unwrap();
             product.encode_component_ids(
-                su2.encode_irrep(&dynkin[..1]).unwrap(),
-                su3.encode_irrep(&dynkin[1..]).unwrap(),
+                su2.encode_irrep_with_charges(&dynkin[..1], &[]).unwrap(),
+                su3.encode_irrep_with_charges(&dynkin[1..], &[]).unwrap(),
             )
         };
         let su3_box = [[0, 0], [1, 0], [0, 1], [2, 0], [1, 1], [0, 2]];
-        let label = |j: i64, [p, q]: [i64; 2]| lie.encode_irrep(&[j, p, q]).unwrap();
+        let label =
+            |j: i64, [p, q]: [i64; 2]| lie.encode_irrep_with_charges(&[j, p, q], &[]).unwrap();
         let sectors: Vec<_> = (0..4)
             .flat_map(|j| su3_box.map(|pq| label(j, pq)))
             .collect();
@@ -1112,9 +1123,17 @@ mod generated {
         .unwrap();
         let product = ProductFusionRule::<_, _>::try_new(su2.clone(), U1FusionRule).unwrap();
         let to_product = |id| {
-            let (dynkin, charges) = lie.decode_irrep(id).unwrap();
+            let (dynkin, charges) = lie
+                .try_decode_label(id)
+                .map(|label| {
+                    (
+                        label.dynkin().collect::<Vec<_>>(),
+                        label.charges().collect::<Vec<_>>(),
+                    )
+                })
+                .unwrap();
             product.encode_component_ids(
-                su2.encode_irrep(&dynkin).unwrap(),
+                su2.encode_irrep_with_charges(&dynkin, &[]).unwrap(),
                 SectorId::from(U1Irrep::new(i32::try_from(charges[0]).unwrap()).unwrap()),
             )
         };

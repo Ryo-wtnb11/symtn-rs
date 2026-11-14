@@ -2,6 +2,8 @@
 //! completeness, canonical-only publication, the reset epoch and failure
 //! non-publication, and concurrent cold misses.
 
+#[cfg(test)]
+use crate::su2::su2_rule;
 use std::hash::{BuildHasher, Hash};
 use std::sync::{Arc, Barrier};
 
@@ -566,7 +568,7 @@ fn structure_cache_clear_does_not_reuse_content_ids() {
 
 #[test]
 fn core_and_racah_resets_have_separate_owners() {
-    use symtn_core::{FusionRule, MultiplicityFreeFusionSymbols, SU2FusionRule, SectorId};
+    use symtn_core::{FusionRule, MultiplicityFreeFusionSymbols, SectorId};
 
     if crate::test_support::run_isolated_or_return(
         "SYMTN_CORE_RACAH_OWNERS_ISOLATED",
@@ -579,7 +581,7 @@ fn core_and_racah_resets_have_separate_owners() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     fusion_symbols::cache::reset();
 
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let identity = rule.rule_identity();
     let structure = BlockStructure::trivial(&[700_000_001]).unwrap();
     let structure_id = structure.content_id();

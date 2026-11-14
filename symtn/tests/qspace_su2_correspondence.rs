@@ -5,27 +5,22 @@
 //! the output and vector-operator legs gives `3/4` times the spin-half
 //! identity, hence the complete closed norm is `2 * 3/4 = 3/2`.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 #[test]
 fn spin_half_vector_operator_norm_matches_qspace() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let rule = Arc::new(SU2FusionRule);
-    let half =
-        GradedSpace::try_new(Arc::clone(&rule), [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
-    let vector =
-        GradedSpace::try_new(Arc::clone(&rule), [(SU2Irrep::from_twice_spin(2), 1)]).unwrap();
+    let rule = Arc::new(su2_rule());
+    let half = GradedSpace::try_new(Arc::clone(&rule), [(su2_irrep(1), 1)]).unwrap();
+    let vector = GradedSpace::try_new(Arc::clone(&rule), [(su2_irrep(2), 1)]).unwrap();
     let spin =
         TensorMap::from_subblock_fn(engine, &runtime, [&half], [&half, &vector], |trees, _| {
-            assert_eq!(trees.codomain_uncoupled(), &[SU2Irrep::from_twice_spin(1)]);
-            assert_eq!(
-                trees.domain_uncoupled(),
-                &[SU2Irrep::from_twice_spin(1), SU2Irrep::from_twice_spin(2),]
-            );
+            assert_eq!(trees.codomain_uncoupled(), &[su2_irrep(1)]);
+            assert_eq!(trees.domain_uncoupled(), &[su2_irrep(1), su2_irrep(2),]);
             -(3.0_f64).sqrt() / 2.0
         })
         .unwrap();

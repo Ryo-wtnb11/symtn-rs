@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn fusion_context_accepts_explicit_backend_type_arguments() {
@@ -433,11 +435,8 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: SU2 C[a b; g h] = A[a b; c d] * B[d c; g h] equals an explicit
     // RHS permutation followed by core composition.
-    let rule = SU2FusionRule;
-    let sectors = [
-        SU2Irrep::from_twice_spin(0).sector_id(),
-        SU2Irrep::from_twice_spin(1).sector_id(),
-    ];
+    let rule = su2_rule();
+    let sectors = [symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)];
     let degeneracy = 2usize;
     let leg = || SectorLeg::new(sectors.map(|sector| (sector, degeneracy)), false);
     let homspace = FusionTreeHomSpace::new(

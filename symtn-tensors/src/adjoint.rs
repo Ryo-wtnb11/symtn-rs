@@ -5,6 +5,8 @@
 //! transposes of `t`'s blocks (`block(t^H, c) = block(t, c)^H`). Codomain and
 //! domain swap as spaces; leg duality flags are unchanged.
 
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use core::ops::{Add, Mul};
 use std::sync::Arc;
 
@@ -599,12 +601,11 @@ mod cache_tests {
     use std::ops::{Add, Mul};
     use symtn_core::{
         FermionParityFusionRule, FermionParityIrrep, FusionProductSpace, ProductFusionRule,
-        ProductSectorCodec, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, TensorKitProductCodec,
-        U1FusionRule, U1Irrep,
+        ProductSectorCodec, SectorId, SectorLeg, TensorKitProductCodec, U1FusionRule, U1Irrep,
     };
 
     type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
     thread_local! {
         static LOWERED_PRIMER_CALLS: Cell<usize> = const { Cell::new(0) };
@@ -661,7 +662,7 @@ mod cache_tests {
     fn triple_rule() -> TripleRule {
         TripleRule::try_new(
             Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap()
     }
@@ -672,7 +673,7 @@ mod cache_tests {
                 SectorId::from(FermionParityIrrep::new(parity == 1)),
                 SectorId::from(U1Irrep::new(charge).unwrap()),
             ),
-            SU2Irrep::from_twice_spin(twice_spin).sector_id(),
+            symtn_core::SectorId::new(twice_spin),
         )
     }
 
@@ -867,6 +868,7 @@ mod cache_tests {
 
     #[test]
     fn final_homspace_is_the_adjoint_layout_authority_for_rank_one_rules() {
+        let su2_provider_rule = su2_rule();
         // What: asymmetric U(1), half-integer SU(2), and odd fZ2 typed and
         // dynamic daggers preserve the complete layout and conjugate
         // transpose numbers without a pivotal or fermionic phase.
@@ -879,8 +881,8 @@ mod cache_tests {
             false,
         );
         assert_rank_one_final_layout(
-            &SU2FusionRule,
-            SU2Irrep::from_twice_spin(1).sector_id(),
+            &su2_provider_rule,
+            symtn_core::SectorId::new(1),
             3,
             2,
             false,
@@ -937,12 +939,13 @@ mod cache_tests {
 
     #[test]
     fn eager_adjoint_keeps_rule_mismatch_precedence_over_canonical_preflight() {
+        let su2_provider_rule = su2_rule();
         // What: a wrong rule is rejected before canonical preflight inspects a
         // noncanonical (adjoint-view) source.
         let tensor = u1_view_tensor();
 
         OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
-        let error = tensor.adjoint(&SU2FusionRule).unwrap_err();
+        let error = tensor.adjoint(&su2_provider_rule).unwrap_err();
 
         assert!(matches!(
             error,
@@ -1010,10 +1013,11 @@ mod cache_tests {
 
     #[test]
     fn eager_adjoint_keeps_rule_mismatch_precedence_over_extent() {
+        let su2_provider_rule = su2_rule();
         // What: source rule validation remains the first eager-adjoint error
         // even when raw storage is also short.
         let source = u1_source(1, 2);
-        let error = adjoint_dyn(&SU2FusionRule, &source, &[] as &[f64]).unwrap_err();
+        let error = adjoint_dyn(&su2_provider_rule, &source, &[] as &[f64]).unwrap_err();
         assert!(matches!(
             error,
             OperationError::Core(CoreError::FusionRuleMismatch { .. })

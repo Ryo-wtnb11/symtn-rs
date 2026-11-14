@@ -1,5 +1,5 @@
 //! The multiplicity-free Lie rule's physical carrier basis: TensorKitSectors
-//! 0.3.12's `SU2Irrep` `fusiontensor` order (descending `m`) per rank-one
+//! 0.3.12's SU(2) `fusiontensor` order (descending `m`) per rank-one
 //! factor, factors composed as its `ProductSector` `_kron` (first factor most
 //! significant), and one recoupling gauge with the rule's F and A/B symbols.
 //! Expected values are hand values or dense CGC contractions.
@@ -24,7 +24,7 @@ fn su2() -> MfLie {
 }
 
 fn spin(rule: &MfLie, dj: i64) -> SectorId {
-    rule.encode_irrep(&[dj]).unwrap()
+    rule.encode_irrep_with_charges(&[dj], &[]).unwrap()
 }
 
 fn element(rule: &MfLie, [a, b, c]: [SectorId; 3], [i, j, k]: [usize; 3]) -> f64 {
@@ -74,7 +74,8 @@ fn product_carrier_puts_the_first_factor_most_significant() {
     // Spin(4) (1/2, 0) x (0, 1/2) -> (1/2, 1/2): both factor CGCs are 1, so
     // the coupled index is exactly the Kronecker index 2 i + j.
     let rule = rule(GroupId::spin(4).unwrap());
-    let vertex = [[1, 0], [0, 1], [1, 1]].map(|labels| rule.encode_irrep(&labels).unwrap());
+    let vertex = [[1, 0], [0, 1], [1, 1]]
+        .map(|labels| rule.encode_irrep_with_charges(&labels, &[]).unwrap());
     assert_eq!(dim(&rule, vertex[2]), 4);
     for i in 0..2 {
         for j in 0..2 {
@@ -204,7 +205,7 @@ fn product_physical_bases_share_the_factor_recoupling_gauge() {
     // Spin(4) with both factors nontrivial (a 4 x 4 F), and U(2) with
     // asymmetric spins and nonzero charges (a 2 x 2 F).
     let spin4 = rule(GroupId::spin(4).unwrap());
-    let bispinor = spin4.encode_irrep(&[1, 1]).unwrap();
+    let bispinor = spin4.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
     assert_eq!(assert_recoupling_matches_f(&spin4, [bispinor; 4]), 16);
 
     let u2 = rule(GroupId::u(2).unwrap());

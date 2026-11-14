@@ -12,12 +12,12 @@
 //! `--features cuda -- --ignored`.
 
 use crate::report;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use symtn::typed::Engine;
 
 use std::sync::Arc;
 
 use report::cause;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{Complex64, GradedSpace, OperationError, Runtime, TensorMap};
 
 /// The misuse class an error reports, read from its typed operation cause
@@ -36,9 +36,9 @@ fn class(error: impl std::error::Error + 'static) -> &'static str {
     }
 }
 
-fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let j = |twice: usize| SU2Irrep::from_twice_spin(twice);
-    let rule = Arc::new(SU2FusionRule);
+fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
+    let j = |twice: usize| su2_irrep(twice);
+    let rule = Arc::new(su2_rule());
     let v = GradedSpace::try_new(Arc::clone(&rule), [(j(0), 2), (j(1), 1), (j(2), 2)]).unwrap();
     let w = GradedSpace::try_new(rule, [(j(0), 2), (j(3), 1)]).unwrap();
     (v, w)

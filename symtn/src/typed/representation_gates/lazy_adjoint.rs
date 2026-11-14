@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 #[cfg(feature = "cgc-gen")]
 #[test]
@@ -1147,24 +1149,15 @@ fn adjoint_trace_pairs_stays_parent_native() {
         |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
     )
     .unwrap();
-    let su2_provider = Arc::new(SU2FusionRule);
+    let su2_provider = Arc::new(su2_rule());
     let su2_traced = GradedSpace::try_new(
         Arc::clone(&su2_provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 1)],
     )
     .unwrap();
-    let su2_open = GradedSpace::try_new(
-        su2_provider,
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
-    )
-    .and_then(|space| space.try_dual())
-    .unwrap();
+    let su2_open = GradedSpace::try_new(su2_provider, [(su2_irrep(0), 1), (su2_irrep(1), 1)])
+        .and_then(|space| space.try_dual())
+        .unwrap();
     let su2 = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -1510,7 +1503,7 @@ fn checked_generic_su3_adjoint_contract_and_compose_read_the_parent() {
 
 fn assert_rank_three_su2_contract_and_compose<D>(
     engine: &mut dyn Engine,
-    source: &TensorMap<SU2FusionRule, D>,
+    source: &TensorMap<Su2Rule, D>,
 ) where
     D: TensorScalar + core::fmt::Debug,
 {

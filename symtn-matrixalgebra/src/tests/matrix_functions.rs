@@ -2,6 +2,8 @@
 
 use super::svd::CountingLease;
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
@@ -833,11 +835,8 @@ fn inv_uses_sector_local_scale_for_su2_fz2_and_product_rules() {
     // What: sector-local rank and inversion apply uniformly to non-Abelian,
     // fermionic, and nested product rules rather than only the U1 fixture.
     assert_scale_separated_inverse(
-        SU2FusionRule,
-        [
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        su2_rule(),
+        [symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
     assert_scale_separated_inverse(
         FermionParityFusionRule::new(),
@@ -853,12 +852,10 @@ fn inv_uses_sector_local_scale_for_su2_fz2_and_product_rules() {
         fz2_u1.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
         fz2_u1.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
-    let fz2_u1_su2 = symtn_core::ProductFusionRule::<_, _>::try_new(fz2_u1, SU2FusionRule).unwrap();
+    let fz2_u1_su2 = symtn_core::ProductFusionRule::<_, _>::try_new(fz2_u1, su2_rule()).unwrap();
     let nested_sectors = [
-        fz2_u1_su2
-            .encode_component_ids(product_sectors[0], SU2Irrep::from_twice_spin(0).sector_id()),
-        fz2_u1_su2
-            .encode_component_ids(product_sectors[1], SU2Irrep::from_twice_spin(1).sector_id()),
+        fz2_u1_su2.encode_component_ids(product_sectors[0], symtn_core::SectorId::new(0)),
+        fz2_u1_su2.encode_component_ids(product_sectors[1], symtn_core::SectorId::new(1)),
     ];
     assert_scale_separated_inverse(fz2_u1_su2, nested_sectors);
 }
@@ -1904,21 +1901,21 @@ fn exp_of_a_hermitian_su2_endomorphism_takes_the_spectral_route() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the same dispatch gate on a non-abelian rule, where the coupled
     // sector matrix carries the recoupling structure the predicate reads.
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let symmetric = |a: f64, b: f64, c: f64| vec![a, b, b, c];
     let blocks = [
         (
-            SU2Irrep::from_twice_spin(0).sector_id(),
+            symtn_core::SectorId::new(0),
             2usize,
             symmetric(0.5, 0.25, -0.75),
         ),
         (
-            SU2Irrep::from_twice_spin(1).sector_id(),
+            symtn_core::SectorId::new(1),
             2usize,
             symmetric(1.25, -0.375, 0.625),
         ),
         (
-            SU2Irrep::from_twice_spin(2).sector_id(),
+            symtn_core::SectorId::new(2),
             2usize,
             symmetric(-0.25, 0.5, 0.125),
         ),
@@ -2616,11 +2613,8 @@ fn mf_pinv_exp_and_polar_publish_no_factor_layout() {
         &[SectorId::new(0), SectorId::new(1)],
     );
     check(
-        SU2FusionRule,
-        &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
+        su2_rule(),
+        &[symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)],
     );
 }
 

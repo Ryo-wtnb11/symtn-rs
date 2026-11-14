@@ -3,11 +3,11 @@
 //! do not depend on the degeneracies (the per-row split it replaces would
 //! scale with neither but cost a cache miss per group).
 
+use crate::su2::su2_rule;
 use std::sync::Arc;
 
 use symtn_core::{
-    FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeAdmissionMode, SU2FusionRule, SU2Irrep,
-    SectorId, SectorLeg,
+    FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeAdmissionMode, SectorId, SectorLeg,
 };
 use symtn_tensors::{BoundDynamicFusionMapSpace, PivotalCoefficientAlgebra, TensorTraceAxisSpec};
 
@@ -88,10 +88,10 @@ fn assert_warm_replay(label: &str, [small, large]: [(u64, u64, u64); 2]) {
 #[test]
 fn warm_multiplicity_free_trace_compile_replays_from_cache() {
     let _serial = crate::counting_alloc::serial();
-    let sectors = [0, 1, 2, 3].map(|spin| SU2Irrep::from_twice_spin(spin).sector_id());
+    let sectors = [0, 1, 2, 3].map(symtn_core::SectorId::new);
     let sizes = [1, 3].map(|degeneracy| {
         let src = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::new(SU2FusionRule),
+            Arc::new(su2_rule()),
             hom(&sectors, degeneracy),
         )
         .unwrap();
@@ -99,7 +99,7 @@ fn warm_multiplicity_free_trace_compile_replays_from_cache() {
             .unwrap()
             .into_selected_homspace();
         let dst = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::new(SU2FusionRule),
+            Arc::new(su2_rule()),
             dst_hom,
         )
         .unwrap();
@@ -120,7 +120,8 @@ fn warm_checked_generic_trace_compile_replays_from_cache() {
         )
         .unwrap(),
     );
-    let sectors = [[0, 0], [1, 0], [1, 1]].map(|dynkin| rule.encode_irrep(&dynkin).unwrap());
+    let sectors = [[0, 0], [1, 0], [1, 1]]
+        .map(|dynkin| rule.encode_irrep_with_charges(&dynkin, &[]).unwrap());
     let sizes = [1, 3].map(|degeneracy| {
         let src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
             Arc::clone(&rule),

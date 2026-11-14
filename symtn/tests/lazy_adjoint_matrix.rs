@@ -32,8 +32,7 @@ use num_complex::Complex64;
 
 use crate::numerics;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, U1FusionRule,
-    U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -383,7 +382,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_u1_legs() {
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_su2_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(crate::su2::su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
@@ -491,7 +490,7 @@ mod factorizations {
     use num_complex::Complex64;
     use symtn::sector::{
         FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector,
-        SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+        U1FusionRule, U1Irrep,
     };
     use symtn::typed::{
         Eig, Eigh, GradedSpace, HermitianTol, LeftPolar, Lq, Qr, RightPolar, Runtime,
@@ -827,13 +826,13 @@ mod factorizations {
     fn multiplicity_free_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
-        let provider = Arc::new(SU2FusionRule);
+        let provider = Arc::new(crate::su2::su2_rule());
         let su2 = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
                 Arc::clone(&provider),
                 pairs
                     .iter()
-                    .map(|&(twice, degeneracy)| (SU2Irrep::from_twice_spin(twice), degeneracy)),
+                    .map(|&(twice, degeneracy)| (crate::su2::su2_irrep(twice), degeneracy)),
             )
             .unwrap()
         };

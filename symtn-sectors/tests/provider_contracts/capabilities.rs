@@ -6,6 +6,8 @@
 //! `styles_follow_the_braiding_and_the_exact_fusion_table`); SU(3) styles
 //! (`src/lie.rs` `su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities`).
 
+use crate::su2::su2_rule;
+
 use num_complex::Complex64;
 use symtn_sectors::*;
 
@@ -24,7 +26,7 @@ fn multiplicity_free_rule_styles() {
     assert_eq!(styles(&FermionParityFusionRule::new()), (Unique, Fermionic));
     assert_eq!(styles(&U1FusionRule), (Unique, Bosonic));
     assert_eq!(styles(&CU1FusionRule::new()), (Simple, Bosonic));
-    assert_eq!(styles(&SU2FusionRule), (Simple, Bosonic));
+    assert_eq!(styles(&su2_rule()), (Simple, Bosonic));
     assert_eq!(styles(&TableRule::fibonacci()), (Simple, Anyonic));
     assert_eq!(styles(&rep_s3), (Simple, NoBraiding));
 
@@ -42,7 +44,7 @@ fn multiplicity_free_rule_styles() {
         styles(
             &symtn_sectors::ProductFusionRule::<_, _>::try_new(
                 FermionParityFusionRule::new(),
-                SU2FusionRule
+                su2_rule()
             )
             .unwrap()
         ),
@@ -134,7 +136,7 @@ fn trivial_associator_gauge_is_certified_only_by_the_abelian_group_rules() {
     assert!(FermionParityFusionRule::new().has_trivial_associator_gauge());
     assert!(U1FusionRule.has_trivial_associator_gauge());
     assert!(!CU1FusionRule::new().has_trivial_associator_gauge());
-    assert!(!SU2FusionRule.has_trivial_associator_gauge());
+    assert!(!su2_rule().has_trivial_associator_gauge());
     assert!(!TableRule::fibonacci().has_trivial_associator_gauge());
     // Products: conjunction of the factors.
     assert!(symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -145,7 +147,7 @@ fn trivial_associator_gauge_is_certified_only_by_the_abelian_group_rules() {
     .has_trivial_associator_gauge());
     assert!(!symtn_sectors::ProductFusionRule::<_, _>::try_new(
         ZNFusionRule::new(2).unwrap(),
-        SU2FusionRule
+        su2_rule()
     )
     .unwrap()
     .has_trivial_associator_gauge());
@@ -180,11 +182,10 @@ fn multiplicity_free_providers_carry_their_markers() {
         FermionParityFusionRule::new(),
         U1FusionRule,
         CU1FusionRule::new(),
-        SU2FusionRule,
-        LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+        su2_rule(),
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(fusion_symbols::lie::GroupId::u(2).unwrap()).unwrap()).unwrap(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), SU2FusionRule).unwrap(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap(), SU2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), su2_rule()).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap(), su2_rule()).unwrap(),
     );
     mf!(Complex64:
         TableRule::fibonacci(),
@@ -192,7 +193,7 @@ fn multiplicity_free_providers_carry_their_markers() {
         symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), TableRule::ising()).unwrap(),
     );
     physical(&U1FusionRule);
-    physical(&SU2FusionRule);
+    physical(&su2_rule());
 }
 
 #[cfg(feature = "cgc-gen")]

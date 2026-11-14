@@ -9,21 +9,17 @@
 //! BIT-identical to the single-threaded reference (a leased context that
 //! carried torn state from another thread would change the value or panic).
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 use std::thread;
 use symtn::typed::ContractSpec;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
-fn space() -> GradedSpace<SU2FusionRule> {
+fn space() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 3),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 3), (su2_irrep(1), 2), (su2_irrep(2), 1)],
     )
     .unwrap()
 }

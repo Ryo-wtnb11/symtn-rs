@@ -28,6 +28,7 @@ pub use symtn_core::FusionRule
 pub use symtn_core::FusionStyleKind
 pub use symtn_core::GenericFArray
 pub use symtn_core::GenericRMatrix
+pub use symtn_core::GroupId
 pub use symtn_core::InfallibleGeneric
 pub use symtn_core::LieGroupFusionRule
 pub use symtn_core::LieGroupFusionRuleError
@@ -46,9 +47,6 @@ pub use symtn_core::ProductSectorCodec
 pub use symtn_core::ProductSectorCodecError
 pub use symtn_core::ProductSectorComponent
 pub use symtn_core::RuleIdentity
-pub use symtn_core::SU2FusionRule
-pub use symtn_core::SU2Irrep
-pub use symtn_core::SU2_MAX_DOUBLED_SPIN
 pub use symtn_core::SectorCodec
 pub use symtn_core::SectorId
 pub use symtn_core::SectorOrderKey

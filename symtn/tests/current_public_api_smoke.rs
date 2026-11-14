@@ -1,9 +1,9 @@
 //! Independent Phase A smoke program for the canonical typed public API.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::ContractSpec;
 use symtn::typed::{GradedSpace, Runtime, TensorMap, Truncation};
@@ -64,15 +64,11 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
     assert!(coupled.contains(&U1Irrep::new(0).unwrap()));
 
     let su2 = GradedSpace::try_new(
-        std::sync::Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
+        std::sync::Arc::new(su2_rule()),
+        [(su2_irrep(0), 1), (su2_irrep(1), 2)],
     )
     .unwrap();
-    let su2_tensor =
-        TensorMap::<SU2FusionRule, f64>::zeros(engine, &runtime, [&su2], [&su2]).unwrap();
+    let su2_tensor = TensorMap::<Su2Rule, f64>::zeros(engine, &runtime, [&su2], [&su2]).unwrap();
     assert!(su2_tensor.subblock_count() >= 2);
 
     let product = GradedSpace::try_new(

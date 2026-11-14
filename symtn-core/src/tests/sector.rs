@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn sector_leg_treats_zero_degeneracy_as_an_absent_sector() {
@@ -225,6 +227,7 @@ fn assert_checked_contract_all_orientations<R>(
 
 #[test]
 fn checked_tensorcontract_matches_all_closed_rules_and_leg_orientations() {
+    let su2_provider_rule = su2_rule();
     // What: checked contraction preserves valid HomSpaces and structural
     // errors across all four stored-side orientations and multi-sector
     // membership for every built-in multiplicity-free family.
@@ -265,7 +268,7 @@ fn checked_tensorcontract_matches_all_closed_rules_and_leg_orientations() {
     let spin_half = su2(1);
     let (su2_leg, su2_bad) = fixture(&[(spin0, 1), (spin_half, 2)], &[(spin0, 1), (spin_half, 3)]);
     assert_checked_contract_all_orientations(
-        &SU2FusionRule,
+        &su2_provider_rule,
         su2_leg,
         su2_bad,
         SectorLeg::new([(spin0, 1)], false),
@@ -363,6 +366,7 @@ where
 
 #[test]
 fn direct_leg_degeneracy_layout_matches_reference_for_supported_rules() {
+    let su2_provider_rule = su2_rule();
     let _guard = test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -390,11 +394,11 @@ fn direct_leg_degeneracy_layout_matches_reference_for_supported_rules() {
     );
 
     let su2_hom = build(&[
-        (SU2Irrep::from_twice_spin(0).sector_id(), 2),
-        (SU2Irrep::from_twice_spin(1).sector_id(), 1),
+        (symtn_core::SectorId::new(0), 2),
+        (symtn_core::SectorId::new(1), 1),
     ]);
-    assert_direct_leg_degeneracy_structure_matches_reference(&SU2FusionRule, &su2_hom);
-    assert_coupled_grid_layout_matches_key_reconstruction(&SU2FusionRule, &su2_hom);
+    assert_direct_leg_degeneracy_structure_matches_reference(&su2_provider_rule, &su2_hom);
+    assert_coupled_grid_layout_matches_key_reconstruction(&su2_provider_rule, &su2_hom);
 
     let product_rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         FermionParityFusionRule::new(),
@@ -550,6 +554,7 @@ fn assert_shared_dual<R: FusionRule>(rule: &R, leg: &SectorLeg, expected: &Secto
 
 #[test]
 fn sector_leg_dual_is_shared_for_non_self_dual_self_dual_and_product_rules() {
+    let su2_provider_rule = su2_rule();
     // What: the dual shares storage for every map, and its content
     // is the hand-computed dual map with the flag flipped.
     for is_dual in [false, true] {
@@ -564,7 +569,7 @@ fn sector_leg_dual_is_shared_for_non_self_dual_self_dual_and_product_rules() {
 
         let su2_leg = SectorLeg::new([(su2(0), 2), (su2(1), 1), (su2(2), 4)], is_dual);
         let su2_expected = SectorLeg::new([(su2(0), 2), (su2(1), 1), (su2(2), 4)], !is_dual);
-        assert_shared_dual(&SU2FusionRule, &su2_leg, &su2_expected);
+        assert_shared_dual(&su2_provider_rule, &su2_leg, &su2_expected);
 
         type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
         let product = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
@@ -592,18 +597,19 @@ fn sector_leg_dual_is_shared_for_non_self_dual_self_dual_and_product_rules() {
 
 #[test]
 fn sector_leg_dual_under_a_different_rule_ignores_the_shared_map() {
+    let su2_provider_rule = su2_rule();
     // What: sector ids are rule-relative. A rule whose dual differs from
     // the rule that filled a leg's dual map gets its own dual, and the
     // shared map keeps serving the filling rule.
     let leg = SectorLeg::new([(u1(-1), 2), (u1(1), 4)], false);
     let u1_dual = leg.dual(&U1FusionRule);
-    let identity_dual = leg.dual(&SU2FusionRule);
+    let identity_dual = leg.dual(&su2_provider_rule);
     assert_eq!(
         identity_dual,
         SectorLeg::new([(u1(-1), 2), (u1(1), 4)], true)
     );
     assert_eq!(
-        u1_dual.dual(&SU2FusionRule),
+        u1_dual.dual(&su2_provider_rule),
         SectorLeg::new([(u1(-1), 4), (u1(1), 2)], false)
     );
     assert_eq!(leg.dual(&U1FusionRule), u1_dual);
@@ -613,7 +619,7 @@ fn sector_leg_dual_under_a_different_rule_ignores_the_shared_map() {
     // What: the other fill order.
     let leg = SectorLeg::new([(u1(-1), 2), (u1(1), 4)], false);
     assert_eq!(
-        leg.dual(&SU2FusionRule),
+        leg.dual(&su2_provider_rule),
         SectorLeg::new([(u1(-1), 2), (u1(1), 4)], true)
     );
     assert_eq!(
@@ -624,6 +630,7 @@ fn sector_leg_dual_under_a_different_rule_ignores_the_shared_map() {
 
 #[test]
 fn sector_leg_dual_race_loser_shares_only_an_agreeing_map() {
+    let su2_provider_rule = su2_rule();
     // What: the arm a thread takes when another filled the shared dual
     // map between its check and its install. The loser's maps are written
     // out by hand: `q -> -q` moves this leg's map, the identity keeps it.
@@ -640,7 +647,7 @@ fn sector_leg_dual_race_loser_shares_only_an_agreeing_map() {
     let identity_map = || DualSectorMap {
         images: Box::new([u1(-1), u1(1)]),
         moved: None,
-        filled_by: SU2FusionRule.rule_identity(),
+        filled_by: su2_provider_rule.rule_identity(),
     };
     let u1_dual = SectorLeg::new([(u1(-1), 4), (u1(1), 2)], true);
     let identity_dual = SectorLeg::new(pairs, true);
@@ -654,11 +661,11 @@ fn sector_leg_dual_race_loser_shares_only_an_agreeing_map() {
 
     // Loser's moved map, winner's identity map: the loser's own leg.
     let leg = SectorLeg::new(pairs, false);
-    leg.dual(&SU2FusionRule);
+    leg.dual(&su2_provider_rule);
     let dual = leg.install_dual_map(u1_map());
     assert_eq!(dual, u1_dual);
     assert!(!dual.shares_sector_data_with(&leg));
-    assert_eq!(leg.dual(&SU2FusionRule), identity_dual);
+    assert_eq!(leg.dual(&su2_provider_rule), identity_dual);
 
     // Loser's identity map, winner's moved map: the source storage with
     // the flag flipped, not the winner's moved map.

@@ -20,12 +20,12 @@
 //! coordinates (Ising entries there carry AnyonWiki's vertex sign
 //! `u^{σσ}_ψ = −1`, so both sides are the same morphism).
 
+use crate::su2::su2_rule;
 use std::f64::consts::SQRT_2;
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{
     ContractSpec, EighFullPlan, GradedSpace, HermitianTol, LeftPolar, Lq, Qr, RightPolar, Runtime,
     SectorSpectrum, StackedTensorMap, Svd, TensorMap, Truncation,
@@ -1120,11 +1120,11 @@ fn a_real_complex_embedding_factorizes_exactly_as_the_real_symbol_rule() {
     let (_, complex) = operands!(
         engine,
         &runtime,
-        Embedded::<_, false>(SU2FusionRule),
+        Embedded::<_, false>(su2_rule()),
         su2_sectors()
     );
-    let (_, real) = operands!(engine, &runtime, SU2FusionRule, su2_sectors());
-    let bits = |spectra: Vec<SectorSpectrum<SU2Irrep>>| -> Vec<(SU2Irrep, Vec<u64>)> {
+    let (_, real) = operands!(engine, &runtime, su2_rule(), su2_sectors());
+    let bits = |spectra: Vec<SectorSpectrum<symtn_core::LieIrrep>>| -> Vec<(symtn_core::LieIrrep, Vec<u64>)> {
         spectra
             .into_iter()
             .map(|entry| {
@@ -1193,7 +1193,7 @@ fn a_non_real_quantum_dimension_is_refused_by_truncation() {
     let (_, t) = operands!(
         engine,
         &runtime,
-        Embedded::<_, true>(SU2FusionRule),
+        Embedded::<_, true>(su2_rule()),
         su2_sectors()
     );
     let Svd { s, .. } = t.svd_compact(engine, &[0, 1], &[2, 3]).unwrap();

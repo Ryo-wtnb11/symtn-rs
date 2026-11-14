@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 /// Parallel replay (threads=4, size gate dropped) must match the serial
 /// default elementwise: swap+out exercises source and output tree
@@ -6,6 +8,7 @@ use super::*;
 /// pack/GEMM/scatter blocks for SU2.
 #[test]
 fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
+    let su2_provider_rule = su2_rule();
     fn run_case<R>(rule: &R, sectors: &[SectorId], degeneracy: usize)
     where
         R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
@@ -118,18 +121,18 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
         3,
     );
     run_case(
-        &SU2FusionRule,
+        &su2_provider_rule,
         &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-            SU2Irrep::from_twice_spin(2).sector_id(),
+            symtn_core::SectorId::new(0),
+            symtn_core::SectorId::new(1),
+            symtn_core::SectorId::new(2),
         ],
         3,
     );
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let product_rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_provider_rule.clone(),
     )
     .unwrap();
     let left_sector = |parity, charge| {
@@ -138,7 +141,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
     let product_sector = |parity, charge, twice_spin| {
         product_rule.encode_component_ids(
             left_sector(parity, charge),
-            SU2Irrep::from_twice_spin(twice_spin).sector_id(),
+            symtn_core::SectorId::new(twice_spin),
         )
     };
     run_case(

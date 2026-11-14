@@ -32,13 +32,14 @@
 //! `frobenius_schur_phase` outputs, checked against TensorKit 0.17.1
 //! (TensorKitSectors 0.3.10, Julia 1.11.6).
 
+use crate::su2::{su2_rule, Su2Rule};
+
 use symtn_sectors::SectorCodec;
 use symtn_sectors::ZNIrrep;
 use symtn_sectors::{
     CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep, FusionRule,
     MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, ProductFusionRule,
-    ProductSectorCodec, SU2FusionRule, SU2Irrep, SectorId, TensorKitProductCodec, U1FusionRule,
-    U1Irrep, ZNFusionRule,
+    ProductSectorCodec, SectorId, TensorKitProductCodec, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 
 const TOL: f64 = 1e-12;
@@ -251,9 +252,7 @@ fn u1_sectors(window: i32) -> Vec<SectorId> {
 }
 
 fn su2_sectors(max_twice_spin: usize) -> Vec<SectorId> {
-    (0..=max_twice_spin)
-        .map(|j| SU2Irrep::from_twice_spin(j).into())
-        .collect()
+    (0..=max_twice_spin).map(crate::sector_ids::su2).collect()
 }
 
 fn cu1_sectors() -> Vec<SectorId> {
@@ -286,12 +285,12 @@ fn u1_fz2_sectors(window: i32) -> Vec<SectorId> {
 
 type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 /// `fZ2 ⊠ U1 ⊠ SU2`, left-associated as `(fZ2 ⊠ U1) ⊠ SU2`.
-type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+type TripleRule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
 fn triple_rule() -> TripleRule {
     ProductFusionRule::try_new(
         ProductFusionRule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap()
 }
@@ -301,7 +300,7 @@ fn triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
         SectorId::new(usize::from(parity & 1)),
         SectorId::from(U1Irrep::new(charge).unwrap()),
     );
-    TensorKitProductCodec::encode(inner, SU2Irrep::from_twice_spin(twice_spin).sector_id())
+    TensorKitProductCodec::encode(inner, crate::sector_ids::su2(twice_spin))
 }
 
 fn triple_sectors(charge_window: i32, max_twice_spin: usize) -> Vec<SectorId> {
@@ -346,11 +345,11 @@ fn axioms_cu1() {
 fn axioms_su2() {
     // Hexagon over the full 2j <= 6 window (cheap: triples only).
     let full = su2_sectors(6);
-    assert!(check_hexagon(&SU2FusionRule, &full, false) > 0);
-    assert!(check_hexagon(&SU2FusionRule, &full, true) > 0);
+    assert!(check_hexagon(&su2_rule(), &full, false) > 0);
+    assert!(check_hexagon(&su2_rule(), &full, true) > 0);
     // Pentagon over 2j <= 3 stays fast in debug builds; the exhaustive
     // 2j <= 6 sweep is `axioms_su2_exhaustive` below.
-    check_all("SU2", &SU2FusionRule, &su2_sectors(3));
+    check_all("SU2", &su2_rule(), &su2_sectors(3));
 }
 
 /// Exhaustive SU(2) pentagon sweep over 2j <= 6.
@@ -358,7 +357,7 @@ fn axioms_su2() {
 #[test]
 #[ignore = "exhaustive sweep, run explicitly in release"]
 fn axioms_su2_exhaustive() {
-    check_all("SU2 (2j<=6)", &SU2FusionRule, &su2_sectors(6));
+    check_all("SU2 (2j<=6)", &su2_rule(), &su2_sectors(6));
 }
 
 #[test]
@@ -406,8 +405,8 @@ fn tensorkit_symbol_values_fz2() {
 
 #[test]
 fn tensorkit_symbol_values_su2() {
-    let rule = SU2FusionRule;
-    let s = |twice_spin: usize| -> SectorId { SU2Irrep::from_twice_spin(twice_spin).into() };
+    let rule = su2_rule();
+    let s = |twice_spin: usize| -> SectorId { crate::sector_ids::su2(twice_spin) };
     let f = |labels: [usize; 6]| {
         rule.f_symbol_scalar(
             s(labels[0]),

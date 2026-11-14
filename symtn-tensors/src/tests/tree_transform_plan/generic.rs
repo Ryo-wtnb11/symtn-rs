@@ -1,5 +1,7 @@
 use super::*;
 use crate::probe::{self, Event};
+#[cfg(feature = "cgc-gen")]
+use symtn_core::TypedSectorAdmission;
 
 // ======================================================================
 // Generic-fusion (outer-multiplicity) plan compile.
@@ -1244,7 +1246,12 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
                             .iter()
                             .chain(tree.innerlines())
                             .chain(std::iter::once(&tree.coupled()))
-                            .map(|&sector| rule.decode_irrep(sector).unwrap().0),
+                            .map(|&sector| {
+                                rule.try_decode_label(sector)
+                                    .unwrap()
+                                    .dynkin()
+                                    .collect::<Vec<_>>()
+                            }),
                     );
                     vertices.extend_from_slice(tree.vertices());
                 }
@@ -1260,7 +1267,9 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
             )
             .unwrap(),
         );
-        let adjoint = provider.encode_irrep(adjoint_labels).unwrap();
+        let adjoint = provider
+            .encode_irrep_with_charges(adjoint_labels, &[])
+            .unwrap();
         assert_eq!(provider.try_nsymbol(adjoint, adjoint, adjoint).unwrap(), 2);
         let homspace = FusionTreeHomSpace::new(
             FusionProductSpace::new(
@@ -1337,8 +1346,8 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
         fusion_symbols::lie::GroupId::su(3).unwrap(),
     )
     .unwrap();
-    let adjoint = inner.encode_irrep(&[1, 1]).unwrap();
-    let fundamental = inner.encode_irrep(&[1, 0]).unwrap();
+    let adjoint = inner.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+    let fundamental = inner.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let leg = || SectorLeg::new([(fundamental, 1), (adjoint, 2)], false);
     let homspace = FusionTreeHomSpace::new(
@@ -1388,7 +1397,7 @@ fn retained_su3_vertex_move_replay_queries_no_symbols() {
             fusion_symbols::lie::GroupId::su(3).unwrap(),
         )
         .unwrap();
-    let octet = inner.encode_irrep(&[1, 1]).unwrap();
+    let octet = inner.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let leg = |n| SectorLeg::new([(octet, n)], false);
     let source = crate::BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(

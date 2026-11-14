@@ -10,12 +10,12 @@
 //!   supplied values in TensorKit sector order.
 
 use crate::common::ErrorKind as _;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
@@ -59,14 +59,10 @@ fn u1_leg() -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
+fn su2_leg() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-            (SU2Irrep::from_twice_spin(2), 2),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 1), (su2_irrep(2), 2)],
     )
     .unwrap()
 }
@@ -562,15 +558,15 @@ fn materialize_densifies_a_compact_diagonal() {
         f64,
         [
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(2),
+                sector: su2_irrep(2),
                 values: vec![4.0, -5.0]
             },
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(0),
+                sector: su2_irrep(0),
                 values: vec![1.0, -2.0]
             },
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(1),
+                sector: su2_irrep(1),
                 values: vec![3.0]
             },
         ],

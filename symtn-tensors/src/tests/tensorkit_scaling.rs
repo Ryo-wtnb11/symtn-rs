@@ -23,6 +23,8 @@
 //! change the expected value through the sign of a zero.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use std::sync::Arc;
 
 trait Payload: Copy + std::fmt::Debug + std::ops::Mul<Output = Self> {
@@ -211,12 +213,12 @@ where
 #[test]
 fn zero_alpha_transform_and_trace_match_tensorkit() {
     let u1 = [0, 1, -1].map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()));
-    let su2 = [0, 1, 2].map(|twice| SU2Irrep::from_twice_spin(twice).sector_id());
+    let su2 = [0, 1, 2].map(symtn_core::SectorId::new);
     let fz2 = [SectorId::new(0), SectorId::new(1)];
     check_zero_alpha::<_, f64>("U(1) f64", Arc::new(U1FusionRule), &u1);
     check_zero_alpha::<_, Complex64>("U(1) c64", Arc::new(U1FusionRule), &u1);
-    check_zero_alpha::<_, f64>("SU(2) f64", Arc::new(SU2FusionRule), &su2);
-    check_zero_alpha::<_, Complex64>("SU(2) c64", Arc::new(SU2FusionRule), &su2);
+    check_zero_alpha::<_, f64>("SU(2) f64", Arc::new(su2_rule()), &su2);
+    check_zero_alpha::<_, Complex64>("SU(2) c64", Arc::new(su2_rule()), &su2);
     check_zero_alpha::<_, f64>("fZ2 f64", Arc::new(FermionParityFusionRule::new()), &fz2);
     check_zero_alpha::<_, Complex64>("fZ2 c64", Arc::new(FermionParityFusionRule::new()), &fz2);
 }
@@ -282,14 +284,14 @@ fn check_trace_overflow<R, D>(
 fn trace_scales_each_element_before_the_sum_as_tensorkit() {
     let big = Complex64::new(1e308, 1e308);
     let u1 = SectorId::from(U1Irrep::new(1).unwrap());
-    let spin_half = SU2Irrep::from_twice_spin(1).sector_id();
+    let spin_half = symtn_core::SectorId::new(1);
     let odd = SectorId::new(1);
     let su2 = 1.000_000_000_000_000_2e308;
     check_trace_overflow("U(1) f64", Arc::new(U1FusionRule), u1, 0.5, 1e308, 1e308);
     check_trace_overflow("U(1) c64", Arc::new(U1FusionRule), u1, 0.5, big, big);
     check_trace_overflow(
         "SU(2) f64",
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         spin_half,
         0.25,
         1e308,
@@ -297,7 +299,7 @@ fn trace_scales_each_element_before_the_sum_as_tensorkit() {
     );
     check_trace_overflow(
         "SU(2) c64",
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         spin_half,
         0.25,
         big,
@@ -454,12 +456,12 @@ where
 #[test]
 fn zero_scale_contraction_matches_tensorkit() {
     let u1 = [0, 1, -1].map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()));
-    let su2 = [0, 1, 2].map(|twice| SU2Irrep::from_twice_spin(twice).sector_id());
+    let su2 = [0, 1, 2].map(symtn_core::SectorId::new);
     let fz2 = [SectorId::new(0), SectorId::new(1)];
     check_zero_scale_contraction::<_, f64>("U(1) f64", Arc::new(U1FusionRule), &u1);
     check_zero_scale_contraction::<_, Complex64>("U(1) c64", Arc::new(U1FusionRule), &u1);
-    check_zero_scale_contraction::<_, f64>("SU(2) f64", Arc::new(SU2FusionRule), &su2);
-    check_zero_scale_contraction::<_, Complex64>("SU(2) c64", Arc::new(SU2FusionRule), &su2);
+    check_zero_scale_contraction::<_, f64>("SU(2) f64", Arc::new(su2_rule()), &su2);
+    check_zero_scale_contraction::<_, Complex64>("SU(2) c64", Arc::new(su2_rule()), &su2);
     check_zero_scale_contraction::<_, f64>(
         "fZ2 f64",
         Arc::new(FermionParityFusionRule::new()),

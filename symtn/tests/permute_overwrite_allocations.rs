@@ -1,9 +1,10 @@
+use crate::su2::{su2_irrep, su2_rule};
 use std::hint::black_box;
 use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
 
-use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{product_sector, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -25,27 +26,15 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     // compiled plan and replay workspace without allocating on the caller.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
     );
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (
-                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(0)),
-                8,
-            ),
-            (
-                product_sector(U1Irrep::new(1).unwrap(), SU2Irrep::from_twice_spin(1)),
-                6,
-            ),
-            (
-                product_sector(U1Irrep::new(-1).unwrap(), SU2Irrep::from_twice_spin(1)),
-                6,
-            ),
-            (
-                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(2)),
-                4,
-            ),
+            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(0)), 8),
+            (product_sector(U1Irrep::new(1).unwrap(), su2_irrep(1)), 6),
+            (product_sector(U1Irrep::new(-1).unwrap(), su2_irrep(1)), 6),
+            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(2)), 4),
         ],
     )
     .unwrap();
@@ -127,11 +116,11 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
     // Degeneracies stay small so no GEMM reaches the dense provider's
     // own packing workspace.
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let mut warm = |spins: usize| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
-            (0..spins).map(|twice_spin| (SU2Irrep::from_twice_spin(twice_spin), 2)),
+            (0..spins).map(|twice_spin| (su2_irrep(twice_spin), 2)),
         )
         .unwrap();
         let source: TensorMap<_, f64> =

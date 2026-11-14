@@ -24,11 +24,12 @@
 //! `dot_general` over the per-job ops path, one per coupled block) are
 //! outside it and are not covered here.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::hint::black_box;
 use std::sync::Arc;
 use symtn::typed::Engine;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
 use crate::counting_alloc;
@@ -171,14 +172,14 @@ macro_rules! assert_borrowed {
     }};
 }
 
-fn su2_spaces(scale: usize) -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
+fn su2_spaces(scale: usize) -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
     let space = |degs: [usize; 3]| {
         GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
+            Arc::new(su2_rule()),
             [0, 1, 2]
                 .into_iter()
                 .zip(degs)
-                .map(|(twice, deg)| (SU2Irrep::from_twice_spin(twice), deg * scale)),
+                .map(|(twice, deg)| (su2_irrep(twice), deg * scale)),
         )
         .unwrap()
     };

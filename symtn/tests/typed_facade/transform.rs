@@ -62,7 +62,7 @@ fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
         [&leg, &leg],
         |sectors, indices| {
             Complex64::new(
-                sectors.coupled().twice_spin() as f64 + 1.0,
+                usize::try_from(sectors.coupled().dynkin().next().unwrap()).unwrap() as f64 + 1.0,
                 indices.iter().sum::<usize>() as f64 + 1.0,
             )
         },

@@ -7,10 +7,11 @@
 //! build's. Unique fusion never enters it (TensorKit's `NoCache`; see
 //! `composed_coefficient_cache.rs`).
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::HashSet;
 use std::sync::Arc;
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector};
+use symtn::sector::{TableRule, TableSector};
 use symtn::typed::Engine;
 use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 
@@ -180,15 +181,12 @@ macro_rules! check_rule {
     }};
 }
 
-type Su2Operation =
-    dyn Fn(&mut dyn Engine, &TensorMap<SU2FusionRule, f64>) -> TensorMap<SU2FusionRule, f64>;
+type Su2Operation = dyn Fn(&mut dyn Engine, &TensorMap<Su2Rule, f64>) -> TensorMap<Su2Rule, f64>;
 
-fn su2_leg(sectors: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
+fn su2_leg(sectors: &[(usize, usize)]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        sectors
-            .iter()
-            .map(|&(j, d)| (SU2Irrep::from_twice_spin(j), d)),
+        Arc::new(su2_rule()),
+        sectors.iter().map(|&(j, d)| (su2_irrep(j), d)),
     )
     .unwrap()
 }

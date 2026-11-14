@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 fn assert_checked_keys_match_encoded_oracle<R>(rule: &R, hom: &FusionTreeHomSpace)
 where
@@ -23,6 +25,7 @@ where
 
 #[test]
 fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
+    let su2_provider_rule = su2_rule();
     // What: every persistent key field and key order stays identical for
     // ranks 0 through 6 across all built-in multiplicity-free algebras.
     for rank in 0..=6 {
@@ -35,7 +38,10 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
             &FermionParityFusionRule::new(),
             &singleton_rank_hom(z2_odd(), rank),
         );
-        assert_checked_keys_match_encoded_oracle(&SU2FusionRule, &singleton_rank_hom(su2(1), rank));
+        assert_checked_keys_match_encoded_oracle(
+            &su2_provider_rule,
+            &singleton_rank_hom(su2(1), rank),
+        );
     }
     // Dual legs change the stored key duality flags on a non-product rule too.
     let su2_dual_leg = FusionProductSpace::new([
@@ -43,7 +49,7 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
         SectorLeg::new([(su2(1), 2)], false),
     ]);
     assert_checked_keys_match_encoded_oracle(
-        &SU2FusionRule,
+        &su2_provider_rule,
         &FusionTreeHomSpace::new(su2_dual_leg.clone(), su2_dual_leg),
     );
 
@@ -52,10 +58,10 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
     let pair_sector = TensorKitProductCodec::encode(u1(1), z2_odd());
 
     type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule>;
+    type TripleRule = ProductFusionRule<Fz2U1Rule, Su2Rule>;
     let triple_rule = TripleRule::try_new(
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_provider_rule.clone(),
     )
     .unwrap();
     let triple_sector =
@@ -135,6 +141,7 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
 
 #[test]
 fn checked_and_encoded_entries_share_the_same_layout_cache() {
+    let su2_provider_rule = su2_rule();
     // What: encoded-first and lowered-first construction converge on the same
     // Arc rather than publishing parallel layouts for one semantic key.
     let _guard = test_support::CACHE_TEST_LOCK
@@ -143,24 +150,25 @@ fn checked_and_encoded_entries_share_the_same_layout_cache() {
     let hom = singleton_rank_hom(su2(1), 4);
 
     clear_structure_caches();
-    let encoded_first = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    let encoded_first = hom.cached_fusion_tree_layout(&su2_provider_rule);
     let checked_second = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .prepare_fusion_tree_layout_checked(&su2_provider_rule)
         .unwrap()
         .commit_layout();
     assert!(Arc::ptr_eq(&encoded_first, &checked_second));
 
     clear_structure_caches();
     let checked_first = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .prepare_fusion_tree_layout_checked(&su2_provider_rule)
         .unwrap()
         .commit_layout();
-    let encoded_second = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    let encoded_second = hom.cached_fusion_tree_layout(&su2_provider_rule);
     assert!(Arc::ptr_eq(&checked_first, &encoded_second));
 }
 
 #[test]
 fn warm_layout_commit_publishes_nothing() {
+    let su2_provider_rule = su2_rule();
     // What: publishing a layout admits it once; a warm call finds it in the
     // prepare lookup and publishes nothing.
     let _guard = test_support::CACHE_TEST_LOCK
@@ -170,7 +178,7 @@ fn warm_layout_commit_publishes_nothing() {
     let hom = singleton_rank_hom(su2(1), 5);
 
     let recording = crate::probe::record();
-    let cold = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    let cold = hom.cached_fusion_tree_layout(&su2_provider_rule);
     assert_eq!(
         (
             recording.get(crate::probe::Event::LayoutBuild),
@@ -179,7 +187,7 @@ fn warm_layout_commit_publishes_nothing() {
         (1, 1)
     );
 
-    let warm = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    let warm = hom.cached_fusion_tree_layout(&su2_provider_rule);
     assert_eq!(
         (
             recording.get(crate::probe::Event::LayoutBuild),
@@ -194,10 +202,11 @@ fn warm_layout_commit_publishes_nothing() {
 /// checks that the commit returns the prepared keys without re-admitting
 /// them and that the next call rebuilds once.
 fn assert_warm_commit_after_removal_is_not_readmitted(drop_entry: impl FnOnce()) {
+    let su2_provider_rule = su2_rule();
     let hom = singleton_rank_hom(su2(1), 5);
-    let resident = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    let resident = hom.cached_fusion_tree_layout(&su2_provider_rule);
     let prepared = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .prepare_fusion_tree_layout_checked(&su2_provider_rule)
         .unwrap();
     let prepared_keys = prepared.keys_arc();
     assert!(Arc::ptr_eq(&prepared_keys, &resident.keys));
@@ -212,7 +221,7 @@ fn assert_warm_commit_after_removal_is_not_readmitted(drop_entry: impl FnOnce())
         0
     );
 
-    let rebuilt = hom.cached_fusion_tree_layout(&SU2FusionRule);
+    let rebuilt = hom.cached_fusion_tree_layout(&su2_provider_rule);
     assert_eq!(rebuilt.keys, committed);
     assert_eq!(
         (
@@ -311,6 +320,7 @@ fn warm_multiplicity_free_permute_looks_up_its_sector_structure_once() {
 
 #[test]
 fn prepared_layout_publishes_only_at_commit() {
+    let su2_provider_rule = su2_rule();
     // What: cold preparation enumerates exactly once but does not consume
     // identity or cache admission until its explicit commit point.
     let _guard = test_support::CACHE_TEST_LOCK
@@ -321,7 +331,7 @@ fn prepared_layout_publishes_only_at_commit() {
     let hom = singleton_rank_hom(su2(1), 5);
 
     let prepared = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .prepare_fusion_tree_layout_checked(&su2_provider_rule)
         .unwrap();
     // Why not inspect global cache totals: unrelated parallel tests may
     // populate the same process cache. These thread-local probes attribute
@@ -347,6 +357,7 @@ fn prepared_layout_publishes_only_at_commit() {
 
 #[test]
 fn prepared_final_structure_reuses_one_checked_enumeration() {
+    let su2_provider_rule = su2_rule();
     // What: cold checked preparation and the direct leg-degeneracy builder
     // match the established single-pass structure without a second
     // decode/channel enumeration or early cache publication.
@@ -356,13 +367,13 @@ fn prepared_final_structure_reuses_one_checked_enumeration() {
     let hom = singleton_rank_hom(su2(1), 5);
     clear_structure_caches();
     let expected = hom
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
 
     clear_structure_caches();
     let recording = crate::probe::record();
     let prepared = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .prepare_fusion_tree_layout_checked(&su2_provider_rule)
         .unwrap();
     assert_eq!(
         (
@@ -394,6 +405,7 @@ fn prepared_final_structure_reuses_one_checked_enumeration() {
 
 #[test]
 fn prepared_complete_structure_hits_without_rebuilding_layout() {
+    let su2_provider_rule = su2_rule();
     // Isolated like symtn-tensors' checked_bind_failure test: this asserts an absolute process-global cache admission
     // count right after a reset, which CACHE_TEST_LOCK does not
     // protect from the crate's many ordinary, unlocked complete-
@@ -414,7 +426,7 @@ fn prepared_complete_structure_hits_without_rebuilding_layout() {
     let hom = singleton_rank_hom(su2(1), 5);
 
     let first_prepared = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .prepare_fusion_tree_layout_checked(&su2_provider_rule)
         .unwrap();
     let first = first_prepared
         .build_complete_from_leg_degeneracies(&hom)
@@ -424,7 +436,7 @@ fn prepared_complete_structure_hits_without_rebuilding_layout() {
     assert_eq!(after_first.admissions(), 1);
 
     let second_prepared = hom
-        .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+        .prepare_fusion_tree_layout_checked(&su2_provider_rule)
         .unwrap();
     let second = second_prepared
         .build_complete_from_leg_degeneracies(&hom)
@@ -717,6 +729,7 @@ fn prepared_lowered_final_structure_checks_signature_but_reads_target_degeneraci
 
 #[test]
 fn concurrent_commits_share_one_layout_admission() {
+    let su2_provider_rule = su2_rule();
     // What: two cold preparations racing to commit converge on one Arc
     // and one cache miss without the losing transaction issuing an ID.
     let _guard = test_support::CACHE_TEST_LOCK
@@ -729,10 +742,11 @@ fn concurrent_commits_share_one_layout_admission() {
         .map(|_| {
             let hom = hom.clone();
             let barrier = Arc::clone(&barrier);
+            let su2_provider_rule = su2_provider_rule.clone();
             std::thread::spawn(move || {
                 let recording = crate::probe::record();
                 let prepared = hom
-                    .prepare_fusion_tree_layout_checked(&SU2FusionRule)
+                    .prepare_fusion_tree_layout_checked(&su2_provider_rule)
                     .unwrap();
                 barrier.wait();
                 let keys = prepared.commit();
@@ -760,6 +774,7 @@ fn concurrent_commits_share_one_layout_admission() {
 
 #[test]
 fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking() {
+    let su2_provider_rule = su2_rule();
     // What: custom decode stays a codec error, while U(1), SU(2), and
     // recursive product closure failures retain exact causes.
     type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
@@ -826,19 +841,19 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
 
     let su2_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(su2(128), 1)], false),
-            SectorLeg::new([(su2(127), 1)], false),
+            SectorLeg::new([(su2(u32::MAX as usize), 1)], false),
+            SectorLeg::new([(su2(1), 1)], false),
         ]),
         FusionProductSpace::new([]),
     );
     let error = su2_overflow
-        .try_fusion_tree_layout_data_uncached_checked(&SU2FusionRule)
+        .try_fusion_tree_layout_data_uncached_checked(&su2_provider_rule)
         .unwrap_err();
     assert_eq!(
         error,
         FusionAlgebraError::FusionNotRepresentable {
-            left: su2(128),
-            right: su2(127),
+            left: su2(u32::MAX as usize),
+            right: su2(1),
         }
     );
 
@@ -862,10 +877,10 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
             right: u1(1),
         }
     );
-    type Fz2Su2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+    type Fz2Su2Rule = ProductFusionRule<FermionParityFusionRule, Su2Rule>;
     type TripleRule = ProductFusionRule<Fz2Su2Rule, U1FusionRule>;
     let triple_rule = TripleRule::try_new(
-        Fz2Su2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap(),
+        Fz2Su2Rule::try_new(FermionParityFusionRule::new(), su2_provider_rule.clone()).unwrap(),
         U1FusionRule,
     )
     .unwrap();
@@ -917,6 +932,7 @@ fn assert_failed_checked_build_is_transactional<R>(
 
 #[test]
 fn failed_checked_algebra_builds_publish_no_identity_or_intern_state() {
+    let su2_provider_rule = su2_rule();
     // What: invalid built-in U1, SU2, and product closure leaves layout
     // identity/admission, HomSpace, and BlockStructure state untouched.
     let u1_overflow = FusionTreeHomSpace::new(
@@ -937,17 +953,17 @@ fn failed_checked_algebra_builds_publish_no_identity_or_intern_state() {
 
     let su2_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
-            SectorLeg::new([(su2(128), 1)], false),
-            SectorLeg::new([(su2(127), 1)], false),
+            SectorLeg::new([(su2(u32::MAX as usize), 1)], false),
+            SectorLeg::new([(su2(1), 1)], false),
         ]),
         FusionProductSpace::new([]),
     );
     assert_failed_checked_build_is_transactional(
-        &SU2FusionRule,
+        &su2_provider_rule,
         &su2_overflow,
         FusionAlgebraError::FusionNotRepresentable {
-            left: su2(128),
-            right: su2(127),
+            left: su2(u32::MAX as usize),
+            right: su2(1),
         },
     );
 

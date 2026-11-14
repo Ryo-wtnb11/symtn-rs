@@ -1,5 +1,9 @@
 //! Copy into symtn/examples/issue_1682_svd_full.rs, then run with --release.
 //! Input setup is separate; factor publication and drop are inside every call.
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+use symtn_core as sector_types;
+use su2::{su2_rule, su2_irrep};
 use num_complex::{Complex32, Complex64};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
@@ -7,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Instant;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep,
     FermionParityIrrep,
 };
 use symtn::typed::{GradedSpace, LinalgBackend, Runtime, SectorSpectrum, TensorMap};
@@ -132,8 +136,8 @@ fn main() {
                 $name,
                 $value,
                 "SU2",
-                SU2FusionRule,
-                |c: i32, _dual| SU2Irrep::from_twice_spin(c as usize)
+                su2_rule(),
+                |c: i32, _dual| su2_irrep(c as usize)
             );
             family!(
                 $dtype,

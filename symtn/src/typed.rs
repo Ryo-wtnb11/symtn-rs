@@ -51,7 +51,7 @@
 //! itself a provider. The spelling
 //!
 //! ```text
-//! ProductFusionRule::try_new(ProductFusionRule::try_new(FermionParityFusionRule::new(), U1FusionRule)?, SU2FusionRule)?
+//! ProductFusionRule::try_new(ProductFusionRule::try_new(FermionParityFusionRule::new(), U1FusionRule)?, LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(GroupId::su(2)?)?)?
 //! ```
 //!
 //! is the left-associated `(fZ2 ⊠ U(1)) ⊠ SU(2)`, whose labels are

@@ -8,10 +8,10 @@
 //! `n n^H = 1`. The null dimension of every coupled sector is the hand-counted
 //! rectangular deficit `(rows_c - cols_c)+` of that sector's block.
 
+use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep};
 use symtn::typed::{GradedSpace, TensorMap};
 
 use crate::fixtures;
@@ -105,8 +105,8 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
     // (total dimension `sum rows_c (2c+1) = 729 = 9^3`), against
     // `w = 0 + (1/2)^2 + 1^3` columns `1, 2, 3, 0, 0, 0, 0`.
     let runtime = host_runtime();
-    let rule = Arc::new(SU2FusionRule);
-    let spin = SU2Irrep::from_twice_spin;
+    let rule = Arc::new(su2_rule());
+    let spin = su2_irrep;
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [(spin(0), 2), (spin(1), 2), (spin(2), 1)],
@@ -123,7 +123,15 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
         (spin(5), 6),
         (spin(6), 1),
     ];
-    check_both_sides!(engine, runtime, f64, [v, v_dual, v], w, 1.0, expected);
+    check_both_sides!(
+        engine,
+        runtime,
+        f64,
+        [v, v_dual, v],
+        w,
+        1.0,
+        expected.clone()
+    );
     check_both_sides!(
         engine,
         runtime,

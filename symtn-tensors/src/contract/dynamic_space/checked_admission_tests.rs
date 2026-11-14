@@ -1,9 +1,11 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use crate::test_support::CACHE_TEST_LOCK;
 use symtn_core::{
     clear_structure_caches, structure_cache_info, BraidingStyleKind, FusionAlgebraError,
-    FusionProductSpace, FusionStyleKind, MultiplicityFreeFusionSymbols, RuleIdentity,
-    SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec, StructureCacheKind,
+    FusionProductSpace, FusionStyleKind, MultiplicityFreeFusionSymbols, RuleIdentity, SectorId,
+    SectorLeg, SectorVec, StructureCacheKind,
 };
 
 #[derive(Clone, Copy)]
@@ -140,16 +142,16 @@ impl FusionRule for ExternalSimpleRule {
         BraidingStyleKind::Bosonic
     }
     fn vacuum(&self) -> SectorId {
-        SU2FusionRule.vacuum()
+        su2_rule().vacuum()
     }
     fn dual(&self, sector: SectorId) -> SectorId {
-        SU2FusionRule.dual(sector)
+        su2_rule().dual(sector)
     }
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        SU2FusionRule.fusion_channels(left, right)
+        su2_rule().fusion_channels(left, right)
     }
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        SU2FusionRule.nsymbol(left, right, coupled)
+        su2_rule().nsymbol(left, right, coupled)
     }
 }
 
@@ -166,31 +168,31 @@ impl MultiplicityFreeFusionSymbols for ExternalSimpleRule {
         lc: SectorId,
         rc: SectorId,
     ) -> f64 {
-        SU2FusionRule.f_symbol_scalar(l, m, r, c, lc, rc)
+        su2_rule().f_symbol_scalar(l, m, r, c, lc, rc)
     }
     fn r_symbol_scalar(&self, l: SectorId, r: SectorId, c: SectorId) -> f64 {
-        SU2FusionRule.r_symbol_scalar(l, r, c)
+        su2_rule().r_symbol_scalar(l, r, c)
     }
 }
 
 impl MultiplicityFreeRigidSymbols for ExternalSimpleRule {
     fn dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.dim_scalar(s)
+        su2_rule().dim_scalar(s)
     }
     fn inv_dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.inv_dim_scalar(s)
+        su2_rule().inv_dim_scalar(s)
     }
     fn sqrt_dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.sqrt_dim_scalar(s)
+        su2_rule().sqrt_dim_scalar(s)
     }
     fn inv_sqrt_dim_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.inv_sqrt_dim_scalar(s)
+        su2_rule().inv_sqrt_dim_scalar(s)
     }
     fn twist_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.twist_scalar(s)
+        su2_rule().twist_scalar(s)
     }
     fn frobenius_schur_phase_scalar(&self, s: SectorId) -> f64 {
-        SU2FusionRule.frobenius_schur_phase_scalar(s)
+        su2_rule().frobenius_schur_phase_scalar(s)
     }
 }
 
@@ -305,7 +307,7 @@ fn packed_len(rows: &[BlockRow]) -> usize {
 
 fn simple_matrix_homspace() -> FusionTreeHomSpace {
     // SU(2) spin-1/2 x spin-1/2 on each side couples to spin 0 and spin 1.
-    let half = SU2Irrep::from_twice_spin(1).sector_id();
+    let half = symtn_core::SectorId::new(1);
     let leg = |dual| SectorLeg::new([(half, 2)], dual);
     FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(false), leg(false)]),
@@ -351,14 +353,14 @@ fn checked_final_root_builds_the_hand_enumerated_multi_block_layout() {
     )
     .unwrap();
     // spin-1/2 x spin-1/2 = spin 0 + spin 1 on both sides, one tree each.
-    let half = SU2Irrep::from_twice_spin(1).sector_id().id();
+    let half = symtn_core::SectorId::new(1).id();
     let row = |twice_spin| {
         (
             vec![half, half],
             vec![false, false],
             vec![half, half],
             vec![false, false],
-            SU2Irrep::from_twice_spin(twice_spin).sector_id().id(),
+            symtn_core::SectorId::new(twice_spin).id(),
             vec![2, 2, 2, 2],
         )
     };

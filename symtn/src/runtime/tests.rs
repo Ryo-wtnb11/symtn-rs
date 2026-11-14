@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
@@ -5,8 +7,8 @@ use crate::typed::{GradedSpace, TensorMap};
 use symtn_core::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionAlgebraError, FusionProductSpace, FusionRule,
     FusionStyleKind, FusionTreeHomSpace, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, SU2FusionRule, SU2Irrep, SectorCodec, SectorId, SectorLeg,
-    SectorVec, TableRule, TableSector,
+    MultiplicityFreeRigidSymbols, SectorCodec, SectorId, SectorLeg, SectorVec, TableRule,
+    TableSector,
 };
 
 #[test]
@@ -565,19 +567,15 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
     }
     let runtime_a = Runtime::builder().build().unwrap();
     let runtime_b = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let space = GradedSpace::try_new(
         provider,
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
     )
     .unwrap();
-    let source_a: TensorMap<SU2FusionRule, f64> =
+    let source_a: TensorMap<Su2Rule, f64> =
         TensorMap::rand_with_seed(engine, &runtime_a, [&space, &space], [&space], 475_002).unwrap();
-    let source_b: TensorMap<SU2FusionRule, f64> =
+    let source_b: TensorMap<Su2Rule, f64> =
         TensorMap::rand_with_seed(engine, &runtime_b, [&space, &space], [&space], 475_002).unwrap();
     crate::cache::clear();
     let expected_a = source_a.permute(engine, &[1], &[2, 0]).unwrap();

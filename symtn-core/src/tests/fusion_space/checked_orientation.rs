@@ -1,7 +1,10 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn canonical_coupled_storage_is_admitted_by_witness_across_symmetries() {
+    let su2_provider_rule = su2_rule();
     // What: symtn-built coupled-sector destinations are admitted as
     // injective without visiting elements for Abelian, non-Abelian, and
     // fermionic product sectors with dual legs and nontrivial
@@ -32,7 +35,7 @@ fn canonical_coupled_storage_is_admitted_by_witness_across_symmetries() {
         ]),
     );
     assert_canonical_storage_admitted_without_enumeration(
-        &hom.coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        &hom.coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
             .unwrap(),
     );
 
@@ -72,7 +75,7 @@ fn canonical_coupled_storage_is_admitted_by_witness_across_symmetries() {
 fn canonical_and_factor_bridge_storage_skip_exact_enumeration() {
     // What: hom-space-generated coupled storage and its typed factor-style
     // shared bridge are admitted by structural proof, not element scans.
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let homspace = FusionTreeHomSpace::from_sectors([(su2(1), 2)], [(su2(1), 3)]);
     let recording = crate::probe::record();
     let canonical = homspace

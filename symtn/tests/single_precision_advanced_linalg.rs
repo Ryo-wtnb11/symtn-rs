@@ -18,11 +18,12 @@
 //! | eigenvalues | `sigma_max / sigma_min` of the double-precision eigenvector factor (Bauer–Fike) |
 
 use crate::single_precision_oracle;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Eig, Engine, Svd};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap, Truncation};
 
@@ -57,13 +58,13 @@ fn nonnormal_entry(row: usize, col: usize) -> (f32, f32) {
     }
 }
 
-fn su2_leg_with(degeneracies: [usize; 3]) -> GradedSpace<SU2FusionRule> {
+fn su2_leg_with(degeneracies: [usize; 3]) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         [
-            (SU2Irrep::from_twice_spin(0), degeneracies[0]),
-            (SU2Irrep::from_twice_spin(1), degeneracies[1]),
-            (SU2Irrep::from_twice_spin(2), degeneracies[2]),
+            (su2_irrep(0), degeneracies[0]),
+            (su2_irrep(1), degeneracies[1]),
+            (su2_irrep(2), degeneracies[2]),
         ],
     )
     .unwrap()

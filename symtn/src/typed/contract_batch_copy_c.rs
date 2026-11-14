@@ -6,7 +6,8 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use crate::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+    use crate::sector::{U1FusionRule, U1Irrep};
+    use crate::su2::{su2_irrep, su2_rule};
     use crate::typed::{ContractSpec, GradedSpace, TensorMap};
     use std::sync::Arc;
     use symtn_dense::{
@@ -240,17 +241,11 @@ mod tests {
         cases!(&u1_v, &u1_c, f32);
         cases!(&u1_v, &u1_c, crate::typed::Complex32);
         let su2_v = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            [
-                (SU2Irrep::from_twice_spin(0), 2),
-                (SU2Irrep::from_twice_spin(1), 2),
-                (SU2Irrep::from_twice_spin(2), 1),
-            ],
+            Arc::new(su2_rule()),
+            [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
         )
         .unwrap();
-        let su2_c =
-            GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 1)])
-                .unwrap();
+        let su2_c = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1)]).unwrap();
         cases!(&su2_v, &su2_c, f64);
         cases!(&su2_v, &su2_c, crate::typed::Complex64);
         cases!(&su2_v, &su2_c, f32);
@@ -262,12 +257,8 @@ mod tests {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
         let v = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            [
-                (SU2Irrep::from_twice_spin(0), 2),
-                (SU2Irrep::from_twice_spin(1), 2),
-                (SU2Irrep::from_twice_spin(2), 1),
-            ],
+            Arc::new(su2_rule()),
+            [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
         )
         .unwrap();
         let a =
@@ -320,12 +311,8 @@ mod tests {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
         let v = GradedSpace::try_new(
-            Arc::new(SU2FusionRule),
-            [
-                (SU2Irrep::from_twice_spin(0), 2),
-                (SU2Irrep::from_twice_spin(1), 2),
-                (SU2Irrep::from_twice_spin(2), 1),
-            ],
+            Arc::new(su2_rule()),
+            [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
         )
         .unwrap();
         let a =

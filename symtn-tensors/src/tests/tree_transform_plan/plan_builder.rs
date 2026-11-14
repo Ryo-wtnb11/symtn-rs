@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 pub(super) fn grouped_su2_test_pair(first_inner: usize) -> FusionTreePairKey {
     all_codomain_fusion_tree_test_key_for_rule(
@@ -594,12 +596,13 @@ fn tree_transform_plan_builder_keeps_destination_collisions_in_multi() {
 
 #[test]
 fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the first-vertex SU(2) R move is direct for every fusion channel,
     // while preserving the channel-dependent coefficients returned by core.
     let keys = [[0, 1], [2, 1]].map(|inner| {
         all_codomain_fusion_tree_test_key_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [1, 1, 1, 1],
             0,
             [false, false, false, false],
@@ -612,9 +615,12 @@ fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
             .unwrap();
     let operation = TreeTransformOperation::braid([1, 0, 2, 3], [], [0, 1, 2, 3], []);
 
-    let plan =
-        build_all_codomain_tree_transform_group_plan(&SU2FusionRule, operation.clone(), &structure)
-            .unwrap();
+    let plan = build_all_codomain_tree_transform_group_plan(
+        &su2_provider_rule,
+        operation.clone(),
+        &structure,
+    )
+    .unwrap();
 
     assert_eq!(plan.specs().len(), keys.len());
     for ((spec, key), expected_coefficient) in plan.specs().iter().zip(&keys).zip([-1.0, 1.0]) {
@@ -633,7 +639,7 @@ fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
 
     let serial =
         crate::tree_transform::build_multiplicity_free_all_codomain_tree_transform_group_plan(
-            &SU2FusionRule,
+            &su2_provider_rule,
             operation.clone(),
             &structure,
         )
@@ -725,7 +731,7 @@ fn nested_fz2_u1_su2_first_pair_braid_preserves_product_phases_in_singles() {
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let left_sector = |parity, charge| {
@@ -734,7 +740,7 @@ fn nested_fz2_u1_su2_first_pair_braid_preserves_product_phases_in_singles() {
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(
             left_sector(parity, charge),
-            SU2Irrep::from_twice_spin(twice_spin).sector_id(),
+            symtn_core::SectorId::new(twice_spin),
         )
     };
     let odd_half = sector(SectorId::new(1), 0, 1);
@@ -783,9 +789,10 @@ fn nested_fz2_u1_su2_first_pair_braid_preserves_product_phases_in_singles() {
 
 #[test]
 fn multiplicity_free_su2_plan_builder_creates_generic_recoupling_block() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -793,7 +800,7 @@ fn multiplicity_free_su2_plan_builder_creates_generic_recoupling_block() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -811,7 +818,7 @@ fn multiplicity_free_su2_plan_builder_creates_generic_recoupling_block() {
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
 
     let plan =
-        build_all_codomain_tree_transform_group_plan(&SU2FusionRule, operation, &src_structure)
+        build_all_codomain_tree_transform_group_plan(&su2_provider_rule, operation, &src_structure)
             .unwrap();
 
     assert_eq!(plan.specs().len(), 1);
@@ -866,8 +873,9 @@ fn multiplicity_free_su2_plan_builder_creates_generic_recoupling_block() {
 
 #[test]
 fn tree_pair_transform_public_helper_executes_su2_recoupling_block() {
+    let su2_provider_rule = su2_rule();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -875,7 +883,7 @@ fn tree_pair_transform_public_helper_executes_su2_recoupling_block() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -899,10 +907,10 @@ fn tree_pair_transform_public_helper_executes_su2_recoupling_block() {
         TestTensor::<f64>::from_vec_with_structure(vec![0.0, 0.0], dst_space, structure).unwrap();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
 
-    let compiled = uncached_tree_pair_structure(&SU2FusionRule, operation, &dst, &src).unwrap();
+    let compiled = uncached_tree_pair_structure(&su2_provider_rule, operation, &dst, &src).unwrap();
     assert!(compiled.has_pack_gemm_scatter_blocks());
     eager_tree_transform_into(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []),
         &mut dst,
         &src,
@@ -917,9 +925,10 @@ fn tree_pair_transform_public_helper_executes_su2_recoupling_block() {
 
 #[test]
 fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficients() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -927,7 +936,7 @@ fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficie
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -957,7 +966,7 @@ fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficie
     )
     .unwrap();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
-    let compiled = uncached_tree_pair_structure(&SU2FusionRule, operation, &dst, &src).unwrap();
+    let compiled = uncached_tree_pair_structure(&su2_provider_rule, operation, &dst, &src).unwrap();
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
 
@@ -1046,9 +1055,10 @@ fn tree_transform_recoupling_plan_groups_same_shape_multi_blocks() {
 
 #[test]
 fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -1056,7 +1066,7 @@ fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
         [1, 1, 1],
     );
     let src_key1 = all_codomain_fusion_tree_test_key_for_rule(
-        &SU2FusionRule,
+        &su2_provider_rule,
         [1, 1, 1, 1],
         0,
         [false, false, false, false],
@@ -1083,7 +1093,8 @@ fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
         TestTensor::<f64>::from_vec_with_structure(vec![0.0, 0.0], dst_space, block_structure)
             .unwrap();
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
-    let structure = uncached_tree_pair_structure(&SU2FusionRule, operation, &dst, &src).unwrap();
+    let structure =
+        uncached_tree_pair_structure(&su2_provider_rule, operation, &dst, &src).unwrap();
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     let expected = |initial: [f64; 2], source: [f64; 2], alpha: f64, beta: f64| {
@@ -1132,6 +1143,7 @@ fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
 
 #[test]
 fn parallel_plan_compile_matches_serial_plan() {
+    let su2_provider_rule = su2_rule();
     // What: shared group compilation produces the same transformer,
     // source order, and group order.
     use crate::tree_transform::{
@@ -1141,7 +1153,7 @@ fn parallel_plan_compile_matches_serial_plan() {
 
     let key = |uncoupled: [usize; 4], inner: [usize; 2]| {
         all_codomain_fusion_tree_test_key_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             uncoupled,
             0,
             [false, false, false, false],
@@ -1163,7 +1175,7 @@ fn parallel_plan_compile_matches_serial_plan() {
     let operation = TreeTransformOperation::braid([0, 2, 1, 3], [], [0, 1, 2, 3], []);
     let build = |threads: usize| {
         let proof = validate_multiplicity_free_tree_pair_preflight(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &src_structure,
         )
@@ -1183,10 +1195,11 @@ fn parallel_plan_compile_matches_serial_plan() {
 
 #[test]
 fn all_codomain_repeated_axis_is_an_invalid_permutation() {
+    let su2_provider_rule = su2_rule();
     let keys = [1, 2].map(|sector| {
         FusionTreePairKey::pair(
             FusionTreeKey::try_new_for_rule(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 [SectorId::new(sector), SectorId::new(sector)],
                 SectorId::new(0),
                 [false, false],
@@ -1200,8 +1213,11 @@ fn all_codomain_repeated_axis_is_an_invalid_permutation() {
     let structure =
         packed_fixture_structure(2, keys.into_iter().map(|key| (key, vec![1, 1]))).unwrap();
     let invalid_operation = TreeTransformOperation::braid([0, 0], [], [0, 1], []);
-    let result =
-        build_all_codomain_tree_transform_group_plan(&SU2FusionRule, invalid_operation, &structure);
+    let result = build_all_codomain_tree_transform_group_plan(
+        &su2_provider_rule,
+        invalid_operation,
+        &structure,
+    );
     assert!(matches!(
         result,
         Err(OperationError::InvalidPermutation { rank: 2, .. })
@@ -1233,6 +1249,7 @@ fn staged_group_scheduler_builds_bounded_balanced_contiguous_batches() {
 
 #[test]
 fn split_only_repartition_plan_matches_serial_and_parallel_builders() {
+    let su2_provider_rule = su2_rule();
     // What: a SU(2) 2|2 -> 3|1 split-only braid compiles to the direct
     // repartition row independently of the compile worker count.
     use crate::tree_transform::{
@@ -1255,10 +1272,10 @@ fn split_only_repartition_plan_matches_serial_and_parallel_builders() {
     let source_key = BlockKey::from(source.clone());
     let source_structure = packed_fixture_structure(4, [(source_key, vec![1usize; 4])]).unwrap();
     let operation = TreeTransformOperation::braid([0, 1, 3], [2], [0, 1], [2, 3]);
-    let expected = multiplicity_free_repartition_tree_pair(&SU2FusionRule, &source, 3).unwrap();
+    let expected = multiplicity_free_repartition_tree_pair(&su2_provider_rule, &source, 3).unwrap();
     let build = |threads: &mut dyn symtn_dense::Engine| {
         let proof = validate_multiplicity_free_tree_pair_preflight(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &operation,
             &source_structure,
         )
@@ -1282,6 +1299,7 @@ fn split_only_repartition_plan_matches_serial_and_parallel_builders() {
 
 #[test]
 fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an identity operation over a multi-tree SU2 fusion group compiles
     // to independent direct copies for every supported facade and worker count.
@@ -1292,7 +1310,7 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
 
     let key = |inner: [usize; 2]| {
         all_codomain_fusion_tree_test_key_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [3, 3, 3, 3],
             0,
             [false, false, false, false],
@@ -1305,9 +1323,12 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
         packed_fixture_structure(4, keys.iter().map(|key| (key.clone(), vec![1usize; 4]))).unwrap();
     let operation = TreeTransformOperation::braid([0, 1, 2, 3], [], [17, 3, 11, 5], []);
     let build = |threads: &mut dyn symtn_dense::Engine| {
-        let proof =
-            validate_multiplicity_free_tree_pair_preflight(&SU2FusionRule, &operation, &structure)
-                .unwrap();
+        let proof = validate_multiplicity_free_tree_pair_preflight(
+            &su2_provider_rule,
+            &operation,
+            &structure,
+        )
+        .unwrap();
         build_tree_pair_transform_group_plan_validated_with_threads(
             &proof,
             operation.clone(),
@@ -1332,7 +1353,7 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
         .has_pack_gemm_scatter_blocks());
 
     let transpose = build_tree_pair_transform_group_plan(
-        &SU2FusionRule,
+        &su2_provider_rule,
         TreeTransformOperation::transpose([0, 1, 2, 3], []),
         &structure,
     )
@@ -1348,7 +1369,7 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
         .has_pack_gemm_scatter_blocks());
 
     let all_codomain =
-        build_all_codomain_tree_transform_group_plan(&SU2FusionRule, operation, &structure)
+        build_all_codomain_tree_transform_group_plan(&su2_provider_rule, operation, &structure)
             .unwrap();
     assert_eq!(all_codomain, serial);
 
@@ -1400,6 +1421,7 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
 
 #[test]
 fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() {
+    let su2_provider_rule = su2_rule();
     // What: exact 2|1 fZ2 and SU2 transposes preserve the source tree with a
     // unit coefficient, while a cyclic split change retains recoupling.
     let fz2_source = FusionTreePairKey::pair(
@@ -1446,10 +1468,10 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
         .unwrap()
         .has_pack_gemm_scatter_blocks());
 
-    let one = SU2Irrep::from_twice_spin(2).sector_id();
+    let one = symtn_core::SectorId::new(2);
     let su2_source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
+            &su2_provider_rule,
             [one, one],
             one,
             [false, false],
@@ -1457,10 +1479,10 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
             [MultiplicityIndex::ONE],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&SU2FusionRule, [one], one, [true], [], []).unwrap(),
+        FusionTreeKey::try_new_for_rule(&su2_provider_rule, [one], one, [true], [], []).unwrap(),
     );
     let su2_rows = symtn_core::testing::multiplicity_free_transpose_tree_pair(
-        &SU2FusionRule,
+        &su2_provider_rule,
         &su2_source,
         &[0, 1],
         &[2],
@@ -1471,7 +1493,7 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
     let su2_key = su2_source;
     let su2_structure = packed_fixture_structure(3, [(su2_key.clone(), vec![1, 1, 1])]).unwrap();
     let su2_plan =
-        build_tree_pair_transform_group_plan(&SU2FusionRule, exact, &su2_structure).unwrap();
+        build_tree_pair_transform_group_plan(&su2_provider_rule, exact, &su2_structure).unwrap();
     assert_eq!(
         su2_plan.specs()[0].src_keys(),
         std::slice::from_ref(&su2_key)
@@ -1489,7 +1511,7 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
     let control_keys = [0, 2, 4].map(|inner| {
         BlockKey::from(FusionTreePairKey::pair(
             FusionTreeKey::try_new_for_rule(
-                &SU2FusionRule,
+                &su2_provider_rule,
                 [one, one, one],
                 one,
                 [false, false, false],
@@ -1497,7 +1519,8 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
                 [MultiplicityIndex::ONE, MultiplicityIndex::ONE],
             )
             .unwrap(),
-            FusionTreeKey::try_new_for_rule(&SU2FusionRule, [one], one, [true], [], []).unwrap(),
+            FusionTreeKey::try_new_for_rule(&su2_provider_rule, [one], one, [true], [], [])
+                .unwrap(),
         ))
     });
     let control_src = packed_fixture_structure(
@@ -1511,7 +1534,8 @@ fn same_split_transpose_is_direct_for_real_tree_pairs_but_split_change_is_not() 
     let split_change = TreeTransformOperation::transpose([3, 0, 1], [2]);
     assert!(!split_change.is_identity_for(3, 1));
     let control =
-        build_tree_pair_transform_group_plan(&SU2FusionRule, split_change, &control_src).unwrap();
+        build_tree_pair_transform_group_plan(&su2_provider_rule, split_change, &control_src)
+            .unwrap();
     assert_eq!(control.specs()[0].src_keys().len(), control_keys.len());
     let dst_structure = packed_fixture_structure(
         4,

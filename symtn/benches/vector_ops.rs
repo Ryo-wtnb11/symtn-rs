@@ -2,16 +2,20 @@
 //! `cargo bench -p symtn --bench vector_ops --offline -- U1`.
 //! Finite, bounded random inputs; setup and correctness checks are untimed.
 //! Allocations include result destruction and count only the calling thread.
+#[path = "../../tests/support/su2.rs"]
+mod su2;
 use std::{
     hint::black_box,
     ops::{Add, Mul},
     sync::Arc,
     time::{Duration, Instant},
 };
+use su2::{su2_irrep, su2_rule};
 use symtn::{
-    sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep},
+    sector::{U1FusionRule, U1Irrep},
     typed::{Complex64, GradedSpace, Runtime, TensorMap},
 };
+use symtn_core as sector_types;
 use symtn_sectors::{TableRule, TableSector};
 
 #[path = "../../tests/support/counting_alloc.rs"]
@@ -235,12 +239,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &runtime,
                 &filter,
                 "SU2",
-                SU2FusionRule,
-                vec![
-                    SU2Irrep::from_twice_spin(0),
-                    SU2Irrep::from_twice_spin(1),
-                    SU2Irrep::from_twice_spin(2)
-                ],
+                su2_rule(),
+                vec![su2_irrep(0), su2_irrep(1), su2_irrep(2)],
                 [1.0, 2.0, 3.0],
                 $d,
                 $name,

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn tensorcontract_fusion_non_core_form_su2_lhs_adjoint_prepared_plan_matches_reference_sequence() {
@@ -48,7 +50,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
 
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
     let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
@@ -223,7 +225,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     let plan = crate::prepare_tensorcontract_fusion_plan_dyn(
         &crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
             explicit_dst.fusion_space().unwrap().as_ref().clone(),
-            Arc::new(rule),
+            Arc::new(rule.clone()),
         )
         .unwrap(),
         operand(lhs.fusion_space().unwrap().as_ref(), lhs_conjugate),
@@ -531,7 +533,7 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let even = SectorId::new(0);
@@ -542,7 +544,7 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(
             left_sector(parity, charge),
-            SU2Irrep::from_twice_spin(twice_spin).sector_id(),
+            symtn_core::SectorId::new(twice_spin),
         )
     };
     let a = sector(odd, 1, 1);
@@ -652,12 +654,12 @@ fn tensorcontract_fusion_product_no_twist_identity_rhs_is_borrowed() {
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
-        SU2FusionRule,
+        su2_rule(),
     )
     .unwrap();
     let odd_charge =
         left_rule.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(0).unwrap()));
-    let odd = rule.encode_component_ids(odd_charge, SU2Irrep::from_twice_spin(0).sector_id());
+    let odd = rule.encode_component_ids(odd_charge, symtn_core::SectorId::new(0));
     let matrix_hom = || {
         FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(odd, 1)], false)]),

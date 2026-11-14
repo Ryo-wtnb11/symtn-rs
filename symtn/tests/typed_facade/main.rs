@@ -8,6 +8,7 @@
 
 use crate::common::ErrorKind as _;
 use crate::numerics;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.
@@ -38,7 +39,7 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
 }
 use fusion_symbols::category::{BraidingStyle, FusionCategory, FusionStyle};
 use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep};
-use symtn::sector::{CU1FusionRule, CU1Irrep, SU2FusionRule, SU2Irrep, SectorId};
+use symtn::sector::{CU1FusionRule, CU1Irrep, SectorId};
 use symtn::sector::{
     CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec, CategoryFailure,
     CategoryOperation, CategoryRule, CheckedFusionAlgebra, FusionRule,
@@ -423,7 +424,7 @@ impl FusionCategory for ExternalSu2 {
     }
 }
 
-/// Doubled-spin ids under the built-in `SU2Irrep` labels.
+/// Doubled-spin ids under the built-in `symtn_core::LieIrrep` labels.
 #[derive(Clone, Copy, Debug)]
 struct Su2Codec;
 
@@ -435,7 +436,7 @@ fn external_su2() -> ExternalSu2Rule {
 }
 
 impl CategoryCodec<ExternalSu2> for Su2Codec {
-    type Sector = SU2Irrep;
+    type Sector = symtn_core::LieIrrep;
     type Error = FusionAlgebraError;
     type Mode = MultiplicityFreeAdmissionMode;
     type Unit = CanonicalUnitAdmission;
@@ -444,17 +445,18 @@ impl CategoryCodec<ExternalSu2> for Su2Codec {
         &self,
         _: impl Fn() -> &'a ExternalSu2 + Copy,
         _: &RuleIdentity,
-        label: &SU2Irrep,
+        label: &symtn_core::LieIrrep,
     ) -> Result<SectorId, FusionAlgebraError> {
-        SU2FusionRule.encode_sector(label)
+        su2_rule().encode_sector(label)
     }
 
     fn decode_label<'a>(
         &self,
         _: impl Fn() -> &'a ExternalSu2 + Copy,
         sector: SectorId,
-    ) -> Result<SU2Irrep, FusionAlgebraError> {
-        SectorCodec::decode_sector(&SU2FusionRule, sector)
+    ) -> Result<symtn_core::LieIrrep, FusionAlgebraError> {
+        let su2_provider_rule = su2_rule();
+        SectorCodec::decode_sector(&su2_provider_rule, sector)
     }
 
     fn object<'a>(
@@ -517,7 +519,7 @@ fn z3_leg(provider: &Arc<ExternalZ3Rule>, is_dual: bool) -> GradedSpace<External
 }
 
 fn su2_leg(provider: &Arc<ExternalSu2Rule>, is_dual: bool) -> GradedSpace<ExternalSu2Rule> {
-    GradedSpace::try_new(Arc::clone(provider), [(SU2Irrep::from_twice_spin(1), 2)])
+    GradedSpace::try_new(Arc::clone(provider), [(su2_irrep(1), 2)])
         .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
         .expect("SU(2) leg is well formed")
 }
@@ -1034,19 +1036,10 @@ macro_rules! truncated_svd {
 /// path, where the quantum-dimension weights are all one and therefore
 /// invisible — every dimension-weighted operation needs this fixture as well.
 ///
-fn su2_tensor_split(
-    runtime: &Runtime,
-    num_codomain: usize,
-) -> TensorMap<symtn::sector::SU2FusionRule, f64> {
+fn su2_tensor_split(runtime: &Runtime, num_codomain: usize) -> TensorMap<Su2Rule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 1), (su2_irrep(1), 2)]).unwrap();
     let legs = [&leg, &leg];
     let (codomain, domain) = legs.split_at(num_codomain);
     let mut next = 0.0;
@@ -1065,7 +1058,7 @@ fn su2_tensor_split(
 
 /// The endomorphism split of [`su2_tensor_split`]: `[v] <- [v]`, which is
 /// what `tr` needs and what every other SU(2) assertion here happens to use.
-fn su2_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::SU2FusionRule, f64> {
+fn su2_tensor(runtime: &Runtime) -> TensorMap<Su2Rule, f64> {
     su2_tensor_split(runtime, 1)
 }
 
@@ -1190,7 +1183,7 @@ type Fz2U1Rule = symtn::sector::ProductFusionRule<
     symtn::sector::FermionParityFusionRule,
     symtn::sector::U1FusionRule,
 >;
-type Fz2U1Su2Rule = symtn::sector::ProductFusionRule<Fz2U1Rule, symtn::sector::SU2FusionRule>;
+type Fz2U1Su2Rule = symtn::sector::ProductFusionRule<Fz2U1Rule, Su2Rule>;
 
 /// `[p, q] <- [p, q]`, filled with a counter starting at `first_value`.
 ///
@@ -1263,7 +1256,7 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
                 symtn::sector::U1FusionRule,
             )
             .unwrap(),
-            SU2FusionRule,
+            su2_rule(),
         )
         .unwrap(),
     );
@@ -1277,7 +1270,7 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
                 },
                 symtn::sector::U1Irrep::new(charge).unwrap(),
             ),
-            SU2Irrep::from_twice_spin(twice_spin),
+            su2_irrep(twice_spin),
         )
     };
     let typed_p = GradedSpace::try_new(

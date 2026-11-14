@@ -6,11 +6,13 @@ use super::*;
 use crate::probe::{
     take_compiled_trace_activity, take_trace_column_activity, CoefficientGroupActivity,
 };
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use symtn_core::{
     clear_structure_caches, structure_cache_info, FermionParityFusionRule, StructureCacheKind,
 };
 
-type FpSu2Rule = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+type FpSu2Rule = ProductFusionRule<FermionParityFusionRule, Su2Rule>;
 
 fn real(i: usize) -> f64 {
     ((i * 7919 + 13) % 1009) as f64 / 37.0 - 13.0
@@ -270,7 +272,7 @@ fn check_mf_trace<R>(
 fn su2_leg() -> SectorLeg {
     SectorLeg::new(
         [(0, 2), (1, 1), (2, 2)]
-            .map(|(spin, degeneracy)| (SU2Irrep::from_twice_spin(spin).sector_id(), degeneracy)),
+            .map(|(spin, degeneracy)| (symtn_core::SectorId::new(spin), degeneracy)),
         false,
     )
 }
@@ -283,14 +285,14 @@ fn su2_hom() -> FusionTreeHomSpace {
 }
 
 fn fp_su2_hom() -> FusionTreeHomSpace {
-    let rule = FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap();
+    let rule = FpSu2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap();
     let leg = |dual| {
         SectorLeg::new(
             [(0, 0, 1), (1, 1, 2), (1, 2, 1)].map(|(parity, spin, degeneracy)| {
                 (
                     rule.encode_component_ids(
                         SectorId::new(parity),
-                        SU2Irrep::from_twice_spin(spin).sector_id(),
+                        symtn_core::SectorId::new(spin),
                     ),
                     degeneracy,
                 )
@@ -328,9 +330,8 @@ fn mf_trace_terms_and_outputs_match_the_per_pair_oracle_cold_and_warm() {
     let open: (&[usize], &[usize], &[usize]) = (&[1, 3], &[0], &[2]);
     let identity: (&[usize], &[usize], &[usize]) = (&[0, 2], &[1], &[3]);
     let both: (&[usize], &[usize], &[usize]) = (&[], &[0, 1], &[2, 3]);
-    let su2 = || Arc::new(SU2FusionRule);
-    let fp =
-        || Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap());
+    let su2 = || Arc::new(su2_rule());
+    let fp = || Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap());
     let u1 = || Arc::new(U1FusionRule);
     check_mf_trace("su2 open", su2(), su2_hom(), open, false);
     check_mf_trace("su2 identity", su2(), su2_hom(), identity, false);
@@ -420,7 +421,7 @@ fn cache_lock() -> std::sync::MutexGuard<'static, ()> {
 fn su2_present_zero_hom(degeneracy: usize) -> FusionTreeHomSpace {
     let leg = |dual| {
         SectorLeg::new(
-            [0, 2, 4].map(|spin| (SU2Irrep::from_twice_spin(spin).sector_id(), degeneracy)),
+            [0, 2, 4].map(|spin| (symtn_core::SectorId::new(spin), degeneracy)),
             dual,
         )
     };
@@ -459,7 +460,7 @@ fn trace_groups_resolve_through_cache4_per_group() {
     clear_structure_caches();
     take_trace_column_activity();
     let open = TensorTraceAxisSpec::new(&[1, 3], &[0], &[2]);
-    let su2 = MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), open, 1);
+    let su2 = MfTrace::new(Arc::new(su2_rule()), su2_hom(), open, 1);
     let groups = su2.groups();
     assert!(groups > 1);
 
@@ -474,23 +475,22 @@ fn trace_groups_resolve_through_cache4_per_group() {
 
     // Key splits: another `(p…, q…)` and the lazy adjoint of one parent.
     let identity = TensorTraceAxisSpec::new(&[0, 2], &[1], &[3]);
-    MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), identity, 1).compile(identity);
+    MfTrace::new(Arc::new(su2_rule()), su2_hom(), identity, 1).compile(identity);
     assert_eq!(take_trace_column_activity(), activity(0, groups, groups));
     let adjoint = TensorTraceAxisSpec::new_with_conjugation(&[1, 3], &[0], &[2], true);
-    MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), adjoint, 1).compile(adjoint);
+    MfTrace::new(Arc::new(su2_rule()), su2_hom(), adjoint, 1).compile(adjoint);
     assert_eq!(take_trace_column_activity(), activity(0, groups, groups));
 
     // Degeneracies are not keyed.
     let scaled_leg = || {
         SectorLeg::new(
-            [(0, 3), (1, 2), (2, 1)].map(|(spin, degeneracy)| {
-                (SU2Irrep::from_twice_spin(spin).sector_id(), degeneracy)
-            }),
+            [(0, 3), (1, 2), (2, 1)]
+                .map(|(spin, degeneracy)| (symtn_core::SectorId::new(spin), degeneracy)),
             false,
         )
     };
     let scaled = MfTrace::new(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([scaled_leg(), scaled_leg()]),
             FusionProductSpace::new([scaled_leg(), scaled_leg()]),
@@ -503,14 +503,14 @@ fn trace_groups_resolve_through_cache4_per_group() {
 
     // Two instances of one rule share entries (`RuleIdentity`).
     let fp_groups = MfTrace::new(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap()),
         fp_su2_hom(),
         open,
         1,
     )
     .groups();
     MfTrace::new(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap()),
         fp_su2_hom(),
         open,
         1,
@@ -521,7 +521,7 @@ fn trace_groups_resolve_through_cache4_per_group() {
         activity(0, fp_groups, fp_groups)
     );
     MfTrace::new(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap()),
         fp_su2_hom(),
         open,
         1,
@@ -541,6 +541,7 @@ fn trace_groups_resolve_through_cache4_per_group() {
 /// the other's value, and each still hits its own entry afterwards.
 #[test]
 fn trace_and_transform_of_one_permutation_do_not_share_entries() {
+    let su2_provider_rule = su2_rule();
     let engine = &mut symtn_dense::CpuEngine::serial();
     // Exact hit/miss counts: alone in a child process, so no sibling test
     // publishes or clears these shared SU(2) groups meanwhile.
@@ -560,7 +561,7 @@ fn trace_and_transform_of_one_permutation_do_not_share_entries() {
     let structure = |degeneracy| {
         Arc::clone(
             BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-                Arc::new(SU2FusionRule),
+                Arc::new(su2_provider_rule.clone()),
                 FusionTreeHomSpace::new(
                     FusionProductSpace::new([su2_leg_with(degeneracy), su2_leg_with(degeneracy)]),
                     FusionProductSpace::new([su2_leg_with(degeneracy), su2_leg_with(degeneracy)]),
@@ -575,10 +576,17 @@ fn trace_and_transform_of_one_permutation_do_not_share_entries() {
     let mut transform = |degeneracy| {
         let layout = structure(degeneracy);
         planning
-            .resolve_tree_pair(engine, &SU2FusionRule, &operation, &layout, &layout, false)
+            .resolve_tree_pair(
+                engine,
+                &su2_provider_rule,
+                &operation,
+                &layout,
+                &layout,
+                false,
+            )
             .unwrap()
     };
-    let su2 = MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), open, 1);
+    let su2 = MfTrace::new(Arc::new(su2_provider_rule.clone()), su2_hom(), open, 1);
     let groups = su2.groups();
     let before = transform(41);
     let transform_cold = crate::probe::take_coefficient_group_activity();
@@ -622,8 +630,8 @@ fn trace_entries_key_the_open_codomain_rank() {
     }
     let one_pair = TensorTraceAxisSpec::new(&[1, 3], &[0], &[2]);
     let pair_free = TensorTraceAxisSpec::new(&[1, 0, 3, 2], &[], &[]);
-    let traced = MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), one_pair, 1);
-    let permuted = MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), pair_free, 2);
+    let traced = MfTrace::new(Arc::new(su2_rule()), su2_hom(), one_pair, 1);
+    let permuted = MfTrace::new(Arc::new(su2_rule()), su2_hom(), pair_free, 2);
     let groups = permuted.groups();
     clear_structure_caches();
     let alone = term_bits(&permuted.compile(pair_free));
@@ -638,7 +646,7 @@ fn trace_entries_key_the_open_codomain_rank() {
 
 fn su2_leg_with(degeneracy: usize) -> SectorLeg {
     SectorLeg::new(
-        [0, 1, 2].map(|spin| (SU2Irrep::from_twice_spin(spin).sector_id(), degeneracy)),
+        [0, 1, 2].map(|spin| (symtn_core::SectorId::new(spin), degeneracy)),
         false,
     )
 }
@@ -654,7 +662,7 @@ fn trace_groups_are_cache4_entries() {
         return;
     }
     let open = TensorTraceAxisSpec::new(&[1, 3], &[0], &[2]);
-    let su2 = MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), open, 1);
+    let su2 = MfTrace::new(Arc::new(su2_rule()), su2_hom(), open, 1);
     clear_structure_caches();
     let entries = || structure_cache_info(StructureCacheKind::TreeTransformCoefficients).entries();
     assert_eq!(entries(), 0);
@@ -715,23 +723,23 @@ fn mf_trace_terms_match_per_pair_composition_cold_and_warm() {
             }
         }
     }
-    check(Arc::new(SU2FusionRule), su2_hom(), &[1, 3], &[0], &[2]);
+    check(Arc::new(su2_rule()), su2_hom(), &[1, 3], &[0], &[2]);
     check(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         su2_present_zero_hom(1),
         &PRESENT_ZERO_OUTPUT,
         &PRESENT_ZERO_LHS,
         &PRESENT_ZERO_RHS,
     );
     check(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap()),
         fp_su2_hom(),
         &[1, 3],
         &[0],
         &[2],
     );
     check(
-        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap()),
+        Arc::new(FpSu2Rule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap()),
         fp_su2_hom(),
         &[0, 2],
         &[1],
@@ -757,7 +765,7 @@ fn present_zero_entry_propagates_nan_warm_as_cold() {
     }
     clear_structure_caches();
     let axes = present_zero_axes();
-    let trace = MfTrace::new(Arc::new(SU2FusionRule), su2_present_zero_hom(2), axes, 1);
+    let trace = MfTrace::new(Arc::new(su2_rule()), su2_present_zero_hom(2), axes, 1);
     let cold = trace.compile(axes);
     take_trace_column_activity();
     let warm = trace.compile(axes);
@@ -826,6 +834,7 @@ fn present_zero_entry_propagates_nan_warm_as_cold() {
 /// the split. The field pins that the key never relies on it.)
 #[test]
 fn compiled_trace_keys_separate_splits_over_equal_structures() {
+    let su2_provider_rule = su2_rule();
     if crate::test_support::run_isolated_or_return(
         "SYMTN_2072_ISOLATED",
         "tests::tensortrace::trace_cache4::compiled_trace_keys_separate_splits_over_equal_structures",
@@ -836,13 +845,13 @@ fn compiled_trace_keys_separate_splits_over_equal_structures() {
         lookup_trace, publish_staged_trace, TraceKeyRef, TraceSplit, TransformerMode,
     };
     let space = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_provider_rule.clone()),
         su2_hom(),
     )
     .unwrap();
     let structure = space.space().structure();
     assert!(structure.is_canonical());
-    let identity = symtn_core::FusionRule::rule_identity(&SU2FusionRule);
+    let identity = symtn_core::FusionRule::rule_identity(&su2_provider_rule);
     let key = |split| TraceKeyRef {
         rule: &identity,
         mode: TransformerMode::MultiplicityFree,

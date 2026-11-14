@@ -26,6 +26,11 @@ mod matrix_functions;
 #[cfg(test)]
 mod probe;
 mod results;
+#[cfg(test)]
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+#[cfg(test)]
+use symtn_core as sector_types;
 pub mod truncation;
 
 pub use factorize::{

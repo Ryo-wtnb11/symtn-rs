@@ -10,6 +10,8 @@
 //! sorted magnitudes / values, and the expected values below are written out.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 use num_complex::{Complex32, Complex64};
 use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn_matrixalgebra::FactorScalar;
@@ -194,9 +196,9 @@ where
         all.push((name, matrix!(engine, t, rcond)));
     }
 
-    let su2 = Arc::new(SU2FusionRule);
-    let (zero, half) = (SU2Irrep::from_twice_spin(0), SU2Irrep::from_twice_spin(1));
-    let bond = GradedSpace::try_new(Arc::clone(&su2), [(zero, 2), (half, 3)]).unwrap();
+    let su2 = Arc::new(su2_rule());
+    let (zero, half) = (su2_irrep(0), su2_irrep(1));
+    let bond = GradedSpace::try_new(Arc::clone(&su2), [(zero, 2), (half.clone(), 3)]).unwrap();
     let t: TensorMap<_, D> =
         TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
     all.push(("su2", matrix!(engine, t, rcond)));

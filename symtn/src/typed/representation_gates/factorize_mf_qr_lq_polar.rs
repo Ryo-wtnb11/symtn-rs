@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule};
 
 #[test]
 fn compact_diagonal_qr_lq_preserves_compact_factors_without_dense_kernels() {
@@ -376,19 +378,23 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
             },
         ]
     );
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let half = SU2Irrep::from_twice_spin(1);
-    let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (half, 1)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let half = su2_irrep(1);
+    let su2 = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 2), (half.clone(), 1)],
+    )
+    .unwrap();
     check!(
         engine,
         su2,
         [
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![2.0, -2.0]
             },
             SectorSpectrum {
-                sector: half,
+                sector: half.clone(),
                 values: vec![0.0]
             },
         ]
@@ -798,19 +804,23 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
             },
         ]
     );
-    let spin0 = SU2Irrep::from_twice_spin(0);
-    let half = SU2Irrep::from_twice_spin(1);
-    let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (half, 1)]).unwrap();
+    let spin0 = su2_irrep(0);
+    let half = su2_irrep(1);
+    let su2 = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        [(spin0.clone(), 2), (half.clone(), 1)],
+    )
+    .unwrap();
     check!(
         engine,
         su2,
         [
             SectorSpectrum {
-                sector: spin0,
+                sector: spin0.clone(),
                 values: vec![2.0, -2.0]
             },
             SectorSpectrum {
-                sector: half,
+                sector: half.clone(),
                 values: vec![0.0]
             },
         ]

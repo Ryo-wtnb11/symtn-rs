@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use crate::test_errors::ErrorKind as _;
 use crate::typed::probe::{self, Event};
 
@@ -81,8 +83,8 @@ impl<T> FactorPair<T> for RightPolar<T> {
 use symtn_core::{product_sector, ProductFusionRule};
 use symtn_core::{
     BlockKey, BlockSpec, BlockStructure, CU1FusionRule, CU1Irrep, FermionParityFusionRule,
-    FermionParityIrrep, FusionTreeKey, FusionTreePairKey, SU2FusionRule, SU2Irrep, U1FusionRule,
-    U1Irrep, ZNFusionRule, ZNIrrep,
+    FermionParityIrrep, FusionTreeKey, FusionTreePairKey, U1FusionRule, U1Irrep, ZNFusionRule,
+    ZNIrrep,
 };
 use symtn_dense::{
     DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
@@ -162,12 +164,12 @@ fn owned<R, D, S>(tensor: &TensorMap<R, D, S>) -> &Arc<TypedTensorBody<R, D, S>>
 fn physical_projection_publishes_only_after_success_on_receiver_authority() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
-    let half = SU2Irrep::from_twice_spin(1);
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(half, 1)]).unwrap();
+    let provider = Arc::new(su2_rule());
+    let half = su2_irrep(1);
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(half.clone(), 1)]).unwrap();
     let source =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg, &leg], [&leg], |trees, _| {
-            if trees.codomain_innerlines()[0].twice_spin() == 0 {
+            if trees.codomain_innerlines()[0].dynkin().next().unwrap() == 0 {
                 1.25
             } else {
                 -0.75
@@ -425,17 +427,10 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
         .is_empty());
 }
 
-fn su2_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<SU2FusionRule, f64> {
+fn su2_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<Su2Rule, f64> {
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(SU2FusionRule);
-    let leg = GradedSpace::try_new(
-        provider,
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
-    )
-    .unwrap();
+    let provider = Arc::new(su2_rule());
+    let leg = GradedSpace::try_new(provider, [(su2_irrep(0), 2), (su2_irrep(1), 1)]).unwrap();
     TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })

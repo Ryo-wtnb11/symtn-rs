@@ -14,10 +14,9 @@
 //! The signed-zero regression also checks the storage-local `0 * factor` bits.
 
 use crate::numerics::nan_folded_bits;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use num_complex::Complex64;
-use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap, TensorScalar};
 
 const X: [(f64, f64); 5] = [
@@ -190,10 +189,10 @@ fn u1() -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2() -> GradedSpace<SU2FusionRule> {
+fn su2() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        std::sync::Arc::new(SU2FusionRule),
-        [0, 1, 2].map(|twice| (SU2Irrep::from_twice_spin(twice), 2)),
+        std::sync::Arc::new(su2_rule()),
+        [0, 1, 2].map(|twice| (su2_irrep(twice), 2)),
     )
     .unwrap()
 }

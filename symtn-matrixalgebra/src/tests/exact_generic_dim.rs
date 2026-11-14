@@ -4,12 +4,14 @@
 //! TensorKitSectors `dim(::Sector)` is an exact categorical dimension (`Int`
 //! for SU(2)); TensorKit `findtruncated(::SectorVector, ...)` compares
 //! `totaldim > howmany` against it without slack (`truncation.jl:198`). The
-//! oracle is SU(2) through both tiers: `SU2FusionRule` (multiplicity-free) and
+//! oracle is SU(2) through both tiers: `MF Lie SU(2)` (multiplicity-free) and
 //! the same data lifted to `GenericRigidSymbols`, whose `dim_scalar` is the
 //! hand-written `2j + 1`.
 
 use super::*;
 use crate::seam::decide_bond_truncation;
+#[cfg(test)]
+use crate::su2::su2_rule;
 use crate::TruncationDecision;
 use std::collections::BTreeMap;
 use symtn_core::MultiplicityFreeAdmissionMode;
@@ -32,7 +34,7 @@ fn checked_decision(
 }
 
 /// SU(2) as an infallible Generic provider: 1x1 symbol blocks lifted from
-/// [`SU2FusionRule`], under its own identity and the Generic style.
+/// [`MF Lie SU(2)`], under its own identity and the Generic style.
 struct Su2Generic;
 
 impl symtn_core::testing::Provider for Su2Generic {}
@@ -47,22 +49,22 @@ impl FusionRule for Su2Generic {
         FusionStyleKind::Generic
     }
     fn braiding_style(&self) -> BraidingStyleKind {
-        SU2FusionRule.braiding_style()
+        su2_rule().braiding_style()
     }
     fn vacuum(&self) -> SectorId {
-        SU2FusionRule.vacuum()
+        su2_rule().vacuum()
     }
     fn dual(&self, sector: SectorId) -> SectorId {
-        SU2FusionRule.dual(sector)
+        su2_rule().dual(sector)
     }
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        SU2FusionRule.fusion_channels(left, right)
+        su2_rule().fusion_channels(left, right)
     }
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        SU2FusionRule.nsymbol(left, right, coupled)
+        su2_rule().nsymbol(left, right, coupled)
     }
     fn sector_order_key(&self, sector: SectorId) -> symtn_core::SectorOrderKey {
-        SU2FusionRule.sector_order_key(sector)
+        su2_rule().sector_order_key(sector)
     }
 }
 
@@ -85,13 +87,13 @@ impl GenericFusionSymbols for Su2Generic {
             self.nsymbol(a, f, d),
         );
         let len = shape.0 * shape.1 * shape.2 * shape.3;
-        let value = SU2FusionRule.f_symbol_scalar(a, b, c, d, e, f);
+        let value = su2_rule().f_symbol_scalar(a, b, c, d, e, f);
         GenericFArray::new(vec![value; len], shape)
     }
 
     fn r_symbol_generic(&self, a: SectorId, b: SectorId, c: SectorId) -> GenericRMatrix<f64> {
         let (rows, cols) = (self.nsymbol(a, b, c), self.nsymbol(b, a, c));
-        let value = SU2FusionRule.r_symbol_scalar(a, b, c);
+        let value = su2_rule().r_symbol_scalar(a, b, c);
         GenericRMatrix::new(vec![value; rows * cols], rows, cols)
     }
 }
@@ -107,7 +109,7 @@ impl GenericRigidSymbols for Su2Generic {
         self.sqrt_dim_scalar(sector).recip()
     }
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> f64 {
-        SU2FusionRule.frobenius_schur_phase_scalar(sector)
+        su2_rule().frobenius_schur_phase_scalar(sector)
     }
 }
 
@@ -174,6 +176,7 @@ fn infallible_generic_keeps_a_state_that_meets_the_rank_budget_exactly() {
 
 #[test]
 fn multiplicity_free_and_infallible_generic_take_one_rank_decision() {
+    let su2_provider_rule = su2_rule();
     // What: SU(2) through either tier keeps the same states and reports the
     // same discarded weight under every rank budget.
     let spectra = spectra();
@@ -185,11 +188,11 @@ fn multiplicity_free_and_infallible_generic_take_one_rank_decision() {
     for budget in 0..=total + 1 {
         let truncation = Truncation::rank(budget);
         let mf = decide_bond_truncation::<MultiplicityFreeAdmissionMode, _, _>(
-            &SU2FusionRule,
+            &su2_provider_rule,
             &spectra,
             &truncation,
-            &FusionRule::rule_identity(&SU2FusionRule),
-            |sector| FusionRule::sector_order_key(&SU2FusionRule, sector),
+            &FusionRule::rule_identity(&su2_provider_rule),
+            |sector| FusionRule::sector_order_key(&su2_provider_rule, sector),
         )
         .unwrap();
         let generic = checked_decision(&provider, &spectra, &truncation);
@@ -269,7 +272,7 @@ fn multiplicity_free_and_checked_publish_one_rectangular_bond() {
         FusionProductSpace::new([SectorLeg::new([(SectorId::new(2), 1)], false)]),
     );
     let mf = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(SU2FusionRule),
+        Arc::new(su2_rule()),
         homspace.clone(),
     )
     .unwrap();

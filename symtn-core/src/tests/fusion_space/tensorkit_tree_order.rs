@@ -1,8 +1,10 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::su2_rule;
 
 #[test]
 fn fusion_tree_homspace_matches_tensorkit_su2_simple_order() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let leg = || {
         SectorLeg::new(
             [
@@ -21,7 +23,7 @@ fn fusion_tree_homspace_matches_tensorkit_su2_simple_order() {
     let keys = hom.fusion_tree_keys(&rule);
 
     // TensorKit.jl 6Camk with sector id = twice spin:
-    // V=Vect[SU2Irrep](0=>1,1//2=>1,1=>1); W=(V⊗V)←V;
+    // V has SU(2) spins 0, 1/2, 1 with degeneracy 1; W=(V⊗V)←V;
     // [(2f1.uncoupled, 2f2.uncoupled, 2f1.coupled) for (f1,f2) in fusiontrees(W)]
     assert_eq!(
         fusion_tree_pair_order(&keys),
@@ -87,13 +89,13 @@ fn transpose_tree_pair_block_matches_fz2_odd_pivotal_oracle() {
 
 #[test]
 fn fusion_tree_homspace_matches_tensorkit_su2_innerline_order() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let hom = FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1), (1, 1)], [(1, 1)]);
 
     let keys = hom.fusion_tree_keys(&rule);
 
     // TensorKit.jl 6Camk with sector id = twice spin:
-    // V=Vect[SU2Irrep](1//2=>1); W=(V⊗V⊗V)←V;
+    // V has SU(2) spin 1/2 with degeneracy 1; W=(V⊗V⊗V)←V;
     // codomain innerlines for fusiontrees(W) are [0], then [2].
     assert_eq!(keys.len(), 2);
     assert_eq!(keys[0].codomain_innerlines(), &[SectorId::new(0)]);
@@ -110,7 +112,7 @@ fn fusion_tree_homspace_matches_tensorkit_su2_innerline_order() {
 
 #[test]
 fn fusion_tree_homspace_external_sectors_preserve_su2_simple_innerline_order() {
-    let rule = SU2FusionRule;
+    let rule = su2_rule();
     let half = SectorId::new(1);
     let hom = FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1), (1, 1)], [(1, 1)]);
 
@@ -317,8 +319,8 @@ fn fibonacci_three_leg_trees_follow_tensorkit_fusiontrees_order() {
 #[test]
 fn su2_three_leg_trees_follow_tensorkit_fusiontrees_order() {
     // TensorKit 0.17.1, ids = twice spin (both orders ascend in spin):
-    // V = Vect[SU2Irrep](0=>1, 1//2=>1, 1=>1); fusiontrees(V ⊗ V' ⊗ V, c).
-    let rule = SU2FusionRule;
+    // V has SU(2) spins 0, 1/2, 1 with degeneracy 1; fusiontrees(V ⊗ V' ⊗ V, c).
+    let rule = su2_rule();
     let space = product_space(&[0, 1, 2], &[false, true, false]);
     let expected_half: Vec<TreeRow> = vec![
         ([1, 0, 0], [1], [1, 1]),
@@ -373,8 +375,8 @@ fn su2_three_leg_trees_follow_tensorkit_fusiontrees_order() {
 fn su2_four_leg_trees_follow_tensorkit_fusiontrees_order() {
     // What: two inner lines, each slower than the legs in front of it.
     // TensorKit 0.17.1, ids = twice spin:
-    // W = Vect[SU2Irrep](1//2=>1, 1=>1); fusiontrees(W ⊗ W ⊗ W' ⊗ W, SU2Irrep(0)).
-    let rule = SU2FusionRule;
+    // W has SU(2) spins 1/2 and 1 with degeneracy 1; fusiontrees(W ⊗ W ⊗ W' ⊗ W, spin 0).
+    let rule = su2_rule();
     let space = product_space(&[1, 2], &[false, false, true, false]);
     let expected: Vec<TreeRow> = vec![
         ([1, 1, 1, 1], [0, 1], [1, 1, 1]),
@@ -403,15 +405,13 @@ fn su2_four_leg_trees_follow_tensorkit_fusiontrees_order() {
 
 #[test]
 fn homspace_trees_skip_inverse_products_of_unshared_coupled_sectors() {
+    let su2_provider_rule = su2_rule();
     // What: a HomSpace enumerates only the coupled sectors both sides reach,
-    // so the domain never fuses an unshared sector with a dual leg. Here the
-    // domain also reaches spin 78 (id 156), and 156 ⊗ dual(100) leaves the
-    // compact SU(2) id range (ids = twice spin, at most 254), while the one
-    // shared sector, the vacuum, has a single tree by hand: 0 ⊗ 50 → 50,
-    // 50 ⊗ 50 → 0.
+    // so the domain never fuses an unshared sector with a dual leg. The
+    // shared vacuum has one tree by hand: 0 ⊗ 50 → 50, 50 ⊗ 50 → 0.
     let hom = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1), (100, 1), (100, 1)]);
 
-    let keys = hom.fusion_tree_keys(&SU2FusionRule);
+    let keys = hom.fusion_tree_keys(&su2_provider_rule);
 
     let rows = keys
         .iter()
@@ -438,13 +438,13 @@ fn homspace_trees_skip_inverse_products_of_unshared_coupled_sectors() {
 
 #[test]
 fn homspace_with_disjoint_coupled_sectors_has_no_trees() {
+    let su2_provider_rule = su2_rule();
     // What: when the sides share no coupled sector (codomain reaches only the
-    // vacuum, the domain only spin 100), no tree is built and no dual-leg
-    // product of the domain's unshared sector (200 ⊗ dual(200), beyond the
-    // compact SU(2) id range) is requested.
+    // vacuum, the domain only spin 100), no tree is built and no inverse
+    // product of the domain's unshared sector is requested.
     let hom = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1), (0, 1), (200, 1)]);
 
-    assert!(hom.fusion_tree_keys(&SU2FusionRule).is_empty());
+    assert!(hom.fusion_tree_keys(&su2_provider_rule).is_empty());
 }
 
 /// SU(2) that counts every fusion-product query (channels or multiplicity).
@@ -466,29 +466,33 @@ impl FusionRule for FusionQueryCountingSu2 {
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
-        FusionRule::fusion_style(&SU2FusionRule)
+        let su2_provider_rule = su2_rule();
+        FusionRule::fusion_style(&su2_provider_rule)
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        FusionRule::braiding_style(&SU2FusionRule)
+        let su2_provider_rule = su2_rule();
+        FusionRule::braiding_style(&su2_provider_rule)
     }
 
     fn vacuum(&self) -> SectorId {
-        FusionRule::vacuum(&SU2FusionRule)
+        let su2_provider_rule = su2_rule();
+        FusionRule::vacuum(&su2_provider_rule)
     }
 
     fn dual(&self, sector: SectorId) -> SectorId {
-        FusionRule::dual(&SU2FusionRule, sector)
+        let su2_provider_rule = su2_rule();
+        FusionRule::dual(&su2_provider_rule, sector)
     }
 
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
         self.query();
-        SU2FusionRule.fusion_channels(left, right)
+        su2_rule().fusion_channels(left, right)
     }
 
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
         self.query();
-        SU2FusionRule.nsymbol(left, right, coupled)
+        su2_rule().nsymbol(left, right, coupled)
     }
 }
 
@@ -496,7 +500,7 @@ impl MultiplicityFreeFusionRule for FusionQueryCountingSu2 {}
 
 impl CheckedFusionAlgebra for FusionQueryCountingSu2 {
     fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
-        SU2FusionRule.try_dual_sector(sector)
+        su2_rule().try_dual_sector(sector)
     }
 
     fn try_fusion_channels(
@@ -505,7 +509,7 @@ impl CheckedFusionAlgebra for FusionQueryCountingSu2 {
         right: SectorId,
     ) -> Result<SectorVec, FusionAlgebraError> {
         self.query();
-        SU2FusionRule.try_fusion_channels(left, right)
+        su2_rule().try_fusion_channels(left, right)
     }
 
     fn try_nsymbol(
@@ -515,16 +519,15 @@ impl CheckedFusionAlgebra for FusionQueryCountingSu2 {
         coupled: SectorId,
     ) -> Result<usize, FusionAlgebraError> {
         self.query();
-        SU2FusionRule.try_nsymbol(left, right, coupled)
+        su2_rule().try_nsymbol(left, right, coupled)
     }
 }
 
 #[test]
 fn a_leg_without_sectors_has_no_trees_and_queries_no_fusion() {
     // What: a leg with no sectors empties the product space, so every
-    // producer returns no tree without fusing any prefix: here 200 ⊗ 200
-    // would leave the compact SU(2) id range. Rank zero stays the unit
-    // with one vacuum tree.
+    // producer returns no tree without fusing any prefix. Rank zero stays
+    // the unit with one vacuum tree.
     let leg =
         |sectors: &[usize]| SectorLeg::new(sectors.iter().map(|&s| (SectorId::new(s), 1)), false);
     let empty = FusionProductSpace::new([leg(&[200]), leg(&[200]), leg(&[])]);

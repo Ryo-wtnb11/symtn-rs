@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule};
 use symtn::sector::ZNIrrep;
 
 fn host_svd_trunc<R, D>(
@@ -184,15 +185,9 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
         .unwrap();
     assert_typed_cuda_svd_matches_host(engine, cuda, &rank_deficient);
 
-    let su2 = Arc::new(SU2FusionRule);
-    let su2_leg = GradedSpace::try_new(
-        Arc::clone(&su2),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 = Arc::new(su2_rule());
+    let su2_leg =
+        GradedSpace::try_new(Arc::clone(&su2), [(su2_irrep(0), 2), (su2_irrep(1), 2)]).unwrap();
     let multi_tree = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -479,15 +474,9 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
         &Truncation::Full,
     );
 
-    let su2 = Arc::new(SU2FusionRule);
-    let su2_leg = GradedSpace::try_new(
-        Arc::clone(&su2),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 = Arc::new(su2_rule());
+    let su2_leg =
+        GradedSpace::try_new(Arc::clone(&su2), [(su2_irrep(0), 2), (su2_irrep(1), 2)]).unwrap();
     let multi_tree = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -688,14 +677,8 @@ fn typed_cuda_c64_svd_matches_host_spectra_and_truncation_policies() {
     .unwrap();
     assert_c64_svd_matches_host(engine, cuda, &rectangular);
 
-    let su2 = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap();
+    let su2 =
+        GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(1), 2)]).unwrap();
     let su2_tensor = TensorMap::<_, Complex64>::from_subblock_fn(
         engine,
         &runtime,
@@ -739,12 +722,8 @@ fn typed_cuda_su2_svd_trunc_matches_host_at_every_weighted_rank_budget() {
     // which land exactly on a cumulative `dim(c)` sum, in f64 and c64.
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
     )
     .unwrap();
     // Hashed fills keep singular values apart, so device rounding cannot

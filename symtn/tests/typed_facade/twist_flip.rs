@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 
 /// Position-weighted value from typed fZ2 labels.
 fn fz2_typed_fill(
@@ -218,11 +219,10 @@ fn typed_inverse_index_ops_pin_values_and_preserve_structure() {
         &[2.0.into(), (-3.0).into()]
     );
 
-    let su2_provider = Arc::new(SU2FusionRule);
-    let spin_half =
-        GradedSpace::try_new(su2_provider, [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let su2_provider = Arc::new(su2_rule());
+    let spin_half = GradedSpace::try_new(su2_provider, [(su2_irrep(1), 1)]).unwrap();
     let spin_half_dual = spin_half.try_dual().unwrap();
-    let su2: TensorMap<SU2FusionRule, f64> =
+    let su2: TensorMap<Su2Rule, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&spin_half_dual], [&spin_half], |_, _| {
             5.0
         })
@@ -391,8 +391,7 @@ fn typed_flip_rejects_a_repeated_leg() {
     .unwrap();
     let u1 =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1_leg], [&u1_leg], |_, _| 7.0).unwrap();
-    let spin =
-        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let spin = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), 1)]).unwrap();
     let su2 =
         TensorMap::from_subblock_fn(engine, &runtime, [&spin, &spin], [&spin, &spin], |_, _| 5.0)
             .unwrap();

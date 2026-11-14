@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 use std::convert::Infallible;
 
 fn degeneracy_cache_info() -> StructureCacheInfo {
@@ -7,6 +9,7 @@ fn degeneracy_cache_info() -> StructureCacheInfo {
 
 #[test]
 fn complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions() {
+    let su2_provider_rule = su2_rule();
     // Isolated like prepared_complete_structure_hits_without_rebuilding_layout:
     // this asserts process-global complete-structure cache counters, which
     // CACHE_TEST_LOCK does not protect from the crate's many ordinary,
@@ -75,13 +78,13 @@ fn complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions() {
     let u1_hom = || FusionTreeHomSpace::from_sectors([(u1(1), 2)], [(u1(1), 3)]);
     assert_reused(&U1FusionRule, u1_hom(), u1_hom());
     let su2_hom = || FusionTreeHomSpace::from_sectors([(su2(1), 2)], [(su2(1), 3)]);
-    assert_reused(&SU2FusionRule, su2_hom(), su2_hom());
+    assert_reused(&su2_provider_rule, su2_hom(), su2_hom());
 
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    type Product = ProductFusionRule<Fz2U1, SU2FusionRule>;
+    type Product = ProductFusionRule<Fz2U1, Su2Rule>;
     let pair = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let sector = pair.encode_component_ids(z2_odd(), u1(1));
-    let rule = Product::try_new(pair, SU2FusionRule).unwrap();
+    let rule = Product::try_new(pair, su2_provider_rule.clone()).unwrap();
     let product_hom = || {
         FusionTreeHomSpace::from_sectors(
             [(rule.encode_component_ids(sector, su2(1)), 2)],
@@ -98,6 +101,7 @@ fn complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions() {
 
 #[test]
 fn complete_homspace_layout_cache_concurrent_hits_share_one_canonical_arc() {
+    let su2_provider_rule = su2_rule();
     // Isolated like symtn-tensors' checked_bind_failure test: this asserts absolute process-global admissions()/
     // misses()/hits() counts, which CACHE_TEST_LOCK does not protect
     // from the crate's many ordinary, unlocked complete-structure
@@ -119,7 +123,7 @@ fn complete_homspace_layout_cache_concurrent_hits_share_one_canonical_arc() {
     clear_structure_caches();
     let hom = || FusionTreeHomSpace::from_sectors([(su2(1), 2), (su2(3), 1)], [(su2(1), 3)]);
     let held = hom()
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
 
     let round = || {
@@ -130,7 +134,7 @@ fn complete_homspace_layout_cache_concurrent_hits_share_one_canonical_arc() {
                     scope.spawn(|| {
                         barrier.wait();
                         hom()
-                            .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+                            .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
                             .unwrap()
                     })
                 })
@@ -150,7 +154,7 @@ fn complete_homspace_layout_cache_concurrent_hits_share_one_canonical_arc() {
     drop(held);
     let rebuilt = round();
     // The entry's wrapper is the rebuilt Arc.
-    let key = CompleteHomSpaceStructureCacheKey::new(&SU2FusionRule, &hom());
+    let key = CompleteHomSpaceStructureCacheKey::new(&su2_provider_rule, &hom());
     let before = degeneracy_cache_info().hits();
     let entry = degeneracy_structure_cache().get(&key).unwrap();
     assert!(Arc::ptr_eq(&entry.structure(), &rebuilt[0]));
@@ -418,6 +422,7 @@ fn complete_admission_preserves_the_winner_wrapper_and_region_memo() {
 
 #[test]
 fn complete_cache_separates_multiplicity_free_and_generic_modes() {
+    let su2_provider_rule = su2_rule();
     if test_support::run_isolated_or_return(
         "SYMTN_COMPLETE_OWNER_MODE_ISOLATED",
         "tests::fusion_space::layout_caches::complete_cache_separates_multiplicity_free_and_generic_modes",
@@ -429,10 +434,10 @@ fn complete_cache_separates_multiplicity_free_and_generic_modes() {
     let hom = FusionTreeHomSpace::from_sectors([(su2(1), 2)], [(su2(1), 3)]);
 
     let multiplicity_free = hom
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
     let generic = hom
-        .coupled_subblock_structure_from_leg_degeneracies_generic(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies_generic(&su2_provider_rule)
         .unwrap();
 
     assert_eq!(multiplicity_free.as_ref(), generic.as_ref());
@@ -441,22 +446,22 @@ fn complete_cache_separates_multiplicity_free_and_generic_modes() {
     for _ in 0..2 {
         assert!(Arc::ptr_eq(
             &generic,
-            &hom.coupled_subblock_structure_from_leg_degeneracies_generic(&SU2FusionRule)
+            &hom.coupled_subblock_structure_from_leg_degeneracies_generic(&su2_provider_rule)
                 .unwrap()
         ));
         assert!(Arc::ptr_eq(
             &multiplicity_free,
-            &hom.coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+            &hom.coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
                 .unwrap()
         ));
     }
     let budget = degeneracy_cache_info().byte_budget();
     set_structure_cache_byte_budget(StructureCacheKind::DegeneracyStructure, 0);
     let rejected_mf = hom
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
     let rejected_generic = hom
-        .coupled_subblock_structure_from_leg_degeneracies_generic(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies_generic(&su2_provider_rule)
         .unwrap();
     assert_eq!(rejected_mf.as_ref(), multiplicity_free.as_ref());
     assert_eq!(rejected_generic.as_ref(), generic.as_ref());
@@ -472,10 +477,10 @@ fn complete_cache_separates_multiplicity_free_and_generic_modes() {
     set_structure_cache_byte_budget(StructureCacheKind::DegeneracyStructure, budget);
     clear_structure_caches();
     let fresh_generic = hom
-        .coupled_subblock_structure_from_leg_degeneracies_generic(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies_generic(&su2_provider_rule)
         .unwrap();
     let fresh_mf = hom
-        .coupled_subblock_structure_from_leg_degeneracies(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_provider_rule)
         .unwrap();
     assert_ne!(fresh_mf.content_id(), rejected_mf.content_id());
     assert_ne!(fresh_generic.content_id(), rejected_generic.content_id());
@@ -487,6 +492,7 @@ fn complete_cache_separates_multiplicity_free_and_generic_modes() {
 
 #[test]
 fn checked_homspace_factory_captures_reset_epoch_before_the_producer() {
+    let su2_provider_rule = su2_rule();
     if test_support::run_isolated_or_return(
         "SYMTN_COMPLETE_OWNER_PRODUCER_EPOCH_ISOLATED",
         "tests::fusion_space::layout_caches::checked_homspace_factory_captures_reset_epoch_before_the_producer",
@@ -495,7 +501,7 @@ fn checked_homspace_factory_captures_reset_epoch_before_the_producer() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     clear_structure_caches();
-    let rule = InfallibleGeneric::new(&SU2FusionRule);
+    let rule = InfallibleGeneric::new(&su2_provider_rule);
     let hom = || FusionTreeHomSpace::from_sectors([(su2(1), 2)], [(su2(1), 3)]);
 
     let prepared =
@@ -632,6 +638,7 @@ fn overlapping_resets_wait_so_the_epoch_stays_odd_until_the_first_finishes() {
 
 #[test]
 fn a_degeneracy_only_change_reuses_the_sector_structure() {
+    let su2_provider_rule = su2_rule();
     // What (variable shape): two HomSpaces with the same sectors and
     // different degeneracies enumerate their fusion trees once and share one
     // sector structure; only the degeneracy structure differs. TensorKit
@@ -676,10 +683,10 @@ fn a_degeneracy_only_change_reuses_the_sector_structure() {
         )
     };
     let small = su2_hom(1)
-        .coupled_subblock_structure_from_leg_degeneracies_generic(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies_generic(&su2_provider_rule)
         .unwrap();
     let large = su2_hom(4)
-        .coupled_subblock_structure_from_leg_degeneracies_generic(&SU2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies_generic(&su2_provider_rule)
         .unwrap();
     assert!(Arc::ptr_eq(
         &small.content_key().sector,
@@ -688,7 +695,7 @@ fn a_degeneracy_only_change_reuses_the_sector_structure() {
     assert_ne!(small.required_len(), large.required_len());
 
     // So does the checked Generic builder, once a walk succeeded.
-    let checked = InfallibleGeneric::new(&SU2FusionRule);
+    let checked = InfallibleGeneric::new(&su2_provider_rule);
     let checked_small = su2_hom(2)
         .coupled_subblock_structure_from_leg_degeneracies_generic_checked(&checked)
         .unwrap();
@@ -703,8 +710,8 @@ fn a_degeneracy_only_change_reuses_the_sector_structure() {
     #[cfg(feature = "cgc-gen")]
     {
         let checked = symtn_sectors::testing::su_lie_rule(3);
-        let vacuum = checked.encode_irrep(&[0, 0]).unwrap();
-        let fundamental = checked.encode_irrep(&[1, 0]).unwrap();
+        let vacuum = checked.encode_irrep_with_charges(&[0, 0], &[]).unwrap();
+        let fundamental = checked.encode_irrep_with_charges(&[1, 0], &[]).unwrap();
         let hom = |deg: usize| {
             let leg = SectorLeg::new([(vacuum, deg), (fundamental, deg + 1)], false);
             FusionTreeHomSpace::new(
@@ -784,8 +791,8 @@ fn generic_complete_owner_keeps_canonical_identity_regions_and_budget() {
     ) { return; }
     clear_structure_caches();
     let rule = symtn_sectors::testing::su_lie_rule(3);
-    let adjoint = rule.encode_irrep(&[1, 1]).unwrap();
-    let vacuum = rule.encode_irrep(&[0, 0]).unwrap();
+    let adjoint = rule.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+    let vacuum = rule.encode_irrep_with_charges(&[0, 0], &[]).unwrap();
     let hom = || {
         let leg = || SectorLeg::new([(adjoint, 2), (vacuum, 3)], false);
         FusionTreeHomSpace::new(
@@ -908,6 +915,7 @@ fn generic_complete_owner_keeps_canonical_identity_regions_and_budget() {
 /// unpublished, reset-straddling or non-resident staging derives.
 #[test]
 fn a_committed_permutation_memoizes_its_destination_in_the_source_entry() {
+    let su2_provider_rule = su2_rule();
     if test_support::run_isolated_or_return(
         "SYMTN_PERMUTED_MEMO_ISOLATED",
         "tests::fusion_space::layout_caches::a_committed_permutation_memoizes_its_destination_in_the_source_entry",
@@ -918,7 +926,7 @@ fn a_committed_permutation_memoizes_its_destination_in_the_source_entry() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     clear_structure_caches();
-    let rule = InfallibleGeneric::new(&SU2FusionRule);
+    let rule = InfallibleGeneric::new(&su2_provider_rule);
     let admit = || {
         let (hom, structure) =
             FusionTreeHomSpace::from_sectors([(su2(1), 2), (su2(1), 1)], [(su2(2), 3)])

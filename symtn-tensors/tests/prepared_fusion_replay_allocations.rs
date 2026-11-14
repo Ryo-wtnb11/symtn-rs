@@ -1,10 +1,11 @@
+use crate::su2::su2_rule;
 use std::sync::Arc;
 use symtn_dense::Engine;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeFusionRule,
-    MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSectorCodec, SU2Irrep, SectorId,
-    SectorLeg, TensorKitProductCodec, U1FusionRule, U1Irrep,
+    MultiplicityFreeRigidSymbols, ProductFusionRule, ProductSectorCodec, SectorId, SectorLeg,
+    TensorKitProductCodec, U1FusionRule, U1Irrep,
 };
 use symtn_operations::ContractDestinationInit;
 use symtn_tensors::{
@@ -161,11 +162,11 @@ fn warmed_prepared_rank4_fusion_replay_matches_planned_eager() {
     );
     assert_replay_matches_planned_eager(
         engine,
-        &symtn_core::SU2FusionRule,
+        &su2_rule(),
         &[
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-            SU2Irrep::from_twice_spin(2).sector_id(),
+            symtn_core::SectorId::new(0),
+            symtn_core::SectorId::new(1),
+            symtn_core::SectorId::new(2),
         ],
     );
     assert_replay_matches_planned_eager(

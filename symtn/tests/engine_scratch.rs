@@ -7,11 +7,12 @@
 //! (`out`), all distinct in each fixture, so an allocation of one of them is
 //! that buffer or a scratch of its size, never another fixture's.
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRule, U1Irrep};
+use symtn::sector::{TableRule, TableSector, U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, CpuEngine, GradedSpace, Runtime, TensorMap};
 use tenferro_runtime::ExecutionEngine;
 
@@ -53,10 +54,10 @@ fn u1(base: usize) -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2(base: usize) -> GradedSpace<SU2FusionRule> {
+fn su2(base: usize) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [(0, base), (1, base + 1), (2, 1)].map(|(twice, n)| (SU2Irrep::from_twice_spin(twice), n)),
+        Arc::new(su2_rule()),
+        [(0, base), (1, base + 1), (2, 1)].map(|(twice, n)| (su2_irrep(twice), n)),
     )
     .unwrap()
 }

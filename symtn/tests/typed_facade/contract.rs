@@ -1,4 +1,5 @@
 use super::*;
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use symtn::typed::Engine;
 
 #[test]
@@ -871,20 +872,16 @@ fn contract_ordered_delegates_with_a_nonidentity_output_order() {
 fn typed_contract_parallel_su2_replay_matches_serial() {
     let _serial = crate::counting_alloc::serial();
     fn run(engine: &mut dyn Engine, runtime: &Runtime) -> Vec<f64> {
-        let provider = Arc::new(SU2FusionRule);
+        let provider = Arc::new(su2_rule());
         let leg = GradedSpace::try_new(
             provider,
-            [
-                (SU2Irrep::from_twice_spin(0), 2),
-                (SU2Irrep::from_twice_spin(1), 3),
-                (SU2Irrep::from_twice_spin(2), 2),
-            ],
+            [(su2_irrep(0), 2), (su2_irrep(1), 3), (su2_irrep(2), 2)],
         )
         .unwrap();
-        let lhs: TensorMap<SU2FusionRule, f64> =
+        let lhs: TensorMap<Su2Rule, f64> =
             TensorMap::rand_with_seed(engine, runtime, [&leg, &leg], [&leg, &leg], 224_401)
                 .unwrap();
-        let rhs: TensorMap<SU2FusionRule, f64> =
+        let rhs: TensorMap<Su2Rule, f64> =
             TensorMap::rand_with_seed(engine, runtime, [&leg, &leg], [&leg, &leg], 224_402)
                 .unwrap();
         lhs.contract(

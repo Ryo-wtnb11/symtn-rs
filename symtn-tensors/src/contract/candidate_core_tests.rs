@@ -5,12 +5,14 @@
 //! oracles live in `symtn/tests/contract_candidate_core.rs`.
 
 use crate::probe::{self, Event};
+#[cfg(test)]
+use crate::su2::su2_rule;
 use std::sync::Arc;
 use symtn_dense::Engine;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols,
-    ProductFusionRule, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, U1FusionRule, U1Irrep,
+    ProductFusionRule, SectorId, SectorLeg, U1FusionRule, U1Irrep,
 };
 use symtn_operations::fusion_replay::{Rank2Gemm, Rank2GemmBatchJob};
 use symtn_operations::stacked::{StackedDirectReplay, StackedStorageView, StackedStorageViewMut};
@@ -140,9 +142,9 @@ fn u1_leg() -> SectorLeg {
 fn su2_leg() -> SectorLeg {
     SectorLeg::new(
         [
-            (SU2Irrep::from_twice_spin(0).sector_id(), 2),
-            (SU2Irrep::from_twice_spin(1).sector_id(), 1),
-            (SU2Irrep::from_twice_spin(2).sector_id(), 1),
+            (symtn_core::SectorId::new(0), 2),
+            (symtn_core::SectorId::new(1), 1),
+            (symtn_core::SectorId::new(2), 1),
         ],
         false,
     )
@@ -312,7 +314,7 @@ fn zero_copy_candidates_resolve_to_core_on_non_self_dual_u1() {
 
 #[test]
 fn zero_copy_candidates_resolve_to_core_on_su2() {
-    assert_probes_resolve_to_core(&Arc::new(SU2FusionRule), &su2_leg());
+    assert_probes_resolve_to_core(&Arc::new(su2_rule()), &su2_leg());
 }
 
 #[test]

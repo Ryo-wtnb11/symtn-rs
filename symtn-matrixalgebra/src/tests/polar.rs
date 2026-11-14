@@ -1,6 +1,8 @@
 //! Polar decomposition tests.
 
 use super::*;
+#[cfg(test)]
+use crate::su2::{su2_rule, Su2Rule};
 
 #[test]
 #[expect(
@@ -343,12 +345,12 @@ fn polar_valid_direct_and_fallback_layouts_agree() {
 fn su2_polar_input<D: FactorScalar>(
     tall: bool,
     value: fn(f64, f64) -> D,
-) -> BoundTensorMap<SU2FusionRule, D> {
-    let rule = SU2FusionRule;
+) -> BoundTensorMap<Su2Rule, D> {
+    let rule = su2_rule();
     let side = |degeneracy| {
         let leg = || {
             SectorLeg::new(
-                [0, 1].map(|twice| (SU2Irrep::from_twice_spin(twice).sector_id(), degeneracy)),
+                [0, 1].map(|twice| (symtn_core::SectorId::new(twice), degeneracy)),
                 false,
             )
         };
@@ -484,9 +486,9 @@ fn sector_matrices<R, D: FactorScalar>(
 /// `Wh Whᴴ = 1`; in both `P` is Hermitian positive definite (the inputs
 /// have full rank). Returns how many sectors were checked.
 fn assert_polar_laws<D: FactorScalar>(
-    source: &BoundTensorMap<SU2FusionRule, D>,
-    w: &BoundDynFactor<SU2FusionRule, D>,
-    p: &BoundDynFactor<SU2FusionRule, D>,
+    source: &BoundTensorMap<Su2Rule, D>,
+    w: &BoundDynFactor<Su2Rule, D>,
+    p: &BoundDynFactor<Su2Rule, D>,
     left: bool,
 ) -> usize {
     let a = sector_matrices(source.space(), source.data());
@@ -527,16 +529,12 @@ fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
             panic!("a dense source has dense polar factors")
         }
     };
-    fn parent<D>(
-        bound: &BoundTensorMap<SU2FusionRule, D>,
-    ) -> BoundDynamicTensorRef<'_, SU2FusionRule, D> {
+    fn parent<D>(bound: &BoundTensorMap<Su2Rule, D>) -> BoundDynamicTensorRef<'_, Su2Rule, D> {
         BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap()
     }
     let source = |bound| FactorSource::Dense(parent(bound));
     // Polar reads only the parent; the adjoint's own layout is not consulted.
-    fn adjoint_of<D>(
-        bound: &BoundTensorMap<SU2FusionRule, D>,
-    ) -> FactorSource<'_, SU2FusionRule, D> {
+    fn adjoint_of<D>(bound: &BoundTensorMap<Su2Rule, D>) -> FactorSource<'_, Su2Rule, D> {
         FactorSource::AdjointOf {
             parent: BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap(),
             adjoint_space: bound.space(),

@@ -21,12 +21,13 @@
 
 #![allow(dead_code)]
 
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
-    SU2Irrep, U1FusionRule, U1Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SectorCodec,
@@ -56,45 +57,32 @@ pub fn u1(charges: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-pub fn su2() -> GradedSpace<SU2FusionRule> {
+pub fn su2() -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
+        Arc::new(su2_rule()),
+        [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
     )
     .unwrap()
 }
 
-pub type U1Su2 = ProductFusionRule<U1FusionRule, SU2FusionRule>;
+pub type U1Su2 = ProductFusionRule<U1FusionRule, Su2Rule>;
 
 pub fn u1_su2() -> GradedSpace<U1Su2> {
     GradedSpace::try_new(
         Arc::new(
-            symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
         ),
         [
-            (
-                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(0)),
-                2,
-            ),
-            (
-                product_sector(U1Irrep::new(1).unwrap(), SU2Irrep::from_twice_spin(1)),
-                1,
-            ),
-            (
-                product_sector(U1Irrep::new(-1).unwrap(), SU2Irrep::from_twice_spin(1)),
-                2,
-            ),
+            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(0)), 2),
+            (product_sector(U1Irrep::new(1).unwrap(), su2_irrep(1)), 1),
+            (product_sector(U1Irrep::new(-1).unwrap(), su2_irrep(1)), 2),
         ],
     )
     .unwrap()
 }
 
 pub type FermionU1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-pub type FermionSu2 = ProductFusionRule<FermionParityFusionRule, SU2FusionRule>;
+pub type FermionSu2 = ProductFusionRule<FermionParityFusionRule, Su2Rule>;
 
 /// fZ2 x U(1): odd sectors of both charge signs, degeneracy > 1.
 pub fn fermion_u1() -> GradedSpace<FermionU1> {
@@ -134,23 +122,14 @@ pub fn fermion_su2() -> GradedSpace<FermionSu2> {
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
                 FermionParityFusionRule::new(),
-                SU2FusionRule,
+                su2_rule(),
             )
             .unwrap(),
         ),
         [
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)),
-                2,
-            ),
-            (
-                product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)),
-                2,
-            ),
-            (
-                product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)),
-                1,
-            ),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
         ],
     )
     .unwrap()
@@ -275,10 +254,7 @@ pub fn u1_reordered<D: Payload>(
 }
 
 /// SU(2) recoupling of the reordered whole-side contraction.
-pub fn su2_reordered<D: Payload>(
-    engine: &mut dyn Engine,
-    runtime: &Runtime,
-) -> Case<SU2FusionRule, D> {
+pub fn su2_reordered<D: Payload>(engine: &mut dyn Engine, runtime: &Runtime) -> Case<Su2Rule, D> {
     let s = su2();
     Case {
         name: "SU(2) reordered whole-side",
@@ -292,7 +268,7 @@ pub fn su2_reordered<D: Payload>(
 }
 
 /// SU(2): a codomain leg of A against a domain leg of B.
-pub fn su2_bent<D: Payload>(engine: &mut dyn Engine, runtime: &Runtime) -> Case<SU2FusionRule, D> {
+pub fn su2_bent<D: Payload>(engine: &mut dyn Engine, runtime: &Runtime) -> Case<Su2Rule, D> {
     let s = su2();
     Case {
         name: "SU(2) codomain against domain",
@@ -667,7 +643,7 @@ where
 pub fn su2_core_form_lazy_cases<D: Payload>(
     engine: &mut dyn Engine,
     runtime: &Runtime,
-) -> [Case<SU2FusionRule, D>; 2] {
+) -> [Case<Su2Rule, D>; 2] {
     let s = su2();
     let x: TensorMap<_, D> = tensor(engine, runtime, &[&s, &s], &[&s, &s], 15);
     let y: TensorMap<_, D> = tensor(engine, runtime, &[&s], &[&s, &s], 17);

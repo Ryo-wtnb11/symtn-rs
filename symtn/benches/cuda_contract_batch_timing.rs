@@ -10,6 +10,9 @@
 //! or allocations. Fresh output is already zeroed, so warm minus cold GEMM
 //! submissions counts inactive-region zero writes.
 
+#[path = "../../tests/support/su2.rs"]
+mod su2;
+use symtn_core as sector_types;
 #[path = "../tests/common/mod.rs"]
 mod common;
 #[path = "../../tests/support"]

@@ -1,3 +1,4 @@
+use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -5,9 +6,7 @@ use symtn::typed::Engine;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::TypedSectorAdmission;
-use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{Complex32, Complex64, Runtime};
 use symtn::typed::{
@@ -30,14 +29,14 @@ impl fmt::Display for CodecError {
 impl std::error::Error for CodecError {}
 
 struct Su2Codec {
-    provider: Arc<SU2FusionRule>,
+    provider: Arc<Su2Rule>,
     resolve_calls: AtomicUsize,
     missing_provider: bool,
     accept_foreign_key: bool,
 }
 
 impl Su2Codec {
-    fn new(provider: Arc<SU2FusionRule>) -> Self {
+    fn new(provider: Arc<Su2Rule>) -> Self {
         Self {
             provider,
             resolve_calls: AtomicUsize::new(0),
@@ -46,14 +45,14 @@ impl Su2Codec {
         }
     }
 
-    fn missing(provider: Arc<SU2FusionRule>) -> Self {
+    fn missing(provider: Arc<Su2Rule>) -> Self {
         Self {
             missing_provider: true,
             ..Self::new(provider)
         }
     }
 
-    fn mismatched(provider: Arc<SU2FusionRule>) -> Self {
+    fn mismatched(provider: Arc<Su2Rule>) -> Self {
         Self {
             accept_foreign_key: true,
             ..Self::new(provider)
@@ -61,14 +60,14 @@ impl Su2Codec {
     }
 }
 
-impl TypedPersistenceCodec<SU2FusionRule> for Su2Codec {
+impl TypedPersistenceCodec<Su2Rule> for Su2Codec {
     type Error = CodecError;
 
-    fn provider_key(&self, _provider: &SU2FusionRule) -> Result<Vec<u8>, Self::Error> {
+    fn provider_key(&self, _provider: &Su2Rule) -> Result<Vec<u8>, Self::Error> {
         Ok(b"su2".to_vec())
     }
 
-    fn resolve_provider(&self, key: &[u8]) -> Result<Arc<SU2FusionRule>, Self::Error> {
+    fn resolve_provider(&self, key: &[u8]) -> Result<Arc<Su2Rule>, Self::Error> {
         self.resolve_calls.fetch_add(1, Ordering::Relaxed);
         if self.missing_provider || (key != b"su2" && !self.accept_foreign_key) {
             Err(CodecError::MissingProvider)
@@ -79,21 +78,23 @@ impl TypedPersistenceCodec<SU2FusionRule> for Su2Codec {
 
     fn encode_sector(
         &self,
-        _provider: &SU2FusionRule,
-        sector: &SU2Irrep,
+        _provider: &Su2Rule,
+        sector: &symtn_core::LieIrrep,
     ) -> Result<Vec<u8>, Self::Error> {
-        Ok(vec![sector.twice_spin() as u8])
+        Ok(vec![
+            u8::try_from(sector.dynkin().next().unwrap()).map_err(|_| CodecError::InvalidSector)?
+        ])
     }
 
     fn decode_sector(
         &self,
-        _provider: &SU2FusionRule,
+        _provider: &Su2Rule,
         bytes: &[u8],
-    ) -> Result<SU2Irrep, Self::Error> {
+    ) -> Result<symtn_core::LieIrrep, Self::Error> {
         let &[twice_spin] = bytes else {
             return Err(CodecError::InvalidSector);
         };
-        SU2Irrep::try_from_twice_spin(twice_spin as usize).ok_or(CodecError::InvalidSector)
+        Ok(su2_irrep(twice_spin as usize))
     }
 }
 
@@ -185,16 +186,10 @@ use crate::fixtures;
 
 use fixtures::host_runtime;
 
-fn su2_leg(provider: &Arc<SU2FusionRule>, dual: bool) -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::clone(provider),
-        [
-            (SU2Irrep::from_twice_spin(0), 1),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .and_then(|space| if dual { space.try_dual() } else { Ok(space) })
-    .unwrap()
+fn su2_leg(provider: &Arc<Su2Rule>, dual: bool) -> GradedSpace<Su2Rule> {
+    GradedSpace::try_new(Arc::clone(provider), [(su2_irrep(0), 1), (su2_irrep(1), 2)])
+        .and_then(|space| if dual { space.try_dual() } else { Ok(space) })
+        .unwrap()
 }
 
 fn u64_at(bytes: &[u8], offset: usize) -> usize {
@@ -562,19 +557,15 @@ fn admitted_shape_limit_precedes_dense_payload_allocation() {
 #[test]
 fn graded_space_roundtrip_keeps_duality_exact_arc_and_deterministic_bytes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let codec = Su2Codec::new(Arc::clone(&provider));
     let source = su2_leg(&provider, true);
 
     let bytes = source.to_bytes_with(&codec).unwrap();
     assert_eq!(source.to_bytes_with(&codec).unwrap(), bytes);
-    let restored = GradedSpace::<SU2FusionRule>::from_bytes_with(
-        engine,
-        &bytes,
-        DecodeLimits::default(),
-        &codec,
-    )
-    .unwrap();
+    let restored =
+        GradedSpace::<Su2Rule>::from_bytes_with(engine, &bytes, DecodeLimits::default(), &codec)
+            .unwrap();
 
     assert!(std::ptr::eq(restored.provider(), provider.as_ref()));
     assert!(restored.is_dual());
@@ -612,7 +603,7 @@ fn non_self_dual_u1_space_roundtrip_does_not_dualize_twice() {
 fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let codec = Su2Codec::new(Arc::clone(&provider));
     let codomain = su2_leg(&provider, false);
     let domain = su2_leg(&provider, true);
@@ -628,7 +619,9 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
         [&domain],
         |trees, indices| {
             f64::from_bits(
-                real_bits[(trees.coupled().twice_spin() + indices.iter().sum::<usize>()) % 3],
+                real_bits[(usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap()
+                    + indices.iter().sum::<usize>())
+                    % 3],
             )
         },
     )
@@ -639,7 +632,9 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
         [&codomain, &codomain, &codomain],
         [&domain],
         |trees, indices| {
-            let index = (trees.coupled().twice_spin() + indices.iter().sum::<usize>()) % 3;
+            let index = (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap()
+                + indices.iter().sum::<usize>())
+                % 3;
             Complex64::new(
                 f64::from_bits(real_bits[index]),
                 f64::from_bits(real_bits[(index + 1) % 3]),
@@ -656,7 +651,7 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
     }));
 
     let real_bytes = real.to_bytes_with(&codec).unwrap();
-    let restored_real = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+    let restored_real = TensorMap::<Su2Rule, f64>::from_bytes_with(
         engine,
         &runtime,
         &real_bytes,
@@ -665,7 +660,7 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
     )
     .unwrap();
     let complex_bytes = complex.to_bytes_with(&codec).unwrap();
-    let restored_complex = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+    let restored_complex = TensorMap::<Su2Rule, Complex64>::from_bytes_with(
         engine,
         &runtime,
         &complex_bytes,
@@ -721,22 +716,21 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
 fn compact_and_lazy_representations_survive_roundtrip() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let codec = Su2Codec::new(Arc::clone(&provider));
     let leg = su2_leg(&provider, false);
     let spectrum = vec![
         SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(0),
+            sector: su2_irrep(0),
             values: vec![f64::from_bits(0x8000_0000_0000_0000)],
         },
         SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(1),
+            sector: su2_irrep(1),
             values: vec![2.0, f64::from_bits(0x7ff8_0000_0000_0007)],
         },
     ];
-    let compact =
-        TensorMap::<SU2FusionRule, f64>::diagonal(engine, &runtime, &leg, spectrum).unwrap();
-    let restored_compact = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+    let compact = TensorMap::<Su2Rule, f64>::diagonal(engine, &runtime, &leg, spectrum).unwrap();
+    let restored_compact = TensorMap::<Su2Rule, f64>::from_bytes_with(
         engine,
         &runtime,
         &compact.to_bytes_with(&codec).unwrap(),
@@ -757,11 +751,11 @@ fn compact_and_lazy_representations_survive_roundtrip() {
 
     let complex_spectrum = vec![
         SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(0),
+            sector: su2_irrep(0),
             values: vec![Complex64::new(f64::from_bits(0x8000_0000_0000_0000), 1.0)],
         },
         SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(1),
+            sector: su2_irrep(1),
             values: vec![
                 Complex64::new(2.0, -3.0),
                 Complex64::new(4.0, f64::from_bits(0x7ff8_0000_0000_0007)),
@@ -769,9 +763,9 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         },
     ];
     let compact_complex =
-        TensorMap::<SU2FusionRule, Complex64>::diagonal(engine, &runtime, &leg, complex_spectrum)
+        TensorMap::<Su2Rule, Complex64>::diagonal(engine, &runtime, &leg, complex_spectrum)
             .unwrap();
-    let restored_compact_complex = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+    let restored_compact_complex = TensorMap::<Su2Rule, Complex64>::from_bytes_with(
         engine,
         &runtime,
         &compact_complex.to_bytes_with(&codec).unwrap(),
@@ -812,7 +806,7 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         symtn::typed::__network::network_reuse_class(&compact_complex_adjoint, false),
         NetworkReuseClass::Compact
     ));
-    let restored_compact_adjoint = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+    let restored_compact_adjoint = TensorMap::<Su2Rule, Complex64>::from_bytes_with(
         engine,
         &runtime,
         &compact_complex_adjoint.to_bytes_with(&codec).unwrap(),
@@ -852,7 +846,7 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         })
         .unwrap();
     let lazy = dense.adjoint(engine).unwrap();
-    let restored_lazy = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+    let restored_lazy = TensorMap::<Su2Rule, f64>::from_bytes_with(
         engine,
         &runtime,
         &lazy.to_bytes_with(&codec).unwrap(),
@@ -888,7 +882,7 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         .scale(engine, Complex64::new(1.0, 0.5))
         .unwrap();
     let lazy_complex = dense_complex.adjoint(engine).unwrap();
-    let restored_lazy_complex = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+    let restored_lazy_complex = TensorMap::<Su2Rule, Complex64>::from_bytes_with(
         engine,
         &runtime,
         &lazy_complex.to_bytes_with(&codec).unwrap(),
@@ -930,7 +924,7 @@ fn compact_and_lazy_representations_survive_roundtrip() {
 fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let codec = Su2Codec::new(Arc::clone(&provider));
     let diagonal = TensorMap::<_, Complex64>::diagonal(
         engine,
@@ -938,11 +932,11 @@ fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
         &su2_leg(&provider, false),
         [
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(0),
+                sector: su2_irrep(0),
                 values: vec![Complex64::new(2.0, 1.5)],
             },
             SectorSpectrum {
-                sector: SU2Irrep::from_twice_spin(1),
+                sector: su2_irrep(1),
                 values: vec![Complex64::new(2.0, 1.5), Complex64::new(-3.0, -0.5)],
             },
         ],
@@ -953,7 +947,7 @@ fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
     assert_eq!(bytes[repr], 2, "diagonal record tag");
     bytes.insert(repr, 3);
     assert!(
-        matches!(TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(engine,
+        matches!(TensorMap::<Su2Rule, Complex64>::from_bytes_with(engine,
             &runtime,
             &bytes,
             DecodeLimits::default(),
@@ -965,11 +959,11 @@ fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
 #[test]
 fn malformed_framing_limits_and_provider_failures_are_typed_and_ordered() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let codec = Su2Codec::new(Arc::clone(&provider));
     let bytes = su2_leg(&provider, true).to_bytes_with(&codec).unwrap();
     let mut decode = |input: &[u8], limits, codec: &Su2Codec| {
-        GradedSpace::<SU2FusionRule>::from_bytes_with(engine, input, limits, codec)
+        GradedSpace::<Su2Rule>::from_bytes_with(engine, input, limits, codec)
     };
 
     for (offset, value) in [(0, b'X'), (10, 2), (11, 1)] {
@@ -1040,15 +1034,14 @@ fn malformed_framing_limits_and_provider_failures_are_typed_and_ordered() {
 fn malformed_tensor_tags_and_duplicate_or_missing_blocks_are_rejected() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let codec = Su2Codec::new(Arc::clone(&provider));
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(SU2Irrep::from_twice_spin(0), 1)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su2_irrep(0), 1)]).unwrap();
     let tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [], |_, _| 3.0).unwrap();
     let bytes = tensor.to_bytes_with(&codec).unwrap();
     let mut decode = |input: &[u8]| {
-        TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+        TensorMap::<Su2Rule, f64>::from_bytes_with(
             engine,
             &runtime,
             input,
@@ -1106,9 +1099,7 @@ fn malformed_tensor_tags_and_duplicate_or_missing_blocks_are_rejected() {
         },
     ] {
         assert!(matches!(
-            TensorMap::<SU2FusionRule, f64>::from_bytes_with(
-                engine, &runtime, &bytes, limits, &codec
-            ),
+            TensorMap::<Su2Rule, f64>::from_bytes_with(engine, &runtime, &bytes, limits, &codec),
             Err(DecodeError::LimitExceeded { .. })
         ));
     }
@@ -1124,10 +1115,7 @@ const GOLDEN_F64_BITS: [u64; 3] = [
     0x7ff8_0000_0000_0042,
 ];
 
-fn golden_dense_f64(
-    runtime: &Runtime,
-    provider: &Arc<SU2FusionRule>,
-) -> TensorMap<SU2FusionRule, f64> {
+fn golden_dense_f64(runtime: &Runtime, provider: &Arc<Su2Rule>) -> TensorMap<Su2Rule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let codomain = su2_leg(provider, false);
     let domain = su2_leg(provider, true);
@@ -1138,7 +1126,10 @@ fn golden_dense_f64(
         [&domain],
         |trees, indices| {
             f64::from_bits(
-                GOLDEN_F64_BITS[(trees.coupled().twice_spin() + indices.iter().sum::<usize>()) % 3],
+                GOLDEN_F64_BITS[(usize::try_from(trees.coupled().dynkin().next().unwrap())
+                    .unwrap()
+                    + indices.iter().sum::<usize>())
+                    % 3],
             )
         },
     )
@@ -1147,19 +1138,19 @@ fn golden_dense_f64(
 
 fn golden_diagonal_c64(
     runtime: &Runtime,
-    provider: &Arc<SU2FusionRule>,
-) -> TensorMap<SU2FusionRule, Complex64> {
+    provider: &Arc<Su2Rule>,
+) -> TensorMap<Su2Rule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let spectrum = vec![
         SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(0),
+            sector: su2_irrep(0),
             values: vec![Complex64::new(
                 f64::from_bits(GOLDEN_F64_BITS[0]),
                 f64::from_bits(GOLDEN_F64_BITS[2]),
             )],
         },
         SectorSpectrum {
-            sector: SU2Irrep::from_twice_spin(1),
+            sector: su2_irrep(1),
             values: vec![
                 Complex64::new(2.0, -3.0),
                 Complex64::new(f64::from_bits(GOLDEN_F64_BITS[1]), -0.0),
@@ -1177,11 +1168,11 @@ fn golden_diagonal_c64(
 fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let provider = Arc::new(SU2FusionRule);
+    let provider = Arc::new(su2_rule());
     let codec = Su2Codec::new(Arc::clone(&provider));
     let golden = |name: &str| std::fs::read(format!("{GOLDEN_DIR}/{name}")).unwrap();
     let mut decode_f64 = |bytes: &[u8]| {
-        TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+        TensorMap::<Su2Rule, f64>::from_bytes_with(
             engine,
             &runtime,
             bytes,
@@ -1230,7 +1221,7 @@ fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
     assert_eq!(adjoint.to_bytes_with(&codec).unwrap(), adjoint_bytes);
 
     let diagonal_bytes = golden("su2_diagonal_c64_v1.bin");
-    let diagonal = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+    let diagonal = TensorMap::<Su2Rule, Complex64>::from_bytes_with(
         engine,
         &runtime,
         &diagonal_bytes,
@@ -1261,7 +1252,7 @@ fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
     assert_eq!(expected.to_bytes_with(&codec).unwrap(), diagonal_bytes);
 
     let space_bytes = golden("su2_space_v1.bin");
-    let space = GradedSpace::<SU2FusionRule>::from_bytes_with(
+    let space = GradedSpace::<Su2Rule>::from_bytes_with(
         engine,
         &space_bytes,
         DecodeLimits::default(),
@@ -1459,7 +1450,7 @@ macro_rules! single_precision_roundtrip {
             );
 
             // SU(2): nontrivial inner lines.
-            let provider = Arc::new(SU2FusionRule);
+            let provider = Arc::new(su2_rule());
             let codec = Su2Codec::new(Arc::clone(&provider));
             let codomain = su2_leg(&provider, false);
             let domain = su2_leg(&provider, true);
@@ -1469,7 +1460,10 @@ macro_rules! single_precision_roundtrip {
                 [&codomain, &codomain, &codomain],
                 [&domain],
                 |trees, indices| {
-                    value(trees.coupled().twice_spin() + indices.iter().sum::<usize>())
+                    value(
+                        usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap()
+                            + indices.iter().sum::<usize>(),
+                    )
                 },
             )
             .unwrap();
@@ -1493,11 +1487,11 @@ macro_rules! single_precision_roundtrip {
                 &codomain,
                 [
                     SectorSpectrum {
-                        sector: SU2Irrep::from_twice_spin(0),
+                        sector: su2_irrep(0),
                         values: vec![value(0)],
                     },
                     SectorSpectrum {
-                        sector: SU2Irrep::from_twice_spin(1),
+                        sector: su2_irrep(1),
                         values: vec![value(2), value(3)],
                     },
                 ],
@@ -1668,14 +1662,14 @@ macro_rules! impl_round_trip {
 impl_round_trip!(
     f32,
     U1FusionRule,
-    SU2FusionRule,
+    Su2Rule,
     FermionParityFusionRule,
     GenericToy
 );
 impl_round_trip!(
     Complex32,
     U1FusionRule,
-    SU2FusionRule,
+    Su2Rule,
     FermionParityFusionRule,
     GenericToy
 );
@@ -1768,14 +1762,14 @@ fn every_scalar_mismatch_direction_is_typed_and_precedes_provider_resolution() {
     assert_only_decodes_as!(engine, &runtime, &codec, &c32_bytes, Complex32);
 
     // The mismatch is reported from the header, before the resolver runs.
-    let missing = Su2Codec::missing(Arc::new(SU2FusionRule));
-    let su2_leg = su2_leg(&Arc::new(SU2FusionRule), false);
+    let missing = Su2Codec::missing(Arc::new(su2_rule()));
+    let su2_leg = su2_leg(&Arc::new(su2_rule()), false);
     let su2: TensorMap<_, f32> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |_, _| 1.0).unwrap();
     let su2_bytes = su2
-        .to_bytes_with(&Su2Codec::new(Arc::new(SU2FusionRule)))
+        .to_bytes_with(&Su2Codec::new(Arc::new(su2_rule())))
         .unwrap();
-    let error = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+    let error = TensorMap::<Su2Rule, f64>::from_bytes_with(
         engine,
         &runtime,
         &su2_bytes,
