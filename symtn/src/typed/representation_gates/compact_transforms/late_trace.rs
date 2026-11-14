@@ -95,7 +95,7 @@ impl CheckedGenericPivotal for RejectingTraceTwist {
 }
 
 impl TypedSectorAdmission for RejectingTraceTwist {
-    type Sector = Vec<i64>;
+    type Sector = symtn_core::LieIrrep;
     type Error = LieGroupFusionRuleError;
     type Mode = CheckedGenericAdmissionMode;
     fn typed_rule_identity(&self) -> RuleIdentity {
@@ -118,22 +118,28 @@ where
 {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(RejectingTraceTwist {
-        inner: LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        inner: LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
         twist_calls: AtomicUsize::new(0),
     });
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let diagonal = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![D::from_real(1.0), D::from_real(2.0)],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![D::from_real(3.0), D::from_real(4.0), D::from_real(5.0)],
             },
         ],

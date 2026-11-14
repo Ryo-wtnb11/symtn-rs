@@ -2,7 +2,8 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use symtn_core::{
     generic_braid_tree_pair_checked, validate_generic_fusion_tree_pair_checked, BraidingStyleKind,
-    FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError, SectorVec,
+    CheckedGenericAdmissionMode, FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError,
+    SectorVec,
 };
 
 #[derive(Debug)]
@@ -136,7 +137,10 @@ struct OrderFixture {
 /// basis trees), with source A (`[vac, adj]` inner lines) placed before source
 /// B (`[adj, adj]`), all vertices one.
 fn order_fixture() -> OrderFixture {
-    let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let inner = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(3).unwrap(),
+    )
+    .unwrap();
     let v = inner.encode_irrep(&[0, 0]).unwrap();
     let a = inner.encode_irrep(&[1, 1]).unwrap();
     assert_eq!(inner.try_nsymbol(a, a, v).unwrap(), 1);

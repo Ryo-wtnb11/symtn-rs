@@ -1,18 +1,24 @@
 use super::*;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 #[cfg(feature = "cgc-gen")]
 fn assert_sun_checked_generic_inverse_outer_multiplicity<D>(
     engine: &mut dyn Engine,
     n: usize,
-    adjoint: Vec<i64>,
+    adjoint: LieIrrep,
 ) where
     D: symtn::typed::AdvancedLinalgScalar + fmt::Debug + PartialEq + numerics::Numeric,
 {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
     let source: TensorMap<_, D> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
@@ -71,19 +77,23 @@ fn assert_sun_checked_generic_inverse_outer_multiplicity<D>(
 fn checked_generic_inv_sun_outer_multiplicity_satisfies_inverse_laws() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_checked_generic_inverse_outer_multiplicity::<f64>(engine, n, adjoint.clone());
         assert_sun_checked_generic_inverse_outer_multiplicity::<Complex64>(engine, n, adjoint);
     }
 }
 
 #[cfg(feature = "cgc-gen")]
-fn assert_sun_checked_generic_left_solve(engine: &mut dyn Engine, n: usize, label: Vec<i64>) {
-    use symtn::sector::LieGroupFusionRule;
+fn assert_sun_checked_generic_left_solve(engine: &mut dyn Engine, n: usize, label: LieIrrep) {
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
     let divisor: TensorMap<_, f64> = TensorMap::from_subblock_fn(
         engine,
@@ -226,7 +236,7 @@ fn assert_sun_checked_generic_left_solve(engine: &mut dyn Engine, n: usize, labe
 fn sun_checked_generic_left_solve_preserves_outer_multiplicity() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_checked_generic_left_solve(engine, n, label);
     }
 }
@@ -236,21 +246,25 @@ fn sun_checked_generic_left_solve_preserves_outer_multiplicity() {
 fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let adjoint = vec![1, 1];
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let adjoint = su_irrep(&[1, 1]);
     let codomain_leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 1)]).unwrap();
     let isomorphic_domain = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (vec![0, 0], 1),
+            (su_irrep(&[0, 0]), 1),
             (adjoint.clone(), 2),
-            (vec![3, 0], 1),
-            (vec![0, 3], 1),
-            (vec![2, 2], 1),
+            (su_irrep(&[3, 0]), 1),
+            (su_irrep(&[0, 3]), 1),
+            (su_irrep(&[2, 2]), 1),
         ],
     )
     .unwrap();
@@ -280,11 +294,11 @@ fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
     let nonisomorphic_domain = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (vec![0, 0], 1),
+            (su_irrep(&[0, 0]), 1),
             (adjoint, 1),
-            (vec![3, 0], 1),
-            (vec![0, 3], 1),
-            (vec![2, 2], 1),
+            (su_irrep(&[3, 0]), 1),
+            (su_irrep(&[0, 3]), 1),
+            (su_irrep(&[2, 2]), 1),
         ],
     )
     .unwrap();
@@ -307,13 +321,17 @@ fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
 fn assert_sun_checked_generic_exp_outer_multiplicity(
     engine: &mut dyn Engine,
     n: usize,
-    adjoint: Vec<i64>,
+    adjoint: LieIrrep,
 ) {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |trees, ij| {
@@ -431,8 +449,8 @@ fn assert_sun_checked_generic_exp_outer_multiplicity(
 fn checked_generic_exp_sun_outer_multiplicity_preserves_layout() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_sun_checked_generic_exp_outer_multiplicity(engine, 3, vec![1, 1]);
-    assert_sun_checked_generic_exp_outer_multiplicity(engine, 4, vec![1, 0, 1]);
+    assert_sun_checked_generic_exp_outer_multiplicity(engine, 3, su_irrep(&[1, 1]));
+    assert_sun_checked_generic_exp_outer_multiplicity(engine, 4, su_irrep(&[1, 0, 1]));
 }
 
 #[test]
@@ -708,14 +726,21 @@ fn sun_checked_generic_map_diagonal_keeps_svd_bond_and_principal_branch() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Checked compact SVD publishes `s` as a compact diagonal on its bond.
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
     for n in [3, 4] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
-        let label = if n == 3 { vec![1, 1] } else { vec![1, 0, 1] };
+        let label = if n == 3 {
+            su_irrep(&[1, 1])
+        } else {
+            su_irrep(&[1, 0, 1])
+        };
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 1)]).unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, _| {

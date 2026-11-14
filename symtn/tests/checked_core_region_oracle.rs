@@ -15,6 +15,8 @@
 
 use std::fmt::Debug;
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use symtn::sector::TypedSectorAdmission;
 use symtn::typed::{
@@ -207,21 +209,28 @@ fn generic_toy_core_composition_matches_block_products() {
 mod racah {
     use super::*;
     use std::collections::BTreeMap;
-    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 
     #[test]
     fn su3_staged_contraction_matches_block_products() {
         let runtime = Runtime::builder().build().unwrap();
         let rule = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
         // `8 ⊗ 8 → 8` has outer multiplicity two.
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
-            [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+            [
+                (su_irrep(&[0i64, 0]), 2),
+                (su_irrep(&[1, 1]), 2),
+                (su_irrep(&[1, 0]), 1),
+            ],
         )
         .unwrap();
-        let w = GradedSpace::try_new(rule, [(vec![1i64, 1], 1), (vec![0, 1], 2)])
+        let w = GradedSpace::try_new(rule, [(su_irrep(&[1i64, 1]), 1), (su_irrep(&[0, 1]), 2)])
             .unwrap()
             .try_dual()
             .unwrap();
@@ -244,14 +253,13 @@ mod racah {
         )
     }
 
-    #[expect(clippy::ptr_arg, reason = "the SU(N) sector label is a `Vec<i64>`")]
-    fn sun_spin(sector: &Vec<i64>) -> usize {
-        sector[0] as usize
+    fn sun_spin(sector: &LieIrrep) -> usize {
+        sector.dynkin().next().unwrap() as usize
     }
 
     use crate::legs::su2_spin;
 
-    fn sun_value(trees: &BlockFusionTrees<Vec<i64>>, index: &[usize], seed: u64) -> f64 {
+    fn sun_value(trees: &BlockFusionTrees<LieIrrep>, index: &[usize], seed: u64) -> f64 {
         hashed_value(&format!("{:?}{index:?}", twice(trees, sun_spin)), seed)
     }
 
@@ -340,11 +348,14 @@ mod racah {
         assert!(want.iter().any(|v| v.abs() > 0.5));
 
         let rule = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
         );
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
-            degeneracies.map(|(s, n)| (vec![s as i64], n)),
+            degeneracies.map(|(s, n)| (su_irrep(&[s as i64]), n)),
         )
         .unwrap();
         let w = v.try_dual().unwrap();
@@ -367,4 +378,12 @@ mod racah {
             );
         }
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

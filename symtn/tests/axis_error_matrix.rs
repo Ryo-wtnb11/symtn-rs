@@ -291,13 +291,22 @@ fn multiplicity_free_device_axis_errors_match_the_host() {
 #[test]
 fn checked_generic_axis_errors_are_the_multiplicity_free_facade_errors() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GenericTensorError;
 
     let rt = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
-        [(vec![0i64, 0], 2), (vec![1, 0], 1), (vec![1, 1], 2)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 0]), 1),
+            (su_irrep(&[1, 1]), 2),
+        ],
     )
     .unwrap();
     let vd = v.try_dual().unwrap();
@@ -312,4 +321,12 @@ fn checked_generic_axis_errors_are_the_multiplicity_free_facade_errors() {
     let t =
         TensorMap::<_, Complex64>::rand_with_seed(engine, &rt, [&v, &vd], [&v, &vd], 3).unwrap();
     eager_matrix!(engine, t, facade);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

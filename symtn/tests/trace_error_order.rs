@@ -185,17 +185,29 @@ fn multiplicity_free_device_trace_reports_the_host_error_per_misuse() {
 #[test]
 fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let rt = Runtime::builder().build().unwrap();
-    let rule =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let rule = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
-        [(vec![0i64, 0], 2), (vec![1, 0], 1), (vec![1, 1], 2)],
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 0]), 1),
+            (su_irrep(&[1, 1]), 2),
+        ],
     )
     .unwrap();
-    let w = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64, 0], 2), (vec![2, 1], 1)]).unwrap();
+    let w = GradedSpace::try_new(
+        Arc::clone(&rule),
+        [(su_irrep(&[0i64, 0]), 2), (su_irrep(&[2, 1]), 1)],
+    )
+    .unwrap();
     let vd = v.try_dual().unwrap();
     macro_rules! generic {
         ($d:ty) => {{
@@ -223,4 +235,12 @@ fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
     }
     generic!(f64);
     generic!(Complex64);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

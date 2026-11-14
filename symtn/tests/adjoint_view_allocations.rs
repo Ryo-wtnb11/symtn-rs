@@ -1,6 +1,8 @@
 use crate::common::ErrorKind as _;
 use std::hint::black_box;
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
@@ -491,19 +493,27 @@ fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
     // a constant number of header allocations, independent of how many fusion
     // trees the HomSpace enumerates. Re-enumerating the adjoint trees with
     // provider queries cost 810 and 1407 calls for the two spaces below.
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let space = |sectors: &[(Vec<i64>, usize)]| {
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let space = |sectors: &[(LieIrrep, usize)]| {
         GradedSpace::try_new(Arc::clone(&provider), sectors.iter().cloned()).unwrap()
     };
-    let small = space(&[(vec![0, 0], 2), (vec![1, 0], 1), (vec![1, 1], 2)]);
+    let small = space(&[
+        (su_irrep(&[0, 0]), 2),
+        (su_irrep(&[1, 0]), 1),
+        (su_irrep(&[1, 1]), 2),
+    ]);
     let wide = space(&[
-        (vec![0, 0], 1),
-        (vec![1, 0], 1),
-        (vec![0, 1], 1),
-        (vec![1, 1], 1),
+        (su_irrep(&[0, 0]), 1),
+        (su_irrep(&[1, 0]), 1),
+        (su_irrep(&[0, 1]), 1),
+        (su_irrep(&[1, 1]), 1),
     ]);
     let mut costs = Vec::new();
     for leg in [&small, &wide] {
@@ -516,4 +526,12 @@ fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
         costs.push(calls);
     }
     counting_alloc::assert_same_calls("fusion trees small -> wide", costs[0], costs[1]);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

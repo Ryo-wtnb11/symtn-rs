@@ -15,15 +15,15 @@ use std::collections::BTreeMap;
 use fusion_symbols::category::{FusionCategory, SymbolBlock};
 use fusion_symbols::lie::{GroupId, HalfInt, LieError, LieGroup, RootSystem};
 use symtn_sectors::{
-    BraidingStyleKind, CategoryProvider, CheckedGenericFusion, CheckedGenericPivotal,
-    CheckedGenericRigidSymbols, FusionStyleKind, LieGroupFusionRule, LieGroupFusionRuleError,
-    SectorId, TypedSectorAdmission,
+    BraidingStyleKind, CategoryProvider, CheckedGenericAdmissionMode, CheckedGenericFusion,
+    CheckedGenericPivotal, CheckedGenericRigidSymbols, FusionStyleKind, LieGroupFusionRule,
+    LieGroupFusionRuleError, SectorId, TypedSectorAdmission,
 };
 
 use crate::numerics;
 
 fn rule(group: GroupId) -> LieGroupFusionRule {
-    LieGroupFusionRule::new(group).unwrap()
+    LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group).unwrap()
 }
 
 #[test]
@@ -698,7 +698,7 @@ fn every_group_shape_round_trips_admitted_labels_and_rejects_the_rest() {
                 Ok((dynkin, charges)) => {
                     assert!(group.admits(&dynkin, &charges), "{group:?}: {raw}");
                     assert_eq!(r.encode_irrep_with_charges(&dynkin, &charges).unwrap(), id);
-                    let typed = [dynkin, charges].concat();
+                    let typed = r.category().irrep_with_charges(&dynkin, &charges).unwrap();
                     assert_eq!(r.try_decode_label(id).unwrap(), typed);
                     assert_eq!(r.try_encode_label(&typed).unwrap(), id);
                     assert_eq!(r.sector_id(&r.object(id).unwrap()).unwrap(), id);
@@ -721,9 +721,13 @@ fn every_group_shape_round_trips_admitted_labels_and_rejects_the_rest() {
             r.encode_irrep_with_charges(&vec![0; r_rank], &vec![0; t_rank + 1]),
             Err(LieGroupFusionRuleError::LabelLength { .. })
         ));
+        let foreign = LieGroup::new(GroupId::torus(r_rank + t_rank + 1).unwrap()).unwrap();
+        let foreign = foreign
+            .irrep_with_charges(&[], &vec![0; r_rank + t_rank + 1])
+            .unwrap();
         assert!(matches!(
-            r.try_encode_label(&vec![0; r_rank + t_rank + 1]),
-            Err(LieGroupFusionRuleError::LabelLength { .. })
+            r.try_encode_label(&foreign),
+            Err(LieGroupFusionRuleError::Provider(LieError::InvalidLabel))
         ));
     }
 }

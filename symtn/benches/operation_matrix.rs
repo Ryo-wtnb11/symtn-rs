@@ -6,6 +6,8 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
@@ -2649,7 +2651,7 @@ fn run_checked_sun(
     engine: &mut dyn Engine,
     symmetry: &str,
     provider: std::sync::Arc<symtn::sector::LieGroupFusionRule>,
-    label: Vec<i64>,
+    label: LieIrrep,
     degeneracy: usize,
     min_time: Duration,
     qr_only: bool,
@@ -3486,15 +3488,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "cgc-gen")]
     {
         use std::sync::Arc;
-        use symtn::sector::LieGroupFusionRule;
+        use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
         run_checked_sun(
             engine,
             "SU3[0;0]",
-            Arc::new(LieGroupFusionRule::new(
+            Arc::new(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
             )?),
-            vec![0, 0],
+            su_irrep(&[0, 0]),
             degeneracy,
             min_time,
             true,
@@ -3502,10 +3504,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked_sun(
             engine,
             "SU3[1;1]",
-            Arc::new(LieGroupFusionRule::new(
+            Arc::new(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
             )?),
-            vec![1, 1],
+            su_irrep(&[1, 1]),
             degeneracy,
             min_time,
             false,
@@ -3513,10 +3515,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked_sun(
             engine,
             "SU4[1;0;1]",
-            Arc::new(LieGroupFusionRule::new(
+            Arc::new(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(4).unwrap(),
             )?),
-            vec![1, 0, 1],
+            su_irrep(&[1, 0, 1]),
             degeneracy,
             min_time,
             false,
@@ -3677,4 +3679,12 @@ where
         op::EigFull,
         dense_source(input),
     )
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

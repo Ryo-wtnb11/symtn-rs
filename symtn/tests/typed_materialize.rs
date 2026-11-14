@@ -618,18 +618,21 @@ fn materialize_is_the_remedy_for_apis_that_reject_lazy_adjoints() {
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     macro_rules! su3_case {
         ($engine:ident, $dtype:ty, $value:expr, $what:expr) => {{
             let (value, what): (fn(f64, f64) -> $dtype, &str) = ($value, $what);
             let runtime = host_runtime();
             let provider = Arc::new(
-                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+                LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                    fusion_symbols::lie::GroupId::su(3).unwrap(),
+                )
+                .unwrap(),
             );
             // The adjoint irrep 8 (Dynkin [1, 1]) couples 8 ⊗ 8 → 8 with multiplicity 2.
-            let a = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
-            let b = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 3)]).unwrap();
+            let a = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 2)]).unwrap();
+            let b = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 3)]).unwrap();
             let b_dual = b.try_dual().unwrap();
             let tensor: TensorMap<_, $dtype> = TensorMap::from_subblock_fn(
                 $engine,
@@ -698,4 +701,12 @@ mod checked_generic {
         assert!(unconjugated < entries, "conjugation is not observable");
         su3_case!(engine, f64, |re, _| re, "SU3 f64");
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -788,9 +788,13 @@ fn checked_compact_arms_never_densify_their_spectrum_operand() {
     // as a spectrum there too.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
-        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     );
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 1], 3)]).unwrap();
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 1]), 3)]).unwrap();
     let tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             1.0 + index[0] as f64 - 0.25 * index[1] as f64
@@ -1277,20 +1281,24 @@ fn checked_compact_trace_reads_the_spectrum_after_admission() {
     // without materializing (it densified after admission before).
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
-        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     );
-    let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)]).unwrap();
     let diagonal = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [
             SectorSpectrum {
-                sector: vec![0, 0],
+                sector: su_irrep(&[0, 0]),
                 values: vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, -1.0)],
             },
             SectorSpectrum {
-                sector: vec![1, 0],
+                sector: su_irrep(&[1, 0]),
                 values: vec![
                     Complex64::new(2.0, 1.0),
                     Complex64::new(-1.0, 2.0),

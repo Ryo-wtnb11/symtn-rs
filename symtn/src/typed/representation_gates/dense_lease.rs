@@ -7,7 +7,7 @@
 use super::*;
 use num_complex::Complex64;
 #[cfg(feature = "cgc-gen")]
-use symtn_core::LieGroupFusionRule;
+use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
 /// What `f` did on this thread: whether it succeeded, its dense executors,
 /// and its adjoint materializations and compact densifications.
@@ -273,12 +273,15 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
         #[cfg(feature = "cgc-gen")]
         {
             let su3 = Arc::new(
-                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+                LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                    fusion_symbols::lie::GroupId::su(3).unwrap(),
+                )
+                .unwrap(),
             );
             let leg = |pairs: &[(&[i64], usize)]| {
                 GradedSpace::try_new(
                     Arc::clone(&su3),
-                    pairs.iter().map(|&(l, d)| (l.to_vec(), d)),
+                    pairs.iter().map(|&(l, d)| (su_irrep(l), d)),
                 )
                 .unwrap()
             };
@@ -295,9 +298,17 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
 #[test]
 fn checked_compact_trace_reads_the_spectrum_without_materializing() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    let su3 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let v = GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let su3 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let v = GradedSpace::try_new(
+        Arc::clone(&su3),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let runtime = Runtime::builder().build().unwrap();
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
         engine,

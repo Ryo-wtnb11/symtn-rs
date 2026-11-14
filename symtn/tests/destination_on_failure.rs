@@ -901,24 +901,36 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
 #[test]
 fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GenericTensorError;
 
     let rt = Runtime::builder().build().unwrap();
     let other_rt = Runtime::builder().build().unwrap();
-    let su2 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
-    let v = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 2), (vec![1], 1)]).unwrap();
+    let su2 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap(),
+        )
+        .unwrap(),
+    );
+    let v =
+        GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 2), (su_irrep(&[1]), 1)]).unwrap();
     let w = v.try_dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&v], 1).unwrap();
     let permuted = t.permute(engine, &[1], &[2, 0]).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, permuted);
     // The same shape under SU(3)'s identity: only the rule differs.
-    let su3 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let su3 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let su3_leg = |dual: bool| {
-        let leg =
-            GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
+        let leg = GradedSpace::try_new(
+            Arc::clone(&su3),
+            [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)],
+        )
+        .unwrap();
         if dual {
             leg.try_dual().unwrap()
         } else {
@@ -974,11 +986,11 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         &v,
         [
             SectorSpectrum {
-                sector: vec![0],
+                sector: su_irrep(&[0]),
                 values: vec![f64::NAN, 2.0],
             },
             SectorSpectrum {
-                sector: vec![1],
+                sector: su_irrep(&[1]),
                 values: vec![3.0],
             },
         ],
@@ -1064,14 +1076,19 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
 #[test]
 fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::{ContractSpec, GenericTensorError};
 
     let rt = Runtime::builder().build().unwrap();
     let other_rt = Runtime::builder().build().unwrap();
-    let su2 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
-    let v = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 2), (vec![1], 1)]).unwrap();
+    let su2 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap(),
+        )
+        .unwrap(),
+    );
+    let v =
+        GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 2), (su_irrep(&[1]), 1)]).unwrap();
     let w = v.try_dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&v], 1).unwrap();
     let r = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&w], 2).unwrap();
@@ -1084,9 +1101,14 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
     };
     let contracted = t.contract(engine, &r, &spec).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, contracted);
-    let su3 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let su3_leg = GradedSpace::try_new(su3, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
+    let su3 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let su3_leg =
+        GradedSpace::try_new(su3, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)]).unwrap();
     let foreign_rule = sentinel!(
         &rt,
         TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&su3_leg, &su3_leg], [&su3_leg], 3)
@@ -1200,23 +1222,34 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
 #[test]
 fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GenericTensorError;
 
     let rt = Runtime::builder().build().unwrap();
     let other_rt = Runtime::builder().build().unwrap();
-    let su2 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
-    let v = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 2), (vec![1], 1)]).unwrap();
-    let w = GradedSpace::try_new(Arc::clone(&su2), [(vec![0], 1), (vec![2], 2)]).unwrap();
+    let su2 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap(),
+        )
+        .unwrap(),
+    );
+    let v =
+        GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 2), (su_irrep(&[1]), 1)]).unwrap();
+    let w =
+        GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 1), (su_irrep(&[2]), 2)]).unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&v], 1).unwrap();
     // The same untraced leg, but the pair joins `v` with `w`.
     let undual = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&w], 4).unwrap();
     let traced = t.trace_pairs(engine, &[(0, 2)]).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, traced);
-    let su3 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let su3_leg = GradedSpace::try_new(su3, [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
+    let su3 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let su3_leg =
+        GradedSpace::try_new(su3, [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)]).unwrap();
     let foreign_rule = sentinel!(
         &rt,
         TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&su3_leg], [&su3_leg], 3).unwrap()
@@ -1555,4 +1588,12 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         Error::InvalidArgument(_),
         |d: &mut _| device_square.contract_into(cuda, &device_square, &unit, d, 1.0, 0.5)
     );
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

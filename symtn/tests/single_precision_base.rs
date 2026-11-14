@@ -386,7 +386,7 @@ mod checked_generic {
     use std::sync::Arc;
 
     use super::*;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GradedSpace;
 
     macro_rules! checked_generic_suite {
@@ -399,10 +399,12 @@ mod checked_generic {
                     let engine = &mut symtn::typed::CpuEngine::serial();
                     let runtime = runtime();
                     let provider = Arc::new(
-                        LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-                            .unwrap(),
+                        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                            fusion_symbols::lie::GroupId::su(3).unwrap(),
+                        )
+                        .unwrap(),
                     );
-                    let adjoint = vec![2i64, 2];
+                    let adjoint = su_irrep(&[2i64, 2]);
                     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)])
                         .unwrap();
                     let (a, wa) = twin!(
@@ -474,4 +476,12 @@ mod checked_generic {
 
     checked_generic_suite!(f32_payload, f32, f64);
     checked_generic_suite!(complex32_payload, Complex32, Complex64);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

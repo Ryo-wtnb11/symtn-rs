@@ -4,13 +4,19 @@ use super::*;
 #[test]
 fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let fundamental = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)]).unwrap();
-    let antifundamental = GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 1], 3)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let fundamental =
+        GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 0]), 2)]).unwrap();
+    let antifundamental =
+        GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[0, 1]), 3)]).unwrap();
     let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -19,7 +25,7 @@ fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
         |trees, indices| {
             Complex64::new(
                 indices.iter().sum::<usize>() as f64,
-                trees.coupled().iter().sum::<i64>() as f64 + 0.5,
+                trees.coupled().dynkin().sum::<i64>() as f64 + 0.5,
             )
         },
     )
@@ -250,12 +256,16 @@ fn lazy_adjoint_metadata_is_logical_and_cold() {
 #[test]
 fn checked_generic_inv_lazy_is_detached_and_keeps_receiver_cold() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
     let lazy = source.adjoint(engine).unwrap();
@@ -282,12 +292,16 @@ fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
     let engine = &mut crate::typed::CpuEngine::serial();
     // What: both null directions use the opposite operation on the owned
     // parent, detach the final adjoint, and never publish the lazy cache.
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -358,12 +372,16 @@ fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
 #[test]
 fn checked_generic_lazy_adjoint_factorizations_follow_the_rule_table() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, indices| {
             trees.codomain_vertices()[0].get() as f64 + 0.25 * indices.iter().sum::<usize>() as f64
@@ -429,12 +447,16 @@ fn checked_generic_lazy_adjoint_factorizations_follow_the_rule_table() {
 #[test]
 fn checked_generic_exp_lazy_is_owned_and_stays_cold() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
             f64::from(ij == [0, 1])
@@ -462,12 +484,16 @@ fn checked_generic_exp_lazy_is_owned_and_stays_cold() {
 #[test]
 fn checked_generic_lazy_flip_stays_cold_and_keeps_logical_duality() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![2, 2], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[2, 2]), 1)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
@@ -860,18 +886,36 @@ fn nonidentity_adjoint_transforms_stay_parent_native_for_unique_simple_and_both_
 #[test]
 fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_both_dtypes() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
     let su2 = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap()),
-        [(vec![0], 2), (vec![1], 3), (vec![2], 2)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [
+            (su_irrep(&[0]), 2),
+            (su_irrep(&[1]), 3),
+            (su_irrep(&[2]), 2),
+        ],
     )
     .unwrap();
     // `8 ⊗ 8 → 8` has outer multiplicity two.
     let su3 = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
-        [(vec![0, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [
+            (su_irrep(&[0, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
     for leg in [su2, su3] {
@@ -881,7 +925,7 @@ fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_bot
             [&leg, &leg],
             [&leg],
             |trees, indices| {
-                indices.iter().sum::<usize>() as f64 + trees.coupled().iter().sum::<i64>() as f64
+                indices.iter().sum::<usize>() as f64 + trees.coupled().dynkin().sum::<i64>() as f64
                     - 1.5
             },
         )
@@ -1409,7 +1453,7 @@ fn assert_checked_adjoint_contract_and_compose<D>(
         for (sector, block) in composed.blocks().unwrap() {
             let parent = source.block(&sector).unwrap();
             assert_eq!((block.rows(), block.cols()), (parent.cols(), parent.cols()));
-            multiplicity_rows |= sector == vec![1, 1] && parent.rows() > parent.cols();
+            multiplicity_rows |= sector == su_irrep(&[1, 1]) && parent.rows() > parent.cols();
             for row in 0..block.rows() {
                 for col in 0..block.cols() {
                     let expected: num_complex::Complex64 = (0..parent.rows())
@@ -1431,18 +1475,28 @@ fn assert_checked_adjoint_contract_and_compose<D>(
 #[test]
 fn checked_generic_su3_adjoint_contract_and_compose_read_the_parent() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
     // `8 ⊗ 8 → 8` has outer multiplicity two.
     let leg = GradedSpace::try_new(
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap()),
-        [(vec![0, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
+        ),
+        [
+            (su_irrep(&[0, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, indices| {
-            indices.iter().sum::<usize>() as f64 + trees.coupled().iter().sum::<i64>() as f64 - 1.5
+            indices.iter().sum::<usize>() as f64 + trees.coupled().dynkin().sum::<i64>() as f64
+                - 1.5
         })
         .unwrap();
     assert_checked_adjoint_contract_and_compose(engine, &source);
@@ -2053,10 +2107,16 @@ fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
-        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     );
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
         Complex64::new(
             (1 + ij[0] + 4 * ij[1]) as f64,
@@ -2093,10 +2153,16 @@ fn checked_trace_nonselfdual_multiblock_real_matches_hand_weighted_trace() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
-        symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+        symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     );
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2), (vec![2, 0], 3)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[1, 0]), 2), (su_irrep(&[2, 0]), 3)],
+    )
+    .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
         (1 + ij[0] + 4 * ij[1]) as f64
     })

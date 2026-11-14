@@ -31,7 +31,7 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
         category::FusionCategory,
         lie::{GroupId, LieGroup},
     };
-    use symtn_sectors::LieGroupFusionRule;
+    use symtn_sectors::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     use fusion_symbols::lie::RootSystem;
     let su2_su3_u1 = GroupId::cover(&[RootSystem::A(1), RootSystem::A(2)], 1).unwrap();
@@ -41,7 +41,7 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
         (GroupId::u(2).unwrap(), &[1][..], &[-3][..]),
         (su2_su3_u1, &[1, 1, 1][..], &[2][..]),
     ] {
-        let rule = LieGroupFusionRule::new(group.clone()).unwrap();
+        let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group.clone()).unwrap();
         let category = LieGroup::new(group).unwrap();
         let adjoint = category.irrep_with_charges(dynkin, charges).unwrap();
         let channel_labels: Vec<_> = category
@@ -91,17 +91,21 @@ fn warm_lie_group_channel_coordinate_encoding_does_not_allocate() {
 fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
     let _serial = crate::counting_alloc::serial();
     use fusion_symbols::lie::{GroupId, LieGroup};
-    use symtn_sectors::{CategoryProvider, LieGroupFusionRule};
+    use symtn_sectors::{CategoryProvider, CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     for (n, labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
-        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
+        let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap();
         let category = LieGroup::new(GroupId::su(n).unwrap()).unwrap();
         let object = category.irrep(labels).unwrap();
         // A separate rule: encoding interns, and this rule's table must stay cold.
-        let expected = LieGroupFusionRule::new(GroupId::su(n).unwrap())
-            .unwrap()
-            .encode_irrep(labels)
-            .unwrap();
+        let expected =
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(GroupId::su(n).unwrap())
+                .unwrap()
+                .encode_irrep(labels)
+                .unwrap();
         let _ = CategoryProvider::category(&rule);
         let (sector, allocs) = counting_alloc::measure(|| rule.sector_id(&object).unwrap());
         assert_eq!(sector, expected);
@@ -119,7 +123,7 @@ fn lie_group_reverse_cache_miss_allocates_only_the_interned_entry() {
 fn warm_lie_group_order_key_does_not_allocate() {
     let _serial = crate::counting_alloc::serial();
     use fusion_symbols::lie::{GroupId, RootSystem};
-    use symtn_sectors::{CheckedGenericFusion, LieGroupFusionRule};
+    use symtn_sectors::{CheckedGenericAdmissionMode, CheckedGenericFusion, LieGroupFusionRule};
 
     // Up to four factor positions fit the key's inline storage.
     let su2_su3_u1 = GroupId::cover(&[RootSystem::A(1), RootSystem::A(2)], 1).unwrap();
@@ -129,7 +133,7 @@ fn warm_lie_group_order_key_does_not_allocate() {
         (GroupId::spin(4).unwrap(), &[2, 1][..], &[][..], 2),
         (su2_su3_u1, &[1, 1, 1][..], &[2][..], 3),
     ] {
-        let rule = LieGroupFusionRule::new(group).unwrap();
+        let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group).unwrap();
         let sector = rule.encode_irrep_with_charges(dynkin, charges).unwrap();
         let (key, allocs) =
             counting_alloc::measure(|| CheckedGenericFusion::sector_order_key(&rule, sector));

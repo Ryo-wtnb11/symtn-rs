@@ -139,7 +139,7 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
 #[test]
 fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     // Dynkin labels: 1 = [0,0], 8 = [1,1], 10 = [3,0], 10bar = [0,3],
     // 27 = [2,2]; `8 (x) 8 = 1 + 8 + 8 + 10 + 10bar + 27`. With
@@ -149,12 +149,23 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
     //   10, 10bar, 27: (8,8) 4 each
     // against `b = 1^2 + 8^3` columns `2, 3, 0, 0, 0`.
     let runtime = host_runtime();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let a =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 1], 2), (vec![0, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let a = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[1i64, 1]), 2), (su_irrep(&[0, 0]), 1)],
+    )
+    .unwrap();
     let a_dual = a.try_dual().unwrap();
-    let b = GradedSpace::try_new(provider, [(vec![0i64, 0], 2), (vec![1, 1], 3)]).unwrap();
+    let b = GradedSpace::try_new(
+        provider,
+        [(su_irrep(&[0i64, 0]), 2), (su_irrep(&[1, 1]), 3)],
+    )
+    .unwrap();
     let probe = TensorMap::<_, f64>::zeros(engine, &runtime, [&a, &a_dual], [&b]).unwrap();
     assert!(
         (0..probe.subblock_count()).any(|index| probe
@@ -166,11 +177,11 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
         "fixture must carry the outer multiplicity vertex mu = 2"
     );
     let expected = [
-        (vec![0i64, 0], 3),
-        (vec![1, 1], 9),
-        (vec![3, 0], 4),
-        (vec![0, 3], 4),
-        (vec![2, 2], 4),
+        (su_irrep(&[0i64, 0]), 3),
+        (su_irrep(&[1, 1]), 9),
+        (su_irrep(&[3, 0]), 4),
+        (su_irrep(&[0, 3]), 4),
+        (su_irrep(&[2, 2]), 4),
     ];
     check_both_sides!(engine, runtime, f64, [a, a_dual], b, 1.0, expected.clone());
     check_both_sides!(
@@ -182,4 +193,12 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
         Complex64::new(1.0, 0.0),
         expected
     );
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

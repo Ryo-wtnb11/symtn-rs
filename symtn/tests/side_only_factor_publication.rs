@@ -5,6 +5,8 @@
 //! complementary on the complete fused spaces.
 
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 #[cfg(feature = "cgc-gen")]
 use symtn::typed::HermitianTol;
@@ -362,7 +364,7 @@ macro_rules! multiplicity_free_full_qr_lq_bonds {
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     /// SU(3), `a = 8^2 + 1`, `b = 8^2 + 1 + 6^2`: `a ⊗ a` holds 8 with
     /// multiplicity two and the codomain-only 10, 10̄, 27; `b` holds the
@@ -371,13 +373,20 @@ mod checked_generic {
         ($engine:ident, $d:ty) => {{
             let rt = Runtime::builder().build().unwrap();
             let provider = Arc::new(
-                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+                LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                    fusion_symbols::lie::GroupId::su(3).unwrap(),
+                )
+                .unwrap(),
             );
-            let space = |irreps: Vec<(Vec<i64>, usize)>| {
+            let space = |irreps: Vec<(LieIrrep, usize)>| {
                 GradedSpace::try_new(Arc::clone(&provider), irreps).unwrap()
             };
-            let a = space(vec![(vec![1, 1], 2), (vec![0, 0], 1)]);
-            let b = space(vec![(vec![1, 1], 2), (vec![0, 0], 1), (vec![2, 0], 2)]);
+            let a = space(vec![(su_irrep(&[1, 1]), 2), (su_irrep(&[0, 0]), 1)]);
+            let b = space(vec![
+                (su_irrep(&[1, 1]), 2),
+                (su_irrep(&[0, 0]), 1),
+                (su_irrep(&[2, 0]), 2),
+            ]);
             let fused = a.fuse(&a).unwrap();
             full_qr_lq_bond_case!($engine, &rt, $d, [&a, &a], [&b], &fused, &b, 1526);
             full_qr_lq_bond_case!($engine, &rt, $d, [&b], [&a, &a], &b, &fused, 1527);
@@ -542,15 +551,26 @@ mod checked_generic {
         ($engine:ident, $d:ty) => {{
             let rt = Runtime::builder().build().unwrap();
             let provider = Arc::new(
-                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+                LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                    fusion_symbols::lie::GroupId::su(3).unwrap(),
+                )
+                .unwrap(),
             );
-            let space = |irreps: Vec<(Vec<i64>, usize)>| {
+            let space = |irreps: Vec<(LieIrrep, usize)>| {
                 GradedSpace::try_new(Arc::clone(&provider), irreps).unwrap()
             };
-            let a = space(vec![(vec![1, 1], 2), (vec![0, 0], 1), (vec![1, 0], 1)]);
+            let a = space(vec![
+                (su_irrep(&[1, 1]), 2),
+                (su_irrep(&[0, 0]), 1),
+                (su_irrep(&[1, 0]), 1),
+            ]);
             let fused = a.fuse(&a).unwrap();
-            let pure = space(vec![(vec![0, 0], 2), (vec![4, 0], 2)]);
-            let mixed = space(vec![(vec![0, 0], 2), (vec![1, 1], 3), (vec![4, 0], 2)]);
+            let pure = space(vec![(su_irrep(&[0, 0]), 2), (su_irrep(&[4, 0]), 2)]);
+            let mixed = space(vec![
+                (su_irrep(&[0, 0]), 2),
+                (su_irrep(&[1, 1]), 3),
+                (su_irrep(&[4, 0]), 2),
+            ]);
             for (seed, b) in [(1528, &pure), (1530, &mixed)] {
                 let (qr_trees, _) =
                     literal_side_only_case!($engine, &rt, $d, [&a, &a], [b], &fused, b, seed);
@@ -577,4 +597,12 @@ mod checked_generic {
         multiplicity_free_full_qr_lq_bonds!(engine, Complex64);
         checked_full_qr_lq_bonds!(engine, Complex64);
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

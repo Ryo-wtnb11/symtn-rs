@@ -163,17 +163,20 @@ fn checked_generic_reduction_dimension_failure_is_typed_and_nonpublishing() {
 fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 1)]).unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, _| {
-                trees.coupled().iter().sum::<i64>() as f64 + 1.0
+                trees.coupled().dynkin().sum::<i64>() as f64 + 1.0
             })
             .unwrap();
 
@@ -197,7 +200,10 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
         );
     }
 
-    let provider = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let provider = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(3).unwrap(),
+    )
+    .unwrap();
     let three = provider.encode_irrep(&[1, 0]).unwrap();
     let eight = provider.encode_irrep(&[1, 1]).unwrap();
     let r = provider.try_r_symbol_generic(three, three, eight).unwrap();

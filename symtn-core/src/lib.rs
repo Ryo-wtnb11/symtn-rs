@@ -40,7 +40,7 @@ pub use symtn_sectors::{
 };
 #[cfg(any(test, feature = "testing"))]
 pub use symtn_sectors::{GenericFusionSymbols, GenericRigidSymbols};
-pub use symtn_sectors::{LieGroupFusionRule, LieGroupFusionRuleError};
+pub use symtn_sectors::{LieGroupFusionRule, LieGroupFusionRuleError, LieIrrep};
 
 pub mod axes;
 mod storage;

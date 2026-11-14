@@ -97,6 +97,58 @@ fn su2_n_rejects_unrepresentable_closure_after_validating_labels() {
     );
 }
 
+/// Multiplicity-free Lie admission reports the multiplicity-free vocabulary:
+/// an id outside the domain (past fusion-symbols' labels, or a lattice hole)
+/// is `InvalidSector`, a label of another group `UnrepresentableSectorLabel`,
+/// and a fusion outcome past fusion-symbols' labels `FusionNotRepresentable`.
+#[test]
+fn multiplicity_free_lie_errors_use_the_fusion_algebra_vocabulary() {
+    use fusion_symbols::lie::GroupId;
+    let mf = |group| LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(group).unwrap();
+    let su2 = mf(GroupId::su(2).unwrap());
+    let past = u32::MAX as usize + 1;
+    assert_eq!(
+        su2.try_dual_sector(s(past)),
+        Err(FusionAlgebraError::InvalidSector { sector: s(past) })
+    );
+    assert_eq!(su2.try_nsymbol(s(0), s(past), s(0)), invalid(past));
+    let so3 = mf(GroupId::so(3).unwrap());
+    assert_eq!(so3.try_nsymbol(s(2), s(1), s(2)), invalid(1));
+    let foreign = so3.category().irrep(&[2]).unwrap();
+    assert!(matches!(
+        su2.encode_sector(&foreign),
+        Err(FusionAlgebraError::UnrepresentableSectorLabel { rule, .. }) if rule == su2.rule_identity()
+    ));
+    let top = s(u32::MAX as usize);
+    assert_eq!(
+        su2.try_fusion_channels(top, s(1)),
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: top,
+            right: s(1)
+        })
+    );
+    // The torus and interner routes report the same vocabulary.
+    let u1 = mf(GroupId::u(1).unwrap());
+    let largest = s(2 * i32::MAX as usize - 1);
+    assert_eq!(
+        u1.try_fusion_channels(largest, s(1)),
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: largest,
+            right: s(1)
+        })
+    );
+    assert!(matches!(
+        u1.encode_sector(&foreign),
+        Err(FusionAlgebraError::UnrepresentableSectorLabel { rule, .. }) if rule == u1.rule_identity()
+    ));
+    let u2 = mf(GroupId::u(2).unwrap());
+    assert_eq!(u2.try_nsymbol(s(4), s(1), s(4)), invalid(1));
+    assert_eq!(
+        u2.try_dual_sector(s(3)),
+        Err(FusionAlgebraError::InvalidSector { sector: s(3) })
+    );
+}
+
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
@@ -114,7 +166,10 @@ fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
             value: 0
         })
     ));
-    let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(3).unwrap(),
+    )
+    .unwrap();
     assert!(matches!(
         su3.encode_irrep(&[1, 0, 0]),
         Err(LieGroupFusionRuleError::LabelLength {
@@ -129,15 +184,11 @@ fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
             value: -1
         })
     ));
-    assert!(matches!(
-        su3.try_encode_label(&vec![-2, 0]),
-        Err(LieGroupFusionRuleError::NegativeLabel {
-            index: 0,
-            value: -2
-        })
-    ));
 
-    let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
+    let su2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(2).unwrap(),
+    )
+    .unwrap();
     assert!(matches!(
         su2.try_fusion_channels(s(u32::MAX as usize), s(1)),
         Err(LieGroupFusionRuleError::UnrepresentableLabel { .. })
@@ -145,7 +196,10 @@ fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
 
     #[cfg(target_pointer_width = "64")]
     {
-        let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
+        let su2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap(),
+        )
+        .unwrap();
         let first = u32::MAX as usize + 1;
         let unrepresentable = |result: Result<SectorVec, LieGroupFusionRuleError>, id: usize| matches!(result, Err(LieGroupFusionRuleError::UnrepresentableLabel { labels }) if labels == [id as i64]);
         assert!(unrepresentable(

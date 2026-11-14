@@ -63,12 +63,12 @@ mod lie {
     use super::{positions, s};
     use fusion_symbols::lie::{GroupId, RootSystem};
     use symtn_sectors::{
-        CheckedGenericFusion, LieGroupFusionRule, ProductFusionRule, SectorId, U1FusionRule,
-        U1Irrep,
+        CheckedGenericAdmissionMode, CheckedGenericFusion, LieGroupFusionRule, ProductFusionRule,
+        SectorId, U1FusionRule, U1Irrep,
     };
 
     fn rule(group: GroupId) -> LieGroupFusionRule {
-        LieGroupFusionRule::new(group).unwrap()
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group).unwrap()
     }
 
     fn key(rule: &LieGroupFusionRule, dynkin: &[i64], charges: &[i64]) -> Vec<u64> {
@@ -426,4 +426,34 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
         positions(nested.sector_order_key(nested.encode_sector(&label).unwrap())),
         [4, 1, 3]
     );
+}
+
+/// Multiplicity-free Lie keys: a rank-one factor's key is its id, a charge
+/// keys at its TensorKit `U1Irrep` position (`4q - 1` for `q > 0`, else
+/// `4|q|`), and U(2) keys per factor `[2j, position(q)]`.
+#[test]
+fn multiplicity_free_lie_keys_are_tensorkit_positions_per_factor() {
+    use fusion_symbols::lie::GroupId;
+    use symtn_sectors::{LieGroupFusionRule, MultiplicityFreeAdmissionMode};
+    let mf = |group| LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(group).unwrap();
+    let su2 = mf(GroupId::su(2).unwrap());
+    for id in [0, 1, 2, 254] {
+        assert_eq!(positions(su2.sector_order_key(s(id))), [id as u64]);
+    }
+    let u1 = mf(GroupId::u(1).unwrap());
+    // ids 0, 1, 2, 3, 4 are the charges 0, 1, -1, 2, -2.
+    for (id, position) in [(0, 0), (1, 3), (2, 4), (3, 7), (4, 8)] {
+        assert_eq!(positions(u1.sector_order_key(s(id))), [position]);
+    }
+    let u2 = mf(GroupId::u(2).unwrap());
+    // (0, 0) = 0, (1, 1) = 4, (2, 0) = 5, (0, 2) = 6, (1, -1) = 7.
+    for (id, key) in [
+        (0, [0, 0]),
+        (4, [1, 3]),
+        (5, [2, 0]),
+        (6, [0, 7]),
+        (7, [1, 4]),
+    ] {
+        assert_eq!(positions(u2.sector_order_key(s(id))), key, "id {id}");
+    }
 }

@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 #[cfg(feature = "cgc-gen")]
 macro_rules! assert_sun_polar_laws {
@@ -159,20 +161,30 @@ fn sun_checked_generic_polar_and_pinv_accept_facade_layouts_of_rank_three_and_fo
     // outer multiplicity satisfy A = WP / PW, W isometric, and P Hermitian
     // PSD with P^2 = A^H A / A A^H (which fixes P uniquely), and the
     // Moore-Penrose laws for pinv.
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[1, 1]), 2), (su_irrep(&[0, 0]), 1)],
+    )
+    .unwrap();
     let value = |salt: u64| ((salt.wrapping_mul(2_654_435_761) % 1009) as f64) / 1009.0 - 0.5;
     // Non-self-dual legs: T = 3 (x2) + 3bar and its dual T*, in mixed-dual
     // and all-dual rank-3 shapes. An all-dual map with one codomain and two
     // domain legs (or the reverse) violates the polar direction in some
     // sector, so the all-dual shapes put all three legs on one side.
-    let t =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2), (vec![0, 1], 1)]).unwrap();
+    let t = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[1, 0]), 2), (su_irrep(&[0, 1]), 1)],
+    )
+    .unwrap();
     let t_dual = t.try_dual().unwrap();
     let cases: [(&[&GradedSpace<_>], &[&GradedSpace<_>], bool); 8] = [
         (&[&leg, &leg], &[&leg], true),
@@ -501,17 +513,21 @@ fn checked_compact_diagonal_pinv_precision_limits_follow_multiplicity_free_seman
 fn assert_sun_checked_generic_pinv<D>(
     engine: &mut dyn Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     off_diagonal: D,
     close: impl Fn(D, D) -> f64,
 ) where
     D: symtn::typed::AdvancedLinalgScalar + fmt::Debug + PartialEq,
 {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
     let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
         engine,
@@ -662,7 +678,7 @@ fn assert_sun_checked_generic_pinv<D>(
 fn sun_checked_generic_pinv_cross_mu_full_keys_for_both_dtypes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_checked_generic_pinv::<f64>(
             engine,
             n,

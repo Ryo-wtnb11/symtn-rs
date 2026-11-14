@@ -56,7 +56,7 @@ impl OracleScalar for Complex64 {
     }
 }
 
-fn marker(trees: &BlockFusionTrees<Vec<i64>>, indices: &[usize]) -> usize {
+fn marker(trees: &BlockFusionTrees<symtn_core::LieIrrep>, indices: &[usize]) -> usize {
     trees
         .codomain_vertices()
         .iter()
@@ -128,10 +128,11 @@ fn authority_provider<D>(
 fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(
     engine: &mut dyn Engine,
     n: usize,
-    label: Vec<i64>,
+    dynkin: Vec<i64>,
 ) {
     let runtime = Runtime::builder().build().unwrap();
     let lhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
+    let label = lhs_provider.category().irrep(&dynkin).unwrap();
     let rhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
     let tail_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
     let lhs_leg = GradedSpace::try_new(Arc::clone(&lhs_provider), [(label.clone(), 1)]).unwrap();
@@ -351,7 +352,7 @@ fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(3));
-    let label = vec![1, 1];
+    let label = provider.category().irrep(&[1, 1]).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
     let lhs: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, indices| {
@@ -694,7 +695,7 @@ impl CheckedGenericPivotal for InjectedGeneric {
 }
 
 impl TypedSectorAdmission for InjectedGeneric {
-    type Sector = Vec<i64>;
+    type Sector = symtn_core::LieIrrep;
     type Error = InjectedError;
     type Mode = CheckedGenericAdmissionMode;
 
@@ -729,7 +730,7 @@ fn injected_chain(
     runtime: &Runtime,
     provider: &Arc<InjectedGeneric>,
 ) -> Vec<TensorMap<InjectedGeneric, f64>> {
-    let leg = GradedSpace::try_new(Arc::clone(provider), [(vec![1, 1], 1)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(provider), [(su3_octet(), 1)]).unwrap();
     vec![
         TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
@@ -865,7 +866,7 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
 
     provider.fail_encode.store(true, Ordering::SeqCst);
     assert!(matches!(
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]),
+        GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 1)]),
         Err(GenericTensorError::Structure(_))
     ));
     provider.fail_encode.store(false, Ordering::SeqCst);
@@ -906,7 +907,7 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 2)]).unwrap();
     let lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
             (1 + ij[0] + 3 * ij[1]) as f64
@@ -1016,7 +1017,7 @@ fn checked_generic_trace_provider_failure_stays_typed_and_recovers() {
     // and the same trace succeeds once the provider recovers.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 1)]).unwrap();
     let tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
     provider.arm_symbol(1);
@@ -1040,7 +1041,7 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [], |_, _| 2.0).unwrap();
     let rhs: TensorMap<_, f64> =
@@ -1126,7 +1127,7 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
 
     let empty = GradedSpace::try_new(
         Arc::clone(&provider),
-        std::iter::empty::<(Vec<i64>, usize)>(),
+        std::iter::empty::<(symtn_core::LieIrrep, usize)>(),
     )
     .unwrap();
     let zero: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&empty], []).unwrap();
@@ -1151,7 +1152,7 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 1)]).unwrap();
     let a64: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
     let b64: TensorMap<_, f64> =
@@ -1308,7 +1309,13 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
     let degeneracies = [(5, 4), (4, 6), (5, 6)];
 
     let checked = Arc::new(symtn_core::testing::su_lie_rule(2));
-    let checked_space = |dim| GradedSpace::try_new(Arc::clone(&checked), [(vec![1], dim)]).unwrap();
+    let checked_space = |dim| {
+        GradedSpace::try_new(
+            Arc::clone(&checked),
+            [(checked.category().irrep(&[1]).unwrap(), dim)],
+        )
+        .unwrap()
+    };
     let checked_tensors: Vec<TensorMap<LieGroupFusionRule, f64>> = degeneracies
         .iter()
         .enumerate()
@@ -1500,7 +1507,11 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
 
     let runtime = Runtime::builder().build().unwrap();
     let chain = |engine: &mut dyn Engine, provider: &Arc<LieGroupFusionRule>, seed: u64| {
-        let leg = GradedSpace::try_new(Arc::clone(provider), [(vec![1], 3)]).unwrap();
+        let leg = GradedSpace::try_new(
+            Arc::clone(provider),
+            [(provider.category().irrep(&[1]).unwrap(), 3)],
+        )
+        .unwrap();
         let tensors: Vec<TensorMap<LieGroupFusionRule, f64>> = (0..3)
             .map(|index| {
                 TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], seed + index).unwrap()
@@ -1568,4 +1579,12 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
     let attached = parked.attach_runtime(&runtime, &authority).unwrap();
     assert!(std::ptr::eq(attached.provider(), current_provider.as_ref()));
     assert_same(&attached, &expected);
+}
+
+/// The SU(3) adjoint label, accepted by every SU(3) Lie rule.
+fn su3_octet() -> symtn_core::LieIrrep {
+    symtn_core::testing::su_lie_rule(3)
+        .category()
+        .irrep(&[1, 1])
+        .unwrap()
 }

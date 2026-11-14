@@ -12,16 +12,17 @@
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
-use symtn::sector::LieGroupFusionRule;
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap, TensorScalar};
 
 use crate::numerics;
 
 type Space = GradedSpace<LieGroupFusionRule>;
-type Sectors = Vec<(Vec<i64>, usize)>;
+type Sectors = Vec<(LieIrrep, usize)>;
 
 /// Contract the codomain leg `lhs` of `x` with the leg `rhs` through
 /// `id(space(x, lhs))`, keeping the remaining legs in their partitions.
@@ -92,17 +93,37 @@ fn assert_trace_matches<D>(
 }
 
 fn spaces(n: usize) -> (Space, Space) {
-    let rule =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let rule = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let (v, w): (Sectors, Sectors) = if n == 2 {
         (
-            vec![(vec![0], 2), (vec![1], 1), (vec![2], 2)],
-            vec![(vec![0], 1), (vec![1], 2), (vec![3], 1)],
+            vec![
+                (su_irrep(&[0]), 2),
+                (su_irrep(&[1]), 1),
+                (su_irrep(&[2]), 2),
+            ],
+            vec![
+                (su_irrep(&[0]), 1),
+                (su_irrep(&[1]), 2),
+                (su_irrep(&[3]), 1),
+            ],
         )
     } else {
         (
-            vec![(vec![0, 0], 2), (vec![1, 0], 1), (vec![1, 1], 2)],
-            vec![(vec![0, 0], 1), (vec![0, 1], 2), (vec![1, 1], 1)],
+            vec![
+                (su_irrep(&[0, 0]), 2),
+                (su_irrep(&[1, 0]), 1),
+                (su_irrep(&[1, 1]), 2),
+            ],
+            vec![
+                (su_irrep(&[0, 0]), 1),
+                (su_irrep(&[0, 1]), 2),
+                (su_irrep(&[1, 1]), 1),
+            ],
         )
     };
     (
@@ -172,4 +193,11 @@ fn checked_su3_trace_matches_identity_contraction() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     cases::<f64>(engine, 3);
     cases::<Complex64>(engine, 3);
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -9,10 +9,10 @@
 
 use super::*;
 use num_complex::Complex64;
-#[cfg(feature = "cgc-gen")]
-use symtn_core::LieGroupFusionRule;
 use symtn_core::ZNFusionRule;
 use symtn_core::ZNIrrep;
+#[cfg(feature = "cgc-gen")]
+use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
 const RUNTIME: &str = "operands belong to different runtimes";
 const RULE: &str = "operands use different fusion rules";
@@ -259,13 +259,17 @@ fn misuse_reports_one_first_error_in_both_modes() {
         .unwrap()
     };
     #[cfg(feature = "cgc-gen")]
-    let su3 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let su3 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     #[cfg(feature = "cgc-gen")]
     let su3_leg = |pairs: &[(&[i64], usize)]| {
         GradedSpace::try_new(
             Arc::clone(&su3),
-            pairs.iter().map(|&(l, d)| (l.to_vec(), d)),
+            pairs.iter().map(|&(l, d)| (su_irrep(l), d)),
         )
         .unwrap()
     };
@@ -404,14 +408,23 @@ fn rule_mismatch_is_the_first_error_in_both_modes() {
     #[cfg(feature = "cgc-gen")]
     {
         let su3 = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
         let su4 = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(4).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(4).unwrap(),
+            )
+            .unwrap(),
         );
-        let sa =
-            GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
-        let sb = GradedSpace::try_new(Arc::clone(&su4), [(vec![0, 0, 0], 1)]).unwrap();
+        let sa = GradedSpace::try_new(
+            Arc::clone(&su3),
+            [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 1)],
+        )
+        .unwrap();
+        let sb = GradedSpace::try_new(Arc::clone(&su4), [(su_irrep(&[0, 0, 0]), 1)]).unwrap();
         assert_eq!(rule_rows!(engine, sa, sb, f64), expected, "SU3/SU4 f64");
         assert_eq!(
             rule_rows!(engine, sa, sb, Complex64),

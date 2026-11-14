@@ -685,7 +685,7 @@ fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::Engine;
 
     use crate::su3::su3_dim;
@@ -693,9 +693,12 @@ mod checked_generic {
     fn measurements(engine: &mut dyn Engine) -> Vec<Measurement> {
         let runtime = host_runtime();
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
-        let adjoint = vec![2i64, 2];
+        let adjoint = su_irrep(&[2i64, 2]);
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
         // Compact rows need the multiplicity-free `scalar` (see
         // `compact_reductions`), so only the dense and lazy-adjoint
@@ -855,4 +858,12 @@ fn dense_inner_cancellation_accumulates_wide() {
         Complex32,
         |v| Complex32::new(v, 0.0)
     );
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -334,16 +334,16 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_view_matches_owned_lazy_adjoint() {
-    use symtn_core::LieGroupFusionRule;
+    use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     let engine = &mut crate::typed::CpuEngine::serial();
 
     macro_rules! su3_case {
         ($engine:ident, $dtype:ty, $alpha:expr, $beta:expr, $what:expr) => {{
             let runtime = runtime();
-            let provider = Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+            let provider = Arc::new(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
             // 8 ⊗ 8 → 8 has multiplicity 2.
-            let v = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
-            let w = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1), (vec![1, 0], 1)])
+            let v = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 2)]).unwrap();
+            let w = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 1), (su_irrep(&[1, 0]), 1)])
                 .unwrap();
             let a: TensorMap<_, $dtype> =
                 // Built as an adjoint so that it shares the lazy adjoint's layout.
@@ -865,4 +865,12 @@ fn dense_data_borrows_dense_storage_and_never_materializes() {
     let (refused, entries) = adjoint_entries(|| adjoint.subblocks().map(|_| ()));
     assert_eq!(entries, 0, "subblocks entered adjoint materialization");
     assert!(is_unsupported(&refused.unwrap_err(), "subblocks"));
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn_core::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

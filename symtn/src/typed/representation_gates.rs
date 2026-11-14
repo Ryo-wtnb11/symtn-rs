@@ -735,3 +735,11 @@ fn a_written_payload_leaves_the_shared_one_untouched() {
     );
     assert!(!Arc::ptr_eq(&owned(&scaled).data, &owned(&tensor).data));
 }
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn_core::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
+}

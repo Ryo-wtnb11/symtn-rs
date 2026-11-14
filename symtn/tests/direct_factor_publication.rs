@@ -3,6 +3,8 @@
 //! output regions instead of per-sector temporaries that are then copied.
 
 use crate::numerics;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 #[cfg(feature = "cgc-gen")]
 use std::hint::black_box;
@@ -145,13 +147,13 @@ fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
 mod checked_generic {
     use super::*;
     use std::sync::Arc;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GradedSpace;
     use symtn::typed::{LeftPolar, RightPolar};
 
     fn su3_leg(
         provider: &Arc<LieGroupFusionRule>,
-        irreps: &[(Vec<i64>, usize)],
+        irreps: &[(LieIrrep, usize)],
     ) -> GradedSpace<LieGroupFusionRule> {
         GradedSpace::try_new(Arc::clone(provider), irreps.to_vec()).unwrap()
     }
@@ -165,7 +167,12 @@ mod checked_generic {
         GradedSpace<LieGroupFusionRule>,
         GradedSpace<LieGroupFusionRule>,
     ) {
-        let irreps = [vec![0i64, 0], vec![1, 0], vec![0, 1], vec![1, 1]];
+        let irreps = [
+            su_irrep(&[0i64, 0]),
+            su_irrep(&[1, 0]),
+            su_irrep(&[0, 1]),
+            su_irrep(&[1, 1]),
+        ];
         let rows = irreps
             .iter()
             .cloned()
@@ -244,7 +251,10 @@ mod checked_generic {
     macro_rules! cases {
         ($engine:ident, $d:ty, $runtime:expr) => {{
             let provider = Arc::new(
-                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+                LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                    fusion_symbols::lie::GroupId::su(3).unwrap(),
+                )
+                .unwrap(),
             );
             let (rows, cols) = tall_legs(&provider, 1);
             let tall: TensorMap<_, $d> =
@@ -255,8 +265,8 @@ mod checked_generic {
             assert_polar!($engine, $d, &wide, false);
             assert_lq!($engine, $d, wide);
             // Vertex multiplicity: 8 ⊗ 8 contains 8 twice.
-            let adjoint = su3_leg(&provider, &[(vec![1, 1], 2)]);
-            let single = su3_leg(&provider, &[(vec![1, 1], 1)]);
+            let adjoint = su3_leg(&provider, &[(su_irrep(&[1, 1]), 2)]);
+            let single = su3_leg(&provider, &[(su_irrep(&[1, 1]), 1)]);
             let tall: TensorMap<_, $d> =
                 TensorMap::rand_with_seed($engine, $runtime, [&adjoint, &adjoint], [&single], 1483)
                     .unwrap();
@@ -302,10 +312,16 @@ mod checked_generic {
         type Tensor = TensorMap<LieGroupFusionRule, f64>;
         let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
         let mut excess = |scale: usize, rank4: bool| {
-            let leg = su3_leg(&provider, &[(vec![1, 1], 2 * scale), (vec![0, 0], scale)]);
+            let leg = su3_leg(
+                &provider,
+                &[(su_irrep(&[1, 1]), 2 * scale), (su_irrep(&[0, 0]), scale)],
+            );
             let fused = leg.fuse(&leg).unwrap();
             let (facade, control): (Tensor, Tensor) = if rank4 {
                 (
@@ -389,4 +405,12 @@ mod checked_generic {
             }
         }
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -2467,7 +2467,7 @@ mod admission_modes {
     //! (`linalg.jl:319`) and `VectorInterface.inner` (`src/tensors/vectorinterface.jl:114`),
     //! whose per-block `Diagonal` methods read only the stored diagonal. The style
     //! of the provider never enters. So SU(2) admitted multiplicity-free
-    //! (`SU2FusionRule`) and checked Generic (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) must give
+    //! (`SU2FusionRule`) and checked Generic (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`) must give
     //! the same answers, and both must match the hand oracle below:
     //!
     //! ```text
@@ -2478,11 +2478,13 @@ mod admission_modes {
     //!
     //! with `dim(j) = 2j + 1` and every entry written out from the tables here,
     //! never read back from a symtn result.
+    use super::su_irrep;
+    use symtn::sector::LieIrrep;
 
     use std::sync::Arc;
     use symtn::typed::Engine;
 
-    use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, SU2FusionRule, SU2Irrep};
     use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
 
     use crate::fixtures;
@@ -2733,12 +2735,12 @@ mod admission_modes {
         label.twice_spin()
     }
 
-    fn sun2(twice: usize) -> Vec<i64> {
-        vec![twice as i64]
+    fn sun2(twice: usize) -> LieIrrep {
+        su_irrep(&[twice as i64])
     }
 
-    fn sun2_twice(label: &[i64]) -> usize {
-        label[0] as usize
+    fn sun2_twice(label: &LieIrrep) -> usize {
+        label.dynkin().next().unwrap() as usize
     }
 
     #[test]
@@ -2750,7 +2752,10 @@ mod admission_modes {
         let mf = reductions!(engine, SU2FusionRule, su2, su2_twice, f64, real);
         let checked = reductions!(
             engine,
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap()
+            )
+            .unwrap(),
             sun2,
             sun2_twice,
             f64,
@@ -2766,7 +2771,10 @@ mod admission_modes {
         let mf = reductions!(engine, SU2FusionRule, su2, su2_twice, Complex64, complex);
         let checked = reductions!(
             engine,
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap()
+            )
+            .unwrap(),
             sun2,
             sun2_twice,
             Complex64,
@@ -2827,8 +2835,15 @@ mod admission_modes {
         check!(
             engine,
             "su3",
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
-            [(vec![0i64, 0], 2), (vec![1, 1], 3), (vec![1, 0], 2)]
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap()
+            )
+            .unwrap(),
+            [
+                (su_irrep(&[0i64, 0]), 2),
+                (su_irrep(&[1, 1]), 3),
+                (su_irrep(&[1, 0]), 2)
+            ]
         );
         let mf = check!(
             engine,
@@ -2839,11 +2854,22 @@ mod admission_modes {
         let checked = check!(
             engine,
             "checked su2",
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap()
+            )
+            .unwrap(),
             SECTORS.map(|(twice, k)| (sun2(twice), k))
         );
         for (p, (mf, checked)) in POWERS.iter().zip(mf[0].iter().zip(checked[0])) {
             numerics::assert_close(&format!("su2 modes norm({p})"), *mf, checked, TERMS);
         }
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

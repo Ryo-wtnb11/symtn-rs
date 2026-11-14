@@ -2,7 +2,7 @@
 //! fusion-symbols can execute.
 
 use fusion_symbols::lie::GroupId;
-use symtn_sectors::{CheckedGenericFusion, LieGroupFusionRule};
+use symtn_sectors::{CheckedGenericAdmissionMode, CheckedGenericFusion, LieGroupFusionRule};
 
 /// A rule that serves `dynkin`/`charges` round-trips the label and finds the
 /// vacuum in the label fused with its dual.
@@ -29,7 +29,7 @@ fn featureless_groups_build_and_fuse_in_every_build() {
         (GroupId::torus(2), &[], &[1, -2]),
     ] {
         assert_serves(
-            &LieGroupFusionRule::new(group.unwrap()).unwrap(),
+            &LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group.unwrap()).unwrap(),
             dynkin,
             charges,
         );
@@ -43,7 +43,7 @@ fn rank_two_simple_factors_follow_the_cgc_gen_feature() {
         (GroupId::u(3), &[1, 0], &[1]),
         (GroupId::sp(4), &[1, 0], &[]),
     ] {
-        let rule = LieGroupFusionRule::new(group.unwrap());
+        let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group.unwrap());
         #[cfg(not(feature = "cgc-gen"))]
         {
             let _ = (dynkin, charges);

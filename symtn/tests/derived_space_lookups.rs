@@ -155,14 +155,24 @@ fn warm_checked_generic_derived_spaces_skip_the_sector_structure() {
     let _serial = crate::counting_alloc::serial();
     symtn::cache::clear();
     let provider = Arc::new(
-        symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-            .unwrap(),
+        symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     );
     warm_derived!(
         engine,
         "SU3",
-        GradedSpace::try_new(provider, [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap(),
+        GradedSpace::try_new(provider, [(su_irrep(&[1, 1]), 2), (su_irrep(&[0, 0]), 1)]).unwrap(),
         // Checked Generic eigh derives two output spaces.
         2
     );
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

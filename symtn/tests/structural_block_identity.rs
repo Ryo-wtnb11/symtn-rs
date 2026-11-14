@@ -386,14 +386,17 @@ fn su2_product_isometry_follows_tensorkit_inner_line_order() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_isometry_is_the_block_identity_across_multiplicity_vertices() {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let rt = Runtime::builder().build().unwrap();
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         );
-        let (octet, singlet) = (vec![1i64, 1], vec![0i64, 0]);
+        let (octet, singlet) = (su_irrep(&[1i64, 1]), su_irrep(&[0i64, 0]));
         let v = GradedSpace::try_new(
             Arc::clone(&provider),
             [(octet.clone(), 2), (singlet.clone(), 1)],
@@ -411,4 +414,12 @@ fn su3_isometry_is_the_block_identity_across_multiplicity_vertices() {
         );
     }
     for_dtypes!(run);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

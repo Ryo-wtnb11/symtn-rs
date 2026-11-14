@@ -208,21 +208,33 @@ fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
 fn checked_lazy_adjoint_factorizations_add_no_payload_allocation() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = |scale: usize| {
         GradedSpace::try_new(
             Arc::clone(&provider),
             [
-                (vec![2i64, 2], scale),
-                (vec![1, 0], scale),
-                (vec![0, 0], scale),
+                (su_irrep(&[2i64, 2]), scale),
+                (su_irrep(&[1, 0]), scale),
+                (su_irrep(&[0, 0]), scale),
             ],
         )
         .unwrap()
     };
     assert_excess_is_metadata!(engine, "checked SU(3)", runtime, leg);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -8,7 +8,8 @@ use crate::numerics;
 
 use fusion_symbols::category::{FusionCategory, SymbolBlock};
 use symtn_sectors::{
-    CategoryProvider, CheckedGenericFusion, CheckedGenericRigidSymbols, LieGroupFusionRule,
+    CategoryProvider, CheckedGenericAdmissionMode, CheckedGenericFusion,
+    CheckedGenericRigidSymbols, LieGroupFusionRule,
 };
 
 #[test]
@@ -19,7 +20,10 @@ fn warm_lie_group_scalar_queries_reuse_interned_handles() {
         (3, &[1, 1][..], 8.0, 2),
         (4, &[1, 0, 1][..], 15.0, 2),
     ] {
-        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
+        let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap();
         let adjoint = rule.encode_irrep(labels).unwrap();
         let query = || {
             (
@@ -39,7 +43,10 @@ fn warm_lie_group_scalar_queries_reuse_interned_handles() {
 #[test]
 fn warm_lie_group_symbol_queries() {
     let _serial = crate::counting_alloc::serial();
-    let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(3).unwrap(),
+    )
+    .unwrap();
     let octet = rule.encode_irrep(&[1, 1]).unwrap();
     let object = rule.object(octet).unwrap();
     let category = CategoryProvider::category(&rule);

@@ -9,17 +9,29 @@ use crate::report;
 use std::sync::Arc;
 
 use report::cause;
-use symtn::sector::LieGroupFusionRule;
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn::typed::{GradedSpace, OperationError, Runtime, TensorMap};
 
 #[test]
 fn checked_generic_trace_rejects_legs_that_are_not_mutually_dual() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
-    let rule =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let v = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64, 0], 1), (vec![1, 0], 2)]).unwrap();
-    let w = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64, 0], 1), (vec![1, 1], 1)]).unwrap();
+    let rule = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let v = GradedSpace::try_new(
+        Arc::clone(&rule),
+        [(su_irrep(&[0i64, 0]), 1), (su_irrep(&[1, 0]), 2)],
+    )
+    .unwrap();
+    let w = GradedSpace::try_new(
+        Arc::clone(&rule),
+        [(su_irrep(&[0i64, 0]), 1), (su_irrep(&[1, 1]), 1)],
+    )
+    .unwrap();
     let rejects = |result: Result<TensorMap<LieGroupFusionRule, f64>, _>, what: &str| {
         let error = result.expect_err(what);
         assert!(
@@ -46,4 +58,11 @@ fn checked_generic_trace_rejects_legs_that_are_not_mutually_dual() {
     // Control: the dual pair is traced.
     let square = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&v], 3).unwrap();
     assert!(square.trace_pairs(engine, &[(0, 1)]).is_ok());
+}
+
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

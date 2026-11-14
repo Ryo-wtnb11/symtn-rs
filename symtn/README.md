@@ -30,8 +30,10 @@ alternatives. `cuda` adds the typed CUDA surface. `LieGroupFusionRule` uses
 fusion-symbols categories of every simple type, A–G, their products, tori and U(n) with checked
 Generic Host execution; without `cgc-gen` it serves A1/B1/C1/D2 factors and
 tori, and other groups return `LieError::Unsupported { requires: "lie-generated" }`.
-It uses Dynkin-label-then-charge labels and explicit `GroupId`
-global forms. `SU2FusionRule`
+It uses fusion-symbols' `LieIrrep` labels and explicit `GroupId` global
+forms; `LieGroupFusionRule::<MultiplicityFreeAdmissionMode>` serves
+multiplicity-free groups (SU(2), U(2), tori, D2 and their products) on the
+multiplicity-free tensor pipeline, CUDA included. `SU2FusionRule`
 retains its compact multiplicity-free and physical-basis capabilities.
 Contraction-order planners and their configuration (`opt-path`, `cotengra-python`) belong to `symtn-network`.
 

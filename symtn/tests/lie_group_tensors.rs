@@ -9,9 +9,9 @@
 use std::sync::Arc;
 use symtn::typed::Engine;
 
-use fusion_symbols::lie::{GroupId, LieError};
+use fusion_symbols::lie::{GroupId, LieError, LieGroup};
 use num_complex::Complex64;
-use symtn::sector::{LieGroupFusionRule, LieGroupFusionRuleError};
+use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule, LieGroupFusionRuleError};
 use symtn::typed::{
     CheckedGenericStructureError, GenericTensorError, GradedSpace, Runtime, TensorMap, TensorScalar,
 };
@@ -94,36 +94,28 @@ fn graded_space_preserves_typed_global_form_rejections() {
         ),
     ];
     for (group, accepted, rejected) in cases {
-        let provider = Arc::new(LieGroupFusionRule::new(group.clone()).unwrap());
-        GradedSpace::try_new(Arc::clone(&provider), [(accepted.clone(), 2)]).unwrap();
-        assert!(matches!(
-            GradedSpace::try_new(Arc::clone(&provider), [(vec![], 2)]),
-            Err(GenericTensorError::Structure(
-                CheckedGenericStructureError::Provider(LieGroupFusionRuleError::LabelLength { .. })
-            ))
-        ));
-        let mut negative = accepted;
-        negative[0] = -1;
-        assert!(matches!(
-            GradedSpace::try_new(Arc::clone(&provider), [(negative, 2)]),
-            Err(GenericTensorError::Structure(
-                CheckedGenericStructureError::Provider(LieGroupFusionRuleError::NegativeLabel {
-                    index: 0,
-                    value: -1
-                })
-            ))
-        ));
+        let provider = Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group.clone()).unwrap(),
+        );
+        let accepted = provider.category().irrep(&accepted).unwrap();
+        GradedSpace::try_new(Arc::clone(&provider), [(accepted, 2)]).unwrap();
+        // An excluded label exists only as an irrep of another global form
+        // (here the simply connected cover), which the space must reject as
+        // foreign, not admit by its Dynkin labels.
+        let cover = GroupId::cover(group.root_systems(), group.torus_rank()).unwrap();
+        let cover = LieGroup::new(cover).unwrap();
         for label in rejected {
+            let foreign = cover.irrep(&label).unwrap();
             assert!(
                 matches!(
-                    GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]),
+                    GradedSpace::try_new(Arc::clone(&provider), [(foreign, 2)]),
                     Err(GenericTensorError::Structure(
                         CheckedGenericStructureError::Provider(LieGroupFusionRuleError::Provider(
-                            LieError::NotAdmissible
+                            LieError::InvalidLabel
                         ))
                     ))
                 ),
-                "{group:?}"
+                "{group:?} {label:?}"
             );
         }
     }
@@ -140,10 +132,19 @@ fn host_round_trips<D>(
     D: TensorScalar + numerics::Numeric,
 {
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(LieGroupFusionRule::new(group).unwrap());
-    let left = GradedSpace::try_new(Arc::clone(&provider), [(label.to_vec(), 2)]).unwrap();
-    let right = GradedSpace::try_new(Arc::clone(&provider), [(label.to_vec(), 3)]).unwrap();
-    let output = GradedSpace::try_new(provider, [(coupled.to_vec(), 2)]).unwrap();
+    let provider = Arc::new(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group).unwrap());
+    let left = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(provider.category().irrep(label).unwrap(), 2)],
+    )
+    .unwrap();
+    let right = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(provider.category().irrep(label).unwrap(), 3)],
+    )
+    .unwrap();
+    let coupled = provider.category().irrep(coupled).unwrap();
+    let output = GradedSpace::try_new(provider, [(coupled, 2)]).unwrap();
     let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
         engine,
         &runtime,

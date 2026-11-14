@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 #[test]
 fn checked_generic_diagonal_is_compact_canonical_and_provider_owned() {
@@ -268,14 +270,19 @@ fn checked_generic_diagonal_rejects_before_layout_and_preserves_error_precedence
 fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
-        let adjoint_id = provider.encode_irrep(&adjoint).unwrap();
+        let adjoint_id = provider
+            .encode_irrep(&adjoint.dynkin().collect::<Vec<_>>())
+            .unwrap();
         assert_eq!(
             provider
                 .try_nsymbol(adjoint_id, adjoint_id, adjoint_id)
@@ -781,10 +788,13 @@ fn su3_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
     let runtime = Runtime::builder().build().unwrap();
     // 8 ⊗ 8 contains 8 twice.
     let provider = Arc::new(
-        symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-            .unwrap(),
+        symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
     );
-    let leg = GradedSpace::try_new(provider, [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
+    let leg =
+        GradedSpace::try_new(provider, [(su_irrep(&[1, 1]), 2), (su_irrep(&[0, 0]), 1)]).unwrap();
     check_generic_structural_constructors(&runtime, &leg, |ij| {
         0.5 - (ij[0] * 7 + ij[1] * 2 + ij[2]) as f64 * 0.125
     });
@@ -797,27 +807,30 @@ fn sun_endomorphism_row_and_column_tree_stacking_is_identical() {
     let _serial = crate::counting_alloc::serial();
     use std::collections::BTreeMap;
 
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::MultiplicityIndex;
 
     type TreePlacement = (
-        Vec<Vec<i64>>,
-        Vec<Vec<i64>>,
+        Vec<LieIrrep>,
+        Vec<LieIrrep>,
         Vec<MultiplicityIndex>,
         usize,
         Vec<usize>,
     );
 
     let runtime = Runtime::builder().build().unwrap();
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |_, _| 0.0)
                 .unwrap();
-        let mut stacks = BTreeMap::<Vec<i64>, (Vec<TreePlacement>, Vec<TreePlacement>)>::new();
+        let mut stacks = BTreeMap::<LieIrrep, (Vec<TreePlacement>, Vec<TreePlacement>)>::new();
         for index in 0..source.subblock_count() {
             let block = source.subblock(index).unwrap();
             let trees = source.subblock_fusion_trees(index).unwrap();

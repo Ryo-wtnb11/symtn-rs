@@ -393,13 +393,20 @@ fn leg_roles_equal_the_permute_composition() {
 fn checked_generic_leg_roles_equal_the_permute_composition() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     let runtime = host_runtime();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let v =
-        GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2), (vec![0, 0], 1)]).unwrap();
-    let w = GradedSpace::try_new(provider, [(vec![1, 0], 1), (vec![1, 1], 1)])
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let v = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(su_irrep(&[1, 1]), 2), (su_irrep(&[0, 0]), 1)],
+    )
+    .unwrap();
+    let w = GradedSpace::try_new(provider, [(su_irrep(&[1, 0]), 1), (su_irrep(&[1, 1]), 1)])
         .unwrap()
         .try_dual()
         .unwrap();
@@ -724,4 +731,12 @@ fn completed_transformers() -> symtn::cache::StructureCacheInfo {
         .into_iter()
         .find(|info| info.kind() == symtn::cache::StructureCacheKind::CompletedTreeTransformer)
         .expect("every structure cache kind reports")
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -114,8 +114,12 @@ fn warm_multiplicity_free_trace_compile_replays_from_cache() {
 fn warm_checked_generic_trace_compile_replays_from_cache() {
     let _serial = crate::counting_alloc::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
-    let rule =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
+    let rule = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
     let sectors = [[0, 0], [1, 0], [1, 1]].map(|dynkin| rule.encode_irrep(&dynkin).unwrap());
     let sizes = [1, 3].map(|degeneracy| {
         let src = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(

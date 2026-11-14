@@ -19,6 +19,7 @@ mod lie_group_adapter_contracts;
 mod lie_group_cross_process_determinism;
 mod lie_group_feature_contract;
 mod lie_group_oracles;
+mod lie_multiplicity_free_equivalence;
 mod product_oracles;
 mod product_rule_client;
 #[path = "provider_contracts/main.rs"]

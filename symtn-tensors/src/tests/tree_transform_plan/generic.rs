@@ -1214,7 +1214,7 @@ fn generic_dense_block_plan_matches_per_source_oracle_matrix() {
 #[test]
 fn racah_generated_sun_adjoint_checked_bound_round_trips() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    use symtn_sectors::LieGroupFusionRule;
+    use symtn_sectors::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     fn repartition(source_nout: usize, target_nout: usize) -> TreeTransformOperation {
         let mut axes = (0..source_nout)
@@ -1255,7 +1255,10 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
 
     for (n, adjoint_labels) in [(3, &[1, 1][..]), (4, &[1, 0, 1][..])] {
         let provider = Arc::new(
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
         );
         let adjoint = provider.encode_irrep(adjoint_labels).unwrap();
         assert_eq!(provider.try_nsymbol(adjoint, adjoint, adjoint).unwrap(), 2);
@@ -1328,9 +1331,12 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    use symtn_sectors::LieGroupFusionRule;
+    use symtn_sectors::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let inner = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let inner = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(3).unwrap(),
+    )
+    .unwrap();
     let adjoint = inner.encode_irrep(&[1, 1]).unwrap();
     let fundamental = inner.encode_irrep(&[1, 0]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
@@ -1378,8 +1384,10 @@ fn retained_su3_vertex_move_replay_queries_no_symbols() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let inner =
-        symtn_sectors::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-            .unwrap();
+        symtn_sectors::LieGroupFusionRule::<symtn_sectors::CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
     let octet = inner.encode_irrep(&[1, 1]).unwrap();
     let provider = Arc::new(MeasurementProvider::new(inner));
     let leg = |n| SectorLeg::new([(octet, n)], false);

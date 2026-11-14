@@ -1,4 +1,6 @@
 use crate::report;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -861,7 +863,7 @@ fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
 fn assert_sun_identity_case<D>(
     engine: &mut dyn symtn::typed::Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     value: impl Fn(usize) -> D,
 ) where
     D: TensorScalar + fmt::Debug + PartialEq,
@@ -869,8 +871,12 @@ fn assert_sun_identity_case<D>(
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let legs = [2, 1, 2].map(|degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), degeneracy)]).unwrap()
     });
@@ -913,12 +919,12 @@ fn sun_checked_generic_twist_identity_shares_exact_provider_and_layout() {
     let _serial = crate::counting_alloc::serial();
     // What: the checked SU(3)/SU(4) pivotal implementation is θ=1, so all four
     // provider/dtype cases share payload and preserve the admitted layout.
-    assert_sun_identity_case(engine, 3, vec![2, 2], |value| value as f64);
-    assert_sun_identity_case(engine, 3, vec![2, 2], |value| {
+    assert_sun_identity_case(engine, 3, su_irrep(&[2, 2]), |value| value as f64);
+    assert_sun_identity_case(engine, 3, su_irrep(&[2, 2]), |value| {
         Complex64::new(value as f64, -(value as f64))
     });
-    assert_sun_identity_case(engine, 4, vec![2, 0, 2], |value| value as f64);
-    assert_sun_identity_case(engine, 4, vec![2, 0, 2], |value| {
+    assert_sun_identity_case(engine, 4, su_irrep(&[2, 0, 2]), |value| value as f64);
+    assert_sun_identity_case(engine, 4, su_irrep(&[2, 0, 2]), |value| {
         Complex64::new(value as f64, -(value as f64))
     });
 }
@@ -927,7 +933,7 @@ fn sun_checked_generic_twist_identity_shares_exact_provider_and_layout() {
 fn assert_sun_flip_case<D>(
     engine: &mut dyn symtn::typed::Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     value: impl Fn(usize) -> D,
 ) where
     D: TensorScalar + fmt::Debug + PartialEq,
@@ -935,8 +941,12 @@ fn assert_sun_flip_case<D>(
     use symtn::sector::LieGroupFusionRule;
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let legs = [2, 1, 2].map(|degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), degeneracy)]).unwrap()
     });
@@ -984,12 +994,12 @@ fn assert_sun_flip_case<D>(
 fn sun_checked_generic_flip_preserves_full_key_layout_and_inverse_roundtrip() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_sun_flip_case(engine, 3, vec![2, 2], |value| value as f64);
-    assert_sun_flip_case(engine, 3, vec![2, 2], |value| {
+    assert_sun_flip_case(engine, 3, su_irrep(&[2, 2]), |value| value as f64);
+    assert_sun_flip_case(engine, 3, su_irrep(&[2, 2]), |value| {
         Complex64::new(value as f64, -(value as f64))
     });
-    assert_sun_flip_case(engine, 4, vec![2, 0, 2], |value| value as f64);
-    assert_sun_flip_case(engine, 4, vec![2, 0, 2], |value| {
+    assert_sun_flip_case(engine, 4, su_irrep(&[2, 0, 2]), |value| value as f64);
+    assert_sun_flip_case(engine, 4, su_irrep(&[2, 0, 2]), |value| {
         Complex64::new(value as f64, -(value as f64))
     });
 }
@@ -1503,4 +1513,12 @@ fn checked_trace_pivotal_failure_does_not_publish_destination() {
     assert_eq!(source.dense_data().unwrap().as_ptr(), payload);
     // The complete-layout owner admits nothing for the rejected destination.
     assert_eq!(owner(), before);
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

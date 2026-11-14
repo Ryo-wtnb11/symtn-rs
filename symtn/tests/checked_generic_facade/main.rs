@@ -182,3 +182,11 @@ fn completed_transformers() -> symtn::cache::StructureCacheInfo {
         .find(|info| info.kind() == symtn::cache::StructureCacheKind::CompletedTreeTransformer)
         .expect("every structure cache kind reports")
 }
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
+}

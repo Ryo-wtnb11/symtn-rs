@@ -88,10 +88,42 @@ fn multiplicity_free_rule_styles() {
 #[test]
 fn lie_group_reports_generic_bosonic_for_every_rank_including_two() {
     for n in [2, 3, 4] {
-        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
+        let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap();
         assert_eq!(rule.fusion_style(), FusionStyleKind::Generic, "SU({n})");
         assert_eq!(rule.braiding_style(), Bosonic, "SU({n})");
         assert_eq!(rule.vacuum(), SectorId::new(0));
+    }
+}
+
+/// Multiplicity-free admission reports fusion-symbols' own style.
+#[test]
+fn multiplicity_free_lie_rule_styles() {
+    use fusion_symbols::lie::GroupId;
+    let mf = |group| LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(group).unwrap();
+    assert_eq!(styles(&mf(GroupId::su(2).unwrap())), (Simple, Bosonic));
+    assert_eq!(styles(&mf(GroupId::so(3).unwrap())), (Simple, Bosonic));
+    assert_eq!(styles(&mf(GroupId::u(1).unwrap())), (Unique, Bosonic));
+    assert_eq!(styles(&mf(GroupId::torus(2).unwrap())), (Unique, Bosonic));
+    assert_eq!(styles(&mf(GroupId::u(2).unwrap())), (Simple, Bosonic));
+    assert_eq!(styles(&mf(GroupId::spin(4).unwrap())), (Simple, Bosonic));
+}
+
+/// A group whose fusion has multiplicity has no multiplicity-free rule.
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn multiplicity_free_lie_rule_refuses_generic_fusion() {
+    use fusion_symbols::{category::FusionStyle, lie::GroupId};
+    for group in [GroupId::su(3).unwrap(), GroupId::so(5).unwrap()] {
+        assert!(matches!(
+            LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(group.clone()),
+            Err(LieGroupFusionRuleError::IncompatibleFusionStyle {
+                actual: FusionStyle::Generic
+            })
+        ));
+        assert!(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group).is_ok());
     }
 }
 
@@ -149,6 +181,8 @@ fn multiplicity_free_providers_carry_their_markers() {
         U1FusionRule,
         CU1FusionRule::new(),
         SU2FusionRule,
+        LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(fusion_symbols::lie::GroupId::u(2).unwrap()).unwrap()).unwrap(),
         symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), SU2FusionRule).unwrap(),
         symtn_sectors::ProductFusionRule::<_, _>::try_new(symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap(), SU2FusionRule).unwrap(),
     );
@@ -169,7 +203,10 @@ fn lie_group_carries_the_checked_generic_markers_for_every_rank() {
     fn checked_pivotal<R: CheckedGenericPivotal + CheckedGenericRigidSymbols<Scalar = f64>>(_: &R) {
     }
     for n in [2, 3] {
-        let rule = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap();
+        let rule = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap();
         checked_canonical_unit(&rule);
         generic_admission(&rule);
         checked_pivotal(&rule);

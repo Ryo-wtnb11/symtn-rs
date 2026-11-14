@@ -21,7 +21,7 @@
 //!    source the reference-step oracle (`materialize`, then eager) is eager
 //!    itself;
 //! 2. multiplicity-free SU(2) (`SU2FusionRule`) == checked Generic SU(2)
-//!    (`LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two adapters to the same exact A1 provider on one input;
+//!    (`LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(fusion_symbols::lie::GroupId::su(2).unwrap())`), two adapters to the same exact A1 provider on one input;
 //! 3. the destination keeps its payload allocation and provider.
 //!
 //! 4. the reference-step oracle: eager on the materialized source equals
@@ -72,6 +72,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 use symtn::typed::Engine;
 
 use symtn::sector::{
@@ -159,9 +161,8 @@ fn twice<S>(trees: &BlockFusionTrees<S>, spin: impl Fn(&S) -> usize) -> String {
 }
 
 #[cfg(feature = "cgc-gen")]
-#[expect(clippy::ptr_arg, reason = "the SU(N) sector label is a `Vec<i64>`")]
-fn sun_spin(sector: &Vec<i64>) -> usize {
-    sector[0] as usize
+fn sun_spin(sector: &LieIrrep) -> usize {
+    sector.dynkin().next().unwrap() as usize
 }
 
 /// The subblock entries of a tensor, keyed by `key`.
@@ -568,10 +569,12 @@ fn su2_leg() -> GradedSpace<SU2FusionRule> {
 fn sun2_leg() -> GradedSpace<symtn::sector::LieGroupFusionRule> {
     GradedSpace::try_new(
         Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
         ),
-        SU2_SECTORS.map(|(s, k)| (vec![s as i64], k)),
+        SU2_SECTORS.map(|(s, k)| (su_irrep(&[s as i64]), k)),
     )
     .unwrap()
 }
@@ -876,7 +879,7 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
         &runtime,
         checked,
         checked,
-        |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin)
+        |t: &BlockFusionTrees<LieIrrep>| twice(t, sun_spin)
     );
     let mf_bond = bond_lanes!(
         engine,
@@ -890,9 +893,9 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
         engine,
         &runtime,
         checked,
-        SU2_SECTORS.map(|(s, k)| (vec![s as i64], k)),
-        |s: &Vec<i64>| sun_spin(s).to_string(),
-        |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin)
+        SU2_SECTORS.map(|(s, k)| (su_irrep(&[s as i64]), k)),
+        |s: &LieIrrep| sun_spin(s).to_string(),
+        |t: &BlockFusionTrees<LieIrrep>| twice(t, sun_spin)
     );
     for (mf, checked) in mf_rows
         .into_iter()
@@ -920,20 +923,28 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
     // SU(3): `8 ⊗ 8 → 8` carries outer multiplicity two.
     let v = GradedSpace::try_new(
         Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         ),
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
-    both_lanes!(engine, &runtime, v, v, debug_key::<Vec<i64>>);
+    both_lanes!(engine, &runtime, v, v, debug_key::<LieIrrep>);
     // A non-self-dual SU(3) bond on a dual leg.
     let leg = GradedSpace::try_new(
         Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         ),
-        [(vec![1i64, 0], 2), (vec![0, 1], 1)],
+        [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap()
     .try_dual()
@@ -943,9 +954,9 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
         &runtime,
         leg,
         // The dual leg holds the conjugate labels.
-        [(vec![0i64, 1], 2), (vec![1, 0], 1)],
-        |s: &Vec<i64>| format!("{s:?}"),
-        debug_key::<Vec<i64>>
+        [(su_irrep(&[0i64, 1]), 2), (su_irrep(&[1, 0]), 1)],
+        |s: &LieIrrep| format!("{s:?}"),
+        debug_key::<LieIrrep>
     );
 }
 
@@ -959,7 +970,7 @@ fn checked_generic_warm_transform_into_allocates_no_result_payload() {
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let v = sun2_leg();
-    let source = source!(engine, &runtime, v, v, |t: &BlockFusionTrees<Vec<i64>>| {
+    let source = source!(engine, &runtime, v, v, |t: &BlockFusionTrees<LieIrrep>| {
         twice(t, sun_spin)
     });
     let mut destination = source.permute(engine, &[2, 0], &[1, 3]).unwrap();
@@ -1034,7 +1045,7 @@ fn lazy_adjoint_transform_into_allocates_no_parent_sized_buffer() {
         let v = sun2_leg();
         lazy_into_allocations!(
             engine,
-            source!(engine, &runtime, v, v, |t: &BlockFusionTrees<Vec<i64>>| {
+            source!(engine, &runtime, v, v, |t: &BlockFusionTrees<LieIrrep>| {
                 twice(t, sun_spin)
             })
         );
@@ -1200,9 +1211,9 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
         &runtime,
         checked,
         checked,
-        SU2_SECTORS.map(|(s, k)| (vec![s as i64], k)),
-        |s: &Vec<i64>| sun_spin(s).to_string(),
-        |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin)
+        SU2_SECTORS.map(|(s, k)| (su_irrep(&[s as i64]), k)),
+        |s: &LieIrrep| sun_spin(s).to_string(),
+        |t: &BlockFusionTrees<LieIrrep>| twice(t, sun_spin)
     );
     for (mf, checked) in mf_rows.into_iter().zip(checked_rows) {
         assert_eq!(mf.len(), checked.len());
@@ -1226,10 +1237,16 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
     // SU(3): `8 ⊗ 8 → 8` carries outer multiplicity two.
     let v = GradedSpace::try_new(
         Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         ),
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
     trace_lanes!(
@@ -1237,9 +1254,13 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
         &runtime,
         v,
         v,
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
-        |s: &Vec<i64>| format!("{s:?}"),
-        debug_key::<Vec<i64>>
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1)
+        ],
+        |s: &LieIrrep| format!("{s:?}"),
+        debug_key::<LieIrrep>
     );
 }
 
@@ -1327,17 +1348,17 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
     #[cfg(feature = "cgc-gen")]
     {
         let v = sun2_leg();
-        let key = |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin);
+        let key = |t: &BlockFusionTrees<LieIrrep>| twice(t, sun_spin);
         lazy_trace!(engine, source!(engine, &runtime, v, v, key));
         // A large untraced leg, so the result payload dominates the staging.
         let w = GradedSpace::try_new(
             Arc::new(
-                symtn::sector::LieGroupFusionRule::new(
+                symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
                     fusion_symbols::lie::GroupId::su(2).unwrap(),
                 )
                 .unwrap(),
             ),
-            [(vec![0i64], 24), (vec![1], 24), (vec![2], 24)],
+            [(su_irrep(&[0i64]), 24), (su_irrep(&[1]), 24), (su_irrep(&[2]), 24)],
         )
         .unwrap();
         let source = source!(engine, &runtime, v, w, key);
@@ -1763,7 +1784,7 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
     let mf = su2_leg();
     let checked = sun2_leg();
     let mf_key = |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin);
-    let checked_key = |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin);
+    let checked_key = |t: &BlockFusionTrees<LieIrrep>| twice(t, sun_spin);
     let mf_rows = contract_lanes!(engine, &runtime, mf, mf, mf_key);
     let checked_rows = contract_lanes!(engine, &runtime, checked, checked, checked_key);
     let mf_compact = compact_contract_lanes!(
@@ -1782,8 +1803,8 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
         checked,
         checked,
         checked,
-        SU2_SECTORS.map(|(s, k)| (vec![s as i64], k)),
-        |s: &Vec<i64>| sun_spin(s).to_string(),
+        SU2_SECTORS.map(|(s, k)| (su_irrep(&[s as i64]), k)),
+        |s: &LieIrrep| sun_spin(s).to_string(),
         checked_key
     );
     for (mf, checked) in mf_rows
@@ -1812,22 +1833,32 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
     // SU(3): `8 ⊗ 8 → 8` carries outer multiplicity two.
     let v = GradedSpace::try_new(
         Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(3).unwrap(),
+            )
+            .unwrap(),
         ),
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1),
+        ],
     )
     .unwrap();
-    contract_lanes!(engine, &runtime, v, v, debug_key::<Vec<i64>>);
+    contract_lanes!(engine, &runtime, v, v, debug_key::<LieIrrep>);
     compact_contract_lanes!(
         engine,
         &runtime,
         v,
         v,
         v,
-        [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
-        |s: &Vec<i64>| format!("{s:?}"),
-        debug_key::<Vec<i64>>
+        [
+            (su_irrep(&[0i64, 0]), 2),
+            (su_irrep(&[1, 1]), 2),
+            (su_irrep(&[1, 0]), 1)
+        ],
+        |s: &LieIrrep| format!("{s:?}"),
+        debug_key::<LieIrrep>
     );
 }
 
@@ -2022,12 +2053,14 @@ fn compact_contract_into_allocates_no_dense_compact_operand_in_both_modes() {
     #[cfg(feature = "cgc-gen")]
     {
         let rule = Arc::new(
-            symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap())
-                .unwrap(),
+            symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
         );
-        let v = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64], 4)]).unwrap();
-        let b = GradedSpace::try_new(rule, [(vec![0i64], 128)]).unwrap();
-        compact_contract_allocations!(engine, &runtime, v, b, vec![0i64]);
+        let v = GradedSpace::try_new(Arc::clone(&rule), [(su_irrep(&[0i64]), 4)]).unwrap();
+        let b = GradedSpace::try_new(rule, [(su_irrep(&[0i64]), 128)]).unwrap();
+        compact_contract_allocations!(engine, &runtime, v, b, su_irrep(&[0i64]));
     }
 }
 
@@ -2790,4 +2823,12 @@ fn into_keeps_a_destination_on_its_own_equal_provider_instance() {
         &destination,
         dense(&source.contract(engine, &source, &spec).unwrap()),
     );
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

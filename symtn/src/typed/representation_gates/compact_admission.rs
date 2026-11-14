@@ -11,7 +11,7 @@
 
 use super::*;
 use num_complex::{Complex32, Complex64};
-use symtn_core::LieGroupFusionRule;
+use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 use symtn_matrixalgebra::FactorScalar;
 
 /// Route class and bit pattern of a result. Value lists are sorted by
@@ -201,9 +201,17 @@ where
         TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
     all.push(("su2", matrix!(engine, t, rcond)));
 
-    let su3 =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let bond = GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
+    let su3 = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap(),
+    );
+    let bond = GradedSpace::try_new(
+        Arc::clone(&su3),
+        [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
+    )
+    .unwrap();
     for (name, bond) in [
         ("su3", bond.clone()),
         ("su3 dual", bond.try_dual().unwrap()),

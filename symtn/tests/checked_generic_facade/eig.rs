@@ -1,11 +1,13 @@
 use super::*;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 #[cfg(feature = "cgc-gen")]
 #[allow(clippy::too_many_arguments)]
 fn assert_sun_checked_generic_eigh<D>(
     engine: &mut dyn Engine,
     n: usize,
-    label: Vec<i64>,
+    label: LieIrrep,
     off_diagonal: D,
     adjoint: impl Fn(D) -> D + Copy,
     real: impl Fn(D) -> f64 + Copy,
@@ -16,11 +18,15 @@ fn assert_sun_checked_generic_eigh<D>(
 {
     use std::cell::Cell;
 
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), 2)]).unwrap();
     let cross_sector = label.clone();
     let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
@@ -178,7 +184,7 @@ fn assert_sun_checked_generic_eigh<D>(
 fn sun_checked_generic_eigh_cross_mu_projectors_for_both_dtypes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_checked_generic_eigh(
             engine,
             n,
@@ -203,15 +209,19 @@ fn sun_checked_generic_eigh_cross_mu_projectors_for_both_dtypes() {
 }
 
 #[cfg(feature = "cgc-gen")]
-fn assert_sun_checked_generic_eig<D>(engine: &mut dyn Engine, n: usize, label: Vec<i64>)
+fn assert_sun_checked_generic_eig<D>(engine: &mut dyn Engine, n: usize, label: LieIrrep)
 where
     D: SunEigInput,
 {
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let runtime = Runtime::builder().build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
+    let provider = Arc::new(
+        LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
+        )
+        .unwrap(),
+    );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), 2)]).unwrap();
     let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
         engine,
@@ -347,7 +357,7 @@ where
 fn sun_checked_generic_eig_nonnormal_cross_mu_projectors_for_both_dtypes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
+    for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         assert_sun_checked_generic_eig::<f64>(engine, n, label.clone());
         assert_sun_checked_generic_eig::<Complex64>(engine, n, label);
     }

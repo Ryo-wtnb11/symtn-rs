@@ -15,6 +15,8 @@
 //! admission errors are pinned in `representation_gates::cuda`.
 
 use std::sync::Arc;
+#[cfg(feature = "cgc-gen")]
+use symtn::sector::LieIrrep;
 
 use num_complex::Complex64;
 use symtn::sector::{TableRule, TableSector};
@@ -192,12 +194,15 @@ fn complex_symbol_zeros_like_keeps_space_and_form() {
 #[cfg(feature = "cgc-gen")]
 mod checked {
     use super::*;
-    use symtn::sector::LieGroupFusionRule;
+    use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    fn sun_leg(n: usize, sectors: &[(Vec<i64>, usize)]) -> GradedSpace<LieGroupFusionRule> {
+    fn sun_leg(n: usize, sectors: &[(LieIrrep, usize)]) -> GradedSpace<LieGroupFusionRule> {
         GradedSpace::try_new(
             Arc::new(
-                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
+                LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                    fusion_symbols::lie::GroupId::su(n).unwrap(),
+                )
+                .unwrap(),
             ),
             sectors.to_vec(),
         )
@@ -206,12 +211,19 @@ mod checked {
 
     /// The `su2_leg` sectors as checked Generic SU(2) labels `[2j]`.
     fn checked_su2_leg() -> GradedSpace<LieGroupFusionRule> {
-        sun_leg(2, &[(vec![0], 2), (vec![1], 3), (vec![2], 1)])
+        sun_leg(
+            2,
+            &[
+                (su_irrep(&[0]), 2),
+                (su_irrep(&[1]), 3),
+                (su_irrep(&[2]), 1),
+            ],
+        )
     }
 
     /// `8 ⊗ 8 ∋ 8` twice: the dense fixture has outer multiplicity.
     fn su3_leg() -> GradedSpace<LieGroupFusionRule> {
-        sun_leg(3, &[(vec![1, 1], 2), (vec![0, 0], 1)])
+        sun_leg(3, &[(su_irrep(&[1, 1]), 2), (su_irrep(&[0, 0]), 1)])
     }
 
     #[test]
@@ -237,4 +249,12 @@ mod checked {
         zeros_rows!(engine, su3_leg(), f64, REAL);
         zeros_rows!(engine, su3_leg(), Complex64, COMPLEX);
     }
+}
+
+#[cfg(feature = "cgc-gen")]
+fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
+    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
+        .unwrap()
+        .irrep(labels)
+        .unwrap()
 }

@@ -297,7 +297,10 @@ mod generated {
 
     #[test]
     fn category_authority_a_b_match_octet_and_asymmetric_product_literals() {
-        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
         let [octet, fifteen, fifteen_bar, twenty_seven] =
             [[1, 1], [2, 1], [1, 2], [2, 2]].map(|labels| su3.encode_irrep(&labels).unwrap());
         for block in [
@@ -521,7 +524,10 @@ mod generated {
 
     #[test]
     fn checked_generic_product_surface_preserves_hand_derived_factor_data() {
-        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
         let three = su3.encode_irrep(&[1, 0]).unwrap();
         let anti_three = su3.encode_irrep(&[0, 1]).unwrap();
         let six = su3.encode_irrep(&[2, 0]).unwrap();
@@ -674,7 +680,10 @@ mod generated {
     fn zero_left_r_still_rejects_an_invalid_right_generic_sector() {
         let rule = ProductFusionRule::<_, _>::try_new(
             SU2FusionRule,
-            LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(2).unwrap(),
+            )
+            .unwrap(),
         )
         .unwrap();
         let vacuum = rule.encode_component_ids(s(0), s(0));
@@ -696,7 +705,10 @@ mod generated {
 
     #[test]
     fn su3_u1_keeps_the_full_octet_blocks_and_nonselfdual_phase() {
-        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
         let octet = su3.encode_irrep(&[1, 1]).unwrap();
         let three = su3.encode_irrep(&[1, 0]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, U1FusionRule).unwrap();
@@ -756,7 +768,10 @@ mod generated {
 
     #[test]
     fn su3_fermion_product_negates_every_octet_r_entry() {
-        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
         let octet = su3.encode_irrep(&[1, 1]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3, FermionParityFusionRule::new()).unwrap();
         let odd = rule.encode_component_ids(octet, s(1));
@@ -777,7 +792,10 @@ mod generated {
 
     #[test]
     fn su3_su3_octet_checks_every_entry_of_the_fourfold_multiplicity_blocks() {
-        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
         let octet = su3.encode_irrep(&[1, 1]).unwrap();
         let rule = ProductFusionRule::<_, _>::try_new(su3.clone(), su3).unwrap();
         let x = rule.encode_component_ids(octet, octet);
@@ -819,7 +837,10 @@ mod generated {
 
     #[test]
     fn asymmetric_su3_product_pins_unequal_f_and_r_digit_orders() {
-        let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
         let octet = su3.encode_irrep(&[1, 1]).unwrap();
         let twenty_seven = su3.encode_irrep(&[2, 2]).unwrap();
         let anti_three = su3.encode_irrep(&[0, 1]).unwrap();
@@ -890,7 +911,10 @@ mod generated {
     #[cfg(target_pointer_width = "64")]
     #[test]
     fn checked_generic_products_complete_the_left_admission_before_the_right() {
-        let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
+        let su2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap(),
+        )
+        .unwrap();
         let invalid_sun = s(u32::MAX as usize + 1);
         let max_charge = SectorId::from(U1Irrep::new(i32::MAX).unwrap());
         let one_charge = SectorId::from(U1Irrep::new(1).unwrap());
@@ -1045,10 +1069,15 @@ mod generated {
     #[test]
     fn composite_lie_rules_match_the_product_of_their_factor_rules() {
         use fusion_symbols::lie::RootSystem::A;
-        let su2 = LieGroupFusionRule::new(GroupId::su(2).unwrap()).unwrap();
-        let su3 = LieGroupFusionRule::new(GroupId::su(3).unwrap()).unwrap();
+        let su2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(GroupId::su(2).unwrap())
+            .unwrap();
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(GroupId::su(3).unwrap())
+            .unwrap();
 
-        let lie = LieGroupFusionRule::new(GroupId::cover(&[A(1), A(2)], 0).unwrap()).unwrap();
+        let lie = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            GroupId::cover(&[A(1), A(2)], 0).unwrap(),
+        )
+        .unwrap();
         let product = ProductFusionRule::<_, _>::try_new(su2.clone(), su3.clone()).unwrap();
         assert_ne!(
             CheckedGenericFusion::rule_identity(&lie),
@@ -1075,7 +1104,10 @@ mod generated {
         assert_eq!(checked, (24, 2400, 14976, 288));
 
         // U1FusionRule and the fs rank-one torus factor share the trivial gauge.
-        let lie = LieGroupFusionRule::new(GroupId::cover(&[A(1)], 1).unwrap()).unwrap();
+        let lie = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            GroupId::cover(&[A(1)], 1).unwrap(),
+        )
+        .unwrap();
         let product = ProductFusionRule::<_, _>::try_new(su2.clone(), U1FusionRule).unwrap();
         let to_product = |id| {
             let (dynkin, charges) = lie.decode_irrep(id).unwrap();

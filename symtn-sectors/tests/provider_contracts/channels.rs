@@ -43,7 +43,10 @@ fn su2_channels_ascend_in_doubled_spin() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lie_group_channels_are_sorted_by_encoded_id() {
-    let su3 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap();
+    let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(3).unwrap(),
+    )
+    .unwrap();
     // 3 = [1,0] (id 2), 3bar = [0,1] (id 1), 6 = [2,0] (id 5), 8 = [1,1] (id 4).
     assert_eq!(ids(su3.try_fusion_channels(s(2), s(2)).unwrap()), [1, 5]);
     assert_eq!(ids(su3.try_fusion_channels(s(2), s(1)).unwrap()), [0, 4]);
@@ -51,7 +54,10 @@ fn lie_group_channels_are_sorted_by_encoded_id() {
         ids(su3.try_fusion_channels_in_table(s(2), s(2)).unwrap()),
         [1, 5]
     );
-    let su2 = LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap();
+    let su2 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+        fusion_symbols::lie::GroupId::su(2).unwrap(),
+    )
+    .unwrap();
     assert_eq!(ids(su2.try_fusion_channels(s(1), s(1)).unwrap()), [0, 2]);
     assert_eq!(ids(su2.try_fusion_channels(s(2), s(3)).unwrap()), [1, 3, 5]);
 }
@@ -130,4 +136,28 @@ fn nested_product_channels_enumerate_the_inner_product_fastest() {
         .unwrap();
     // Cantor ids of (0,0), (5,0), (0,2), (5,2).
     assert_eq!(ids(rule.try_fusion_channels(x, x).unwrap()), [0, 20, 3, 33]);
+}
+
+/// Multiplicity-free Lie channels are sorted by encoded id on every codec
+/// route, and N is their indicator.
+#[test]
+fn multiplicity_free_lie_channels_follow_the_codec_order() {
+    use fusion_symbols::lie::GroupId;
+    let mf = |group| LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(group).unwrap();
+    let su2 = mf(GroupId::su(2).unwrap());
+    assert_eq!(ids(su2.fusion_channels(s(2), s(3))), [1, 3, 5]);
+    assert_eq!(su2.nsymbol(s(2), s(3), s(3)), 1);
+    assert_eq!(su2.nsymbol(s(2), s(3), s(2)), 0);
+    // U(1) ids 0, 1, -1, 2, -2: 1 + (-2) = -1.
+    let u1 = mf(GroupId::u(1).unwrap());
+    assert_eq!(ids(u1.fusion_channels(s(1), s(4))), [2]);
+    assert_eq!(u1.nsymbol(s(1), s(4), s(2)), 1);
+    assert_eq!(u1.nsymbol(s(1), s(4), s(1)), 0);
+    // U(2): fundamental (1, 1) = 4 and its dual (1, -1) = 7.
+    // 4 x 4 = det (0, 2) = 6 + (2, 2) = 17; 4 x 7 = (0, 0) = 0 + (2, 0) = 5.
+    let u2 = mf(GroupId::u(2).unwrap());
+    assert_eq!(ids(u2.fusion_channels(s(4), s(4))), [6, 17]);
+    assert_eq!(ids(u2.fusion_channels(s(4), s(7))), [0, 5]);
+    assert_eq!(u2.nsymbol(s(4), s(7), s(5)), 1);
+    assert_eq!(u2.nsymbol(s(4), s(4), s(5)), 0);
 }
