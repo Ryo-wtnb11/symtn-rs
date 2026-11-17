@@ -179,23 +179,20 @@ fn table_identity_is_the_uuid_under_the_table_tag() {
     );
 }
 
-/// The identity holds its group weakly, as a `CategoryRule` identity holds its
-/// category: sharing lasts while a clone of the rule is alive.
+/// A stored identity keeps its equality after every rule over the group is
+/// dropped, as a cache key or admitted structure requires.
 #[cfg(feature = "cgc-gen")]
 #[test]
-fn lie_group_identity_shares_only_while_a_rule_is_alive() {
-    let su3 = || {
+fn lie_group_identity_outlives_its_rules() {
+    let su = |n| {
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
-            fusion_symbols::lie::GroupId::su(3).unwrap(),
+            fusion_symbols::lie::GroupId::su(n).unwrap(),
         )
         .unwrap()
+        .rule_identity()
     };
-    let rule = su3();
-    let clone = rule.clone();
-    let identity = rule.rule_identity();
-    drop(rule);
-    assert_eq!(identity, su3().rule_identity());
-    drop(clone);
-    assert_ne!(identity, su3().rule_identity());
-    assert_eq!(identity.clone(), identity);
+    // Every rule is a temporary: only the identities survive.
+    let identity = su(3);
+    assert_eq!(identity, su(3));
+    assert_ne!(identity, su(4));
 }

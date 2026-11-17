@@ -138,7 +138,10 @@ impl TableRule {
         // fusion-symbols' `TableCategory` equality: the uuid determines the
         // shipped table within one build.
         let bytes = category.uuid().as_bytes();
-        let identity = RuleIdentity::from_canonical_bytes::<Self>(fnv1a64(bytes), Arc::from(bytes));
+        let identity = RuleIdentity::from_canonical_bytes::<Self>(
+            crate::rule_identity::fnv1a64(bytes),
+            Arc::from(bytes),
+        );
         Self { category, identity }
     }
 
@@ -158,16 +161,6 @@ fn table_rank(category: &TableCategory) -> usize {
         Ok(Some(count)) => usize::try_from(count).expect("table ranks fit u16 labels"),
         _ => unreachable!("table categories enumerate a finite object list"),
     }
-}
-
-/// FNV-1a over 64 bits, the prehash `RuleIdentity` carries beside the bytes.
-///
-/// Why not `DefaultHasher`: its output is not stable across Rust releases.
-/// The prehash is only a bucket key; equality compares the full bytes.
-fn fnv1a64(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
 }
 
 /// One-based `TableSector` labels and zero-based ids over a table.
@@ -262,17 +255,5 @@ impl AdapterAccess for TableRule {
     }
     fn vacuum_id(&self) -> SectorId {
         SectorId::new(0)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fnv1a64_matches_the_published_reference_vectors() {
-        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
-        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
-        assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
     }
 }

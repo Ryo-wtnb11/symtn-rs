@@ -13,6 +13,7 @@ mod numerics;
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 mod abelian_cu1_symbol_allocations;
+mod category_identity_retention;
 mod lie_group_adapter_allocations;
 mod lie_group_identity_allocations;
 mod lie_label_allocations;

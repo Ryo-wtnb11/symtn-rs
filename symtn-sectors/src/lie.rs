@@ -66,9 +66,8 @@ use crate::{
 ///
 /// The rule's [`RuleIdentity`] is its mode and [`GroupId`] value: rules over
 /// equal groups in one mode have equal identities whatever constructor or
-/// lattice basis built them, and share structure-cache entries. Like a
-/// [`CategoryRule`](crate::CategoryRule) identity, it holds the group weakly,
-/// so that sharing ends once every clone of the rule is dropped.
+/// lattice basis built them, and share structure-cache entries, also after
+/// every rule over one of them is dropped.
 pub struct LieGroupFusionRule<M = CheckedGenericAdmissionMode> {
     codec: LieCodec<M>,
     identity: RuleIdentity,
@@ -95,8 +94,7 @@ impl<M> fmt::Debug for LieGroupFusionRule<M> {
 }
 
 pub(crate) struct LieCodec<M> {
-    // Why an `Arc`: the value identity refers to the group weakly.
-    group: Arc<GroupId>,
+    group: GroupId,
     // Why no table for a group with one coordinate (a rank-one simple factor
     // or a rank-one torus): fusion-symbols stores its irrep inline, so
     // rebuilding it from the id's coordinate costs one admission check,
@@ -488,8 +486,9 @@ impl<M: LieAdmissionMode> LieGroupFusionRule<M> {
     /// [`LieGroupFusionRuleError::IncompatibleFusionStyle`].
     ///
     /// The `RankNotRepresentable` bound covers this rule's label buffers only.
-    /// The rule's identity hashes the canonical [`GroupId`] once and compares
-    /// groups by value, without materializing the character lattice; the
+    /// The rule's identity records the canonical [`GroupId`]'s hash input
+    /// once (its root systems, torus rank and sparse lattice basis) and
+    /// compares it in full, without materializing the character lattice; the
     /// fusion-symbols category's own construction cost for a large rank is
     /// fusion-symbols' (fusion-symbols#187).
     pub fn new(group: GroupId) -> Result<Self, LieGroupFusionRuleError> {
@@ -508,8 +507,7 @@ impl<M: LieAdmissionMode> LieGroupFusionRule<M> {
         // Why the mode and group are a complete key: the codec and its
         // conventions are fixed by the rule type, and the provider data by
         // the group and this build.
-        let group = Arc::new(group);
-        let identity = RuleIdentity::value_of::<Self, GroupId>().resolve_value(&group);
+        let identity = RuleIdentity::of_value::<Self, GroupId>(&group);
         let irreps = (rank != 1).then(Arc::default);
         let semisimple_rank = group.semisimple_rank();
         Ok(Self {
@@ -1786,7 +1784,7 @@ mod tests {
         // rejects this rank before constructing eager provider state.
         let semisimple_rank = too_large.semisimple_rank();
         let codec = LieCodec::<CheckedGenericAdmissionMode> {
-            group: Arc::new(too_large),
+            group: too_large,
             irreps: Some(Arc::default()),
             semisimple_rank,
             coordinate_count: semisimple_rank,

@@ -488,10 +488,10 @@ pub(crate) fn try_map_array<T, U, E, const N: usize>(
 /// enumeration order. Checked queries validate their ids in argument order
 /// (for `N`: left, right, then coupled), so the first invalid argument is the
 /// reported `InvalidSector`. Equal category values give equal rule identities, so
-/// two independently constructed rules over equal categories share caches.
-/// A category with drop glue is referred to weakly and shares only while a
-/// rule over it is alive; one without (Z_N, fermion parity, CU(1)) is held by
-/// the identity and shares for as long as the identity exists.
+/// two independently constructed rules over equal categories share caches,
+/// also after every rule over one of them is dropped. The identity owns the
+/// category's recorded `Hash` input, never the category itself; see
+/// [`CategoryRule`] for the requirement this places on the category.
 pub struct EnumeratedCodec<M, U = CanonicalUnitAdmission>(PhantomData<fn() -> (M, U)>);
 
 #[allow(
@@ -597,12 +597,10 @@ where
         enumeration_id(category, object, unrepresentable)
     }
 
-    /// The value identity of the rule's category. [`CategoryRule::try_new`]
-    /// anchors it to the category the rule owns; observed anywhere else, it
-    /// is unique to this call and its clones.
+    /// The identity of `category` under this codec type: equal for equal
+    /// categories, whether or not a rule over them exists.
     fn rule_identity(&self, category: &C) -> Option<RuleIdentity> {
-        let _ = category;
-        Some(RuleIdentity::value_of::<(C, Self), C>())
+        Some(RuleIdentity::of_value::<(C, Self), C>(category))
     }
 
     fn encode_channels(
@@ -697,6 +695,14 @@ where
 /// admission gives [`CheckedGenericFusion`], [`CheckedGenericRigidSymbols`],
 /// and [`CheckedGenericPivotal`] and reports `Generic` fusion for every
 /// category, including multiplicity-free ones.
+///
+/// With [`EnumeratedCodec`], the rule identity records the byte sequence the
+/// category's `Hash` writes and compares it in full. That sequence must
+/// therefore determine the category value: fusion-symbols' [`FusionCategory`]
+/// contract ("category equality and hashing use full mathematical identity")
+/// requires it of every category, and std's `Hash` asks for prefix-free
+/// input. A category whose `Hash` writes less than its `Eq` compares would
+/// give two unequal categories one identity.
 ///
 /// [`MultiplicityFreeAdmissionMode`]: crate::MultiplicityFreeAdmissionMode
 /// [`CheckedGenericAdmissionMode`]: crate::CheckedGenericAdmissionMode
@@ -797,9 +803,7 @@ where
 /// ```
 #[derive(Clone, Debug)]
 pub struct CategoryRule<C, K> {
-    // Why an `Arc`: a value identity refers to a category with drop glue
-    // weakly, so that a cache key never keeps it alive after the last clone
-    // of the rule.
+    // Why an `Arc`: a rule clone then shares the category's derived data.
     category: Arc<C>,
     codec: K,
     identity: RuleIdentity,
@@ -844,12 +848,10 @@ where
         if <K::Unit as private::UnitAdmission>::CANONICAL && !category.has_canonical_unit() {
             return Err(CategoryAdmissionError::MissingCanonicalUnit);
         }
-        let identity = codec.rule_identity(&category);
+        let identity = codec
+            .rule_identity(&category)
+            .unwrap_or_else(RuleIdentity::new_unique::<Self>);
         let category = Arc::new(category);
-        let identity = match identity {
-            Some(identity) => identity.resolve_value(&category),
-            None => RuleIdentity::new_unique::<Self>(),
-        };
         let unit = category.unit();
         let category_ref = || &*category;
         let vacuum = codec

@@ -102,6 +102,11 @@ fn canonical_identity_keeps_prehash_and_provider_type_as_determinants() {
 
     assert_ne!(baseline, same_type_other_prehash);
     assert_ne!(baseline, other_type);
+    // An equal prehash never merges different bytes.
+    assert_ne!(
+        baseline,
+        RuleIdentity::from_canonical_bytes::<StatefulPointedRule>(7, Arc::from([1u8, 2, 4]))
+    );
 }
 
 #[test]

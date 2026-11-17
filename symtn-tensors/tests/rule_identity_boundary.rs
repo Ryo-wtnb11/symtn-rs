@@ -220,3 +220,64 @@ fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
         assert_eq!(dst, [41.0]);
     }
 }
+
+/// Binds a space built with a since-dropped rule to an equal, independently
+/// constructed rule, and rejects a rule over a different category.
+fn binds_after_its_producer_drops<R>(make: impl Fn() -> R, other: R)
+where
+    R: MultiplicityFreeRigidSymbols,
+{
+    let space = bound_scalar_space(&make());
+    let bind =
+        |rule| BoundDynamicFusionMapSpace::bind_multiplicity_free(space.clone(), Arc::new(rule));
+    bind(make()).unwrap();
+    assert_rule_mismatch(bind(other).unwrap_err());
+}
+
+#[test]
+fn a_space_binds_to_an_equal_rule_after_its_producer_drops() {
+    use fusion_symbols::table::TableCategory;
+    use symtn_core::{
+        CategoryRule, EnumeratedCodec, GroupId, LieGroupFusionRule, MultiplicityFreeAdmissionMode,
+        TableRule,
+    };
+    type Mf = MultiplicityFreeAdmissionMode;
+    let table = |category: TableCategory| {
+        CategoryRule::try_new(category, EnumeratedCodec::<Mf>::new()).unwrap()
+    };
+    binds_after_its_producer_drops(
+        || table(TableCategory::fibonacci()),
+        table(TableCategory::ising()),
+    );
+    let lie = |group| LieGroupFusionRule::<Mf>::new(group).unwrap();
+    binds_after_its_producer_drops(
+        || lie(GroupId::su(2).unwrap()),
+        lie(GroupId::so(3).unwrap()),
+    );
+    binds_after_its_producer_drops(
+        || ZNFusionRule::new(3).unwrap(),
+        ZNFusionRule::new(4).unwrap(),
+    );
+    binds_after_its_producer_drops(TableRule::fibonacci, TableRule::ising());
+}
+
+#[test]
+fn a_validated_layout_rebinds_to_an_equal_rule_after_its_binding_drops() {
+    use symtn_core::{CheckedGenericAdmissionMode, GroupId, LieGroupFusionRule};
+    let bound = |group| {
+        BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
+            Arc::new(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group).unwrap()),
+            FusionTreeHomSpace::from_sector_ids([], []),
+        )
+        .unwrap()
+    };
+    let layout = bound(GroupId::su(2).unwrap()).validated_layout();
+    bound(GroupId::su(2).unwrap())
+        .rebind_validated(&layout)
+        .unwrap();
+    assert_rule_mismatch(
+        bound(GroupId::so(3).unwrap())
+            .rebind_validated(&layout)
+            .unwrap_err(),
+    );
+}

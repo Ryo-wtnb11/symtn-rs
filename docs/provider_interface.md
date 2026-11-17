@@ -31,9 +31,12 @@ let z3 = CategoryRule::try_new(
 ```
 
 Labels are category objects; IDs and sector order follow enumeration, and
-fusion channels retain category order. Equal live category values share a
-rule identity. It is weakly held: after all rules over that value are dropped,
-old cache identities are not reused.
+fusion channels retain category order. Equal category values share a rule
+identity, also after every rule over one of them is dropped: the identity owns
+the byte sequence the category's `Hash` writes (charged to caches by its
+length), never the category. That sequence must determine the category, as
+fusion-symbols' `FusionCategory` contract requires ("category equality and
+hashing use full mathematical identity").
 `FusionAlgebraError` distinguishes invalid IDs, unrepresentable labels or
 fusion outcomes, and category failures with their source errors.
 
@@ -190,12 +193,13 @@ label's id already overflows, which returns
 checks the complete category membership before using an interned label.
 The identity is the `GroupId` value under the rule type, mode included: codec, admission and
 scalar conventions are fixed by the type, and the category data by the group
-and the build. Construction hashes the sparse canonical `GroupId` once
-and comparison uses its equality, without building the character lattice.
+and the build. Construction records the sparse canonical `GroupId`'s hash
+input once and comparison compares it in full, without building the character
+lattice.
 Equal lattices share one identity whatever constructor or basis built them;
-full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups. As for `CategoryRule`, the group is held
-weakly: after all rules over it are dropped, old cache identities are not
-reused. Persist semantic labels and rebuild caches when provider identity or
+full `GroupId` equality distinguishes isomorphic A1/B1/C1 groups. As for
+`CategoryRule`, an identity outlives its rules: an artifact built with a
+dropped rule binds to a later rule over an equal group. Persist semantic labels and rebuild caches when provider identity or
 codec conventions change.
 
 symtn retains only the bounded codec interner of a group with more than one
