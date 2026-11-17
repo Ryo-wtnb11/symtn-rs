@@ -1137,20 +1137,48 @@ where
     pub fn structure(&self) -> &'structure BlockStructure {
         self.structure
     }
-
-    fn admitted_keys(&self, block_indices: &[usize]) -> Result<Vec<FusionTreePairKey>, CoreError> {
-        block_indices
-            .iter()
-            .map(|&index| match self.structure.block(index)?.key() {
-                BlockKey::FusionTree(key) => Ok(key.clone()),
-                key => Err(CoreError::ExpectedFusionTreePairKey { actual: key.kind() }),
-            })
-            .collect()
-    }
 }
 
 #[doc(hidden)]
-impl<P> CheckedGenericAdmittedFusionTreeBlockStructure<'_, '_, P>
+impl<'provider, P> CheckedGenericAdmittedFusionTreeBlockStructure<'provider, '_, P>
+where
+    P: CheckedGenericRigidSymbols,
+{
+    /// One build over this proof: every block composition of the build reads
+    /// the provider through one [`CheckedGenericLookup`], dropped with it.
+    pub fn build(&self) -> CheckedGenericAdmittedBuild<'_, 'provider, P> {
+        CheckedGenericAdmittedBuild {
+            structure: self.structure,
+            lookup: CheckedGenericLookup::new(self.provider),
+        }
+    }
+}
+
+/// One build over a [`CheckedGenericAdmittedFusionTreeBlockStructure`]: its
+/// block compositions share the build's [`CheckedGenericLookup`]. Why a type
+/// of its own: the lookup can only be that of the admitted provider.
+#[doc(hidden)]
+pub struct CheckedGenericAdmittedBuild<'a, 'provider, P: CheckedGenericRigidSymbols> {
+    structure: &'a BlockStructure,
+    lookup: CheckedGenericLookup<'provider, P>,
+}
+
+/// The keys of admitted blocks `block_indices` of `structure`.
+fn admitted_keys(
+    structure: &BlockStructure,
+    block_indices: &[usize],
+) -> Result<Vec<FusionTreePairKey>, CoreError> {
+    block_indices
+        .iter()
+        .map(|&index| match structure.block(index)?.key() {
+            BlockKey::FusionTree(key) => Ok(key.clone()),
+            key => Err(CoreError::ExpectedFusionTreePairKey { actual: key.kind() }),
+        })
+        .collect()
+}
+
+#[doc(hidden)]
+impl<P> CheckedGenericAdmittedBuild<'_, '_, P>
 where
     P: CheckedGenericRigidSymbols,
 {
@@ -1168,8 +1196,8 @@ where
         CheckedGenericSymbolError<P::Error>,
     > {
         generic_braid_block_result(
-            self.provider,
-            self.admitted_keys(block_indices)?,
+            &self.lookup,
+            admitted_keys(self.structure, block_indices)?,
             codomain_permutation,
             domain_permutation,
             codomain_levels,
@@ -1188,8 +1216,8 @@ where
         CheckedGenericSymbolError<P::Error>,
     > {
         generic_permute_block_result(
-            self.provider,
-            self.admitted_keys(block_indices)?,
+            &self.lookup,
+            admitted_keys(self.structure, block_indices)?,
             codomain_permutation,
             domain_permutation,
         )
@@ -1206,8 +1234,8 @@ where
         CheckedGenericSymbolError<P::Error>,
     > {
         generic_transpose_block_result(
-            self.provider,
-            self.admitted_keys(block_indices)?,
+            &self.lookup,
+            admitted_keys(self.structure, block_indices)?,
             codomain_permutation,
             domain_permutation,
         )
@@ -1227,9 +1255,11 @@ where
 /// stored structure up front, while trace admits one group at a time (so a
 /// later group's error cannot overtake an earlier source's lowering error)
 /// and permutes the adjoint-oriented keys of a lazy adjoint source.
+///
+/// `lookup` is shared by every group of one lowering.
 #[doc(hidden)]
 pub fn generic_permute_tree_pair_block_indexed_checked<C>(
-    provider: &C,
+    lookup: &CheckedGenericLookup<'_, C>,
     structure: &BlockStructure,
     src_indices: &[usize],
     orientation: FusionTreePairOrientation,
@@ -1254,11 +1284,11 @@ where
                 FusionTreePairKey::pair(key.domain_tree().clone(), key.codomain_tree().clone())
             }
         };
-        validate_generic_fusion_tree_pair_checked(provider, &key)
+        validate_generic_fusion_tree_pair_checked(lookup.provider(), &key)
             .map_err(map_checked_generic_structure_error)?;
         src_keys.push(key);
     }
-    generic_permute_block_outcome(provider, src_keys, codomain_permutation, domain_permutation)
+    generic_permute_block_outcome(lookup, src_keys, codomain_permutation, domain_permutation)
         .map(GenericBlockOutcome::into_source_columns)
 }
 

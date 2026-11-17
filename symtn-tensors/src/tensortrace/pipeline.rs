@@ -20,7 +20,7 @@ use crate::tree_transform::{PendingCoefficientGroups, TraceTermReuse, Transforme
 use crate::TreeTransformOperation;
 use symtn_core::{
     generic_permute_tree_pair_block_indexed_checked, BlockSourceColumns, BraidingStyleKind,
-    CheckedGenericAdmissionMode, MultiplicityFreeAdmissionMode, RuleIdentity,
+    CheckedGenericAdmissionMode, CheckedGenericLookup, MultiplicityFreeAdmissionMode, RuleIdentity,
 };
 
 /// What the trace preflight asks of an admission mode.
@@ -747,6 +747,9 @@ where
         let src = lowering.src;
         src.validate_source_keys()
             .map_err(CheckedGenericPlanError::Operation)?;
+        // Created on the first group that misses the term cache, so a lowering
+        // whose groups all hit builds no lookup.
+        let mut lookup = None;
         lower_by_fusion_group::<Self, R>(
             rule,
             lowering,
@@ -755,7 +758,7 @@ where
             terms,
             |indices| {
                 generic_permute_tree_pair_block_indexed_checked(
-                    rule,
+                    lookup.get_or_insert_with(|| CheckedGenericLookup::new(rule)),
                     src.structure,
                     indices,
                     src.orientation,

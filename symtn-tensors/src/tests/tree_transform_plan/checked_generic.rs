@@ -763,9 +763,11 @@ fn checked_generic_plan_preserves_provider_sources_and_rejects_bad_f_r_shapes() 
         (inner_f_r.clone(), CheckedPlanCall::F),
     ] {
         let provider = CheckedPlanSpy::new(&rule);
-        // Fail after the first lookup has succeeded: compilation must still
-        // return no partially assembled plan.
-        provider.fail.set(Some((call, 2)));
+        // Fail after earlier lookups (N, channels) have succeeded: compilation
+        // must still return no partially assembled plan. Why the first R or F
+        // call: a build sends each distinct query once, and the two sources
+        // differ only in a vertex, so they share their R and F arguments.
+        provider.fail.set(Some((call, 1)));
         let error =
             build_checked_generic_tree_pair_transform_group_plan(&provider, operation, &structure)
                 .unwrap_err();

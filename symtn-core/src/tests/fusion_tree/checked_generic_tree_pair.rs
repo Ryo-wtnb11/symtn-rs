@@ -426,7 +426,7 @@ fn checked_generic_block_indexed_permute_matches_per_pair_in_both_orientations()
     ];
     for (orientation, codomain, domain) in cases {
         let columns = generic_permute_tree_pair_block_indexed_checked(
-            &rule,
+            &CheckedGenericLookup::new(&rule),
             &structure,
             &sources,
             orientation,
@@ -470,7 +470,7 @@ fn checked_generic_block_indexed_permute_admits_sources_in_order() {
     let out_of_range = structure.block_count();
     let permute = |provider: &SunProbe, sources: &[usize]| {
         generic_permute_tree_pair_block_indexed_checked(
-            provider,
+            &CheckedGenericLookup::new(provider),
             &structure,
             sources,
             FusionTreePairOrientation::Direct,
