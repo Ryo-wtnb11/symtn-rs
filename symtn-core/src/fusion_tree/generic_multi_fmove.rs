@@ -99,7 +99,7 @@ pub(super) fn collect_generic_fusion_trees_for_coupled_frozen_checked<R>(
     coupled: SectorId,
 ) -> Result<Vec<FusionTreeKey>, CheckedGenericStructureError<R::Error>>
 where
-    R: CheckedGenericFusion,
+    R: GenericFusionAccess + ?Sized,
 {
     let mut builder = TreeArenaBuilder::sharing();
     push_generic_fusion_trees_for_coupled_checked(
@@ -126,7 +126,7 @@ pub(super) fn push_generic_fusion_trees_for_coupled_checked<R>(
     coupled: SectorId,
 ) -> Result<(), CheckedGenericStructureError<R::Error>>
 where
-    R: CheckedGenericFusion,
+    R: GenericFusionAccess + ?Sized,
 {
     // `inner_rev` / `vtx_rev` accumulate outermost-first as the walk descends
     // (the top vertex/innerline is pushed first); the stored key wants
@@ -170,7 +170,7 @@ fn visit_generic_fusion_trees_checked<R, F>(
     emit: &mut F,
 ) -> Result<(), CheckedGenericStructureError<R::Error>>
 where
-    R: CheckedGenericFusion,
+    R: GenericFusionAccess + ?Sized,
     F: FnMut(&[SectorId], &[usize]),
 {
     match effective.len() {

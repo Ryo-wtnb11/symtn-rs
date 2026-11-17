@@ -99,11 +99,11 @@ pub(super) fn map_infallible_generic_symbol_error(
     }
 }
 
-pub(crate) trait GenericFRAccess {
-    type Scalar: CategoricalScalar;
+/// The fusion-ring queries of a Generic walk: what tree enumeration reads.
+/// Why a separate trait: enumeration runs over any checked provider, which
+/// need not carry rigid symbols, and over a build's [`CheckedGenericLookup`].
+pub(crate) trait GenericFusionAccess {
     type Error;
-    fn fusion_style(&self) -> FusionStyleKind;
-    fn braiding_style(&self) -> BraidingStyleKind;
     fn vacuum(&self) -> SectorId;
     fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error>;
     fn try_nsymbol(&self, a: SectorId, b: SectorId, c: SectorId) -> Result<usize, Self::Error>;
@@ -112,6 +112,32 @@ pub(crate) trait GenericFRAccess {
         a: SectorId,
         b: SectorId,
     ) -> Result<SectorVec, Self::Error>;
+}
+
+impl<P: CheckedGenericFusion> GenericFusionAccess for P {
+    type Error = P::Error;
+    fn vacuum(&self) -> SectorId {
+        CheckedGenericFusion::vacuum(self)
+    }
+    fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
+        CheckedGenericFusion::try_dual(self, sector)
+    }
+    fn try_nsymbol(&self, a: SectorId, b: SectorId, c: SectorId) -> Result<usize, Self::Error> {
+        CheckedGenericFusion::try_nsymbol(self, a, b, c)
+    }
+    fn try_fusion_channels_in_table(
+        &self,
+        a: SectorId,
+        b: SectorId,
+    ) -> Result<SectorVec, Self::Error> {
+        CheckedGenericFusion::try_fusion_channels_in_table(self, a, b)
+    }
+}
+
+pub(crate) trait GenericFRAccess: GenericFusionAccess {
+    type Scalar: CategoricalScalar;
+    fn fusion_style(&self) -> FusionStyleKind;
+    fn braiding_style(&self) -> BraidingStyleKind;
     fn try_f_symbol_generic(
         &self,
         a: SectorId,
@@ -172,19 +198,12 @@ pub(crate) trait GenericRigidAccess: GenericFRAccess {
 pub(crate) struct InfallibleGenericFR<'a, R>(pub(crate) &'a R);
 
 #[cfg(any(test, feature = "testing"))]
-impl<R> GenericFRAccess for InfallibleGenericFR<'_, R>
+impl<R> GenericFusionAccess for InfallibleGenericFR<'_, R>
 where
     R: GenericFusionSymbols,
     R::Scalar: CategoricalScalar,
 {
-    type Scalar = R::Scalar;
     type Error = std::convert::Infallible;
-    fn fusion_style(&self) -> FusionStyleKind {
-        self.0.fusion_style()
-    }
-    fn braiding_style(&self) -> BraidingStyleKind {
-        self.0.braiding_style()
-    }
     fn vacuum(&self) -> SectorId {
         self.0.vacuum()
     }
@@ -200,6 +219,21 @@ where
         b: SectorId,
     ) -> Result<SectorVec, Self::Error> {
         Ok(self.0.fusion_channels(a, b))
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<R> GenericFRAccess for InfallibleGenericFR<'_, R>
+where
+    R: GenericFusionSymbols,
+    R::Scalar: CategoricalScalar,
+{
+    type Scalar = R::Scalar;
+    fn fusion_style(&self) -> FusionStyleKind {
+        self.0.fusion_style()
+    }
+    fn braiding_style(&self) -> BraidingStyleKind {
+        self.0.braiding_style()
     }
     fn try_f_symbol_generic(
         &self,
@@ -281,28 +315,11 @@ where
 
 impl<P: CheckedGenericRigidSymbols> GenericFRAccess for P {
     type Scalar = P::Scalar;
-    type Error = P::Error;
     fn fusion_style(&self) -> FusionStyleKind {
         CheckedGenericFusion::fusion_style(self)
     }
     fn braiding_style(&self) -> BraidingStyleKind {
         CheckedGenericFusion::braiding_style(self)
-    }
-    fn vacuum(&self) -> SectorId {
-        CheckedGenericFusion::vacuum(self)
-    }
-    fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
-        CheckedGenericFusion::try_dual(self, sector)
-    }
-    fn try_nsymbol(&self, a: SectorId, b: SectorId, c: SectorId) -> Result<usize, Self::Error> {
-        CheckedGenericFusion::try_nsymbol(self, a, b, c)
-    }
-    fn try_fusion_channels_in_table(
-        &self,
-        a: SectorId,
-        b: SectorId,
-    ) -> Result<SectorVec, Self::Error> {
-        CheckedGenericFusion::try_fusion_channels_in_table(self, a, b)
     }
     fn try_f_symbol_generic(
         &self,
@@ -369,26 +386,9 @@ impl<P: CheckedGenericRigidSymbols> GenericRigidAccess for P {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, CheckedGenericSymbolError<Self::Error>> {
-        let provider = CheckedGenericSymbolError::Provider;
-        #[cfg(any(test, feature = "testing"))]
-        let (_rows, _cols) = {
-            let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
-            let dual_b = CheckedGenericFusion::try_dual(self, b).map_err(provider)?;
-            let _cols = CheckedGenericFusion::try_nsymbol(self, c, dual_b, a).map_err(provider)?;
-            (_rows, _cols)
-        };
-        let symbol =
-            CheckedGenericRigidSymbols::try_b_symbol_generic(self, a, b, c).map_err(provider)?;
-        #[cfg(any(test, feature = "testing"))]
-        if symbol.shape() != (_rows, _cols) {
-            let (rows, cols) = symbol.shape();
-            return Err(CheckedGenericSymbolError::Shape {
-                symbol: "B",
-                expected: vec![_rows, _cols],
-                actual: vec![rows, cols],
-            });
-        }
-        Ok(symbol)
+        checked_vertex_move(self, VertexMove::B, [a, b, c], || {
+            CheckedGenericRigidSymbols::try_b_symbol_generic(self, a, b, c)
+        })
     }
 
     fn try_a_symbol_generic(
@@ -397,27 +397,61 @@ impl<P: CheckedGenericRigidSymbols> GenericRigidAccess for P {
         b: SectorId,
         c: SectorId,
     ) -> Result<GenericRMatrix<Self::Scalar>, CheckedGenericSymbolError<Self::Error>> {
-        let provider = CheckedGenericSymbolError::Provider;
-        #[cfg(any(test, feature = "testing"))]
-        let (_rows, _cols) = {
-            let _rows = CheckedGenericFusion::try_nsymbol(self, a, b, c).map_err(provider)?;
-            let dual_a = CheckedGenericFusion::try_dual(self, a).map_err(provider)?;
-            let _cols = CheckedGenericFusion::try_nsymbol(self, dual_a, c, b).map_err(provider)?;
-            (_rows, _cols)
-        };
-        let symbol =
-            CheckedGenericRigidSymbols::try_a_symbol_generic(self, a, b, c).map_err(provider)?;
-        #[cfg(any(test, feature = "testing"))]
-        if symbol.shape() != (_rows, _cols) {
-            let (rows, cols) = symbol.shape();
-            return Err(CheckedGenericSymbolError::Shape {
-                symbol: "A",
-                expected: vec![_rows, _cols],
-                actual: vec![rows, cols],
-            });
-        }
-        Ok(symbol)
+        checked_vertex_move(self, VertexMove::A, [a, b, c], || {
+            CheckedGenericRigidSymbols::try_a_symbol_generic(self, a, b, c)
+        })
     }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum VertexMove {
+    A,
+    B,
+}
+
+/// A provider's A or B block from `fetch`. Under `testing` its shape is
+/// checked against `N(a,b,c) x N(ā,c,b)` (A) or `N(a,b,c) x N(c,b̄,a)` (B),
+/// queried through `rule`; production adapters own that validation.
+#[cfg_attr(not(any(test, feature = "testing")), allow(unused_variables))]
+pub(super) fn checked_vertex_move<C, S>(
+    rule: &C,
+    kind: VertexMove,
+    [a, b, c]: [SectorId; 3],
+    fetch: impl FnOnce() -> Result<GenericRMatrix<S>, C::Error>,
+) -> Result<GenericRMatrix<S>, CheckedGenericSymbolError<C::Error>>
+where
+    C: GenericFusionAccess + ?Sized,
+{
+    let provider = CheckedGenericSymbolError::Provider;
+    #[cfg(any(test, feature = "testing"))]
+    let expected = {
+        let rows = rule.try_nsymbol(a, b, c).map_err(provider)?;
+        let cols = match kind {
+            VertexMove::A => {
+                let dual_a = rule.try_dual(a).map_err(provider)?;
+                rule.try_nsymbol(dual_a, c, b).map_err(provider)?
+            }
+            VertexMove::B => {
+                let dual_b = rule.try_dual(b).map_err(provider)?;
+                rule.try_nsymbol(c, dual_b, a).map_err(provider)?
+            }
+        };
+        (rows, cols)
+    };
+    let symbol = fetch().map_err(provider)?;
+    #[cfg(any(test, feature = "testing"))]
+    if symbol.shape() != expected {
+        let (rows, cols) = symbol.shape();
+        return Err(CheckedGenericSymbolError::Shape {
+            symbol: match kind {
+                VertexMove::A => "A",
+                VertexMove::B => "B",
+            },
+            expected: vec![expected.0, expected.1],
+            actual: vec![rows, cols],
+        });
+    }
+    Ok(symbol)
 }
 
 /// Validate a Generic fusion-tree pair without requiring the infallible

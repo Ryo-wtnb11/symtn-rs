@@ -13,13 +13,13 @@ use symtn_core::{
 use symtn_core::{
     multiplicity_free_braid_tree_pair_block_ordered_indexed,
     multiplicity_free_transpose_tree_pair_block_ordered_indexed, BlockKey, BlockKeyKind,
-    BlockStructure, CategoricalScalar, CheckedGenericAdmittedFusionTreeBlockStructure,
-    CheckedGenericFusion, CheckedGenericRigidSymbols, CheckedGenericStructureError,
-    CheckedGenericSymbolError, CoreError, FusionRule, FusionStyleKind, FusionTreeBlockGroup,
-    FusionTreeGroupKey, FusionTreeKey, FusionTreePairKey, FusionTreePairOrientation,
-    LocallyValidatedFusionTreeBlockStructure, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, OrderedBlockLinearMap, OrderedBlockLinearStorage,
-    PreparedTreePairOperation, RuleIdentity, UniqueTreePairScratch,
+    BlockStructure, CategoricalScalar, CheckedGenericAdmittedBuild,
+    CheckedGenericAdmittedFusionTreeBlockStructure, CheckedGenericFusion,
+    CheckedGenericRigidSymbols, CheckedGenericStructureError, CheckedGenericSymbolError, CoreError,
+    FusionRule, FusionStyleKind, FusionTreeBlockGroup, FusionTreeGroupKey, FusionTreeKey,
+    FusionTreePairKey, FusionTreePairOrientation, LocallyValidatedFusionTreeBlockStructure,
+    MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, OrderedBlockLinearMap,
+    OrderedBlockLinearStorage, PreparedTreePairOperation, RuleIdentity, UniqueTreePairScratch,
 };
 
 use crate::OperationError;
@@ -2214,15 +2214,21 @@ where
     P: CheckedGenericRigidSymbols,
     P::Scalar: CategoricalScalar + Zero,
 {
+    // Every group hit the composed-coefficient cache: no build, no lookup.
+    if group_indices.is_empty() {
+        return Ok(Vec::new());
+    }
     let all_groups = source_proof.structure().fusion_tree_group_slice();
     let source_axes = operation_source_axes(operation);
+    let build = source_proof.admitted.build();
     group_indices
         .into_iter()
         .map(|index| {
             build_one_checked_generic_tree_pair_group(
                 operation,
                 &source_axes,
-                source_proof,
+                source_proof.structure(),
+                &build,
                 &all_groups[index],
             )
         })
@@ -2232,37 +2238,36 @@ where
 fn build_one_checked_generic_tree_pair_group<P>(
     operation: &TreeTransformOperation,
     source_axes: &Arc<[usize]>,
-    source_proof: &CheckedGenericTreePairPreflight<'_, '_, P>,
+    structure: &BlockStructure,
+    build: &CheckedGenericAdmittedBuild<'_, '_, P>,
     group: &FusionTreeBlockGroup,
 ) -> Result<Vec<TreeTransformGroupBlockSpec<P::Scalar>>, CheckedGenericPlanError<P::Error>>
 where
     P: CheckedGenericRigidSymbols,
     P::Scalar: CategoricalScalar + Zero,
 {
-    let admitted = &source_proof.admitted;
     let indices = group.block_indices();
     let ordered = match operation.kind() {
-        TreeTransformOperationKind::Permute => admitted.generic_permute_ordered_for_block_indices(
+        TreeTransformOperationKind::Permute => build.generic_permute_ordered_for_block_indices(
             indices,
             operation.codomain_permutation(),
             operation.domain_permutation(),
         ),
-        TreeTransformOperationKind::Braid => admitted.generic_braid_ordered_for_block_indices(
+        TreeTransformOperationKind::Braid => build.generic_braid_ordered_for_block_indices(
             indices,
             operation.codomain_permutation(),
             operation.domain_permutation(),
             operation.codomain_levels(),
             operation.domain_levels(),
         ),
-        TreeTransformOperationKind::Transpose => admitted
-            .generic_transpose_ordered_for_block_indices(
-                indices,
-                operation.codomain_permutation(),
-                operation.domain_permutation(),
-            ),
+        TreeTransformOperationKind::Transpose => build.generic_transpose_ordered_for_block_indices(
+            indices,
+            operation.codomain_permutation(),
+            operation.domain_permutation(),
+        ),
     }
     .map_err(map_checked_generic_symbol_error)?;
-    assemble_ordered_tree_pair_group_specs(source_proof.structure(), group, source_axes, ordered)
+    assemble_ordered_tree_pair_group_specs(structure, group, source_axes, ordered)
         .map_err(CheckedGenericPlanError::Operation)
 }
 

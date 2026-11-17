@@ -89,6 +89,8 @@ fn expert_copy(structure: &BlockStructure) -> Arc<BlockStructure> {
 
 mod admission;
 #[cfg(feature = "cgc-gen")]
+mod checked_build_lookup;
+#[cfg(feature = "cgc-gen")]
 mod checked_composer_oracles;
 #[cfg(feature = "cgc-gen")]
 mod checked_failure_order;
