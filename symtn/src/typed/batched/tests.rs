@@ -215,8 +215,6 @@ fn checked_generic_rule_instance_alone_separates_signatures() {
             .unwrap(),
         )
     };
-    // Why the rules outlive their signatures: a rule identity holds its group
-    // weakly, so signatures of dropped rules equal nothing but their clones.
     let (first_su3, second_su3, su4_rule) = (rule(3), rule(3), rule(4));
     let mut signature = |rule: &Arc<LieGroupFusionRule>, trivial: symtn_core::LieIrrep| {
         let leg = GradedSpace::try_new(Arc::clone(rule), [(trivial, 2)]).unwrap();

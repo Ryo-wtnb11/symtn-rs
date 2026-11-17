@@ -295,8 +295,8 @@ fn equal_lie_groups_share_structure_cache_entries() {
     assert_eq!(warm_misses, misses, "an equal group must not rebuild");
     assert!(warm_hits > hits);
 
-    // The identity holds its group weakly: once both rules are dropped, a new
-    // rule over an equal group no longer reaches their entries.
+    // The identity owns its group's value: once both rules are dropped, a new
+    // rule over an equal group still reaches their entries.
     drop((first, second));
     let third = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -307,10 +307,10 @@ fn equal_lie_groups_share_structure_cache_entries() {
     let _ = tensor!(engine, &runtime, &leg(&third))
         .permute(engine, &[2, 0], &[3, 1])
         .unwrap();
-    let (_, cold_misses) = totals();
-    assert!(
-        cold_misses > warm_misses,
-        "sharing ends when every rule over the group is dropped"
+    let (_, later_misses) = totals();
+    assert_eq!(
+        later_misses, warm_misses,
+        "sharing survives the rules that built the entries"
     );
 }
 

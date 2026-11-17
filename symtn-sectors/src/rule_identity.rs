@@ -14,11 +14,6 @@ enum RuleIdentityNode {
         bytes: Arc<[u8]>,
     },
     Product(Arc<ProductRuleIdentity>),
-    Value(Arc<ValueRuleIdentity>),
-    /// A codec's unresolved request. `CategoryRule::try_new` resolves it;
-    /// observed anywhere else (the public codec hook, or composed into a
-    /// product identity), it is a unique identity shared only by its clones.
-    PendingValue(PendingValue),
 }
 
 #[derive(Debug, Eq, Hash, PartialEq)]
@@ -28,73 +23,21 @@ struct ProductRuleIdentity {
     right: RuleIdentity,
 }
 
-/// Identity of a rule determined by one category value under one rule type.
+/// Records the exact byte sequence a `Hash` impl writes.
 ///
-/// Equality is the value's full `Eq`, never its hash: a hash collision must
-/// not merge two categories.
-///
-/// Why a category with drop glue is held weakly: a cache key is charged by
-/// [`RuleIdentity::charged_retained_bytes`], and an erased category has no
-/// size query, so a key that owned the category could keep unbounded memory
-/// alive (a table's derived data, a Lie group's generated catalog) beyond its
-/// charge. The rule owns the category; the identity only refers to it. Once
-/// every clone of the rule is dropped, the identity can no longer equal any
-/// other identity, so entries keyed on it are unreachable and leave the cache
-/// through its ordinary eviction.
-///
-/// Known limitation (#2540): this is not only a loss of cache sharing. A
-/// structure, key or plan that recorded the identity of a dropped rule no
-/// longer matches a later rule over an equal category, so binding or
-/// rebinding it to that rule fails with `FusionRuleMismatch` for table
-/// categories and Lie groups.
-///
-/// A category without drop glue (Z_N, fermion parity, CU(1)) owns nothing
-/// beyond its `size_of`, which is the charge a `Weak` already pays, so the
-/// identity holds it and equal values stay equal for as long as they exist.
-struct ValueRuleIdentity {
-    rule_type: std::any::TypeId,
-    prehash: u64,
-    /// `size_of` the category: the allocation either reference keeps.
-    value_bytes: usize,
-    value: CategoryRef,
-    equals: fn(&dyn std::any::Any, &dyn std::any::Any) -> bool,
-}
+/// Why the input and not a reference to the value: an identity must keep its
+/// equality for as long as a cache key or admitted structure stores it, and
+/// it must not keep an uncharged category alive. The recorded input is owned,
+/// charged by length, and outlives every rule over the value.
+struct HashInput(Vec<u8>);
 
-/// The category a value identity refers to: weakly when it has drop glue.
-enum CategoryRef {
-    Weak(std::sync::Weak<dyn std::any::Any + Send + Sync>),
-    Owned(Arc<dyn std::any::Any + Send + Sync>),
-}
-
-impl CategoryRef {
-    fn get(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        match self {
-            Self::Weak(value) => value.upgrade(),
-            Self::Owned(value) => Some(Arc::clone(value)),
-        }
+impl std::hash::Hasher for HashInput {
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.extend_from_slice(bytes);
     }
-}
 
-/// A codec's request for a value identity, resolved against the `Arc` the
-/// rule owns: `anchor` is monomorphized for the category type.
-///
-/// Why `instance`: the request does not hold its category, so it cannot
-/// compare categories; without its own instance, requests for Z3 and Z5 would
-/// be equal wherever they escape resolution.
-#[derive(Clone, Copy, Debug)]
-struct PendingValue {
-    rule_type: std::any::TypeId,
-    instance: u64,
-    anchor: fn(std::any::TypeId, &dyn std::any::Any) -> Option<ValueRuleIdentity>,
-}
-
-impl std::fmt::Debug for ValueRuleIdentity {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ValueRuleIdentity")
-            .field("rule_type", &self.rule_type)
-            .field("prehash", &self.prehash)
-            .finish_non_exhaustive()
+    fn finish(&self) -> u64 {
+        fnv1a64(&self.0)
     }
 }
 
@@ -136,25 +79,6 @@ impl PartialEq for RuleIdentityNode {
                     && (Arc::ptr_eq(left, right) || left.as_ref() == right.as_ref())
             }
             (Self::Product(left), Self::Product(right)) => left == right,
-            (Self::PendingValue(left), Self::PendingValue(right)) => {
-                left.rule_type == right.rule_type && left.instance == right.instance
-            }
-            (Self::Value(left), Self::Value(right)) => {
-                if Arc::ptr_eq(left, right) {
-                    return true;
-                }
-                if left.rule_type != right.rule_type || left.prehash != right.prehash {
-                    return false;
-                }
-                // A dropped category equals nothing; see `ValueRuleIdentity`.
-                match (left.value.get(), right.value.get()) {
-                    (Some(left_value), Some(right_value)) => {
-                        Arc::ptr_eq(&left_value, &right_value)
-                            || (left.equals)(&*left_value, &*right_value)
-                    }
-                    _ => false,
-                }
-            }
             _ => false,
         }
     }
@@ -178,14 +102,6 @@ impl std::hash::Hash for RuleIdentityNode {
                 prehash.hash(state);
             }
             Self::Product(identity) => identity.hash(state),
-            Self::Value(identity) => {
-                identity.rule_type.hash(state);
-                identity.prehash.hash(state);
-            }
-            Self::PendingValue(pending) => {
-                pending.rule_type.hash(state);
-                pending.instance.hash(state);
-            }
         }
     }
 }
@@ -211,68 +127,17 @@ impl RuleIdentity {
         })
     }
 
-    /// A codec's request for the value identity, under rule type `R`, of
-    /// the category `V` its rule will own; [`Self::resolve_value`] anchors it.
-    pub(crate) fn value_of<R: 'static, V>() -> Self
-    where
-        V: Eq + std::hash::Hash + Send + Sync + 'static,
-    {
-        fn equals<V: Eq + 'static>(left: &dyn std::any::Any, right: &dyn std::any::Any) -> bool {
-            matches!(
-                (left.downcast_ref::<V>(), right.downcast_ref::<V>()),
-                (Some(left), Some(right)) if left == right
-            )
-        }
-
-        fn anchor<V>(
-            rule_type: std::any::TypeId,
-            owner: &dyn std::any::Any,
-        ) -> Option<ValueRuleIdentity>
-        where
-            V: Eq + std::hash::Hash + Send + Sync + 'static,
-        {
-            use std::hash::BuildHasher;
-
-            let value = owner.downcast_ref::<Arc<V>>()?;
-            let value_ref = if std::mem::needs_drop::<V>() {
-                let weak: std::sync::Weak<V> = Arc::downgrade(value);
-                CategoryRef::Weak(weak)
-            } else {
-                CategoryRef::Owned(Arc::clone(value) as Arc<dyn std::any::Any + Send + Sync>)
-            };
-            Some(
-                ValueRuleIdentity {
-                    rule_type,
-                    prehash: std::hash::BuildHasherDefault::<
-                        std::collections::hash_map::DefaultHasher,
-                    >::default()
-                    .hash_one(&**value),
-                    value_bytes: std::mem::size_of::<V>(),
-                    value: value_ref,
-                    equals: equals::<V>,
-                },
-            )
-        }
-
-        Self(RuleIdentityNode::PendingValue(PendingValue {
-            rule_type: std::any::TypeId::of::<R>(),
-            instance: next_instance(),
-            anchor: anchor::<V>,
-        }))
-    }
-
-    /// Anchors a [`Self::value_of`] request to `owner`, the `Arc` holding the
-    /// rule's category; any other identity is returned unchanged. A request
-    /// for another category type than `owner` holds becomes a fresh identity,
-    /// which can share nothing but cannot alias.
-    pub(crate) fn resolve_value(self, owner: &dyn std::any::Any) -> Self {
-        let RuleIdentityNode::PendingValue(pending) = self.0 else {
-            return self;
-        };
-        match (pending.anchor)(pending.rule_type, owner) {
-            Some(identity) => Self(RuleIdentityNode::Value(Arc::new(identity))),
-            None => Self::unique_of(pending.rule_type),
-        }
+    /// The identity, under rule type `R`, of a value whose `Hash` input is
+    /// an injective encoding of it, as fusion-symbols' `FusionCategory`
+    /// contract requires of every category ("category equality and hashing
+    /// use full mathematical identity").
+    ///
+    /// Equality compares the complete recorded input, never a digest of it.
+    pub(crate) fn of_value<R: 'static, V: std::hash::Hash + ?Sized>(value: &V) -> Self {
+        let mut input = HashInput(Vec::new());
+        value.hash(&mut input);
+        let bytes: Arc<[u8]> = input.0.into();
+        Self::from_canonical_bytes::<R>(fnv1a64(&bytes), bytes)
     }
 
     /// Composes two semantic category identities under one product codec type.
@@ -295,22 +160,27 @@ impl RuleIdentity {
         // the admission budget is conservative rather than allocator-exact.
         match &self.0 {
             RuleIdentityNode::Type(_) | RuleIdentityNode::Unique(_, _) => 0,
+            // The `Arc<[u8]>` allocation is padded to its counters' alignment.
             RuleIdentityNode::Content { bytes, .. } => ARC_HEADER_BYTES
-                .saturating_add(bytes.len().saturating_mul(std::mem::size_of::<u8>())),
+                .saturating_add(bytes.len())
+                .next_multiple_of(std::mem::align_of::<usize>()),
             RuleIdentityNode::Product(identity) => ARC_HEADER_BYTES
                 .saturating_add(std::mem::size_of::<ProductRuleIdentity>())
                 .saturating_add(identity.left.charged_retained_bytes())
                 .saturating_add(identity.right.charged_retained_bytes()),
-            // The key retains the node and the category's allocation; a
-            // category with drop glue is held weakly, so its contents drop
-            // with the last rule.
-            RuleIdentityNode::Value(identity) => ARC_HEADER_BYTES
-                .saturating_add(std::mem::size_of::<ValueRuleIdentity>())
-                .saturating_add(ARC_HEADER_BYTES)
-                .saturating_add(identity.value_bytes),
-            RuleIdentityNode::PendingValue(_) => 0,
         }
     }
+}
+
+/// FNV-1a over 64 bits, the prehash a content identity carries beside its
+/// bytes.
+///
+/// Why not `DefaultHasher`: its output is not stable across Rust releases.
+/// The prehash is only a bucket key; equality compares the full bytes.
+pub(crate) fn fnv1a64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// A process-unique instance for identities that compare by allocation.
@@ -323,4 +193,16 @@ fn next_instance() -> u64 {
             |current| current.checked_add(1),
         )
         .expect("fusion-rule identity space exhausted")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fnv1a64;
+
+    #[test]
+    fn fnv1a64_matches_the_published_reference_vectors() {
+        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
+    }
 }

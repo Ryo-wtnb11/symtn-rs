@@ -47,8 +47,8 @@ one-coordinate group, with a bounded irrep interner otherwise), constructs its `
 eagerly, validates complete `GroupId` admission and takes its admission mode
 `M` as a type parameter: checked `Generic` at every rank, or multiplicity-free
 for a group whose fusion-symbols style is `Unique` or `Simple`. Its identity
-is the mode and `GroupId` value, held weakly as for `CategoryRule`, so
-isomorphic groups do not merge. Warm interner hits clone allocation-free
+is the mode and the `GroupId`'s recorded hash input, as for `CategoryRule`,
+so isomorphic groups do not merge. Warm interner hits clone allocation-free
 provider handles; returned blocks and channels have separate allocation costs.
 See the [provider interface](provider_interface.md) for admission and error bounds.
 

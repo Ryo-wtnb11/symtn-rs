@@ -78,10 +78,10 @@ mod tests;
 /// separated by `Eq`. A signature holds a non-owning Runtime handle and does
 /// not keep the Runtime alive.
 ///
-/// Likewise, a rule whose identity is a category or group value (such as
-/// `CategoryRule` or `LieGroupFusionRule`) is held weakly: once every rule
-/// over that value is dropped, its signatures equal only their own clones,
-/// never a signature built later over an equal value.
+/// A rule whose identity is a category or group value (such as
+/// `CategoryRule` or `LieGroupFusionRule`) is compared by value, so a
+/// signature still equals one built later over an equal value after every
+/// rule it was built with is dropped.
 #[derive(Clone)]
 pub struct StructureSignature {
     rule: RuleIdentity,

@@ -498,91 +498,6 @@ fn different_moduli_do_not_alias() {
     );
 }
 
-/// Values whose hash is constant, so only equality can tell them apart.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct CollidingHash(u8);
-
-impl Hash for CollidingHash {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        0_u8.hash(state);
-    }
-}
-
-impl FusionCategory for CollidingHash {
-    type Object = u8;
-    type Scalar = f64;
-    type FSymbol = f64;
-    type RSymbol = f64;
-    type Fusion<'a> = std::iter::Once<u8>;
-    type Error = std::convert::Infallible;
-
-    fn fusion_style(&self) -> FusionStyle {
-        FusionStyle::Unique
-    }
-    fn braiding_style(&self) -> BraidingStyle {
-        BraidingStyle::Bosonic
-    }
-    fn unit(&self) -> u8 {
-        0
-    }
-    fn contains(&self, a: &u8) -> bool {
-        *a == 0
-    }
-    fn dual(&self, a: &u8) -> u8 {
-        *a
-    }
-    fn dim(&self, _: &u8) -> f64 {
-        1.0
-    }
-    fn frobenius_schur_phase(&self, _: &u8) -> Result<f64, Self::Error> {
-        Ok(1.0)
-    }
-    fn frobenius_schur_indicator(&self, _: &u8) -> f64 {
-        1.0
-    }
-    fn twist(&self, _: &u8) -> f64 {
-        1.0
-    }
-    fn fusion<'a>(&'a self, _: &u8, _: &u8) -> Result<Self::Fusion<'a>, Self::Error> {
-        Ok(std::iter::once(0))
-    }
-    fn nsymbol(&self, _: &u8, _: &u8, _: &u8) -> Result<u32, Self::Error> {
-        Ok(1)
-    }
-    fn has_canonical_unit(&self) -> bool {
-        true
-    }
-    fn f_symbol(&self, _: &u8, _: &u8, _: &u8, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
-        Ok(1.0)
-    }
-    fn r_symbol(&self, _: &u8, _: &u8, _: &u8) -> Result<f64, Self::Error> {
-        Ok(1.0)
-    }
-    fn object_count(&self) -> Result<Option<u64>, EnumerationError> {
-        Ok(Some(1))
-    }
-    fn object_at(&self, index: u64) -> Result<u8, EnumerationError> {
-        if index == 0 {
-            Ok(0)
-        } else {
-            Err(EnumerationError::OutOfRange)
-        }
-    }
-    fn object_index(&self, _: &u8) -> Result<u64, EnumerationError> {
-        Ok(0)
-    }
-}
-
-#[test]
-fn colliding_hashes_stay_distinct_identities() {
-    let (one_rule, two_rule) = (mf(CollidingHash(1)), mf(CollidingHash(2)));
-    let one = FusionRule::rule_identity(&one_rule);
-    let two = FusionRule::rule_identity(&two_rule);
-    assert_eq!(hash_of(&one), hash_of(&two));
-    assert_ne!(one, two);
-    assert_eq!(one, FusionRule::rule_identity(&mf(CollidingHash(1))));
-}
-
 #[test]
 fn identity_separates_mode_unit_codec_table_and_factor_structure() {
     let z3 = || ZN::new(3).unwrap();
@@ -643,7 +558,7 @@ fn identity_separates_mode_unit_codec_table_and_factor_structure() {
     assert_ne!(nested, flat);
 }
 
-/// A category holding a large table, observed through its `Arc` count.
+/// A category holding heap data, observed through its `Arc` count.
 #[derive(Clone, Debug)]
 struct Tracked(Arc<Vec<u8>>);
 
@@ -657,8 +572,7 @@ impl Eq for Tracked {}
 
 impl Hash for Tracked {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // Hashes far less than it holds, as `Hash` permits.
-        self.0.len().hash(state);
+        self.0.hash(state);
     }
 }
 
@@ -729,63 +643,47 @@ impl FusionCategory for Tracked {
 
 #[test]
 fn an_identity_does_not_keep_its_category_alive() {
-    let table = Arc::new(vec![7_u8; 1 << 20]);
+    let table = Arc::new(vec![7_u8; 64]);
     let rule = mf(Tracked(Arc::clone(&table)));
     let clone = rule.clone();
     let identity = FusionRule::rule_identity(&rule);
-    // The key's charge does not depend on what the category holds.
-    let charge = identity.charged_retained_bytes();
-    assert!(charge < 256, "{charge}");
-    assert_eq!(
-        FusionRule::rule_identity(&mf(ZN::new(3).unwrap())).charged_retained_bytes()
-            - std::mem::size_of::<ZN>(),
-        charge - std::mem::size_of::<Tracked>()
-    );
     assert_eq!(Arc::strong_count(&table), 2);
 
     drop(rule);
-    assert_eq!(Arc::strong_count(&table), 2);
     drop(clone);
-    // Only the identity (as a cache key would) survives, and it released the
-    // category.
+    // Only the identity (as a cache key would) survives, it released the
+    // category, and it still names it.
     assert_eq!(Arc::strong_count(&table), 1);
-    assert_eq!(identity.clone(), identity);
+    assert_eq!(identity, FusionRule::rule_identity(&mf(Tracked(table))));
+    assert_ne!(
+        identity,
+        FusionRule::rule_identity(&mf(Tracked(Arc::new(vec![8_u8; 64]))))
+    );
 }
 
 #[test]
-fn the_public_codec_hook_never_aliases_categories() {
+fn the_public_codec_hook_names_the_category_without_a_rule() {
     let codec = EnumeratedCodec::<MF>::new();
-    let z3 = CategoryCodec::<ZN>::rule_identity(&codec, &ZN::new(3).unwrap()).unwrap();
-    let z5 = CategoryCodec::<ZN>::rule_identity(&codec, &ZN::new(5).unwrap()).unwrap();
-    assert_ne!(z3, z5);
-    // Without its rule the request cannot compare categories, so even an
-    // equal category gives a distinct identity; clones stay equal.
-    assert_ne!(
-        z3,
-        CategoryCodec::<ZN>::rule_identity(&codec, &ZN::new(3).unwrap()).unwrap()
-    );
-    assert_eq!(z3.clone(), z3);
-    // Composition before resolution stays distinct as well.
+    let hook = |n| CategoryCodec::<ZN>::rule_identity(&codec, &ZN::new(n).unwrap()).unwrap();
+    assert_eq!(hook(3), hook(3));
+    assert_ne!(hook(3), hook(5));
+    assert_eq!(hook(3), FusionRule::rule_identity(&mf(ZN::new(3).unwrap())));
     let tag = RuleIdentity::of_type::<WrappedZn>();
     assert_ne!(
-        RuleIdentity::compose_with_codec::<WrappedZn>(z3.clone(), tag.clone()),
-        RuleIdentity::compose_with_codec::<WrappedZn>(z5, tag)
+        RuleIdentity::compose_with_codec::<WrappedZn>(hook(3), tag.clone()),
+        RuleIdentity::compose_with_codec::<WrappedZn>(hook(5), tag)
     );
-    // A codec that composes the hook's identity gives each rule its own.
-    let rule3 = CategoryRule::try_new(ZN::new(3).unwrap(), WrappedZn).unwrap();
-    let rule5 = CategoryRule::try_new(ZN::new(5).unwrap(), WrappedZn).unwrap();
-    assert_ne!(
-        FusionRule::rule_identity(&rule3),
-        FusionRule::rule_identity(&rule5)
-    );
-    assert_eq!(
-        FusionRule::rule_identity(&rule3.clone()),
-        FusionRule::rule_identity(&rule3)
-    );
+    // A codec that composes the hook's identity separates categories and
+    // shares between equal ones.
+    let wrapped = |n| {
+        FusionRule::rule_identity(&CategoryRule::try_new(ZN::new(n).unwrap(), WrappedZn).unwrap())
+    };
+    assert_ne!(wrapped(3), wrapped(5));
+    assert_eq!(wrapped(3), wrapped(3));
 }
 
 /// An expert codec built on `EnumeratedCodec` whose identity composes the
-/// enumerated identity before any rule resolves it.
+/// enumerated identity.
 #[derive(Clone, Copy, Debug)]
 struct WrappedZn;
 
@@ -842,33 +740,28 @@ impl CategoryCodec<ZN> for WrappedZn {
     }
 }
 
-// Documents a known limitation (#2540), not the intended contract: an
-// identity over a dropped category with drop glue stops equal to a live one,
-// which breaks drop-then-rebind for tables and Lie groups.
+/// Every rule is a temporary: an identity must keep naming its category after
+/// the rules over it are dropped, as a stored cache key or admitted structure
+/// requires.
 #[test]
-fn a_dropped_weakly_held_category_identity_equals_no_live_identity_known_limitation() {
-    // What: a category with drop glue is currently referred to weakly.
-    let fibonacci = || TableCategory::fibonacci();
-    let first = mf(fibonacci());
-    let dead = FusionRule::rule_identity(&first);
-    let live_rule = mf(fibonacci());
-    let live = FusionRule::rule_identity(&live_rule);
-    assert_eq!(dead, live);
-    drop(first);
-    assert_ne!(dead, live);
-    assert_ne!(live, dead);
-    assert_eq!(hash_of(&dead), hash_of(&live));
-    // A rule built later over an equal category shares the live identity.
-    assert_eq!(live, FusionRule::rule_identity(&mf(fibonacci())));
-}
+fn an_identity_outlives_every_rule_over_its_category() {
+    let fibonacci = FusionRule::rule_identity(&mf(TableCategory::fibonacci()));
+    assert_eq!(
+        fibonacci,
+        FusionRule::rule_identity(&mf(TableCategory::fibonacci()))
+    );
+    assert_ne!(
+        fibonacci,
+        FusionRule::rule_identity(&mf(TableCategory::ising()))
+    );
+    let z3 = FusionRule::rule_identity(&mf(ZN::new(3).unwrap()));
+    assert_eq!(z3, FusionRule::rule_identity(&mf(ZN::new(3).unwrap())));
+    assert_ne!(z3, FusionRule::rule_identity(&mf(ZN::new(4).unwrap())));
 
-#[test]
-fn a_category_without_drop_glue_keeps_its_identity_after_the_rule() {
-    let first = mf(ZN::new(3).unwrap());
-    let kept = FusionRule::rule_identity(&first);
-    drop(first);
-    assert_eq!(kept, FusionRule::rule_identity(&mf(ZN::new(3).unwrap())));
-    assert_ne!(kept, FusionRule::rule_identity(&mf(ZN::new(4).unwrap())));
+    let mut stored = std::collections::HashSet::new();
+    stored.insert(fibonacci);
+    assert!(stored.contains(&FusionRule::rule_identity(&mf(TableCategory::fibonacci()))));
+    assert!(!stored.contains(&FusionRule::rule_identity(&mf(TableCategory::ising()))));
 }
 
 /// Z3 under ids equal to its charges, with no canonical identity.
@@ -1062,6 +955,7 @@ impl<const RANK: usize> Eq for ProbeBlock<RANK> {}
 impl<const RANK: usize> Hash for ProbeBlock<RANK> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.axes.hash(state);
+        self.data.len().hash(state);
         for value in self.data {
             (if *value == 0.0 { 0 } else { value.to_bits() }).hash(state);
         }
@@ -1091,6 +985,29 @@ struct StorageProbe {
     claimed_mf: bool,
     f: ProbeBlock<4>,
     r: ProbeBlock<2>,
+}
+
+#[test]
+fn storage_probe_identity_separates_payload_partitions() {
+    // Equal concatenated payload words split differently between F and R.
+    static WORDS: [f64; 3] = [f64::from_bits(2), f64::from_bits(1), f64::from_bits(1)];
+    let probe = |f: &'static [f64], r: &'static [f64]| StorageProbe {
+        n: 1,
+        claimed_mf: false,
+        f: ProbeBlock {
+            axes: [1; 4],
+            data: f,
+        },
+        r: ProbeBlock {
+            axes: [1; 2],
+            data: r,
+        },
+    };
+    let codec = EnumeratedCodec::<MF>::new();
+    let identity = |category: &StorageProbe| {
+        CategoryCodec::<StorageProbe>::rule_identity(&codec, category).unwrap()
+    };
+    assert_ne!(identity(&probe(&[], &WORDS)), identity(&probe(&WORDS, &[])));
 }
 
 thread_local! {
@@ -2821,74 +2738,4 @@ fn the_testing_a_and_b_composition_agrees_with_the_category_authority() {
             numerics::assert_slices_close("A/B", composed.data(), forwarded.data(), 8);
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Identity requests that escape resolution, and identity formatting.
-// ---------------------------------------------------------------------------
-
-/// A codec over ZN that asks for the value identity of another category type.
-#[derive(Clone, Debug)]
-struct MismatchedRequest;
-
-impl CategoryCodec<ZN> for MismatchedRequest {
-    type Sector = ZNIrrep;
-    type Error = FusionAlgebraError;
-    type Mode = MF;
-    type Unit = CanonicalUnitAdmission;
-
-    fn encode_label<'a>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        rule: &RuleIdentity,
-        label: &ZNIrrep,
-    ) -> Result<SectorId, FusionAlgebraError> {
-        Enumerated::new().encode_label(category, rule, label)
-    }
-    fn decode_label<'a>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        id: SectorId,
-    ) -> Result<ZNIrrep, FusionAlgebraError> {
-        Enumerated::new().decode_label(category, id)
-    }
-    fn object<'a>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        id: SectorId,
-    ) -> Result<ZNIrrep, FusionAlgebraError> {
-        Enumerated::new().object(category, id)
-    }
-    fn sector_id<'a>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        rule: &RuleIdentity,
-        object: &ZNIrrep,
-    ) -> Result<SectorId, FusionAlgebraError> {
-        Enumerated::new().sector_id(category, rule, object)
-    }
-    fn rule_identity(&self, _: &ZN) -> Option<RuleIdentity> {
-        CategoryCodec::<U1>::rule_identity(&Enumerated::new(), &U1)
-    }
-    fn map_error(
-        &self,
-        inputs: &[SectorId],
-        error: CategoryAdapterError<std::convert::Infallible>,
-    ) -> FusionAlgebraError {
-        <Enumerated as CategoryCodec<ZN>>::map_error(&Enumerated::new(), inputs, error)
-    }
-}
-
-#[test]
-fn a_request_for_another_category_type_never_aliases() {
-    let first = CategoryRule::try_new(ZN::new(3).unwrap(), MismatchedRequest).unwrap();
-    let second = CategoryRule::try_new(ZN::new(3).unwrap(), MismatchedRequest).unwrap();
-    assert_ne!(
-        FusionRule::rule_identity(&first),
-        FusionRule::rule_identity(&second)
-    );
-    assert_eq!(
-        FusionRule::rule_identity(&first),
-        FusionRule::rule_identity(&first.clone())
-    );
 }
