@@ -1100,8 +1100,7 @@ where
     /// uninitialized memory ([`FusionBlockContractPlan::execute_owned`]):
     /// the output is not zero-filled by the allocator, and inactive blocks
     /// and padding are written `+0.0`. Backend-side output fills (a one-job
-    /// batch, the faer strategy's per-job prefill) and the zero fill of
-    /// scatter blocks remain. A route with an output transform (CopyC, a
+    /// batch, the faer strategy's per-job prefill) remain. A route with an output transform (CopyC, a
     /// DynamicTree output) runs its core into scratch, then the transform
     /// writes every destination element once into an uninitialized payload
     /// ([`DenseTreeTransformOperations::try_tree_transform_structure_overwrite_owned_raw`])
