@@ -71,10 +71,8 @@ An owned eager Host contraction (`contract`, `planar_contract`, `compose`,
 in both modes) allocates its output without zeroing it when the route's core
 GEMMs write the destination (the canonical core, or a `DynamicTree` route
 without an output transform). Each GEMM call receives only its own
-destination ranges through the fresh entry above; the blocks no direct GEMM
-writes (inactive blocks, padding, and the blocks a packed group scatters
-into) are written `+0.0` by symtn, and scatter groups then overwrite theirs.
-The output is published only after every element has been written. A route
+destination ranges through the fresh entry above; the blocks no GEMM writes
+(inactive blocks and padding) are written `+0.0` by symtn. The output is published only after every element has been written. A route
 with an output transform (`copyC`, a `DynamicTree` output) runs its core into
 scratch; the transform then writes every destination element once into an
 unzeroed payload, inactive blocks as `+0.0`, when the destination proves

@@ -1,5 +1,6 @@
 //! Behavior tests neither observe nor reset process-global state and run concurrently.
 
+mod canonical_destination;
 mod categorical_recoupling;
 #[path = "../../tests/support/su2.rs"]
 mod su2;
