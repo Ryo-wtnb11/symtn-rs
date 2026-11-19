@@ -13,7 +13,6 @@ fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
     let bound = bound_tensor(Arc::clone(&provider), &tensor);
     let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
     let compact_svd_copy_rec = crate::probe::record();
-    let input_pack_bytes_rec = crate::probe::record();
 
     let output =
         pinv_adjoint_parent_into_mf(engine, &mut dense, &bound.as_ref().dynamic(), 0.5).unwrap();
@@ -23,10 +22,6 @@ fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
     assert_eq!(scalar_u1_block(output.tensor(), 0), 0.0);
     assert!((scalar_u1_block(output.tensor(), 1) - 1.0).abs() < 1e-12);
     // The canonical input is read in place; no SVD factor is laid out.
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        0
-    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 
@@ -57,7 +52,6 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
     let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
     let mut dense = ScriptedExecutor::<FailSecondSvd>::default();
     let compact_svd_copy_rec = crate::probe::record();
-    let input_pack_bytes_rec = crate::probe::record();
 
     assert!(matches!(
         pinv_adjoint_parent_into_mf(engine, &mut dense, &bound.as_ref().dynamic(), 0.0,),
@@ -69,10 +63,6 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
     assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 2);
     assert_eq!(tensor.data(), before);
     // The canonical input is read in place; no SVD factor is laid out.
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        0
-    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 

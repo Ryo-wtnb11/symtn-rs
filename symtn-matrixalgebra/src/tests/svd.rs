@@ -33,7 +33,6 @@ fn factorization_without_adjoint_route_refuses_lazy_adjoint_before_leasing() {
         op::SvdVals,
         FactorSource::AdjointOf {
             parent: bound.as_ref().dynamic(),
-            adjoint_space: bound.space(),
         },
     );
     assert!(matches!(

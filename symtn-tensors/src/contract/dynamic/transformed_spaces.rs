@@ -32,7 +32,7 @@ pub(crate) struct DynamicFusionCoreDstEntry<C = f64> {
 
 /// The core-layout space of a stored source and its transformer. A
 /// conjugated source is read as its storage-ordered lazy adjoint, keyed on
-/// the parent's storage: a per-call adjoint view would take a fresh content
+/// the parent's storage: a per-call adjoint layout would take a fresh content
 /// id on every call and only evict live transformers.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_transformed_source<R>(

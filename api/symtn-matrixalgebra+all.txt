@@ -126,7 +126,6 @@ impl<R, D> symtn_matrixalgebra::seam::FactorOutput<R, D>
 pub fn symtn_matrixalgebra::seam::FactorOutput<R, D>::into_dense(self) -> core::option::Option<symtn_matrixalgebra::BoundDynFactor<R, D>>
 pub enum symtn_matrixalgebra::seam::FactorSource<'a, R, D>
 pub symtn_matrixalgebra::seam::FactorSource::AdjointOf
-pub symtn_matrixalgebra::seam::FactorSource::AdjointOf::adjoint_space: &'a symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>
 pub symtn_matrixalgebra::seam::FactorSource::AdjointOf::parent: symtn_tensors::bound_tensor::BoundDynamicTensorRef<'a, R, D>
 pub symtn_matrixalgebra::seam::FactorSource::Dense(symtn_tensors::bound_tensor::BoundDynamicTensorRef<'a, R, D>)
 pub symtn_matrixalgebra::seam::FactorSource::Diagonal

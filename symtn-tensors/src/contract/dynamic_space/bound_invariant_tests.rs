@@ -1081,22 +1081,6 @@ fn generic_adjoint_rejects_multiplicity_free_before_final_layout_build() {
 }
 
 #[test]
-fn memoized_adjoint_view_reads_the_current_admission() {
-    // What: admission is reassigned after construction when a layout is
-    // promoted, so the adjoint view reads it at call time; only the
-    // admission-independent hom space and structure are memoized.
-    let complete = z2_matrix_space();
-    let first = complete.adjoint_view().unwrap();
-    let mut unbound = complete.clone();
-    unbound.admission = FusionSpaceAdmission::Unbound;
-    let second = unbound.adjoint_view().unwrap();
-    assert_eq!(second.admission(), &FusionSpaceAdmission::Unbound);
-    assert_eq!(first.admission(), complete.admission());
-    assert!(Arc::ptr_eq(second.structure(), first.structure()));
-    assert!(Arc::ptr_eq(second.homspace_arc(), first.homspace_arc()));
-}
-
-#[test]
 #[allow(clippy::arc_with_non_send_sync)] // The bound API requires Arc; this isolated spy uses Cell counters.
 fn checked_adjoint_provider_derivation_cannot_republish_after_reset() {
     if crate::test_support::run_isolated_or_return(

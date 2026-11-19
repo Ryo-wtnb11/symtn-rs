@@ -24,37 +24,6 @@ fn one_sector_generic_factorization_input(
 }
 
 #[test]
-fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the adjoint view, a strided noncanonical source, factorizes on
-    // the packed path with the source's provider; its singular values are
-    // the parent's, and every compact factor pair reconstructs it.
-    let (canonical_space, canonical_data) = generic_factorization_input();
-    let (provider, canonical_space) = bind_checked_layout(&canonical_space);
-    let view_space = canonical_space.adjoint_view().unwrap();
-    let canonical = BoundDynamicTensorRef::try_new(&canonical_space, &canonical_data).unwrap();
-    let view = BoundDynamicTensorRef::try_new(&view_space, &canonical_data).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let canonical_values = svd_vals_dyn_checked_generic(&mut dense, &canonical).unwrap();
-    assert!(!canonical_values.is_empty());
-    let view_values = svd_vals_dyn_checked_generic(&mut dense, &view).unwrap();
-    assert_real_spectra_close(&view_values, &canonical_values);
-
-    let svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &view).unwrap();
-    let s = generic_diagonal_factor(&svd.0, &svd.2);
-    assert_compact_factors_reconstruct_input(&view, &svd.0, Some(&s), &svd.1);
-    assert!(Arc::ptr_eq(svd.0.space().provider_arc(), &provider));
-    assert!(Arc::ptr_eq(svd.1.space().provider_arc(), &provider));
-
-    let qr = qr_compact_dyn_checked_generic(engine, &mut dense, &view).unwrap();
-    assert_compact_factors_reconstruct_input(&view, &qr.q, None, &qr.r);
-    let lq = lq_compact_dyn_checked_generic(engine, &mut dense, &view).unwrap();
-    assert_compact_factors_reconstruct_input(&view, &lq.l, None, &lq.q);
-}
-
-#[test]
 fn checked_generic_pair_publication_reuses_one_sector_owners() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = one_sector_generic_factorization_input();

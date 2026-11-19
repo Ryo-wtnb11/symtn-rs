@@ -964,14 +964,12 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    match matricizations {
-        InputMatricizations::Regions { regions, .. } => {
-            build_left_right_bound_pair_generic_checked(provider, homspace, regions.as_ref(), pairs)
-        }
-        InputMatricizations::Packed(matrices) => {
-            build_left_right_bound_pair_generic_checked(provider, homspace, matrices, pairs)
-        }
-    }
+    build_left_right_bound_pair_generic_checked(
+        provider,
+        homspace,
+        matricizations.regions.as_ref(),
+        pairs,
+    )
 }
 
 /// Checked generic factor materialization with identity completion for sectors

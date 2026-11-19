@@ -84,20 +84,14 @@ fn checked_generic_facade_layouts_take_the_direct_region_path() {
         let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
         let generic_pair_rec = crate::probe::record();
-        let compact_qr_copy_rec = crate::probe::record();
         let qr = qr_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
         assert_compact_factors_reconstruct_input(&input, &qr.q, None, &qr.r);
-        assert_eq!(compact_qr_copy_rec.compact_qr_copy().input_pack_bytes, 0);
 
-        let compact_svd_copy_rec = crate::probe::record();
         let svd = svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
         assert_compact_factors_reconstruct_input(&input, &svd.u, Some(&svd.s), &svd.vh);
-        assert_eq!(compact_svd_copy_rec.compact_svd_copy().input_pack_bytes, 0);
 
-        let compact_lq_copy_rec = crate::probe::record();
         let lq = lq_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
         assert_compact_factors_reconstruct_input(&input, &lq.l, None, &lq.q);
-        assert_eq!(compact_lq_copy_rec.compact_lq_copy().input_pack_bytes, 0);
 
         // The fresh bond-space builder enumerates the preserved side's trees
         // in the facade input's order, so the per-call route proof publishes
@@ -111,17 +105,12 @@ fn checked_generic_facade_layouts_take_the_direct_region_path() {
             (3, 0),
             "{publication:?}"
         );
-        let values_fallbacks_rec = crate::probe::record();
         svd_vals_dyn_checked_generic(&mut dense, &input).unwrap();
         if endomorphism {
             let hermitian_input = BoundDynamicTensorRef::try_new(&space, &hermitian).unwrap();
             eigh_vals_dyn_checked_generic(&mut dense, &hermitian_input).unwrap();
             eig_vals_dyn_checked_generic(&mut dense, &input).unwrap();
         }
-        assert_eq!(
-            values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
-            0
-        );
     }
     assert!(
         unordered_fixtures > 0,

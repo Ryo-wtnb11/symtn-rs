@@ -352,7 +352,7 @@ where
     // `svd_compact_dyn(..).map(|svd| svd.singular_values)` computed then threw
     // away. Valid no-vector and full-factor drivers can differ in the last
     // bits, so comparisons use dtype-appropriate tolerances.
-    let matricizations = value_matricizations(space.structure(), input.data(), space.nout())?;
+    let matricizations = input_matricizations(space.structure(), input.data(), space.nout())?;
     svd_vals_spectra(engine, dense, &matricizations)
 }
 
@@ -507,10 +507,7 @@ where
         FactorFamily::Svd,
     )?;
     let authority = bond.space();
-    let plan =
-        compact_factor_plan(authority)?.ok_or(OperationError::UnsupportedTensorContractScope {
-            message: "canonical bond layout has no compact factor plan",
-        })?;
+    let plan = compact_factor_plan(authority)?;
     let (u_data, vh_data, singular_values) = compact_diagonal_svd_factor_data(
         &plan.routes,
         plan.left_regions.len(),
@@ -940,176 +937,18 @@ where
     D: FactorScalar,
 {
     let space = input.space().space();
-    if let Some(plan) = compact_factor_plan(input.space())? {
-        let adjoint_spaces = if matches!(gauge, CompactSvdGauge::AdjointLeft) {
-            let adjoint = input.space().adjoint_view()?;
-            let bond = compact_bond_leg(&plan.source_regions);
-            Some((
-                build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
-                    bond.clone(),
-                    FactorSide::Left,
-                )?,
-                build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
-                    bond,
-                    FactorSide::Right,
-                )?,
-            ))
-        } else {
-            None
-        };
-        return svd_compact_direct_regions(engine, dense, input, &plan, gauge, adjoint_spaces);
-    }
-    let matricizations = sector_matricizations(space.structure(), input.data(), space.nout())?;
-    #[cfg(test)]
-    crate::probe::input_pack(
-        crate::probe::CopyOp::Svd,
-        matricizations
-            .iter()
-            .map(|matrix| std::mem::size_of_val(&matrix.data[..])),
-    );
-
-    let ranks = matricizations
-        .iter()
-        .map(|matrix| SectorRank {
-            sector: matrix.sector,
-            kept: matrix.rows.min(matrix.cols),
-        })
-        .collect::<Vec<_>>();
-    let bond = SectorLeg::new(ranks.iter().map(|rank| (rank.sector, rank.kept)), false);
-    let (left_space, right_space) = match gauge {
-        CompactSvdGauge::Left => (
-            build_bound_factor_space(
-                input.space(),
-                space.homspace(),
-                bond.clone(),
-                FactorSide::Left,
-            )?,
-            build_bound_factor_space(input.space(), space.homspace(), bond, FactorSide::Right)?,
-        ),
-        CompactSvdGauge::AdjointLeft => {
-            let adjoint = input.space().adjoint_view()?;
-            (
-                build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
-                    bond.clone(),
-                    FactorSide::Left,
-                )?,
-                build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
-                    bond,
-                    FactorSide::Right,
-                )?,
-            )
-        }
+    let plan = compact_factor_plan(input.space())?;
+    let adjoint_spaces = if matches!(gauge, CompactSvdGauge::AdjointLeft) {
+        let adjoint_hom = symtn_tensors::FusionOperand::adjoint(space).logical_homspace();
+        let bond = compact_bond_leg(&plan.source_regions);
+        Some((
+            build_bound_factor_space(input.space(), adjoint_hom, bond.clone(), FactorSide::Left)?,
+            build_bound_factor_space(input.space(), adjoint_hom, bond, FactorSide::Right)?,
+        ))
+    } else {
+        None
     };
-    let u_len = left_space
-        .space()
-        .required_len()
-        .map_err(OperationError::from_core_preserving_context)?;
-    let mut u_data = vec![D::zero(); u_len];
-    let vt_len = right_space
-        .space()
-        .required_len()
-        .map_err(OperationError::from_core_preserving_context)?;
-    let mut vt_data = vec![D::zero(); vt_len];
-
-    let mut singular_values = Vec::with_capacity(matricizations.len());
-
-    let index = PlacementIndex::new(&matricizations, &[FactorSide::Left, FactorSide::Right]);
-    let u_groups = SectorBlockGroups::new(left_space.space().structure(), FactorSide::Left)?;
-    let vt_groups = SectorBlockGroups::new(right_space.space().structure(), FactorSide::Right)?;
-    let (u_target, vt_target) = (left_space.space(), right_space.space());
-    let blocks = matricizations
-        .iter()
-        .map(|matrix| (&matrix.data[..], matrix.rows, matrix.cols))
-        .collect::<Vec<_>>();
-    in_linalg_scope(engine, dense, |dense, engine| {
-        compact_svd_sectors_staged(
-            engine,
-            dense,
-            &blocks,
-            Some(gauge),
-            SvdStorage::Packed,
-            |_u, _vt| {
-                #[cfg(test)]
-                crate::probe::mf_svd_fallback(_u, _vt);
-            },
-            |position, stage| {
-                let matrix = &matricizations[position];
-                let CompactSvdSector {
-                    rank,
-                    u,
-                    singular_values: values,
-                    vt,
-                    ..
-                } = stage;
-                singular_values.push(SectorSpectrum {
-                    sector: matrix.sector,
-                    values,
-                });
-                match gauge {
-                    CompactSvdGauge::Left => scatter_left_sector_blocks(
-                        u_target,
-                        &mut u_data,
-                        matrix,
-                        &index,
-                        &u_groups,
-                        u,
-                        matrix.rows,
-                    )?,
-                    CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
-                        u_target,
-                        &mut u_data,
-                        matrix,
-                        &index,
-                        &u_groups,
-                        vt,
-                        rank,
-                        FactorSide::Left,
-                    )?,
-                }
-                #[cfg(test)]
-                crate::probe::output_scatter::<D>(crate::probe::CopyOp::Svd, 1, matrix.rows * rank);
-                match gauge {
-                    CompactSvdGauge::Left => scatter_right_sector_blocks(
-                        vt_target,
-                        &mut vt_data,
-                        matrix,
-                        &index,
-                        &vt_groups,
-                        vt,
-                        rank,
-                    )?,
-                    CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
-                        vt_target,
-                        &mut vt_data,
-                        matrix,
-                        &index,
-                        &vt_groups,
-                        u,
-                        matrix.rows,
-                        FactorSide::Right,
-                    )?,
-                }
-                #[cfg(test)]
-                crate::probe::output_scatter::<D>(crate::probe::CopyOp::Svd, 1, rank * matrix.cols);
-                Ok(())
-            },
-        )
-    })
-    .map(drop)?;
-
-    let (u_nout, u_nin) = (u_target.nout(), u_target.nin());
-    let (vh_nout, vh_nin) = (vt_target.nout(), vt_target.nin());
-    let u = BoundDynFactor::from_bound(left_space, u_data, u_nout, u_nin)?;
-    let vh = BoundDynFactor::from_bound(right_space, vt_data, vh_nout, vh_nin)?;
-    Ok((u, vh, singular_values))
+    svd_compact_direct_regions(engine, dense, input, &plan, gauge, adjoint_spaces)
 }
 
 pub(super) fn svd_compact_direct_regions<E, R, D>(
@@ -1134,39 +973,39 @@ where
             input.space().rebind_validated(&plan.right_layout)?,
         ),
     };
-    // The adjoint's own factor regions, per route, when its trees match the
-    // parent's so each route's adjoint factors are one contiguous region.
+    // The adjoint's own factor regions, per route. Why an internal error,
+    // not a by-tree scatter: the adjoint's factors are canonical over the
+    // parent's sides swapped, so each lists the parent's trees of that side
+    // in the parent's order, and every sector has a nonzero rank (a leg keeps
+    // no zero-degeneracy sector), so each route's adjoint factors are one
+    // contiguous region.
     let adjoint_regions = if matches!(gauge, CompactSvdGauge::AdjointLeft) {
-        let left =
-            checked_sector_regions(left_space.space().structure(), left_space.space().nout())?;
-        let right =
-            checked_sector_regions(right_space.space().structure(), right_space.space().nout())?;
-        match (left, right) {
-            (Some(left), Some(right)) => {
-                let left_by_sector = SectorRegionIndex::new(&left)?;
-                let right_by_sector = SectorRegionIndex::new(&right)?;
-                let mut routes = Vec::with_capacity(plan.routes.len());
-                let mut compatible = true;
-                for route in &plan.routes {
-                    let source = &plan.source_regions[route.source_region];
-                    let pair = left_by_sector
-                        .get(route.sector)
-                        .zip(right_by_sector.get(route.sector));
-                    if let Some((li, ri)) = pair {
-                        compatible &= left[li].row_trees() == source.col_trees()
-                            && right[ri].col_trees() == source.row_trees()
-                            && left[li].rows() == source.cols()
-                            && right[ri].cols() == source.rows();
-                        routes.push((left[li].range(), right[ri].range()));
-                    } else {
-                        compatible = false;
-                        break;
-                    }
-                }
-                compatible.then_some(routes)
-            }
-            _ => None,
+        let left = input_regions(left_space.space().structure(), left_space.space().nout())?;
+        let right = input_regions(right_space.space().structure(), right_space.space().nout())?;
+        let left_by_sector = SectorRegionIndex::new(&left)?;
+        let right_by_sector = SectorRegionIndex::new(&right)?;
+        let mut routes = Vec::with_capacity(plan.routes.len());
+        for route in &plan.routes {
+            let source = &plan.source_regions[route.source_region];
+            let pair = left_by_sector
+                .get(route.sector)
+                .zip(right_by_sector.get(route.sector))
+                .filter(|&(li, ri)| {
+                    left[li].row_trees() == source.col_trees()
+                        && right[ri].col_trees() == source.row_trees()
+                        && left[li].rows() == source.cols()
+                        && right[ri].cols() == source.rows()
+                });
+            debug_assert!(
+                pair.is_some(),
+                "adjoint factor regions do not transpose the source"
+            );
+            let (li, ri) = pair.ok_or(OperationError::InvalidArgument {
+                message: "internal adjoint SVD layout invariant violated (factor trees do not transpose the source); please report this",
+            })?;
+            routes.push((left[li].range(), right[ri].range()));
         }
+        Some(routes)
     } else {
         None
     };
@@ -1192,13 +1031,10 @@ where
     let mut u_data = vec![D::zero(); left_space.space().required_len()?];
     let mut vh_data = vec![D::zero(); right_space.space().required_len()?];
 
-    // Where each solved route's factors land: the final regions (as
-    // computed, or the adjoint problem's factors in the adjoint's regions),
-    // or, for an adjoint whose trees do not match, one packed transient that
-    // is scattered once the batch has succeeded.
-    let scattered = matches!(gauge, CompactSvdGauge::AdjointLeft) && adjoint_regions.is_none();
-    let (u_ranges, vh_ranges, placement) = match (gauge, &adjoint_regions) {
-        (CompactSvdGauge::Left, _) => (
+    // Where each solved route's factors land: the final regions, as computed
+    // or as the adjoint problem's factors in the adjoint's regions.
+    let (u_ranges, vh_ranges, placement) = match &adjoint_regions {
+        None => (
             solved
                 .iter()
                 .map(|&p| {
@@ -1219,26 +1055,13 @@ where
                 .collect::<Vec<_>>(),
             symtn_dense::FactorPlacement::AsComputed,
         ),
-        (CompactSvdGauge::AdjointLeft, Some(routes)) => (
+        Some(routes) => (
             solved.iter().map(|&p| routes[p].0.clone()).collect(),
             solved.iter().map(|&p| routes[p].1.clone()).collect(),
             symtn_dense::FactorPlacement::Adjoint,
         ),
-        (CompactSvdGauge::AdjointLeft, None) => (
-            packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows * rows.min(cols))),
-            packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows.min(cols) * cols)),
-            symtn_dense::FactorPlacement::AsComputed,
-        ),
     };
     let end = |ranges: &[std::ops::Range<usize>]| ranges.last().map_or(0, |range| range.end);
-    let (mut u_transient, mut vh_transient) = if scattered {
-        (
-            vec![D::zero(); end(&u_ranges)],
-            vec![D::zero(); end(&vh_ranges)],
-        )
-    } else {
-        (Vec::new(), Vec::new())
-    };
     let s_ranges = packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows.min(cols)));
     let mut s_data = vec![D::Real::zero(); end(&s_ranges)];
     let layouts = blocks
@@ -1260,13 +1083,8 @@ where
         })
         .collect::<Vec<DestLayouts>>();
     {
-        let (u_target, vh_target) = if scattered {
-            (&mut u_transient[..], &mut vh_transient[..])
-        } else {
-            (&mut u_data[..], &mut vh_data[..])
-        };
-        let u_slices = split_ranges(u_target, &u_ranges)?;
-        let vh_slices = split_ranges(vh_target, &vh_ranges)?;
+        let u_slices = split_ranges(&mut u_data, &u_ranges)?;
+        let vh_slices = split_ranges(&mut vh_data, &vh_ranges)?;
         let s_slices = split_ranges(&mut s_data, &s_ranges)?;
         let mut dests = u_slices
             .into_iter()
@@ -1300,17 +1118,12 @@ where
                     dest_data::<D>(u, "svd_into")?,
                     dest_data::<D>(vh, "svd_into")?,
                 );
-                match (gauge, placement) {
-                    (CompactSvdGauge::Left, _) => {
-                        svd_compact_gauge(u, rows, rows, vh, rank, cols, rank)
-                    }
+                match gauge {
+                    CompactSvdGauge::Left => svd_compact_gauge(u, rows, rows, vh, rank, cols, rank),
                     // The adjoint's `u` columns are the conjugated parent `Vh`
                     // rows, so its left gauge is the parent-row gauge.
-                    (CompactSvdGauge::AdjointLeft, symtn_dense::FactorPlacement::Adjoint) => {
+                    CompactSvdGauge::AdjointLeft => {
                         svd_compact_gauge(u, cols, cols, vh, rank, rows, rank)
-                    }
-                    (CompactSvdGauge::AdjointLeft, _) => {
-                        svd_compact_adjoint_gauge(u, rows, rows, vh, rank, cols, rank)
                     }
                 }
                 singular_values[solved[index]].values =
@@ -1318,37 +1131,6 @@ where
                 Ok(())
             },
         )?;
-    }
-    if scattered {
-        let index =
-            PlacementIndex::new(&plan.source_regions, &[FactorSide::Left, FactorSide::Right]);
-        let left_groups = SectorBlockGroups::new(left_space.space().structure(), FactorSide::Left)?;
-        let right_groups =
-            SectorBlockGroups::new(right_space.space().structure(), FactorSide::Right)?;
-        for (solved_index, &position) in solved.iter().enumerate() {
-            let region = &plan.source_regions[plan.routes[position].source_region];
-            let rank = plan.routes[position].rank;
-            scatter_adjoint_svd_factor(
-                left_space.space(),
-                &mut u_data,
-                region,
-                &index,
-                &left_groups,
-                &vh_transient[vh_ranges[solved_index].clone()],
-                rank,
-                FactorSide::Left,
-            )?;
-            scatter_adjoint_svd_factor(
-                right_space.space(),
-                &mut vh_data,
-                region,
-                &index,
-                &right_groups,
-                &u_transient[u_ranges[solved_index].clone()],
-                region.rows(),
-                FactorSide::Right,
-            )?;
-        }
     }
     let u = BoundDynFactor::from_bound(
         left_space,
@@ -1369,70 +1151,6 @@ where
         },
     )?;
     Ok((u, vh, singular_values))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn scatter_adjoint_svd_factor<D, M>(
-    target: &DynamicFusionMapSpace,
-    data: &mut [D],
-    matrix: &M,
-    index: &PlacementIndex<'_>,
-    groups: &SectorBlockGroups,
-    factor: &[D],
-    source_rows: usize,
-    side: FactorSide,
-) -> Result<(), OperationError>
-where
-    D: FactorScalar,
-    M: SectorGeometry,
-{
-    let source_side = match side {
-        FactorSide::Left => FactorSide::Right,
-        FactorSide::Right => FactorSide::Left,
-    };
-    for block_index in groups.blocks(matrix.sector()) {
-        let block = target.structure().block(block_index)?;
-        let BlockKey::FusionTree(key) = block.key() else {
-            continue;
-        };
-        let tree = match side {
-            FactorSide::Left => key.codomain_tree(),
-            FactorSide::Right => key.domain_tree(),
-        };
-        let (side_offset, _) = index.placement(matrix.sector(), source_side, tree)?;
-        let shape = block.shape();
-        let strides = block.strides();
-        let bond_axis = match side {
-            FactorSide::Left => shape.len() - 1,
-            FactorSide::Right => 0,
-        };
-        let side_extent = shape
-            .iter()
-            .enumerate()
-            .filter(|&(axis, _)| axis != bond_axis)
-            .map(|(_, &extent)| extent)
-            .product::<usize>();
-        for side_index in 0..side_extent {
-            let mut remaining = side_index;
-            let mut target_offset = block.offset();
-            for axis in 0..shape.len() {
-                if axis != bond_axis {
-                    let coordinate = remaining % shape[axis];
-                    remaining /= shape[axis];
-                    target_offset += coordinate * strides[axis];
-                }
-            }
-            for bond in 0..shape[bond_axis] {
-                let source_index = match side {
-                    FactorSide::Left => bond + source_rows * (side_offset + side_index),
-                    FactorSide::Right => side_offset + side_index + source_rows * bond,
-                };
-                data[target_offset + bond * strides[bond_axis]] =
-                    FactorScalar::adjoint(factor[source_index]);
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -1816,8 +1534,7 @@ where
     D: FactorScalar,
 {
     let space = input.space().space();
-    let matrices =
-        multiplicity_free_input_matricizations(space.structure(), input.data(), space.nout())?;
+    let matrices = input_matricizations(space.structure(), input.data(), space.nout())?;
     let authority = MfAuthority(input.space());
     let row_dimensions = authority.coupled_dimensions(space.homspace().codomain())?;
     let col_dimensions = authority.coupled_dimensions(space.homspace().domain())?;
@@ -1837,17 +1554,20 @@ where
     };
     // The left/right bond legs differ in the full SVD (rows vs columns), so
     // build the two factors with separate bond dimensions.
-    let (u, vh) = with_input_geometry!(&matrices, |geometry| {
-        let mut publish = |dimensions, side| {
-            build_bound_factor_with_placement(
-                authority, homspace, geometry, &mut pairs, dimensions, side, placement,
-            )
-        };
-        Ok::<_, OperationError>((
-            publish(&row_dimensions, FactorSide::Left)?,
-            publish(&col_dimensions, FactorSide::Right)?,
-        ))
-    })?;
+    let (u, vh) = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        {
+            let mut publish = |dimensions, side| {
+                build_bound_factor_with_placement(
+                    authority, homspace, geometry, &mut pairs, dimensions, side, placement,
+                )
+            };
+            Ok::<_, OperationError>((
+                publish(&row_dimensions, FactorSide::Left)?,
+                publish(&col_dimensions, FactorSide::Right)?,
+            ))
+        }
+    }?;
     Ok(SvdFullFactorsDyn {
         u,
         vh,
@@ -2163,8 +1883,7 @@ pub(super) fn concat_compact_svd_factor_regions<D>(
         .find_map(|region| region.as_ref().map(Vec::as_ptr));
     let output = concat_owned_factor_regions(regions, required_len);
     #[cfg(test)]
-    crate::probe::owned_output(
-        crate::probe::CopyOp::Svd,
+    crate::probe::svd_owned_output(
         first.is_some_and(|pointer| std::ptr::eq(pointer, output.as_ptr())),
     );
     output
@@ -2264,17 +1983,8 @@ where
 {
     let provider = input.space().provider_arc();
     let space = input.space().space();
-    let matrices = generic_input_matricizations(space.structure(), input.data(), space.nout())
+    let matrices = input_matricizations(space.structure(), input.data(), space.nout())
         .map_err(CheckedGenericFactorPlanError::from)?;
-    #[cfg(test)]
-    if let InputMatricizations::Packed(matrices) = &matrices {
-        crate::probe::input_pack(
-            crate::probe::CopyOp::Svd,
-            matrices
-                .iter()
-                .map(|matrix| std::mem::size_of_val(&matrix.data[..])),
-        );
-    }
     let gauge = match placement {
         FactorPlacement::Direct => CompactSvdGauge::Left,
         FactorPlacement::Adjoint => CompactSvdGauge::AdjointLeft,
@@ -2378,25 +2088,16 @@ where
         space.homspace().codomain().clone(),
     );
     let authority = CheckedAuthority(provider);
-    let mut publish = |side| match &matrices {
-        InputMatricizations::Regions { regions, .. } => publish_one_sided_factor(
+    let mut publish = |side| {
+        publish_one_sided_factor(
             &authority,
             &adjoint,
-            regions.as_ref(),
+            matrices.regions.as_ref(),
             &mut pairs,
             &ranks,
             side,
             FactorPlacement::Adjoint,
-        ),
-        InputMatricizations::Packed(packed) => publish_one_sided_factor(
-            &authority,
-            &adjoint,
-            packed,
-            &mut pairs,
-            &ranks,
-            side,
-            FactorPlacement::Adjoint,
-        ),
+        )
     };
     let u = publish(FactorSide::Left)?;
     let vh = publish(FactorSide::Right)?;
@@ -2476,7 +2177,7 @@ where
 {
     let provider = input.space().provider_arc();
     let space = input.space().space();
-    let matrices = generic_input_matricizations(space.structure(), input.data(), space.nout())
+    let matrices = input_matricizations(space.structure(), input.data(), space.nout())
         .map_err(CheckedGenericFactorPlanError::from)?;
     let checked = CheckedAuthority(provider);
     let row_dimensions = checked.coupled_dimensions(space.homspace().codomain())?;
@@ -2494,17 +2195,20 @@ where
             row_dimensions,
         ),
     };
-    let (u, vh) = with_input_geometry!(&matrices, |geometry| {
-        let mut publish = |dimensions, side| {
-            publish_one_sided_factor(
-                &checked, &homspace, geometry, &mut pairs, dimensions, side, placement,
-            )
-        };
-        Ok::<_, CheckedGenericFactorPlanError<R::Error>>((
-            publish(&row_dimensions, FactorSide::Left)?,
-            publish(&col_dimensions, FactorSide::Right)?,
-        ))
-    })?;
+    let (u, vh) = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        {
+            let mut publish = |dimensions, side| {
+                publish_one_sided_factor(
+                    &checked, &homspace, geometry, &mut pairs, dimensions, side, placement,
+                )
+            };
+            Ok::<_, CheckedGenericFactorPlanError<R::Error>>((
+                publish(&row_dimensions, FactorSide::Left)?,
+                publish(&col_dimensions, FactorSide::Right)?,
+            ))
+        }
+    }?;
     Ok(SvdFullFactorsDyn {
         u,
         vh,
@@ -2545,8 +2249,7 @@ impl<R, D: FactorScalar> Run<R, D> for op::SvdCompact {
             Some(
                 |engine: &mut dyn Engine,
                  dense: &mut L::Executor,
-                 parent: &BoundDynamicTensorRef<'_, R, D>,
-                 _: &BoundDynamicFusionMapSpace<R>| {
+                 parent: &BoundDynamicTensorRef<'_, R, D>| {
                     M::svd_compact_adjoint_dense(TOKEN, engine, dense, parent)
                 },
             ),
@@ -2589,8 +2292,7 @@ impl<R, D: FactorScalar> Run<R, D> for op::SvdFull {
             Some(
                 |engine: &mut dyn Engine,
                  dense: &mut L::Executor,
-                 parent: &BoundDynamicTensorRef<'_, R, D>,
-                 _: &BoundDynamicFusionMapSpace<R>| {
+                 parent: &BoundDynamicTensorRef<'_, R, D>| {
                     M::svd_full_adjoint_dense(TOKEN, engine, dense, parent)
                 },
             ),

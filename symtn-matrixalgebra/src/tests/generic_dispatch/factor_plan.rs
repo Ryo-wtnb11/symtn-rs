@@ -29,9 +29,7 @@ fn compact_factor_plan_does_not_retain_provider() {
     let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let weak = Arc::downgrade(&provider);
     let bound = bound_tensor(Arc::clone(&provider), &tensor);
-    let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
-        .unwrap()
-        .unwrap();
+    let plan = crate::factorize::compact_factor_plan_for_test(bound.space()).unwrap();
 
     drop(bound);
     drop(provider);
@@ -53,12 +51,8 @@ fn compact_factor_plan_is_identical_across_calls_on_one_space() {
     .map(SectorId::from);
     let tensor = tsvd_test_tensor(&U1FusionRule, &charges);
     let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
-    let first = crate::factorize::compact_factor_plan_for_test(bound.space())
-        .unwrap()
-        .unwrap();
-    let second = crate::factorize::compact_factor_plan_for_test(bound.space())
-        .unwrap()
-        .unwrap();
+    let first = crate::factorize::compact_factor_plan_for_test(bound.space()).unwrap();
+    let second = crate::factorize::compact_factor_plan_for_test(bound.space()).unwrap();
 
     let (first_source, first_u, first_vh) =
         crate::factorize::compact_factor_plan_regions_for_test(&first);
@@ -87,9 +81,7 @@ fn compact_factor_routes_agree_between_sorted_and_unsorted_region_tables() {
     .map(SectorId::from);
     let tensor = tsvd_test_tensor(&U1FusionRule, &charges);
     let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
-    let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
-        .unwrap()
-        .unwrap();
+    let plan = crate::factorize::compact_factor_plan_for_test(bound.space()).unwrap();
     let (source, u, vh) = crate::factorize::compact_factor_plan_regions_for_test(&plan);
     assert!(u
         .windows(2)
@@ -140,9 +132,7 @@ fn compact_factor_plan_rejects_duplicate_missing_mismatched_and_extra_routes() {
     let rule = ZNFusionRule::new(2).unwrap();
     let tensor = rectangular_svd_tensor(17, 13);
     let bound = bound_tensor(Arc::new(rule.clone()), &tensor);
-    let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
-        .unwrap()
-        .unwrap();
+    let plan = crate::factorize::compact_factor_plan_for_test(bound.space()).unwrap();
     let (source, u, vh) = crate::factorize::compact_factor_plan_regions_for_test(&plan);
 
     let mut duplicate = u.to_vec();
@@ -159,9 +149,7 @@ fn compact_factor_plan_rejects_duplicate_missing_mismatched_and_extra_routes() {
 
     let multi = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let multi_bound = bound_tensor(Arc::new(rule), &multi);
-    let multi_plan = crate::factorize::compact_factor_plan_for_test(multi_bound.space())
-        .unwrap()
-        .unwrap();
+    let multi_plan = crate::factorize::compact_factor_plan_for_test(multi_bound.space()).unwrap();
     let (multi_source, multi_u, multi_vh) =
         crate::factorize::compact_factor_plan_regions_for_test(&multi_plan);
     let mut reversed_u = multi_u.to_vec();

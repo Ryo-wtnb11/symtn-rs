@@ -47,10 +47,6 @@ macro_rules! events {
 
 events! {
     singles {
-        /// A values-only matricization fell back to the packed path.
-        ValuesMatricizationFallback,
-        /// Bytes allocated by `sector_matricizations{,_generic}`.
-        InputPackBytes,
         /// Left factor buffers built by multiplicity-free publication.
         LeftFactorBufferBuilds,
         /// Right factor buffers built by multiplicity-free publication.
@@ -61,37 +57,10 @@ events! {
         /// Sectors whose eigenvalues the order authority had to permute.
         EigOrderPermutation,
     }
-    /// Copies of compact SVD: input packs, output scatters, owned outputs.
+    /// Owned-output publications of compact SVD.
     CompactSvdCopyProbe => compact_svd_copy {
-        input_pack_calls: SvdInputPackCalls,
-        input_pack_bytes: SvdInputPackBytes,
-        output_scatter_calls: SvdOutputScatterCalls,
-        output_scatter_bytes: SvdOutputScatterBytes,
         owned_output_publications: SvdOwnedOutputPublications,
         owned_output_owner_reused: SvdOwnedOutputOwnerReused,
-    }
-    /// Copies of compact QR.
-    CompactQrCopyProbe => compact_qr_copy {
-        input_pack_calls: QrInputPackCalls,
-        input_pack_bytes: QrInputPackBytes,
-        output_scatter_calls: QrOutputScatterCalls,
-        output_scatter_bytes: QrOutputScatterBytes,
-        owned_output_publications: QrOwnedOutputPublications,
-        owned_output_owner_reused: QrOwnedOutputOwnerReused,
-    }
-    /// Copies of compact LQ.
-    CompactLqCopyProbe => compact_lq_copy {
-        input_pack_calls: LqInputPackCalls,
-        input_pack_bytes: LqInputPackBytes,
-        output_scatter_calls: LqOutputScatterCalls,
-        output_scatter_bytes: LqOutputScatterBytes,
-    }
-    /// Copies of Hermitian eigendecomposition.
-    EighCopyProbe => eigh_copy {
-        input_pack_calls: EighInputPackCalls,
-        input_pack_bytes: EighInputPackBytes,
-        output_scatter_calls: EighOutputScatterCalls,
-        output_scatter_bytes: EighOutputScatterBytes,
     }
     /// Diagonal bond constructions.
     DiagonalBondBuildProbe => diagonal_bond_build {
@@ -155,10 +124,8 @@ const EVENTS: usize = ALL.len();
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Observation {
     CheckedCompactInput(CheckedCompactInputObservation),
-    EighOwnedVector(usize),
     CheckedEighPairs(Vec<usize>),
     CheckedSvdStage(usize, usize),
-    MfSvdFallback(usize, usize),
     StagedDestination(usize, [Option<usize>; 3]),
 }
 
@@ -175,15 +142,6 @@ pub(crate) struct CheckedCompactInputObservation {
     pub input_pointer: usize,
     pub matrix_pointer: usize,
     pub elements: usize,
-}
-
-/// The compact factorization whose copies an event belongs to.
-#[derive(Clone, Copy)]
-pub(crate) enum CopyOp {
-    Svd,
-    Qr,
-    Lq,
-    Eigh,
 }
 
 struct Probe {
@@ -272,13 +230,6 @@ impl Recording {
         })
     }
 
-    pub(crate) fn eigh_owned_vectors(&self) -> Vec<usize> {
-        self.observed(|o| match o {
-            Observation::EighOwnedVector(pointer) => Some(*pointer),
-            _ => None,
-        })
-    }
-
     /// The pair pointers of the last checked Hermitian publication.
     pub(crate) fn checked_eigh_pairs(&self) -> Vec<usize> {
         self.observed(|o| match o {
@@ -292,13 +243,6 @@ impl Recording {
     pub(crate) fn checked_svd_stages(&self) -> Vec<(usize, usize)> {
         self.observed(|o| match o {
             Observation::CheckedSvdStage(u, vt) => Some((*u, *vt)),
-            _ => None,
-        })
-    }
-
-    pub(crate) fn mf_svd_fallbacks(&self) -> Vec<(usize, usize)> {
-        self.observed(|o| match o {
-            Observation::MfSvdFallback(u, vt) => Some((*u, *vt)),
             _ => None,
         })
     }
@@ -321,56 +265,11 @@ impl Recording {
     }
 }
 
-fn bytes<D>(elements: usize) -> usize {
-    elements * std::mem::size_of::<D>()
-}
-
-/// Records the bytes of the packed matricizations of `sector_matricizations`.
-pub(crate) fn input_pack_bytes(sizes: impl Iterator<Item = usize>) {
-    add(Event::InputPackBytes, sizes.sum());
-}
-
-/// Records the packed input matricizations of one compact `op`; `sizes` are
-/// their byte sizes.
-pub(crate) fn input_pack(op: CopyOp, sizes: impl ExactSizeIterator<Item = usize>) {
-    let (calls, size) = match op {
-        CopyOp::Svd => (Event::SvdInputPackCalls, Event::SvdInputPackBytes),
-        CopyOp::Qr => (Event::QrInputPackCalls, Event::QrInputPackBytes),
-        CopyOp::Lq => (Event::LqInputPackCalls, Event::LqInputPackBytes),
-        CopyOp::Eigh => (Event::EighInputPackCalls, Event::EighInputPackBytes),
-    };
-    add(calls, sizes.len());
-    add(size, sizes.sum());
-}
-
-/// Records `calls` output scatters of `op` writing `elements` in total.
-pub(crate) fn output_scatter<D>(op: CopyOp, calls: usize, elements: usize) {
-    let (call, size) = match op {
-        CopyOp::Svd => (Event::SvdOutputScatterCalls, Event::SvdOutputScatterBytes),
-        CopyOp::Qr => (Event::QrOutputScatterCalls, Event::QrOutputScatterBytes),
-        CopyOp::Lq => (Event::LqOutputScatterCalls, Event::LqOutputScatterBytes),
-        CopyOp::Eigh => (Event::EighOutputScatterCalls, Event::EighOutputScatterBytes),
-    };
-    add(call, calls);
-    add(size, bytes::<D>(elements));
-}
-
-/// Records an owned-output publication of QR or SVD, and whether the first
+/// Records an owned-output publication of SVD, and whether the first
 /// owner's allocation was kept.
-pub(crate) fn owned_output(op: CopyOp, owner_reused: bool) {
-    let (publications, reused) = match op {
-        CopyOp::Svd => (
-            Event::SvdOwnedOutputPublications,
-            Event::SvdOwnedOutputOwnerReused,
-        ),
-        CopyOp::Qr => (
-            Event::QrOwnedOutputPublications,
-            Event::QrOwnedOutputOwnerReused,
-        ),
-        CopyOp::Lq | CopyOp::Eigh => unreachable!("only QR and SVD publish owned outputs"),
-    };
-    hit(publications);
-    add(reused, usize::from(owner_reused));
+pub(crate) fn svd_owned_output(owner_reused: bool) {
+    hit(Event::SvdOwnedOutputPublications);
+    add(Event::SvdOwnedOutputOwnerReused, usize::from(owner_reused));
 }
 
 pub(crate) fn checked_compact_input<D>(
@@ -386,10 +285,6 @@ pub(crate) fn checked_compact_input<D>(
             elements: matrix.len(),
         },
     ));
-}
-
-pub(crate) fn eigh_owned_vector<D>(vectors: &[D]) {
-    observe(Observation::EighOwnedVector(vectors.as_ptr() as usize));
 }
 
 pub(crate) fn checked_eigh_pairs(pointers: Vec<usize>) {
@@ -423,12 +318,5 @@ pub(crate) fn staged_destination(index: usize, dest: &mut symtn_dense::FactorDes
         dest.outputs_mut()
             .each_ref()
             .map(|output| output.as_ref().map(address)),
-    ));
-}
-
-pub(crate) fn mf_svd_fallback<D>(u: &[D], vt: &[D]) {
-    observe(Observation::MfSvdFallback(
-        u.as_ptr() as usize,
-        vt.as_ptr() as usize,
     ));
 }

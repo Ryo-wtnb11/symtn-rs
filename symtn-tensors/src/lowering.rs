@@ -1,3 +1,4 @@
+#[cfg(test)]
 use symtn_core::{BlockKey, BlockSpec, BlockStructure, FusionTreePairKey};
 
 use crate::OperationError;
@@ -82,13 +83,12 @@ fn adjoint_tensor_axes_inline(
         .collect()
 }
 
+#[cfg(test)]
 pub(crate) fn adjoint_block_structure_view(
     nout: usize,
     nin: usize,
     source: &BlockStructure,
 ) -> Result<BlockStructure, OperationError> {
-    #[cfg(test)]
-    crate::probe::hit(crate::probe::Event::AdjointViewBuild);
     let rank = nout
         .checked_add(nin)
         .ok_or_else(|| OperationError::ElementCountOverflow)?;
@@ -115,6 +115,7 @@ pub(crate) fn adjoint_block_structure_view(
         .map_err(OperationError::from_core_preserving_context)
 }
 
+#[cfg(test)]
 fn adjoint_block_key(key: &BlockKey) -> Result<BlockKey, OperationError> {
     match key {
         BlockKey::Dense => Ok(BlockKey::Dense),

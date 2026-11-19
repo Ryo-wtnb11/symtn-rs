@@ -608,8 +608,8 @@ fn scalar_copy<D: FactorScalar>(source: &TestTensor<f64>, real_only: bool) -> Te
     .unwrap()
 }
 
-/// What: canonical inputs to the multiplicity-free full QR/LQ, null and
-/// eigen ops pack nothing.
+/// What: the multiplicity-free full QR/LQ, null and eigen ops run on
+/// canonical inputs, which they borrow by type.
 fn assert_multiplicity_free_full_family_borrows_input<R, D>(rule: R, sectors: &[SectorId])
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + Clone,
@@ -624,16 +624,9 @@ where
     let tall_ref = tall_bound.as_ref();
     let tall_input = tall_ref.dynamic();
 
-    let input_pack_bytes = |general: &TestTensor<D>, hermitian: &TestTensor<D>| {
-        let (general, hermitian) = (bind(general), bind(hermitian));
-        let (general, hermitian) = (general.as_ref(), hermitian.as_ref());
-        let (general, hermitian) = (general.dynamic(), hermitian.dynamic());
-        let input_pack_bytes_rec = crate::probe::record();
-        multiplicity_free_full_family(&general, &tall_input, &hermitian);
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes)
-    };
-
-    assert_eq!(input_pack_bytes(&general, &hermitian), 0);
+    let (general, hermitian) = (bind(&general), bind(&hermitian));
+    let (general, hermitian) = (general.as_ref(), hermitian.as_ref());
+    multiplicity_free_full_family(&general.dynamic(), &tall_input, &hermitian.dynamic());
 }
 
 #[test]
@@ -788,12 +781,7 @@ fn assert_checked_full_family_borrows_input<R, D>(
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    let input_pack_bytes_rec = crate::probe::record();
     checked_full_family(general, tall, hermitian);
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        0
-    );
 }
 
 #[expect(

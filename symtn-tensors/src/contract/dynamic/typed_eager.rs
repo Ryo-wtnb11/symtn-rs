@@ -212,9 +212,15 @@ where
     let src_fusion = src.dynamic_space();
     if source_conjugate {
         src_fusion.validate_rule(rule)?;
-        let adjoint = src_fusion.adjoint_view()?;
-        let replay_structure = std::sync::Arc::clone(adjoint.structure());
-        let space = adjoint.transformed(rule, operation)?;
+        let replay_structure = std::sync::Arc::new(crate::lowering::adjoint_block_structure_view(
+            src_fusion.nout(),
+            src_fusion.nin(),
+            src_fusion.structure(),
+        )?);
+        let primer = crate::contract::dynamic_space::encoded_layout_primer::<R>;
+        let space = crate::FusionOperand::adjoint(src_fusion)
+            .prepare(rule, primer)?
+            .transformed_space(rule, operation, primer)?;
         Ok((space, replay_structure))
     } else {
         let replay_structure = std::sync::Arc::clone(src.structure());

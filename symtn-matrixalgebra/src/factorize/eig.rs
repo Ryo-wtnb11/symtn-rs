@@ -209,120 +209,10 @@ where
 {
     let space = input.space().space();
     EndomorphismFamily::EighFull.require_endomorphism(space.homspace())?;
-    if let Some(plan) = compact_factor_plan(input.space())? {
-        // The plan proves the stacking.
-        require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eigh)?;
-        return eigh_full_direct_regions(engine, dense, input, &plan, hermitian_tol);
-    }
-    let matricizations = admit_endomorphism_stacking(
-        space,
-        input.data(),
-        EndomorphismFamily::EighFull,
-        |structure, data, nout| {
-            let matricizations = multiplicity_free_input_matricizations(structure, data, nout)?;
-            #[cfg(test)]
-            if let InputMatricizations::Packed(matrices) = &matricizations {
-                crate::probe::input_pack(
-                    crate::probe::CopyOp::Eigh,
-                    matrices
-                        .iter()
-                        .map(|matrix| std::mem::size_of_val(&matrix.data[..])),
-                );
-            }
-            Ok(matricizations)
-        },
-    )?;
+    let plan = compact_factor_plan(input.space())?;
+    // The plan proves the stacking.
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eigh)?;
-    matricizations.validate_hermitian(hermitian_tol)?;
-    with_input_geometry!(&matricizations, |geometry| eigh_full_scattered(
-        engine,
-        dense,
-        input,
-        &matricizations,
-        geometry
-    ))
-}
-
-/// Eigendecomposition of an input whose tree order the positional direct
-/// path cannot prove; eigenvectors scatter by tree identity.
-pub(super) fn eigh_full_scattered<E, R, D, M>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    input: &BoundDynamicTensorRef<'_, R, D>,
-    matricizations: &InputMatricizations<'_, D>,
-    geometry: &[M],
-) -> Result<EighFullDyn<R, D>, OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    R: MultiplicityFreeRigidSymbols,
-    D: FactorScalar,
-    M: SectorGeometry + Sync,
-{
-    let space = input.space().space();
-    let ranks = geometry
-        .iter()
-        .map(|matrix| SectorRank {
-            sector: matrix.sector(),
-            kept: matrix.rows(),
-        })
-        .collect::<Vec<_>>();
-    let v_space = build_bound_factor_space(
-        input.space(),
-        space.homspace(),
-        SectorLeg::new(ranks.iter().map(|rank| (rank.sector, rank.kept)), false),
-        FactorSide::Left,
-    )?;
-    let v_len = v_space
-        .space()
-        .required_len()
-        .map_err(OperationError::from_core_preserving_context)?;
-    let mut v_data = vec![D::zero(); v_len];
-    let max_n = geometry.iter().map(SectorGeometry::rows).max().unwrap_or(0);
-    let mut scratch = EighScratch::for_order(max_n);
-    let mut eigenvalues = Vec::with_capacity(geometry.len());
-    let index = PlacementIndex::new(geometry, &[FactorSide::Left]);
-    let v_groups = SectorBlockGroups::new(v_space.space().structure(), FactorSide::Left)?;
-    let v_target = v_space.space();
-    in_linalg_scope(engine, dense, |dense, engine| {
-        let (sectors, blocks) = sector_blocks(matricizations)?;
-        // One packed transient for every sector's eigenvectors, scattered
-        // by tree identity as each sector is delivered.
-        let ranges = packed_ranges(blocks.iter().map(|&(_, n, _)| n * n));
-        let mut transient = vec![D::zero(); ranges.last().map_or(0, |range| range.end)];
-        eigh_sectors_staged(
-            engine,
-            dense,
-            &blocks,
-            split_ranges(&mut transient, &ranges)?,
-            &mut scratch,
-            |position, sorted_values, vectors| {
-                let n = blocks[position].1;
-                eigenvalues.push(SectorSpectrum {
-                    sector: sectors[position],
-                    values: sorted_values,
-                });
-                #[cfg(test)]
-                crate::probe::eigh_owned_vector(vectors);
-                scatter_left_sector_blocks(
-                    v_target,
-                    &mut v_data,
-                    &geometry[position],
-                    &index,
-                    &v_groups,
-                    vectors,
-                    n,
-                )?;
-                #[cfg(test)]
-                crate::probe::output_scatter::<D>(crate::probe::CopyOp::Eigh, 1, n * n);
-                Ok(())
-            },
-        )
-    })?;
-
-    Ok(EighFullDyn {
-        v: BoundDynFactor::from_bound(v_space, v_data, space.nout(), 1)?,
-        eigenvalues,
-    })
+    eigh_full_direct_regions(engine, dense, input, &plan, hermitian_tol)
 }
 
 pub(super) fn eigh_full_direct_regions<E, R, D>(
@@ -421,7 +311,7 @@ where
         hermitian_diagonal_bond(&MfAuthority(authority), authority, spectrum, hermitian_tol)?;
     let authority = bond.space();
     let space = authority.space();
-    let plan = compact_factor_plan(authority)?.ok_or(missing_compact_plan())?;
+    let plan = compact_factor_plan(authority)?;
     let by_sector = &bond.by_sector;
     let v_space = authority.rebind_validated(&plan.left_layout)?;
     let mut v_data = vec![D::zero(); plan.left_layout.required_len()?];
@@ -614,7 +504,7 @@ where
         space,
         input.data(),
         EndomorphismFamily::EigFull,
-        multiplicity_free_input_matricizations,
+        input_matricizations,
     )?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eig)?;
 
@@ -643,12 +533,10 @@ where
         },
     )?;
 
-    let v_factor = with_input_geometry!(&matricizations, |geometry| build_left_bound_factor(
-        input.space(),
-        space.homspace(),
-        geometry,
-        &mut pairs,
-    ))?;
+    let v_factor = {
+        let geometry: &[CoupledSectorRegion] = &matricizations.regions;
+        build_left_bound_factor(input.space(), space.homspace(), geometry, &mut pairs)
+    }?;
     Ok(EigFullDyn {
         v: v_factor,
         eigenvalues,
@@ -673,7 +561,7 @@ where
     validate_diagonal_eigenvalues(&bond)?;
     let authority = bond.space();
     let space = authority.space();
-    let plan = compact_factor_plan(authority)?.ok_or(missing_compact_plan())?;
+    let plan = compact_factor_plan(authority)?;
     let by_sector = &bond.by_sector;
     let v_space = authority.rebind_validated(&plan.left_layout)?;
     let mut v_data = vec![<D::Eig as num_traits::Zero>::zero(); plan.left_layout.required_len()?];
@@ -904,12 +792,6 @@ where
     Ok(result)
 }
 
-fn missing_compact_plan() -> OperationError {
-    OperationError::UnsupportedTensorContractScope {
-        message: "canonical bond layout has no compact factor plan",
-    }
-}
-
 #[cfg(test)]
 /// All Hermitian eigenvalues per coupled sector, ascending
 /// (MatrixAlgebraKit `eigh_vals`).
@@ -948,7 +830,7 @@ where
         space,
         input.data(),
         EndomorphismFamily::EighVals,
-        value_matricizations,
+        input_matricizations,
     )?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eigh)?;
     matricizations.validate_hermitian(hermitian_tol)?;
@@ -990,7 +872,7 @@ where
         space,
         input.data(),
         EndomorphismFamily::EigVals,
-        value_matricizations,
+        input_matricizations,
     )?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eig)?;
     eig_vals_spectra(engine, dense, &matricizations)
@@ -1556,19 +1438,6 @@ pub(super) fn validate_hermitian_matrix_contents<D: FactorScalar>(
     Ok(())
 }
 
-pub(super) fn validate_hermitian_matricizations<D: FactorScalar>(
-    matricizations: &[SectorMatricization<D>],
-    hermitian_tol: HermitianTol,
-) -> Result<(), OperationError> {
-    for matrix in matricizations {
-        validate_hermitian_matrix_shape(&matrix.data, matrix.rows, matrix.cols)?;
-    }
-    for matrix in matricizations {
-        validate_hermitian_matrix_contents(&matrix.data, matrix.rows, hermitian_tol)?;
-    }
-    Ok(())
-}
-
 #[doc(hidden)]
 pub fn validate_hermitian_regions<D: FactorScalar>(
     data: &[D],
@@ -1626,35 +1495,24 @@ where
     // reached only by a direct caller.
     EndomorphismFamily::EighFull.require_endomorphism(space.homspace())?;
     let exp_route_tol = EXP_SPECTRAL_ROUTE_EPSILONS * D::epsilon();
-    // Why `checked_sector_regions` and not `compact_factor_plan` as
-    // `eigh_full_dyn` does: the plan is `Some` exactly when the regions are
-    // (`build_compact_factor_plan` returns early otherwise), and building it
-    // also builds the factor bond spaces — work a yes/no question must not pay
-    // for on the retained Hermitian route.
-    if let Some(regions) = checked_sector_regions(space.structure(), space.nout())? {
-        validate_endomorphism_tree_stacking(regions.as_ref(), EndomorphismFamily::Exp)?;
-        for region in regions.iter() {
-            let range = region.range();
-            let matrix = data_region(input.data(), &range)?;
-            validate_hermitian_matrix_shape(matrix, region.rows(), region.cols())?;
-        }
-        for region in regions.iter() {
-            let range = region.range();
-            let matrix = data_region(input.data(), &range)?;
-            if !hermitian_matrix_contents(matrix, region.rows(), exp_route_tol) {
-                return Ok(false);
-            }
-        }
-        return Ok(true);
+    // Why `input_regions` and not `compact_factor_plan` as `eigh_full_dyn`
+    // does: building the plan also builds the factor bond spaces — work a
+    // yes/no question must not pay for on the retained Hermitian route.
+    let regions = input_regions(space.structure(), space.nout())?;
+    validate_endomorphism_tree_stacking(regions.as_ref(), EndomorphismFamily::Exp)?;
+    for region in regions.iter() {
+        let range = region.range();
+        let matrix = data_region(input.data(), &range)?;
+        validate_hermitian_matrix_shape(matrix, region.rows(), region.cols())?;
     }
-    let matricizations = sector_matricizations(space.structure(), input.data(), space.nout())?;
-    validate_endomorphism_tree_stacking(&matricizations, EndomorphismFamily::Exp)?;
-    for matrix in &matricizations {
-        validate_hermitian_matrix_shape(&matrix.data, matrix.rows, matrix.cols)?;
+    for region in regions.iter() {
+        let range = region.range();
+        let matrix = data_region(input.data(), &range)?;
+        if !hermitian_matrix_contents(matrix, region.rows(), exp_route_tol) {
+            return Ok(false);
+        }
     }
-    Ok(matricizations
-        .iter()
-        .all(|matrix| hermitian_matrix_contents(&matrix.data, matrix.rows, exp_route_tol)))
+    Ok(true)
 }
 
 #[doc(hidden)]
@@ -1737,7 +1595,7 @@ where
         space,
         input.data(),
         EndomorphismFamily::EighFull,
-        generic_input_matricizations,
+        input_matricizations,
     )
     .map_err(CheckedGenericFactorPlanError::from)?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eigh)?;
@@ -1745,11 +1603,10 @@ where
         .validate_hermitian(hermitian_tol)
         .map_err(CheckedGenericFactorPlanError::from)?;
 
-    let max_n = with_input_geometry!(&matrices, |geometry| geometry
-        .iter()
-        .map(SectorGeometry::rows)
-        .max()
-        .unwrap_or(0));
+    let max_n = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        geometry.iter().map(SectorGeometry::rows).max().unwrap_or(0)
+    };
     let mut scratch = EighScratch::for_order(max_n);
     let mut eigenvalues = Vec::with_capacity(matrices.len());
     let mut pairs = Vec::with_capacity(matrices.len());
@@ -1790,24 +1647,30 @@ where
         left: packed,
         right: Vec::new(),
     };
-    let dimensions = with_input_geometry!(&matrices, |geometry| geometry
-        .iter()
-        .map(|matrix| (matrix.sector(), matrix.rows()))
-        .collect::<BTreeMap<_, _>>());
+    let dimensions = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        geometry
+            .iter()
+            .map(|matrix| (matrix.sector(), matrix.rows()))
+            .collect::<BTreeMap<_, _>>()
+    };
     #[cfg(test)]
     crate::probe::checked_eigh_pairs(
         (0..pairs.pairs.len())
             .map(|index| PairedFactors::pair(&pairs, index).left.as_ptr() as usize)
             .collect(),
     );
-    let v = with_input_geometry!(&matrices, |geometry| build_bound_factor_generic_checked(
-        provider,
-        space.homspace(),
-        geometry,
-        &mut pairs,
-        &dimensions,
-        FactorSide::Left,
-    ))?;
+    let v = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        build_bound_factor_generic_checked(
+            provider,
+            space.homspace(),
+            geometry,
+            &mut pairs,
+            &dimensions,
+            FactorSide::Left,
+        )
+    }?;
     Ok(EighFullDyn { v, eigenvalues })
 }
 
@@ -1831,7 +1694,7 @@ where
         space,
         input.data(),
         EndomorphismFamily::EigFull,
-        generic_input_matricizations,
+        input_matricizations,
     )
     .map_err(CheckedGenericFactorPlanError::from)?;
     // Every sector is read before the shared finite-input stage reports, so
@@ -1874,20 +1737,23 @@ where
     )
     .map_err(CheckedGenericFactorPlanError::from)?;
 
-    let v = with_input_geometry!(&matrices, |geometry| {
-        let dimensions = geometry
-            .iter()
-            .map(|matrix| (matrix.sector(), matrix.rows()))
-            .collect::<BTreeMap<_, _>>();
-        build_bound_factor_generic_checked(
-            provider,
-            space.homspace(),
-            geometry,
-            &mut pairs,
-            &dimensions,
-            FactorSide::Left,
-        )
-    })?;
+    let v = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        {
+            let dimensions = geometry
+                .iter()
+                .map(|matrix| (matrix.sector(), matrix.rows()))
+                .collect::<BTreeMap<_, _>>();
+            build_bound_factor_generic_checked(
+                provider,
+                space.homspace(),
+                geometry,
+                &mut pairs,
+                &dimensions,
+                FactorSide::Left,
+            )
+        }
+    }?;
     Ok(EigFullDyn { v, eigenvalues })
 }
 

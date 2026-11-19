@@ -753,7 +753,6 @@ fn tensortrace_fusion_with_conjugation_lowers_lazy_adjoint_supertrace() {
         TestTensor::from_vec_with_fusion_space(vec![Complex64::new(10.0, 20.0)], dst_space)
             .unwrap();
 
-    let adjoint_view_build_count_rec = probe::record();
     dynamic_tensortrace_fusion_into(
         &rule,
         &mut dst,
@@ -765,9 +764,6 @@ fn tensortrace_fusion_with_conjugation_lowers_lazy_adjoint_supertrace() {
     .unwrap();
 
     assert_eq!(dst.data(), &[Complex64::new(-1.0, 3.0)]);
-    // What: typed conjugating trace reads the parent block grid through its
-    // orientation instead of constructing an adjoint block structure.
-    assert_eq!(adjoint_view_build_count_rec.get(Event::AdjointViewBuild), 0);
 }
 
 #[test]
@@ -783,7 +779,6 @@ fn tensortrace_fusion_rank_zero_adjoint_keeps_parent_structure() {
     let mut dst: TestTensor<Complex64> =
         TestTensor::from_vec_with_fusion_space(vec![Complex64::new(0.0, 0.0)], space()).unwrap();
 
-    let adjoint_view_build_count_rec = probe::record();
     dynamic_tensortrace_fusion_into(
         &rule,
         &mut dst,
@@ -794,10 +789,9 @@ fn tensortrace_fusion_rank_zero_adjoint_keeps_parent_structure() {
     )
     .unwrap();
 
-    // What: the empty tree pair is still an oriented parent block, and source
-    // conjugation does not require an owned rank-zero adjoint structure.
+    // What: the empty tree pair is still an oriented parent block under source
+    // conjugation.
     assert_eq!(dst.data(), &[Complex64::new(2.0, -3.0)]);
-    assert_eq!(adjoint_view_build_count_rec.get(Event::AdjointViewBuild), 0);
 }
 
 #[test]
@@ -846,7 +840,6 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
         .map(|(&dst, trace)| beta * dst + alpha * trace)
         .collect::<Vec<_>>();
 
-    let adjoint_view_build_count_rec = probe::record();
     let mut typed: TestTensor<Complex64> =
         TestTensor::from_vec_with_fusion_space(initial.clone(), dst_fusion).unwrap();
     dynamic_tensortrace_fusion_into(&rule, &mut typed, &src, axes, alpha, beta).unwrap();
@@ -1000,9 +993,6 @@ fn dynamic_u1_conjugating_trace_matches_hand_indexed_logical_adjoint() {
             actual: 11,
         })
     );
-    // What: typed, dynamic unchecked, dynamic checked, and their error path all
-    // retain the parent block grid for asymmetric non-self-dual U1.
-    assert_eq!(adjoint_view_build_count_rec.get(Event::AdjointViewBuild), 0);
 }
 
 #[test]
@@ -1435,12 +1425,17 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
     );
 
     let conjugate_axes = TensorTraceAxisSpec::new_with_conjugation(&[1, 3], &[0], &[2], true);
-    let adjoint_src = src.dynamic_space().adjoint_view().unwrap();
+    let adjoint_src_hom = crate::FusionOperand::adjoint(src.dynamic_space()).logical_homspace();
+    let adjoint_src_structure = crate::lowering::adjoint_block_structure_view(
+        src.dynamic_space().nout(),
+        src.dynamic_space().nin(),
+        src.structure(),
+    )
+    .unwrap();
     let lowered_axes =
         crate::lowering::lower_tensortrace_source_adjoint_axes_dyn(2, 2, conjugate_axes).unwrap();
     let lowered_axes = lowered_axes.as_spec();
-    let conjugate_dst_hom = adjoint_src
-        .homspace()
+    let conjugate_dst_hom = adjoint_src_hom
         .select(
             &rule,
             &lowered_axes.output_axes()[..1],
@@ -1454,7 +1449,6 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
         conjugate_dst_space,
     )
     .unwrap();
-    let adjoint_view_build_count_rec = probe::record();
     let conjugate_structure =
         dynamic_tensortrace_fusion_structure(&rule, &conjugate_dst, &src, conjugate_axes).unwrap();
     // What: source-conjugate lowering still batches the logical adjoint tree
@@ -1463,12 +1457,11 @@ fn tensortrace_fusion_recouples_once_per_simple_fusion_group() {
         &rule,
         &conjugate_structure,
         &conjugate_dst,
-        adjoint_src.structure(),
+        &adjoint_src_structure,
         lowered_axes.output_axes(),
         lowered_axes.trace_lhs_axes(),
         lowered_axes.trace_rhs_axes(),
     );
-    assert_eq!(adjoint_view_build_count_rec.get(Event::AdjointViewBuild), 0);
 }
 
 #[test]
@@ -1531,12 +1524,17 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
     );
 
     let conjugate_axes = TensorTraceAxisSpec::new_with_conjugation(&[1, 2], &[0], &[3], true);
-    let adjoint_src = src.dynamic_space().adjoint_view().unwrap();
+    let adjoint_src_hom = crate::FusionOperand::adjoint(src.dynamic_space()).logical_homspace();
+    let adjoint_src_structure = crate::lowering::adjoint_block_structure_view(
+        src.dynamic_space().nout(),
+        src.dynamic_space().nin(),
+        src.structure(),
+    )
+    .unwrap();
     let lowered_axes =
         crate::lowering::lower_tensortrace_source_adjoint_axes_dyn(2, 2, conjugate_axes).unwrap();
     let lowered_axes = lowered_axes.as_spec();
-    let conjugate_dst_hom = adjoint_src
-        .homspace()
+    let conjugate_dst_hom = adjoint_src_hom
         .select(
             &rule,
             &lowered_axes.output_axes()[..1],
@@ -1550,7 +1548,6 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
         conjugate_dst_space,
     )
     .unwrap();
-    let adjoint_view_build_count_rec = probe::record();
     let conjugate_structure =
         dynamic_tensortrace_fusion_structure(&rule, &conjugate_dst, &src, conjugate_axes).unwrap();
 
@@ -1560,7 +1557,7 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
         &rule,
         &conjugate_structure,
         &conjugate_dst,
-        adjoint_src.structure(),
+        &adjoint_src_structure,
         lowered_axes.output_axes(),
         lowered_axes.trace_lhs_axes(),
         lowered_axes.trace_rhs_axes(),
@@ -1594,7 +1591,6 @@ fn tensortrace_fusion_product_block_matches_scalar_trace_terms() {
         &dynamic_src,
         conjugate_axes,
     );
-    assert_eq!(adjoint_view_build_count_rec.get(Event::AdjointViewBuild), 0);
 }
 
 #[test]

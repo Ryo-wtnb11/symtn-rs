@@ -190,11 +190,10 @@ impl<E: std::error::Error + 'static> std::error::Error for CheckedGenericFactorP
     }
 }
 
-/// The Host direct-region plan: `None` unless `input` is a coupled-sector
-/// matrix layout whose factors keep the source's tree order.
+/// The Host direct-region plan of `input`'s canonical layout.
 pub(super) fn compact_factor_plan<R>(
     input: &BoundDynamicFusionMapSpace<R>,
-) -> Result<Option<CompactFactorPlan>, OperationError>
+) -> Result<CompactFactorPlan, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
 {
@@ -204,26 +203,32 @@ where
 pub(super) fn build_compact_factor_plan<R>(
     input: &BoundDynamicFusionMapSpace<R>,
     source_layout: ValidatedDynamicFusionLayout,
-) -> Result<Option<CompactFactorPlan>, OperationError>
+) -> Result<CompactFactorPlan, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
 {
     let space = input.space();
-    let Some(regions) = checked_sector_regions(space.structure(), space.nout())? else {
-        return Ok(None);
-    };
+    let regions = input_regions(space.structure(), space.nout())?;
     let plan = route_compact_factors(input, source_layout, regions)?;
     // The direct path publishes each dense factor region positionally, so it
-    // is sound only when the fresh factor lists the source's trees in the
-    // source's order. Why not scatter here: a reordered tiling takes the
-    // packed path, whose `PlacementIndex` scatter already maps by tree
-    // identity, so one authority owns non-canonical publication.
-    if !plan.routes.iter().all(|route| {
+    // is sound only when each factor lists the source's trees in the source's
+    // order. Why an internal error, not a by-tree scatter: the source and both
+    // factors are canonical, and a canonical layout enumerates one side's
+    // trees of a coupled sector by the same fusion walk of that side's legs
+    // whatever the other side is, so the orders agree by construction.
+    let preserved = plan.routes.iter().all(|route| {
         route.rank == 0 || (plan.left_preserves_trees(route) && plan.right_preserves_trees(route))
-    }) {
-        return Ok(None);
+    });
+    debug_assert!(
+        preserved,
+        "canonical factor tree order differs from the source's"
+    );
+    if !preserved {
+        return Err(OperationError::InvalidArgument {
+            message: "internal compact factor layout invariant violated (factor tree order differs from the source's); please report this",
+        });
     }
-    Ok(Some(plan))
+    Ok(plan)
 }
 
 /// The compact factor plan of `input` over its coupled-sector regions,
@@ -241,11 +246,7 @@ where
     R: MultiplicityFreeRigidSymbols,
 {
     let space = input.space();
-    let regions = checked_sector_regions(space.structure(), space.nout())?.ok_or(
-        OperationError::UnsupportedTensorContractScope {
-            message: "compact factor source is not a coupled-sector matrix layout",
-        },
-    )?;
+    let regions = input_regions(space.structure(), space.nout())?;
     route_compact_factors(input, input.validated_layout(), regions)
 }
 
@@ -262,16 +263,8 @@ where
     let u_space =
         build_bound_factor_space(input, space.homspace(), bond.clone(), FactorSide::Left)?;
     let vh_space = build_bound_factor_space(input, space.homspace(), bond, FactorSide::Right)?;
-    let left_regions = checked_sector_regions(u_space.space().structure(), u_space.space().nout())?
-        .ok_or_else(|| OperationError::UnsupportedTensorContractScope {
-            message: "compact left factor is not a coupled-sector matrix layout",
-        })?;
-    let right_regions =
-        checked_sector_regions(vh_space.space().structure(), vh_space.space().nout())?.ok_or_else(
-            || OperationError::UnsupportedTensorContractScope {
-                message: "compact right factor is not a coupled-sector matrix layout",
-            },
-        )?;
+    let left_regions = input_regions(u_space.space().structure(), u_space.space().nout())?;
+    let right_regions = input_regions(vh_space.space().structure(), vh_space.space().nout())?;
     let routes = compile_compact_factor_routes(&regions, &left_regions, &right_regions)?;
     Ok(CompactFactorPlan {
         source_layout,
@@ -395,7 +388,7 @@ pub(super) fn compile_compact_factor_routes(
 #[cfg(test)]
 pub(crate) fn compact_factor_plan_for_test<R>(
     input: &BoundDynamicFusionMapSpace<R>,
-) -> Result<Option<CompactFactorPlan>, OperationError>
+) -> Result<CompactFactorPlan, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
 {

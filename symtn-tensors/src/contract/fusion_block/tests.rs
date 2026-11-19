@@ -361,7 +361,7 @@ fn an_identity_side_is_free_in_selection_over_canonical_layouts() {
     let (lhs_axes, rhs_axes) = ([2, 3], [1, 0]);
     for adjoint in [true, false] {
         let lhs_logical = if adjoint {
-            canonical.adjoint_view().unwrap()
+            crate::adjoint_bound_space_dyn(&canonical).unwrap()
         } else {
             canonical.clone()
         };

@@ -71,16 +71,16 @@ pub mod seam {
 // consumer outside them (nor does `scale_axis_by_spectrum` outside this
 // crate), and reach the seam through `use crate::*`.
 #[cfg(test)]
+use factorize::eig_full_dyn;
+#[cfg(test)]
 use factorize::{
     eig_full, eig_vals, eigh_full, eigh_vals, left_null, left_null_dyn,
     left_null_dyn_checked_generic, left_polar, left_polar_dyn, lq_compact, lq_compact_dyn, lq_full,
     lq_full_dyn, qr_compact, qr_compact_dyn, qr_full, qr_full_dyn, right_null, right_null_dyn,
     right_null_dyn_checked_generic, right_polar, right_polar_dyn, scale_axis_by_spectrum,
-    svd_compact, svd_compact_adjoint_factors_dyn, svd_compact_dyn, svd_compact_factors_dyn,
-    svd_full, svd_full_adjoint_dyn, svd_full_dyn, svd_full_dyn_checked_generic, svd_vals,
+    svd_compact, svd_compact_adjoint_factors_dyn, svd_compact_dyn, svd_full, svd_full_adjoint_dyn,
+    svd_full_dyn, svd_full_dyn_checked_generic, svd_vals,
 };
-#[cfg(test)]
-use factorize::{eig_full_dyn, eig_vals_dyn, eigh_vals_dyn};
 #[cfg(test)]
 use factorize::{
     eig_full_dyn_checked_generic, eigh_full_dyn_checked_generic, left_polar_dyn_checked_generic,
@@ -89,7 +89,7 @@ use factorize::{
     svd_compact_factors_with_spectrum_dyn_checked_generic,
 };
 #[cfg(test)]
-use factorize::{eigh_full_dyn, svd_compact_dyn_checked_generic, svd_vals_dyn};
+use factorize::{eigh_full_dyn, svd_compact_dyn_checked_generic};
 #[cfg(test)]
 use matrix_functions::{
     exp, exp_direct_into_dyn, exp_into_mf, inv, inv_direct_into_dyn, inv_into_mf, pinv,

@@ -212,10 +212,7 @@ where
             .map(|(w, p)| (FactorOutput::Dense(w), FactorOutput::Dense(p)))
         },
         Some(
-            |engine: &mut dyn Engine,
-             dense: &mut E,
-             parent: &BoundDynamicTensorRef<'_, R, D>,
-             _: &BoundDynamicFusionMapSpace<R>| {
+            |engine: &mut dyn Engine, dense: &mut E, parent: &BoundDynamicTensorRef<'_, R, D>| {
                 polar_dense(
                     engine,
                     dense,
@@ -322,7 +319,7 @@ where
     };
     let p_space = authority.output_space(FusionTreeHomSpace::new(p_leg.clone(), p_leg.clone()))?;
     let matrices =
-        generic_input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
+        input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
     let w_space = authority.same_homspace_output(input.space())?;
     let w_regions = checked_sector_regions(w_space.space().structure(), w_space.space().nout())?
         .ok_or(OperationError::UnsupportedTensorContractScope {
@@ -342,21 +339,24 @@ where
         .space()
         .required_len()
         .map_err(OperationError::from_core_preserving_context)?;
-    let (w_landings, p_landings) = with_input_geometry!(&matrices, |geometry| {
-        compile_sector_landings(
-            geometry,
-            &w_regions,
-            w_len,
-            FactorSide::Left,
-            FactorSide::Right,
-        )
-        .and_then(|w| {
-            Ok((
-                w,
-                compile_sector_landings(geometry, &p_regions, p_len, p_side, p_side)?,
-            ))
-        })
-    })?;
+    let (w_landings, p_landings) = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        {
+            compile_sector_landings(
+                geometry,
+                &w_regions,
+                w_len,
+                FactorSide::Left,
+                FactorSide::Right,
+            )
+            .and_then(|w| {
+                Ok((
+                    w,
+                    compile_sector_landings(geometry, &p_regions, p_len, p_side, p_side)?,
+                ))
+            })
+        }
+    }?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Polar)?;
 
     // Every sector with a nonzero rank is one input of one destination

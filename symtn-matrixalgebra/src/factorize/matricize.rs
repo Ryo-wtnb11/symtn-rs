@@ -1,5 +1,8 @@
 use super::*;
 
+/// A packed coupled-sector matricization: the test oracle for publication
+/// over borrowed regions.
+#[cfg(test)]
 pub(super) struct SectorMatricization<D> {
     pub(super) sector: SectorId,
     pub(super) rows: usize,
@@ -29,6 +32,7 @@ pub(super) trait SectorGeometry {
     fn tree(&self, side: FactorSide, index: usize) -> Option<TreeExtentRef<'_>>;
 }
 
+#[cfg(test)]
 impl<D> SectorGeometry for SectorMatricization<D> {
     fn sector(&self) -> SectorId {
         self.sector
@@ -119,6 +123,7 @@ impl<D: FactorScalar> SectorMatrices<D> for InputMatricizations<'_, D> {
     }
 }
 
+#[cfg(test)]
 impl<D> SectorMatrices<D> for [SectorMatricization<D>] {
     fn len(&self) -> usize {
         <[SectorMatricization<D>]>::len(self)
@@ -135,55 +140,34 @@ impl<D> SectorMatrices<D> for [SectorMatricization<D>] {
     }
 }
 
-pub(super) enum InputMatricizations<'a, D> {
-    Regions {
-        data: &'a [D],
-        regions: Arc<[CoupledSectorRegion]>,
-    },
-    Packed(Vec<SectorMatricization<D>>),
+/// The input's coupled-sector matrices, borrowed in place from its
+/// canonical layout.
+pub(super) struct InputMatricizations<'a, D> {
+    pub(super) data: &'a [D],
+    pub(super) regions: Arc<[CoupledSectorRegion]>,
 }
 
 impl<'a, D: FactorScalar> InputMatricizations<'a, D> {
     pub(super) fn len(&self) -> usize {
-        match self {
-            Self::Regions { regions, .. } => regions.len(),
-            Self::Packed(matrices) => matrices.len(),
-        }
+        self.regions.len()
     }
 
     pub(super) fn get(&self, index: usize) -> Result<SectorMatrixRef<'_, D>, OperationError> {
-        match self {
-            Self::Regions { data, regions } => {
-                let region = &regions[index];
-                let range = region.range();
-                let matrix =
-                    data.get(range.clone())
-                        .ok_or(OperationError::ElementCountMismatch {
-                            expected: range.end,
-                            actual: data.len(),
-                        })?;
-                Ok(SectorMatrixRef {
-                    sector: region_sector(region),
-                    rows: region.rows(),
-                    cols: region.cols(),
-                    data: matrix,
-                })
-            }
-            Self::Packed(matrices) => {
-                let matrix = &matrices[index];
-                Ok(SectorMatrixRef {
-                    sector: matrix.sector,
-                    rows: matrix.rows,
-                    cols: matrix.cols,
-                    data: &matrix.data,
-                })
-            }
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn is_packed(&self) -> bool {
-        matches!(self, Self::Packed(_))
+        let region = &self.regions[index];
+        let range = region.range();
+        let matrix = self
+            .data
+            .get(range.clone())
+            .ok_or(OperationError::ElementCountMismatch {
+                expected: range.end,
+                actual: self.data.len(),
+            })?;
+        Ok(SectorMatrixRef {
+            sector: region_sector(region),
+            rows: region.rows(),
+            cols: region.cols(),
+            data: matrix,
+        })
     }
 
     /// Eigenvalues are basis-invariant only when row `i` and column `i` name
@@ -193,24 +177,14 @@ impl<'a, D: FactorScalar> InputMatricizations<'a, D> {
         &self,
         family: EndomorphismFamily,
     ) -> Result<(), OperationError> {
-        match self {
-            Self::Regions { regions, .. } => {
-                validate_endomorphism_tree_stacking(regions.as_ref(), family)
-            }
-            Self::Packed(matrices) => validate_endomorphism_tree_stacking(matrices, family),
-        }
+        validate_endomorphism_tree_stacking(self.regions.as_ref(), family)
     }
 
     pub(super) fn validate_hermitian(
         &self,
         hermitian_tol: HermitianTol,
     ) -> Result<(), OperationError> {
-        match self {
-            Self::Regions { data, regions } => {
-                validate_hermitian_regions(data, regions, hermitian_tol)
-            }
-            Self::Packed(matrices) => validate_hermitian_matricizations(matrices, hermitian_tol),
-        }
+        validate_hermitian_regions(self.data, &self.regions, hermitian_tol)
     }
 }
 
@@ -272,7 +246,14 @@ pub(super) fn checked_sector_regions(
         .map_err(OperationError::from_core_preserving_context)
 }
 
-pub(super) fn generic_input_matricizations<'a, D>(
+/// The coupled-sector matrices of an input, borrowed from its regions.
+///
+/// A region lists its sector and tree extents in first-appearance block order,
+/// which is the canonical tree order, so the factor outputs (also canonical)
+/// list the same trees in the same order, and the eigenvalue ops check
+/// endomorphism stacking. Why no tree-order admission (`FusionTreeKey` Ord):
+/// canonical multi-leg order is the fusion walk's, not that `Ord`.
+pub(super) fn input_matricizations<'a, D>(
     structure: &BlockStructure,
     data: &'a [D],
     nout: usize,
@@ -280,158 +261,26 @@ pub(super) fn generic_input_matricizations<'a, D>(
 where
     D: FactorScalar,
 {
-    // Why no tree-order admission (`FusionTreeKey` Ord, which the facade
-    // builder's multi-leg order fails): a region lists its sector and tree
-    // extents in first-appearance block order and proves the dense column-major
-    // matrix at `range`, which is exactly the matrix, sector order and tree
-    // order `sector_matricizations` would pack from the same tiling.
-    // Every consumer therefore sees the same matricization either way; output
-    // tree order is proven per output by `factor_output_is_canonical` (else a
-    // by-tree scatter), and the eigenvalue ops check endomorphism stacking.
-    Ok(match input_regions(structure, nout)? {
-        Some(regions) => InputMatricizations::Regions { data, regions },
-        None => InputMatricizations::Packed(sector_matricizations(structure, data, nout)?),
+    Ok(InputMatricizations {
+        data,
+        regions: input_regions(structure, nout)?,
     })
 }
 
-/// Multiplicity-free sibling of [`generic_input_matricizations`]; the same
-/// region admission applies because both packers stack sectors and trees in
-/// first-appearance order.
-pub(super) fn multiplicity_free_input_matricizations<'a, D>(
-    structure: &BlockStructure,
-    data: &'a [D],
-    nout: usize,
-) -> Result<InputMatricizations<'a, D>, OperationError>
-where
-    D: FactorScalar,
-{
-    Ok(match input_regions(structure, nout)? {
-        Some(regions) => InputMatricizations::Regions { data, regions },
-        None => InputMatricizations::Packed(sector_matricizations(structure, data, nout)?),
-    })
-}
-
-/// The single admission authority for lending input regions to the
-/// numerical stages instead of packing them.
+/// The coupled-sector regions of a dynamic space's layout.
+///
+/// Why an internal error, not a packed fallback: every dynamic space is its
+/// HomSpace's canonical coupled-sector layout, which the region compiler
+/// always admits, so a missing region table is a broken layout invariant.
 pub(super) fn input_regions(
     structure: &BlockStructure,
     nout: usize,
-) -> Result<Option<Arc<[CoupledSectorRegion]>>, OperationError> {
-    checked_sector_regions(structure, nout)
-}
-
-pub(super) fn value_matricizations<'a, D>(
-    structure: &BlockStructure,
-    data: &'a [D],
-    nout: usize,
-) -> Result<InputMatricizations<'a, D>, OperationError>
-where
-    D: FactorScalar,
-{
-    let matricizations = multiplicity_free_input_matricizations(structure, data, nout)?;
-    #[cfg(test)]
-    if matricizations.is_packed() {
-        crate::probe::hit(crate::probe::Event::ValuesMatricizationFallback);
-    }
-    Ok(matricizations)
-}
-
-/// Packs every coupled sector of the source data into its dense column-major
-/// matricization, independent of the storage layout. Core's
-/// [`CoupledMatricizationBuilder`] owns the sector, row and column placement;
-/// this only records the trees and moves the data.
-pub(super) fn sector_matricizations<D>(
-    structure: &BlockStructure,
-    data: &[D],
-    nout: usize,
-) -> Result<Vec<SectorMatricization<D>>, OperationError>
-where
-    D: FactorScalar,
-{
-    let mut layout = symtn_core::CoupledMatricizationBuilder::new();
-    let mut matricizations: Vec<SectorMatricization<D>> = Vec::new();
-    let mut routes = Vec::with_capacity(structure.block_count());
-
-    for index in 0..structure.block_count() {
-        let block = structure
-            .block(index)
-            .map_err(OperationError::from_core_preserving_context)?;
-        let BlockKey::FusionTree(key) = block.key() else {
-            return Err(OperationError::ExpectedFusionTreeBlock {
-                tensor: "tsvd",
-                index,
-            });
-        };
-        let (row_shape, col_shape) = block.shape().split_at(nout);
-        let overflow = |_| OperationError::ElementCountOverflow;
-        let placement = layout
-            .place(
-                key,
-                symtn_core::checked_product(row_shape).map_err(overflow)?,
-                symtn_core::checked_product(col_shape).map_err(overflow)?,
-            )
-            .map_err(overflow)?;
-        if placement.new_sector {
-            matricizations.push(SectorMatricization::<D> {
-                sector: key.codomain_tree().coupled(),
-                rows: 0,
-                cols: 0,
-                row_trees: Vec::new(),
-                col_trees: Vec::new(),
-                data: Vec::new(),
-            });
-        }
-        let matrix = &mut matricizations[placement.sector];
-        if placement.new_row {
-            matrix.row_trees.push((
-                key.codomain_tree().clone(),
-                placement.row_offset,
-                row_shape.to_vec(),
-            ));
-        }
-        if placement.new_col {
-            matrix.col_trees.push((
-                key.domain_tree().clone(),
-                placement.col_offset,
-                col_shape.to_vec(),
-            ));
-        }
-        routes.push((placement.sector, placement.row_offset, placement.col_offset));
-    }
-    for matrix in &mut matricizations {
-        (matrix.rows, matrix.cols) = layout.extents(matrix.sector);
-        let len = matrix
-            .rows
-            .checked_mul(matrix.cols)
-            .ok_or(OperationError::ElementCountOverflow)?;
-        matrix.data = vec![D::zero(); len];
-    }
-
-    for (index, (matrix_index, row_offset, col_offset)) in routes.into_iter().enumerate() {
-        let block = structure
-            .block(index)
-            .map_err(OperationError::from_core_preserving_context)?;
-        let matrix = &mut matricizations[matrix_index];
-        let rows = matrix.rows;
-        copy_tensor_block_to_matrix(
-            data,
-            block.shape(),
-            block.strides(),
-            block.offset(),
-            nout,
-            &mut matrix.data,
-            rows,
-            row_offset,
-            col_offset,
-        );
-    }
-    #[cfg(test)]
-    crate::probe::input_pack_bytes(
-        matricizations
-            .iter()
-            .map(|matrix| std::mem::size_of_val(&matrix.data[..])),
-    );
-    Ok(matricizations)
+) -> Result<Arc<[CoupledSectorRegion]>, OperationError> {
+    let regions = checked_sector_regions(structure, nout)?;
+    debug_assert!(regions.is_some(), "dynamic space layout is not canonical");
+    regions.ok_or(OperationError::InvalidArgument {
+        message: "internal layout invariant violated (not a coupled-sector matrix layout); please report this",
+    })
 }
 
 // ============================================================================
@@ -540,8 +389,8 @@ impl EndomorphismFamily {
     }
 
     /// Why an internal error, not a refusal: an endomorphism's canonical
-    /// layout, and the adjoint view of one, stack row and column trees
-    /// identically, so a mismatch is a broken layout invariant.
+    /// layout stacks row and column trees identically, so a mismatch is a
+    /// broken layout invariant.
     const fn stacking(self) -> &'static str {
         match self {
             Self::EighFull => "internal eigh_full layout invariant violated (row/column tree stacking differs); please report this",
@@ -624,5 +473,149 @@ pub(super) fn validate_endomorphism_tree_stacking<M: SectorGeometry>(
         Err(OperationError::InvalidArgument {
             message: family.stacking(),
         })
+    }
+}
+
+#[cfg(test)]
+/// Packs every coupled sector of the source data into its dense column-major
+/// matricization, independent of the storage layout. Core's
+/// [`CoupledMatricizationBuilder`] owns the sector, row and column placement;
+/// this only records the trees and moves the data.
+pub(super) fn sector_matricizations<D>(
+    structure: &BlockStructure,
+    data: &[D],
+    nout: usize,
+) -> Result<Vec<SectorMatricization<D>>, OperationError>
+where
+    D: FactorScalar,
+{
+    let mut layout = symtn_core::CoupledMatricizationBuilder::new();
+    let mut matricizations: Vec<SectorMatricization<D>> = Vec::new();
+    let mut routes = Vec::with_capacity(structure.block_count());
+
+    for index in 0..structure.block_count() {
+        let block = structure
+            .block(index)
+            .map_err(OperationError::from_core_preserving_context)?;
+        let BlockKey::FusionTree(key) = block.key() else {
+            return Err(OperationError::ExpectedFusionTreeBlock {
+                tensor: "tsvd",
+                index,
+            });
+        };
+        let (row_shape, col_shape) = block.shape().split_at(nout);
+        let overflow = |_| OperationError::ElementCountOverflow;
+        let placement = layout
+            .place(
+                key,
+                symtn_core::checked_product(row_shape).map_err(overflow)?,
+                symtn_core::checked_product(col_shape).map_err(overflow)?,
+            )
+            .map_err(overflow)?;
+        if placement.new_sector {
+            matricizations.push(SectorMatricization::<D> {
+                sector: key.codomain_tree().coupled(),
+                rows: 0,
+                cols: 0,
+                row_trees: Vec::new(),
+                col_trees: Vec::new(),
+                data: Vec::new(),
+            });
+        }
+        let matrix = &mut matricizations[placement.sector];
+        if placement.new_row {
+            matrix.row_trees.push((
+                key.codomain_tree().clone(),
+                placement.row_offset,
+                row_shape.to_vec(),
+            ));
+        }
+        if placement.new_col {
+            matrix.col_trees.push((
+                key.domain_tree().clone(),
+                placement.col_offset,
+                col_shape.to_vec(),
+            ));
+        }
+        routes.push((placement.sector, placement.row_offset, placement.col_offset));
+    }
+    for matrix in &mut matricizations {
+        (matrix.rows, matrix.cols) = layout.extents(matrix.sector);
+        let len = matrix
+            .rows
+            .checked_mul(matrix.cols)
+            .ok_or(OperationError::ElementCountOverflow)?;
+        matrix.data = vec![D::zero(); len];
+    }
+
+    for (index, (matrix_index, row_offset, col_offset)) in routes.into_iter().enumerate() {
+        let block = structure
+            .block(index)
+            .map_err(OperationError::from_core_preserving_context)?;
+        let matrix = &mut matricizations[matrix_index];
+        let rows = matrix.rows;
+        copy_tensor_block_to_matrix(
+            data,
+            block.shape(),
+            block.strides(),
+            block.offset(),
+            nout,
+            &mut matrix.data,
+            rows,
+            row_offset,
+            col_offset,
+        );
+    }
+    Ok(matricizations)
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn copy_tensor_block_to_matrix<D: Copy>(
+    source: &[D],
+    shape: &[usize],
+    strides: &[usize],
+    offset: usize,
+    nout: usize,
+    matrix: &mut [D],
+    matrix_rows: usize,
+    row_offset: usize,
+    col_offset: usize,
+) {
+    if shape.is_empty() {
+        matrix[row_offset + matrix_rows * col_offset] = source[offset];
+        return;
+    }
+    let run = shape[0];
+    let src_lane_stride = strides[0];
+    let dst_lane_stride = if nout > 0 { 1 } else { matrix_rows };
+    let outer_count: usize = shape[1..].iter().product();
+    let mut index = vec![0usize; shape.len()];
+    for _ in 0..outer_count {
+        let mut src_start = offset;
+        let mut row = 0usize;
+        let mut row_stride = if nout > 0 { shape[0] } else { 1 };
+        let mut col = 0usize;
+        let mut col_stride = if nout == 0 { shape[0] } else { 1 };
+        for axis in 1..shape.len() {
+            src_start += index[axis] * strides[axis];
+            if axis < nout {
+                row += index[axis] * row_stride;
+                row_stride *= shape[axis];
+            } else {
+                col += index[axis] * col_stride;
+                col_stride *= shape[axis];
+            }
+        }
+        let dst_start = (row_offset + row) + matrix_rows * (col_offset + col);
+        if src_lane_stride == 1 && dst_lane_stride == 1 {
+            matrix[dst_start..dst_start + run].copy_from_slice(&source[src_start..src_start + run]);
+        } else {
+            for lane in 0..run {
+                matrix[dst_start + lane * dst_lane_stride] =
+                    source[src_start + lane * src_lane_stride];
+            }
+        }
+        advance_outer_index(&mut index, shape);
     }
 }

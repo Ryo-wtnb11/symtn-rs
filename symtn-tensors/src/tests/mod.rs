@@ -2002,7 +2002,7 @@ impl DenseExecutor for PanicDenseExecutor {
 
 mod adjoint_memo;
 
-mod adjoint_view;
+mod logical_homspace;
 
 mod alternating_bicharacter;
 

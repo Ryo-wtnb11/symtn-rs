@@ -945,7 +945,7 @@ impl TreeTransformPlanning {
 
     /// A lazy adjoint addressed through its parent's storage blocks. The key
     /// is the parent's storage content with the orientation and basis order,
-    /// never a per-call adjoint view, so it is publishable whenever the
+    /// never a per-call adjoint layout, so it is publishable whenever the
     /// parent is canonical.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn resolve_tree_pair_oriented<'p, R, T, FIndices, FAxis>(

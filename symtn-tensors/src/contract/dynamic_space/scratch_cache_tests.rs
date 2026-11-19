@@ -468,7 +468,6 @@ fn validated_layout_does_not_retain_the_adjoint_memo() {
             encoded_layout_primer::<ZNFusionRule>,
         )
         .unwrap();
-    bound.space().adjoint_view().unwrap();
     let memo = Arc::downgrade(bound.space().adjoint.get().expect("prepare fills the memo"));
 
     let validated = bound.validated_layout();

@@ -6,41 +6,6 @@ use super::*;
 use crate::su2::su2_rule;
 
 #[test]
-fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // The adjoint view of a square endomorphism has the input's hom space but
-    // transposed strides: an admitted, noncanonical output layout.
-    let source = hermitian_test_tensor(
-        &ZNFusionRule::new(2).unwrap(),
-        &[SectorId::new(0), SectorId::new(1)],
-    );
-    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &source);
-    let output = bound.space().adjoint_view().unwrap();
-    assert_eq!(output.space().homspace(), bound.space().space().homspace());
-    assert_ne!(
-        output.space().structure(),
-        bound.space().space().structure()
-    );
-    let called = Cell::new(false);
-    let result = map_square_sectors_dyn_into(
-        engine,
-        &mut ScriptedExecutor::new(RejectExecutorCalls),
-        &bound.as_ref().dynamic(),
-        output,
-        |_| -> Result<(), OperationError> {
-            called.set(true);
-            unreachable!("layout rejection precedes kernel initialization")
-        },
-        |_, _, _, _, _, _| unreachable!("layout rejection precedes dense work"),
-    );
-    assert!(matches!(
-        result,
-        Err(OperationError::UnsupportedTensorContractScope { .. })
-    ));
-    assert!(!called.get());
-}
-
-#[test]
 fn dense_only_matrix_function_refuses_adjoint_and_diagonal_before_leasing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let source = hermitian_test_tensor(
@@ -201,7 +166,6 @@ fn pinv_satisfies_the_moore_penrose_identity() {
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let mut context = default_context();
     let compact_svd_copy_rec = crate::probe::record();
-    let input_pack_bytes_rec = crate::probe::record();
 
     let plus = pinv(
         engine,
@@ -221,10 +185,6 @@ fn pinv_satisfies_the_moore_penrose_identity() {
         );
     }
     // The canonical input is read in place; no SVD factor is laid out.
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        0
-    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 
@@ -1181,7 +1141,6 @@ fn pinv_keeps_its_global_rcond_cutoff() {
     let tensor = canonical;
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
-    let input_pack_bytes_rec = crate::probe::record();
 
     let inverse = pinv(
         engine,
@@ -1194,10 +1153,6 @@ fn pinv_keeps_its_global_rcond_cutoff() {
     assert!((scalar_u1_block(inverse.tensor(), 0) - 1.0).abs() < 1e-12);
     assert_eq!(scalar_u1_block(inverse.tensor(), 1), 0.0);
     // The canonical input is read in place; no SVD factor is laid out.
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        0
-    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 

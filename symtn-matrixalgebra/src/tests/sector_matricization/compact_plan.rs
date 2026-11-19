@@ -246,10 +246,7 @@ fn packed_and_region_geometry_preserve_dual_and_innerline_tree_identity() {
     let packed = sector_matricizations(&structure, &data, 3).unwrap();
     assert_eq!(regions.len(), 1);
     assert_eq!(packed.len(), 1);
-    assert!(matches!(
-        generic_input_matricizations(&structure, &data, 3).unwrap(),
-        InputMatricizations::Regions { .. }
-    ));
+    input_matricizations(&structure, &data, 3).unwrap();
     let region = &regions[0];
     let matrix = &packed[0];
     assert_eq!(matrix.data, data);

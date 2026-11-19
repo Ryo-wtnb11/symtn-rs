@@ -34,24 +34,6 @@ use crate::results::{LeftPolar, Lq, Qr, RightPolar};
 use crate::truncation::{select_truncation, Truncation, WeightedSpectrum};
 use symtn_tensors::OperationError;
 
-/// Binds `$geometry` to the admitted input's per-sector geometry
-/// (`&[CoupledSectorRegion]` or `&[SectorMatricization<D>]`) for the
-/// `SectorGeometry`-generic publication helpers.
-macro_rules! with_input_geometry {
-    ($input:expr, |$geometry:ident| $body:expr) => {
-        match $input {
-            InputMatricizations::Regions { regions, .. } => {
-                let $geometry: &[CoupledSectorRegion] = regions;
-                $body
-            }
-            InputMatricizations::Packed(matrices) => {
-                let $geometry = matrices.as_slice();
-                $body
-            }
-        }
-    };
-}
-
 mod authority;
 mod bound;
 mod compact_plan;
@@ -184,8 +166,6 @@ pub use eig::{
     validate_hermitian_regions, EigFullDyn, EighFullDyn, EighScratch, HermitianTol,
     EIGH_EIGENVALUE_CHECK,
 };
-#[cfg(test)]
-pub(crate) use eig::{eig_vals_dyn, eigh_vals_dyn};
 pub use matricize::{
     coupled_sector_block_dimensions_generic_checked, validate_endomorphism_region_stacking,
     EndomorphismFamily, EIGH_NOT_HERMITIAN, EIGH_NOT_SQUARE,

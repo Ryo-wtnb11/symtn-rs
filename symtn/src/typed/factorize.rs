@@ -379,8 +379,7 @@ where
     }
 
     /// The factors `seam_op` computes. Under [`AdjointRule::AdjointSeam`] a
-    /// lazy adjoint's dense parent is read in place, with the adjoint's own
-    /// layout.
+    /// lazy adjoint's dense parent is read in place.
     fn seam_factors<O>(
         &self,
         engine: &mut dyn Engine,
@@ -397,7 +396,6 @@ where
                 symtn_matrixalgebra::seam::FactorSource::AdjointOf {
                     parent: BoundDynamicTensorRef::try_new(&view.parent.space, view.parent_data())
                         .map_err(Error::from)?,
-                    adjoint_space: &view.logical_space,
                 }
             }
             _ => self.factor_input(engine, op, &mut local)?,

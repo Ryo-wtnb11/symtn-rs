@@ -49,9 +49,10 @@ pub(crate) struct TransformedLayoutProbe {
 /// The dynamic expert entry points (`*_dyn_into`) take it directly together with
 /// raw `f64` slices in the coupled-sector matrix layout.
 ///
-/// Invariant: the block structure is a library enumeration of the HomSpace
-/// (or a view derived from one, such as an adjoint view), so every block's
-/// trees, sectors, duality and degeneracies match the HomSpace legs. No
+/// Invariant: the block structure is the library's canonical coupled-sector
+/// layout of the HomSpace, so every block's trees, sectors, duality and
+/// degeneracies match the HomSpace legs. A lazy adjoint is a `FusionOperand`
+/// orientation over its parent's storage, never a space. No
 /// constructor accepts a foreign `BlockStructure` and neither field is
 /// reassigned after construction, so operations rely on this structural
 /// subset proof instead of repeating it; foreign structure is proved where it
@@ -63,16 +64,15 @@ pub struct DynamicFusionMapSpace {
     homspace: Arc<FusionTreeHomSpace>,
     subblock_structure: Arc<BlockStructure>,
     admission: FusionSpaceAdmission,
-    /// The adjoint view's hom space and block structure, each derived on
-    /// first use.
+    /// The adjoint hom space (codomain and domain swapped), derived on first
+    /// use.
     ///
     /// Why not the bounded complete-structure cache or a context cache: this
     /// is immutable data derived only from `nout`, `nin`, `homspace`, and
     /// `subblock_structure`, none of which is reassigned after construction,
     /// so it lives and dies with the space and needs no key, byte bound, or
-    /// invalidation. Its cost is one adjoint hom space and block structure per
-    /// space that is ever adjointed; a lazy-adjoint contraction fills only
-    /// the hom space. It stays out of `PartialEq` and the
+    /// invalidation. Its cost is one adjoint hom space per space that is ever
+    /// adjointed. It stays out of `PartialEq` and the
     /// layout hash because it is a function of the compared fields; clones
     /// share the filled value. It sits behind an `Arc` so an unused slot adds
     /// only one pointer and the once-state to every space.
@@ -80,13 +80,7 @@ pub struct DynamicFusionMapSpace {
     /// Hazard: a struct update (`Self { subblock_structure, ..other }`) that
     /// replaces `nout`, `nin`, `homspace`, or `subblock_structure` must also
     /// reset this slot with `OnceLock::new()`, or it inherits a stale adjoint.
-    adjoint: OnceLock<Arc<AdjointMemo>>,
-}
-
-#[derive(Debug)]
-struct AdjointMemo {
-    homspace: Arc<FusionTreeHomSpace>,
-    structure: OnceLock<Result<Arc<BlockStructure>, OperationError>>,
+    adjoint: OnceLock<Arc<FusionTreeHomSpace>>,
 }
 
 impl PartialEq for DynamicFusionMapSpace {
@@ -474,14 +468,19 @@ impl DynamicFusionMapSpace {
         &self,
         rule: &R,
         operation: &TreeTransformOperation,
+        source_conjugate: bool,
     ) -> Result<TransformedLayoutProbe, OperationError>
     where
         R: MultiplicityFreeRigidSymbols,
     {
         self.validate_rule(rule)?;
         let (codomain_axes, domain_axes) = tree_transform_operation_axes(operation);
-        let homspace = self
-            .homspace()
+        let logical = if source_conjugate {
+            self.adjoint_homspace()
+        } else {
+            self.homspace()
+        };
+        let homspace = logical
             .permute(rule, codomain_axes, domain_axes)
             .map_err(OperationError::from_core_preserving_context)?;
         let (required_len, source_structure_matches) = homspace
@@ -491,7 +490,10 @@ impl DynamicFusionMapSpace {
             nout: codomain_axes.len(),
             homspace,
             required_len,
-            source_structure_matches,
+            // Why not report a match for an adjoint: the parent's tiling is
+            // not the logical layout, and this oracle never borrows a
+            // conjugated source (`source_layout_permutation_is_borrowable`).
+            source_structure_matches: source_structure_matches && !source_conjugate,
         })
     }
 
@@ -884,49 +886,14 @@ impl DynamicFusionMapSpace {
         Self::from_final_homspace_generic(rule, homspace)
     }
 
-    /// Adjoint view: codomain and domain swap (spaces and per-block shapes),
-    /// no data movement implied. The block layout is a strided view into the
-    /// source layout, so this space is for replay bookkeeping, not for
-    /// allocating fresh coupled storage.
-    pub(crate) fn adjoint_view(&self) -> Result<Self, OperationError> {
-        let memo = self.adjoint_memo();
-        let homspace = Arc::clone(&memo.homspace);
-        let structure = memo
-            .structure
-            .get_or_init(|| {
-                crate::lowering::adjoint_block_structure_view(
-                    self.nout,
-                    self.nin,
-                    &self.subblock_structure,
-                )
-                .map(Arc::new)
-            })
-            .clone()?;
-        debug_assert_eq!(structure.rank(), self.subblock_structure.rank());
-        debug_assert_eq!(
-            structure.block_count(),
-            self.subblock_structure.block_count()
-        );
-        Ok(Self {
-            nout: self.nin,
-            nin: self.nout,
-            homspace,
-            subblock_structure: structure,
-            admission: self.admission.clone(),
-            adjoint: OnceLock::new(),
-        })
-    }
-
-    /// The memoized adjoint hom space; the block structure fills on demand.
-    fn adjoint_memo(&self) -> &AdjointMemo {
+    /// The memoized adjoint hom space: codomain and domain swapped, legs not
+    /// dualized.
+    fn adjoint_homspace(&self) -> &FusionTreeHomSpace {
         self.adjoint.get_or_init(|| {
-            Arc::new(AdjointMemo {
-                homspace: Arc::new(FusionTreeHomSpace::new(
-                    self.homspace.domain().clone(),
-                    self.homspace.codomain().clone(),
-                )),
-                structure: OnceLock::new(),
-            })
+            Arc::new(FusionTreeHomSpace::new(
+                self.homspace.domain().clone(),
+                self.homspace.codomain().clone(),
+            ))
         })
     }
 

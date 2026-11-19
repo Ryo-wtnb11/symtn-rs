@@ -1833,7 +1833,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
 
     // What: a lazy adjoint with arbitrary axes compiles the prelowered
     // artifact, never the Host's dense `Structure` route.
-    let adjoint_bound = lhs.adjoint_view().unwrap();
+    let adjoint_bound = crate::adjoint_bound_space_dyn(&lhs).unwrap();
     let rhs3 = space(&provider, vec![v(), v()], vec![v()]);
     let output = [3, 0, 1, 2];
     let lazy_dst = crate::BoundDynamicFusionMapSpace::contracted_multiplicity_free_ordered(
@@ -1879,7 +1879,7 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
     let y = space(&provider, vec![s()], vec![s(), s()]);
     let cases = [
         (
-            x.adjoint_view().unwrap(),
+            crate::adjoint_bound_space_dyn(&x).unwrap(),
             FusionOperand::adjoint(x.space()),
             rhs.clone(),
             FusionOperand::direct(rhs.space()),
@@ -1891,7 +1891,7 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
         (
             lhs.clone(),
             FusionOperand::direct(lhs.space()),
-            y.adjoint_view().unwrap(),
+            crate::adjoint_bound_space_dyn(&y).unwrap(),
             FusionOperand::adjoint(y.space()),
             vec![1, 2],
             vec![0, 1],
@@ -2714,16 +2714,16 @@ fn host_eager_and_the_device_planner_take_the_same_route() {
     // DynamicTree, and the two self-dual core-form lazy contractions the
     // Host resolves to `Structure`.
     let x = space(&su2, vec![su2_leg(), su2_leg()], vec![su2_leg(), su2_leg()]);
-    let x_adjoint = x.adjoint_view().unwrap();
+    let x_adjoint = crate::adjoint_bound_space_dyn(&x).unwrap();
     let rhs = space(&su2, vec![su2_leg(), su2_leg()], vec![su2_leg()]);
     let lhs = space(&su2, vec![su2_leg()], vec![su2_leg(), su2_leg()]);
     let y = space(&su2, vec![su2_leg()], vec![su2_leg(), su2_leg()]);
-    let y_adjoint = y.adjoint_view().unwrap();
+    let y_adjoint = crate::adjoint_bound_space_dyn(&y).unwrap();
     let square = space(&su2, vec![su2_leg(), su2_leg()], vec![su2_leg(), su2_leg()]);
     let p = space(&su2, vec![su2_leg(), su2_leg()], vec![su2_leg(), su2_leg()]);
-    let p_adjoint = p.adjoint_view().unwrap();
+    let p_adjoint = crate::adjoint_bound_space_dyn(&p).unwrap();
     let u1_lhs = space(&u1, vec![u1_v(), u1_v()], vec![u1_v()]);
-    let u1_lhs_adjoint = u1_lhs.adjoint_view().unwrap();
+    let u1_lhs_adjoint = crate::adjoint_bound_space_dyn(&u1_lhs).unwrap();
     let u1_rhs = space(&u1, vec![u1_v(), u1_v()], vec![u1_v()]);
     type Lazy<'a> = (
         &'a str,

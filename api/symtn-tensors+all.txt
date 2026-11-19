@@ -116,7 +116,6 @@ pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_generic
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::prepare_final_homspace_generic_checked_root_with<E>(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, E>) -> core::result::Result<symtn_tensors::PreparedCheckedGenericRoot<R>, E> where E: core::convert::From<symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::prepare_final_homspace_generic_with_checked<P>(&self, &P, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where P: symtn_sectors::algebra::CheckedGenericFusion
 impl<R> symtn_tensors::BoundDynamicFusionMapSpace<R> where R: symtn_sectors::algebra::FusionRule
-pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::adjoint_view(&self) -> core::result::Result<Self, symtn_operations::error::OperationError>
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::bind_generic(symtn_tensors::DynamicFusionMapSpace, alloc::sync::Arc<R>) -> core::result::Result<Self, symtn_operations::error::OperationError>
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::bind_multiplicity_free(symtn_tensors::DynamicFusionMapSpace, alloc::sync::Arc<R>) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::bind_multiplicity_free_checked(symtn_tensors::DynamicFusionMapSpace, alloc::sync::Arc<R>) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra
@@ -219,6 +218,7 @@ pub struct symtn_tensors::FusionOperand<'a>
 impl<'a> symtn_tensors::FusionOperand<'a>
 pub fn symtn_tensors::FusionOperand<'a>::adjoint(&'a symtn_tensors::DynamicFusionMapSpace) -> Self
 pub fn symtn_tensors::FusionOperand<'a>::direct(&'a symtn_tensors::DynamicFusionMapSpace) -> Self
+pub fn symtn_tensors::FusionOperand<'a>::logical_homspace(self) -> &'a symtn_core::fusion_space::hom_space::FusionTreeHomSpace
 pub fn symtn_tensors::FusionOperand<'a>::storage_conjugate(self) -> bool
 pub fn symtn_tensors::FusionOperand<'a>::storage_space(self) -> &'a symtn_tensors::DynamicFusionMapSpace
 impl<'a> core::clone::Clone for symtn_tensors::FusionOperand<'a>

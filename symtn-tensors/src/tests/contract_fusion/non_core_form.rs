@@ -54,14 +54,8 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
 
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
     let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
-    let lhs_adjoint_space = lhs_space
-        .validate_rule(&rule)
-        .and_then(|()| lhs_space.adjoint_view())
-        .unwrap();
-    let rhs_adjoint_space = rhs_space
-        .validate_rule(&rule)
-        .and_then(|()| rhs_space.adjoint_view())
-        .unwrap();
+    let lhs_adjoint_hom = crate::FusionOperand::adjoint(&lhs_space).logical_homspace();
+    let rhs_adjoint_hom = crate::FusionOperand::adjoint(&rhs_space).logical_homspace();
     let (lowered_lhs_axes, lowered_rhs_axes) =
         su2_contracted_logical_axes(lhs_conjugate, rhs_conjugate);
     let lowered_lhs_open_axes = complement_axes(4, &lowered_lhs_axes);
@@ -75,12 +69,12 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         rhs_conjugate,
     );
     let effective_lhs_hom = if lhs_conjugate {
-        lhs_adjoint_space.homspace()
+        lhs_adjoint_hom
     } else {
         &lhs_hom
     };
     let effective_rhs_hom = if rhs_conjugate {
-        rhs_adjoint_space.homspace()
+        rhs_adjoint_hom
     } else {
         &rhs_hom
     };

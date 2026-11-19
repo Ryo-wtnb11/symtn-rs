@@ -11,13 +11,15 @@ pub enum FactorSource<'a, R, D> {
         space: &'a BoundDynamicFusionMapSpace<R>,
         spectrum: &'a [SectorSpectrum<D>],
     },
-    /// The adjoint of the dense `parent`, read in place; `adjoint_space` is
-    /// the adjoint's own layout. Only the operations with a lazy-adjoint
-    /// route (compact and full SVD and LQ, left and right polar) accept it;
-    /// the others refuse it before any lease or value scan.
+    /// The adjoint of the dense `parent`, read in place. Only the operations
+    /// with a lazy-adjoint route (compact and full SVD and LQ, left and right
+    /// polar) accept it; the others refuse it before any lease or value scan.
+    ///
+    /// Why no caller-supplied adjoint layout: a route that needs the
+    /// adjoint's own space derives it from `parent` on the parent's provider,
+    /// so it cannot disagree with the parent.
     AdjointOf {
         parent: BoundDynamicTensorRef<'a, R, D>,
-        adjoint_space: &'a BoundDynamicFusionMapSpace<R>,
     },
 }
 
@@ -128,14 +130,8 @@ fn no_adjoint_route() -> OperationError {
 /// The `adjoint` argument of [`factor_from_source`] for an operation without
 /// a lazy-adjoint route.
 #[allow(clippy::type_complexity)]
-pub(super) fn no_adjoint<E: ?Sized, R, D, T, X>() -> Option<
-    fn(
-        &mut dyn Engine,
-        &mut E,
-        &BoundDynamicTensorRef<'_, R, D>,
-        &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<T, X>,
-> {
+pub(super) fn no_adjoint<E: ?Sized, R, D, T, X>(
+) -> Option<fn(&mut dyn Engine, &mut E, &BoundDynamicTensorRef<'_, R, D>) -> Result<T, X>> {
     None
 }
 
@@ -163,12 +159,7 @@ pub(super) fn factor_from_source<L, E, R, D, T, X, A>(
     adjoint: Option<A>,
 ) -> Result<T, X>
 where
-    A: FnOnce(
-        &mut dyn Engine,
-        &mut E,
-        &BoundDynamicTensorRef<'_, R, D>,
-        &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<T, X>,
+    A: FnOnce(&mut dyn Engine, &mut E, &BoundDynamicTensorRef<'_, R, D>) -> Result<T, X>,
     L: ExecutorLease<Executor = E>,
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
@@ -182,17 +173,14 @@ where
             lease.run(|executor| dense(engine, executor, &input))
         }
         FactorSource::Diagonal { space, spectrum } => diagonal(space, spectrum),
-        FactorSource::AdjointOf {
-            parent,
-            adjoint_space,
-        } => {
+        FactorSource::AdjointOf { parent } => {
             let Some(adjoint) = adjoint else {
                 return Err(no_adjoint_route().into());
             };
             if let Some(family) = dense_finite {
                 require_finite_factor_input(parent.data().iter().copied(), family)?;
             }
-            lease.run(|executor| adjoint(engine, executor, &parent, adjoint_space))
+            lease.run(|executor| adjoint(engine, executor, &parent))
         }
     }
 }
