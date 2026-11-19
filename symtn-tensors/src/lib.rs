@@ -66,7 +66,7 @@ pub use contract::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, ValidatedDynamicFusionLayout,
 };
 #[doc(hidden)]
-pub use contract::{CopyCRoute, CoreRoute};
+pub use contract::{CopyCRoute, CoreRoute, PreparedCheckedGenericRoot};
 #[cfg(test)]
 pub(crate) use contract::{
     PreparedCheckedGenericDynamicSpace, TensorContractStructure, TensorContractWorkspace,

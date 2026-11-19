@@ -435,11 +435,11 @@ fn checked_generic_preparation_rejects_unchecked_binding_before_checker_algebra_
 
 #[test]
 #[allow(clippy::arc_with_non_send_sync)] // The bound API requires Arc; the spy and rule are single-threaded test values.
-fn checked_generic_prepared_structure_constructor_matches_root_constructor() {
-    // What: committing a structure the caller already enumerated yields
-    // the same checked Generic root as enumerating inside the constructor
-    // (blocks, required length, HomSpace, provider Arc, checked binding),
-    // and the commit itself issues no provider query.
+fn checked_generic_staged_root_commit_matches_root_constructor() {
+    // What: committing a staged checked root yields the same checked Generic
+    // root as enumerating inside the constructor (blocks, required length,
+    // HomSpace, provider Arc, checked binding), and the commit itself issues
+    // no provider query.
     let rule = GenericMultiplicityRule;
     let charge = SectorId::new(1);
     let homspace = FusionTreeHomSpace::new(
@@ -458,15 +458,7 @@ fn checked_generic_prepared_structure_constructor_matches_root_constructor() {
         homspace.clone(),
     )
     .unwrap();
-    let prepared = homspace
-        .prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked(provider.as_ref())
-        .unwrap();
-    let committed = BoundDynamicFusionMapSpace::from_prepared_final_homspace_generic_checked(
-        Arc::clone(&provider),
-        homspace.clone(),
-        prepared,
-    )
-    .unwrap();
+    let committed = stage_and_commit(&provider, homspace.clone());
     let rows = |space: &DynamicFusionMapSpace| {
         let structure = space.structure();
         (0..structure.block_count())
@@ -502,18 +494,67 @@ fn checked_generic_prepared_structure_constructor_matches_root_constructor() {
         FailAtCallRule,
     >()));
     let vacuum_hom = FusionTreeHomSpace::from_sector_ids([(0, 2)], [(0, 3)]);
-    let prepared = vacuum_hom
-        .prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked(spy.as_ref())
-        .unwrap();
+    let prepared = BoundDynamicFusionMapSpace::prepare_final_homspace_generic_checked_root_with::<
+        CheckedGenericStructureError<FailAtCallError>,
+    >(Arc::clone(&spy), || Ok(vacuum_hom))
+    .unwrap();
     let enumerated = spy.calls.get();
     assert!(enumerated > 0);
-    BoundDynamicFusionMapSpace::from_prepared_final_homspace_generic_checked(
-        Arc::clone(&spy),
-        vacuum_hom,
-        prepared,
-    )
-    .unwrap();
+    BoundDynamicFusionMapSpace::commit_final_homspace_generic_checked_root(prepared);
     assert_eq!(spy.calls.get(), enumerated);
+}
+
+fn stage_and_commit<R: CheckedGenericFusion>(
+    provider: &Arc<R>,
+    homspace: FusionTreeHomSpace,
+) -> BoundDynamicFusionMapSpace<R> {
+    let prepared = BoundDynamicFusionMapSpace::prepare_final_homspace_generic_checked_root_with::<
+        CheckedGenericStructureError<R::Error>,
+    >(Arc::clone(provider), || Ok(homspace))
+    .unwrap_or_else(|_| panic!("checked root stages"));
+    BoundDynamicFusionMapSpace::commit_final_homspace_generic_checked_root(prepared)
+}
+
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn staged_checked_root_publishes_its_own_providers_tiling() {
+    // What: one raw sector id (SU(3) octet, SU(2) spin 2) staged under each
+    // provider commits that provider's tiling and identity; no input pairs
+    // one provider's staging with another's identity.
+    use symtn_sectors::{CheckedGenericAdmissionMode, LieGroupFusionRule};
+    let lie = |n| {
+        Arc::new(
+            LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+                fusion_symbols::lie::GroupId::su(n).unwrap(),
+            )
+            .unwrap(),
+        )
+    };
+    let (su2, su3) = (lie(2), lie(3));
+    let x = su3.encode_irrep_with_charges(&[1, 1], &[]).unwrap();
+    assert_eq!(x, su2.encode_irrep_with_charges(&[4], &[]).unwrap());
+    let leg = || SectorLeg::new([(x, 1)], false);
+    let homspace = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg(), leg()]),
+        FusionProductSpace::new([leg(), leg()]),
+    );
+    // Oracle: spin 2 ⊗ spin 2 = 0+1+2+3+4 gives 5 tree pairs;
+    // 8⊗8 = 1+8+8+10+10̄+27 gives 1 + 2·2 + 1 + 1 + 1 = 8.
+    for (provider, blocks) in [(&su2, 5), (&su3, 8)] {
+        let staged = stage_and_commit(provider, homspace.clone());
+        let root = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
+            Arc::clone(provider),
+            homspace.clone(),
+        )
+        .unwrap();
+        assert_eq!(staged.space().structure().block_count(), blocks);
+        assert_eq!(staged.space().structure(), root.space().structure());
+        assert_eq!(
+            staged.space().admission().rule_identity(),
+            Some(&staged.provider().rule_identity())
+        );
+        assert_eq!(staged.provider().rule_identity(), provider.rule_identity());
+    }
 }
 
 #[test]

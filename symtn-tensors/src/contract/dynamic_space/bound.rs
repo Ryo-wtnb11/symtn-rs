@@ -6,7 +6,7 @@ use symtn_core::{
     CheckedFusionAlgebra, CheckedGenericFusion, CheckedGenericStructureError, CoreError,
     FusionRule, FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace,
     MultiplicityFreeFusionRule, MultiplicityFreeRigidSymbols, PreparedBlockStructure, RuleIdentity,
-    StructurallyValidatedFusionTreeSubset,
+    SectorStructure, StructurallyValidatedFusionTreeSubset,
 };
 
 #[cfg(test)]
@@ -195,6 +195,26 @@ impl<R> BoundDynamicFusionMapSpace<R> {
     }
 }
 
+/// A complete checked Generic root layout staged under, and owning, its provider.
+///
+/// Why it owns the provider instead of taking one at commit: committing it
+/// under any other provider would pair one category's tiling with another's
+/// identity.
+#[doc(hidden)]
+pub struct PreparedCheckedGenericRoot<R> {
+    provider: Arc<R>,
+    identity: RuleIdentity,
+    structure: PreparedBlockStructure,
+}
+
+impl<R> PreparedCheckedGenericRoot<R> {
+    /// The staged block keys, for validation before publication.
+    #[inline]
+    pub fn sector_structure(&self) -> &SectorStructure {
+        self.structure.sector_structure()
+    }
+}
+
 impl<R> BoundDynamicFusionMapSpace<R>
 where
     R: CheckedGenericFusion,
@@ -235,6 +255,21 @@ where
     where
         E: From<CheckedGenericStructureError<R::Error>>,
     {
+        Self::prepare_final_homspace_generic_checked_root_with(provider, build_homspace)
+            .map(Self::commit_final_homspace_generic_checked_root)
+    }
+
+    /// Stages a complete checked Generic root without publishing its layout:
+    /// reset epoch, one identity read, `build_homspace`, the style check, then
+    /// the layout preparation.
+    #[doc(hidden)]
+    pub fn prepare_final_homspace_generic_checked_root_with<E>(
+        provider: Arc<R>,
+        build_homspace: impl FnOnce() -> Result<FusionTreeHomSpace, E>,
+    ) -> Result<PreparedCheckedGenericRoot<R>, E>
+    where
+        E: From<CheckedGenericStructureError<R::Error>>,
+    {
         let root_identity = std::cell::OnceCell::new();
         let structure =
             FusionTreeHomSpace::prepare_complete_coupled_subblock_structure_generic_checked_with::<
@@ -252,11 +287,29 @@ where
         let identity = root_identity
             .into_inner()
             .expect("successful checked root builder records identity");
+        Ok(PreparedCheckedGenericRoot {
+            provider,
+            identity,
+            structure,
+        })
+    }
+
+    /// Publishes a staged checked root under the provider it was enumerated
+    /// with. Never enumerates.
+    #[doc(hidden)]
+    pub fn commit_final_homspace_generic_checked_root(
+        prepared: PreparedCheckedGenericRoot<R>,
+    ) -> Self {
+        let PreparedCheckedGenericRoot {
+            provider,
+            identity,
+            structure,
+        } = prepared;
         let (homspace, subblock_structure) = structure.commit_with_complete_homspace();
         let homspace = homspace.expect("complete checked builder retains its HomSpace");
         let nout = homspace.codomain().len();
         let nin = homspace.domain().len();
-        Ok(Self {
+        Self {
             space: DynamicFusionMapSpace {
                 nout,
                 nin,
@@ -265,63 +318,6 @@ where
                 admission: FusionSpaceAdmission::Complete(identity),
                 adjoint: OnceLock::new(),
             },
-            provider,
-            layout_build: LayoutBuildCapability::CheckedGeneric,
-        })
-    }
-
-    /// Commits a structure that `homspace` already enumerated under `provider`
-    /// as a complete checked Generic root, without enumerating it again. The
-    /// style check runs here because the checked enumeration does not perform
-    /// it; the root constructor above checks before enumerating instead.
-    ///
-    /// Why not the existing prepare/commit pairs: they either require a
-    /// `CheckedGeneric`-bound input space or hand the result the input's
-    /// capability, so a caller that only holds the provider could not obtain
-    /// the `CheckedGeneric` binding `from_final_homspace_generic_checked` gives.
-    ///
-    /// A `homspace` whose codomain/domain split differs from the one
-    /// `structure` was prepared for is refused with
-    /// [`CoreError::FusionSpaceSplitMismatch`].
-    #[doc(hidden)]
-    pub fn from_prepared_final_homspace_generic_checked(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        structure: PreparedBlockStructure,
-    ) -> Result<Self, CheckedGenericStructureError<R::Error>> {
-        Self::validate_checked_generic_style(provider.as_ref())?;
-        let (actual_nout, actual_nin) = (homspace.codomain().len(), homspace.domain().len());
-        let bound = Self::commit_prepared_generic_checked(provider, homspace, structure);
-        let (expected_nout, expected_nin) = (bound.space.nout, bound.space.nin);
-        if (expected_nout, expected_nin) != (actual_nout, actual_nin) {
-            return Err(CoreError::FusionSpaceSplitMismatch {
-                expected_nout,
-                expected_nin,
-                actual_nout,
-                actual_nin,
-            }
-            .into());
-        }
-        Ok(bound)
-    }
-
-    fn commit_prepared_generic_checked(
-        provider: Arc<R>,
-        homspace: FusionTreeHomSpace,
-        structure: PreparedBlockStructure,
-    ) -> Self {
-        let identity = provider.rule_identity();
-        let nout = homspace.codomain().len();
-        let nin = homspace.domain().len();
-        Self {
-            space: PreparedCheckedGenericDynamicSpace {
-                nout,
-                nin,
-                homspace,
-                structure,
-                identity,
-            }
-            .commit(),
             provider,
             layout_build: LayoutBuildCapability::CheckedGeneric,
         }
