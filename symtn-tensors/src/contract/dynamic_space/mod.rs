@@ -21,6 +21,7 @@ mod bound;
 mod metadata;
 mod operand;
 
+pub use bound::PreparedCheckedGenericRoot;
 use metadata::LayoutBuildCapability;
 #[cfg(test)]
 pub(crate) use metadata::{checked_layout_primer, checked_metadata_dispatcher};

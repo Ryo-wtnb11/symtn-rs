@@ -40,6 +40,7 @@ mod generic_fixtures;
 pub(crate) mod scripted_executor;
 mod spies;
 use fixtures::*;
+pub(crate) use generic_fixtures::FactorGenericRule;
 use generic_fixtures::*;
 use spies::*;
 

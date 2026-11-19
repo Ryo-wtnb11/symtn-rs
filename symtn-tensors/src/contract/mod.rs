@@ -85,7 +85,7 @@ pub(crate) use dynamic_space::{
 };
 pub use dynamic_space::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand,
-    PreparedCheckedGenericDynamicSpace, ValidatedDynamicFusionLayout,
+    PreparedCheckedGenericDynamicSpace, PreparedCheckedGenericRoot, ValidatedDynamicFusionLayout,
 };
 #[cfg(test)]
 pub(crate) use fusion::contracted_fusion_tree_basis_matches;

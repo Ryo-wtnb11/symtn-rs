@@ -3,7 +3,7 @@ use super::*;
 use crate::su2::su2_rule;
 use symtn_dense::Engine;
 
-use symtn_core::PreparedBlockStructure;
+use symtn_tensors::PreparedCheckedGenericRoot;
 
 mod sealed {
     use super::*;
@@ -811,29 +811,22 @@ where
     R: CheckedGenericFusion,
 {
     type Error = CheckedGenericFactorPlanError<R::Error>;
-    type Staged = (FusionTreeHomSpace, PreparedBlockStructure);
+    type Staged = PreparedCheckedGenericRoot<R>;
 
     fn stage(&self, homspace: FusionTreeHomSpace) -> Result<Self::Staged, Self::Error> {
-        let prepared = homspace
-            .prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked(
-                self.0.as_ref(),
-            )
-            .map_err(CheckedGenericFactorPlanError::from)?;
-        Ok((homspace, prepared))
+        BoundDynamicFusionMapSpace::prepare_final_homspace_generic_checked_root_with(
+            Arc::clone(self.0),
+            || Ok(homspace),
+        )
     }
 
     fn commit(
         &self,
-        (homspace, prepared): Self::Staged,
+        prepared: Self::Staged,
         pre_commit: impl FnOnce(&SectorStructure) -> Result<(), OperationError>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::Error> {
         pre_commit(prepared.sector_structure())?;
-        BoundDynamicFusionMapSpace::from_prepared_final_homspace_generic_checked(
-            Arc::clone(self.0),
-            homspace,
-            prepared,
-        )
-        .map_err(CheckedGenericFactorPlanError::from)
+        Ok(BoundDynamicFusionMapSpace::commit_final_homspace_generic_checked_root(prepared))
     }
 
     fn coupled_dimensions(
@@ -874,12 +867,12 @@ mod publication_order_tests {
     use super::*;
 
     #[test]
-    fn checked_factor_pre_commit_error_precedes_late_style_and_publication() {
-        const FILTER: &str = "factorize::authority::publication_order_tests::checked_factor_pre_commit_error_precedes_late_style_and_publication";
-        if std::env::var_os("SYMTN_FACTOR_LATE_STYLE").is_none() {
+    fn checked_factor_pre_commit_error_precedes_publication() {
+        const FILTER: &str = "factorize::authority::publication_order_tests::checked_factor_pre_commit_error_precedes_publication";
+        if std::env::var_os("SYMTN_FACTOR_PUBLICATION_ORDER").is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", FILTER])
-                .env("SYMTN_FACTOR_LATE_STYLE", "1")
+                .env("SYMTN_FACTOR_PUBLICATION_ORDER", "1")
                 .output()
                 .unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -891,10 +884,14 @@ mod publication_order_tests {
             return;
         }
         symtn_core::clear_structure_caches();
-        let rule = su2_rule();
+        let entries = || {
+            symtn_core::structure_cache_info(symtn_core::StructureCacheKind::DegeneracyStructure)
+                .entries()
+        };
+        let hom = FusionTreeHomSpace::from_sector_ids([(1, 2)], [(1, 3)]);
+        let rule = crate::tests::FactorGenericRule;
         let provider = Arc::new(symtn_core::InfallibleGeneric::new(&rule));
         let authority = CheckedAuthority(&provider);
-        let hom = FusionTreeHomSpace::from_sector_ids([(1, 2)], [(1, 3)]);
         let stage = authority.stage(hom.clone()).unwrap();
         let sentinel = OperationError::InvalidArgument {
             message: "placement sentinel",
@@ -905,20 +902,11 @@ mod publication_order_tests {
         assert!(
             matches!(error, CheckedGenericFactorPlanError::Operation(ref actual) if actual == &sentinel)
         );
-        let entries = || {
-            symtn_core::structure_cache_info(symtn_core::StructureCacheKind::DegeneracyStructure)
-                .entries()
-        };
         assert_eq!(entries(), 0);
-        let stage = authority.stage(hom).unwrap();
-        let checked = std::cell::Cell::new(false);
-        let error = authority
-            .commit(stage, |_| {
-                checked.set(true);
-                Ok(())
-            })
-            .unwrap_err();
-        assert!(checked.get());
+
+        let rule = su2_rule();
+        let provider = Arc::new(symtn_core::InfallibleGeneric::new(&rule));
+        let error = CheckedAuthority(&provider).stage(hom).err().unwrap();
         assert!(matches!(
             error,
             CheckedGenericFactorPlanError::Operation(OperationError::Core(

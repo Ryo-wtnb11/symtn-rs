@@ -110,9 +110,10 @@ impl<'a> core::marker::Copy for symtn_tensors::AdjointBlockMap<'a>
 pub struct symtn_tensors::BoundDynamicFusionMapSpace<R>
 impl<R> symtn_tensors::BoundDynamicFusionMapSpace<R> where R: symtn_sectors::algebra::CheckedGenericFusion
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::commit_final_homspace_generic_bound_checked(&self, symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::commit_final_homspace_generic_checked_root(symtn_tensors::PreparedCheckedGenericRoot<R>) -> Self
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_generic_checked(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_generic_checked_with<E>(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, E>) -> core::result::Result<Self, E> where E: core::convert::From<symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
-pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_prepared_final_homspace_generic_checked(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace, symtn_core::block_structure::structure::PreparedBlockStructure) -> core::result::Result<Self, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::prepare_final_homspace_generic_checked_root_with<E>(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, E>) -> core::result::Result<symtn_tensors::PreparedCheckedGenericRoot<R>, E> where E: core::convert::From<symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::prepare_final_homspace_generic_with_checked<P>(&self, &P, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where P: symtn_sectors::algebra::CheckedGenericFusion
 impl<R> symtn_tensors::BoundDynamicFusionMapSpace<R> where R: symtn_sectors::algebra::FusionRule
 pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::adjoint_view(&self) -> core::result::Result<Self, symtn_operations::error::OperationError>
@@ -243,6 +244,9 @@ pub fn symtn_tensors::PlanarContractOrders::eq(&self, &symtn_tensors::PlanarCont
 impl core::fmt::Debug for symtn_tensors::PlanarContractOrders
 pub fn symtn_tensors::PlanarContractOrders::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for symtn_tensors::PlanarContractOrders
+pub struct symtn_tensors::PreparedCheckedGenericRoot<R>
+impl<R> symtn_tensors::PreparedCheckedGenericRoot<R>
+pub fn symtn_tensors::PreparedCheckedGenericRoot<R>::sector_structure(&self) -> &symtn_core::block_structure::sector_structure::SectorStructure
 pub struct symtn_tensors::StagedContract<'a, R, St>
 impl<'a, P> symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>> where P: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64> + 'a
 pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::checked_generic((&'a symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'a>, usize), (&'a symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'a>, usize), symtn_tensors::ContractRequest<'a>) -> core::result::Result<Self, symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>

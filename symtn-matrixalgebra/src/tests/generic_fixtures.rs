@@ -77,7 +77,7 @@ impl MultiplicityFreeRigidSymbols for IdentityQdimRule {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct FactorGenericRule;
+pub(crate) struct FactorGenericRule;
 
 impl symtn_core::testing::Provider for FactorGenericRule {}
 
