@@ -538,11 +538,7 @@ fn polar_validates_every_sector_before_direct_svd_execution() {
     let rule = ZNFusionRule::new(2).unwrap();
     let direct = mixed_rectangular_tensor((4, 2), (1, 3));
     let direct_bound = bound_tensor(Arc::new(rule.clone()), &direct);
-    assert!(
-        crate::factorize::compact_factor_plan_for_test(direct_bound.space())
-            .unwrap()
-            .is_some()
-    );
+    crate::factorize::compact_factor_plan_for_test(direct_bound.space()).unwrap();
     let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
     let direct_error = left_polar(engine, &mut dense, &direct_bound.as_ref()).unwrap_err();
     assert!(matches!(

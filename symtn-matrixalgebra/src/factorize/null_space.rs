@@ -259,7 +259,7 @@ where
     D: FactorScalar,
 {
     let space = input.space().space();
-    let matrices = generic_input_matricizations(space.structure(), input.data(), space.nout())?;
+    let matrices = input_matricizations(space.structure(), input.data(), space.nout())?;
     // A sector only on the null side has no tensor block but is entirely null.
     let mut null_dimensions = authority.coupled_dimensions(match side {
         FactorSide::Left => space.homspace().codomain(),
@@ -268,15 +268,18 @@ where
     let mut pairs = in_linalg_scope(engine, dense, |dense, engine| {
         null_packed(engine, dense, &matrices, &mut null_dimensions, side)
     })?;
-    with_input_geometry!(&matrices, |geometry| publish_one_sided_factor(
-        authority,
-        space.homspace(),
-        geometry,
-        &mut pairs,
-        &null_dimensions,
-        side,
-        FactorPlacement::Direct,
-    ))
+    {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        publish_one_sided_factor(
+            authority,
+            space.homspace(),
+            geometry,
+            &mut pairs,
+            &null_dimensions,
+            side,
+            FactorPlacement::Direct,
+        )
+    }
 }
 
 /// The null bases of every sector longer on the null `side` (`rows > cols`

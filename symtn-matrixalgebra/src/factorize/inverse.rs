@@ -36,20 +36,23 @@ where
     })?;
     let output_len = output_space.space().required_len()?;
     let matrices =
-        generic_input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
+        input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
     let (_, blocks) = sector_blocks(&matrices)?;
     if blocks.iter().any(|&(_, rows, cols)| rows != cols) {
         return Err(OperationError::SpaceMismatch {
             message: "inverse coupled-sector matrix is not square",
         });
     }
-    let landings = with_input_geometry!(&matrices, |geometry| compile_sector_landings(
-        geometry,
-        &output_regions,
-        output_len,
-        FactorSide::Right,
-        FactorSide::Left,
-    ))?;
+    let landings = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        compile_sector_landings(
+            geometry,
+            &output_regions,
+            output_len,
+            FactorSide::Right,
+            FactorSide::Left,
+        )
+    }?;
     let solved: Vec<usize> = (0..blocks.len())
         .filter(|&index| blocks[index].1 > 0)
         .collect();
@@ -299,19 +302,16 @@ where
         }
     })?;
     let matrices =
-        generic_input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
+        input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
     // `A^+` is `domain <- codomain`: its rows are the input's column trees.
     let (rows, cols) = match placement {
         FactorPlacement::Direct => (FactorSide::Right, FactorSide::Left),
         FactorPlacement::Adjoint => (FactorSide::Left, FactorSide::Right),
     };
-    let landings = with_input_geometry!(&matrices, |geometry| compile_sector_landings(
-        geometry,
-        &output_regions,
-        output_len,
-        rows,
-        cols,
-    ))?;
+    let landings = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        compile_sector_landings(geometry, &output_regions, output_len, rows, cols)
+    }?;
 
     let mut output_data = vec![D::zero(); output_len];
     // One scope spans both passes: the staged SVDs (the cutoff is global) and
@@ -646,10 +646,8 @@ pub(super) fn compile_solve_left_region_routes(
 /// kernel can size its scratch to `O(max_c n_c²)` and allocate nothing per
 /// sector.
 ///
-/// That bound is the kernel's own. It is also the whole of the scratch on a
-/// canonical region layout: the blocks are read and written in place. A
-/// packed input matricizes *every* sector up front and so costs
-/// `O(Σ_c n_c²)` on top of it.
+/// That bound is the kernel's own. It is also the whole of the scratch: the
+/// blocks of the canonical region layout are read and written in place.
 ///
 /// `apply(dense, state, source, n, out)` reads the column-major `n x n` block at
 /// `source` and writes its image into the column-major `n x n` `out`; one
@@ -751,18 +749,21 @@ fn square_sector_routes<'a, R, D: FactorScalar>(
     })?;
     let output_len = output_space.space().required_len()?;
     let matrices =
-        generic_input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
+        input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
     // Why stacking and not only tree identity, as `inv` needs: `f(P_R A
     // P_C^T)` is not `P_R f(A) P_C^T` unless the row and column stackings
     // coincide.
     matrices.validate_endomorphism_stacking(EndomorphismFamily::Exp)?;
-    let landings = with_input_geometry!(&matrices, |geometry| compile_sector_landings(
-        geometry,
-        &output_regions,
-        output_len,
-        FactorSide::Left,
-        FactorSide::Right,
-    ))?;
+    let landings = {
+        let geometry: &[CoupledSectorRegion] = &matrices.regions;
+        compile_sector_landings(
+            geometry,
+            &output_regions,
+            output_len,
+            FactorSide::Left,
+            FactorSide::Right,
+        )
+    }?;
     Ok(SquareSectorRoutes {
         output_regions,
         output_len,

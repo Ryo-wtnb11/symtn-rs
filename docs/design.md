@@ -76,10 +76,12 @@ direct-region and CUDA routes for dense compact QR/SVD and full EIGH use
 `CompactFactorPlan` as the per-call, placement-neutral authority for bond
 spaces, factor layouts and sector routes. For sector matrix shape `(m, n)`,
 the compact bond has `min(m, n)` degeneracy; zero-rank routes are skipped.
-Host direct output requires matching tree order; a packed input (a layout
-without coupled regions in canonical tree order) scatters by tree identity.
-A lazy adjoint is a `FusionOperand` orientation over its parent's storage,
-never an input layout. Checked Generic QR builds factors through its own checked
+Every input is a canonical coupled-sector layout, so the multiplicity-free
+Host routes read its regions in place and publish factors positionally: a
+canonical layout enumerates each side's trees by that side's fusion walk, so
+the factors list the source's trees in the source's order. A lazy adjoint is
+a `FusionOperand` orientation over its parent's storage, never an input
+layout. Checked Generic QR builds factors through its own checked
 staging path.
 
 This is the output-initialization/per-block split of TensorKit

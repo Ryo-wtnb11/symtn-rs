@@ -433,7 +433,6 @@ fn checked_only_generic_values_borrow_canonical_input_regions() {
         .unwrap()
         .unwrap();
     let mut spy = ScriptedExecutor::<ValuesInputSpy>::default();
-    let values_fallbacks_rec = crate::probe::record();
     let spectra = svd_vals_dyn_checked_generic(
         &mut spy,
         &BoundDynamicTensorRef::try_new(&rectangular_space, &rectangular_data).unwrap(),
@@ -522,10 +521,6 @@ fn checked_only_generic_values_borrow_canonical_input_regions() {
                 values: vec![Complex64::new(1.0, 1.0), Complex64::new(3.0, -1.0)],
             },
         ],
-    );
-    assert_eq!(
-        values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
-        0
     );
     assert_eq!(endomorphism_provider.calls.get(), provider_calls);
     assert_eq!(hermitian, hermitian_before);
@@ -674,7 +669,6 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
     assert_eq!(empty.structure().block_count(), 0);
     assert!(empty.data().is_empty());
     let mut reject = ScriptedExecutor::new(RejectExecutorCalls);
-    let values_fallbacks_rec = crate::probe::record();
     assert!(svd_vals(
         engine,
         &mut reject,
@@ -696,10 +690,6 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
     )
     .unwrap()
     .is_empty());
-    assert_eq!(
-        values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
-        0
-    );
 
     let rule = ZNFusionRule::new(2).unwrap();
     let homspace =

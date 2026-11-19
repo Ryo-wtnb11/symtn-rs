@@ -225,9 +225,10 @@ full SVD, full EIGH, the left and right polar decompositions, the Hermitian `exp
 and the inverse run through
 `DenseExecutor::factorize_batch_into`: the
 operation allocates each output once (the final packed factor for a
-direct-region or Checked Generic canonical output, otherwise one packed
-transient per call that is scattered by tree identity afterwards, about
-twice the factor payload on that route) and one packed real spectrum, and
+multiplicity-free or Checked Generic canonical output; a Checked Generic
+publication whose factor keys are not in source order instead scatters one
+packed transient per call by tree identity, about twice the factor payload on
+that route) and one packed real spectrum, and
 each block writes its factors straight into its slice through tlinalg's
 initialized-destination entries; SVD and EIGH write their real spectra
 straight into the destination, with no staging. Each lane allocates one

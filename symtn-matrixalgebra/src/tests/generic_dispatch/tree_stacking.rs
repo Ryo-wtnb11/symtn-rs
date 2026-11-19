@@ -111,17 +111,12 @@ fn checked_generic_facade_layouts_take_the_direct_region_path() {
             (3, 0),
             "{publication:?}"
         );
-        let values_fallbacks_rec = crate::probe::record();
         svd_vals_dyn_checked_generic(&mut dense, &input).unwrap();
         if endomorphism {
             let hermitian_input = BoundDynamicTensorRef::try_new(&space, &hermitian).unwrap();
             eigh_vals_dyn_checked_generic(&mut dense, &hermitian_input).unwrap();
             eig_vals_dyn_checked_generic(&mut dense, &input).unwrap();
         }
-        assert_eq!(
-            values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
-            0
-        );
     }
     assert!(
         unordered_fixtures > 0,

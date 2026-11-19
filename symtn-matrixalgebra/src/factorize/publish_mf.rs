@@ -48,45 +48,6 @@ where
     authority.commit(staged, |_| Ok(()))
 }
 
-/// Builds the `(codomain <- W, W <- domain)` factor pair shared by SVD and
-/// the orthogonal factorizations, in the coupled-sector matrix layout.
-pub(super) fn build_left_right_bound_pair<R, D, P>(
-    authority: &BoundDynamicFusionMapSpace<R>,
-    homspace: &FusionTreeHomSpace,
-    matricizations: &[SectorMatricization<D>],
-    pairs: &mut P,
-) -> Result<DynamicFactorPair<R, D>, OperationError>
-where
-    R: MultiplicityFreeRigidSymbols,
-    D: FactorScalar,
-    P: SidedFactors<D> + ?Sized,
-{
-    let dimensions = (0..pairs.len())
-        .map(|index| {
-            let pair = pairs.pair(index);
-            (pair.sector, pair.kept)
-        })
-        .collect::<BTreeMap<_, _>>();
-    Ok((
-        build_bound_factor(
-            authority,
-            homspace,
-            matricizations,
-            pairs,
-            &dimensions,
-            FactorSide::Left,
-        )?,
-        build_bound_factor(
-            authority,
-            homspace,
-            matricizations,
-            pairs,
-            &dimensions,
-            FactorSide::Right,
-        )?,
-    ))
-}
-
 pub(super) fn build_left_bound_factor<R, D, M>(
     authority: &BoundDynamicFusionMapSpace<R>,
     homspace: &FusionTreeHomSpace,
@@ -337,88 +298,6 @@ where
         *side_offset = side_end;
     }
     Ok(BoundDynFactor::from_bound(space, data, nout, nin)?)
-}
-
-pub(super) fn scatter_left_sector_blocks<D, M>(
-    left_space: &DynamicFusionMapSpace,
-    left_data: &mut [D],
-    matrix: &M,
-    index: &PlacementIndex<'_>,
-    groups: &SectorBlockGroups,
-    factor: &[D],
-    factor_rows: usize,
-) -> Result<(), OperationError>
-where
-    D: FactorScalar,
-    M: SectorGeometry,
-{
-    let left_structure = Arc::clone(left_space.structure());
-    for block_index in groups.blocks(matrix.sector()) {
-        #[cfg(test)]
-        crate::probe::hit(crate::probe::Event::LeftVisits);
-        let block = left_structure
-            .block(block_index)
-            .map_err(OperationError::from_core_preserving_context)?;
-        let BlockKey::FusionTree(key) = block.key() else {
-            continue;
-        };
-        debug_assert_eq!(coupled_of(key.codomain_tree()), matrix.sector());
-        let (row_offset, _) =
-            index.placement(matrix.sector(), FactorSide::Left, key.codomain_tree())?;
-        scatter_matrix_block(
-            left_data,
-            block.shape(),
-            block.strides(),
-            block.offset(),
-            block.shape().len() - 1,
-            FactorSide::Left,
-            factor,
-            factor_rows,
-            row_offset,
-        );
-    }
-    Ok(())
-}
-
-pub(super) fn scatter_right_sector_blocks<D, M>(
-    right_space: &DynamicFusionMapSpace,
-    right_data: &mut [D],
-    matrix: &M,
-    index: &PlacementIndex<'_>,
-    groups: &SectorBlockGroups,
-    factor: &[D],
-    factor_rows: usize,
-) -> Result<(), OperationError>
-where
-    D: FactorScalar,
-    M: SectorGeometry,
-{
-    let right_structure = Arc::clone(right_space.structure());
-    for block_index in groups.blocks(matrix.sector()) {
-        #[cfg(test)]
-        crate::probe::hit(crate::probe::Event::RightVisits);
-        let block = right_structure
-            .block(block_index)
-            .map_err(OperationError::from_core_preserving_context)?;
-        let BlockKey::FusionTree(key) = block.key() else {
-            continue;
-        };
-        debug_assert_eq!(coupled_of(key.domain_tree()), matrix.sector());
-        let (col_offset, _) =
-            index.placement(matrix.sector(), FactorSide::Right, key.domain_tree())?;
-        scatter_matrix_block(
-            right_data,
-            block.shape(),
-            block.strides(),
-            block.offset(),
-            0,
-            FactorSide::Right,
-            factor,
-            factor_rows,
-            col_offset,
-        );
-    }
-    Ok(())
 }
 
 pub(super) fn reorder_columns_in_place<D: Copy>(

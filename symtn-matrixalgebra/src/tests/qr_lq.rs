@@ -1173,6 +1173,36 @@ impl crate::tests::scripted_executor::Observer for LqRefusingScope {
 }
 
 #[test]
+fn lazy_adjoint_lq_refuses_a_layout_that_is_not_the_parents_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: compact and full LQ of a lazy adjoint refuse an adjoint layout
+    // that does not lay out the adjoint of the parent's HomSpace (here the
+    // parent's own `V3 <- V2`), before any dense call.
+    let bound = bound_tensor(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        &rectangular_svd_tensor(3, 2),
+    );
+    let bound = bound.as_ref();
+    let parent = bound.dynamic();
+    let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
+    let expected = OperationError::SpaceMismatch {
+        message: "lazy adjoint layout is not the adjoint of its parent's space",
+    };
+    assert_eq!(
+        crate::factorize::lq_compact_adjoint_dyn(engine, &mut dense, &parent, parent.space())
+            .map(drop)
+            .unwrap_err(),
+        expected
+    );
+    assert_eq!(
+        crate::factorize::lq_full_adjoint_dyn(engine, &mut dense, &parent, parent.space())
+            .map(drop)
+            .unwrap_err(),
+        expected
+    );
+}
+
+#[test]
 fn compact_lq_runs_in_one_scope_whose_refusal_wins() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: compact LQ, ordinary and of a lazy adjoint, runs its dense batch

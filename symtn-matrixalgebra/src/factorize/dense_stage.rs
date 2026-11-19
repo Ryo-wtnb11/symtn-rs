@@ -387,56 +387,6 @@ pub(super) fn advance_outer_index(index: &mut [usize], shape: &[usize]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn copy_tensor_block_to_matrix<D: Copy>(
-    source: &[D],
-    shape: &[usize],
-    strides: &[usize],
-    offset: usize,
-    nout: usize,
-    matrix: &mut [D],
-    matrix_rows: usize,
-    row_offset: usize,
-    col_offset: usize,
-) {
-    if shape.is_empty() {
-        matrix[row_offset + matrix_rows * col_offset] = source[offset];
-        return;
-    }
-    let run = shape[0];
-    let src_lane_stride = strides[0];
-    let dst_lane_stride = if nout > 0 { 1 } else { matrix_rows };
-    let outer_count: usize = shape[1..].iter().product();
-    let mut index = vec![0usize; shape.len()];
-    for _ in 0..outer_count {
-        let mut src_start = offset;
-        let mut row = 0usize;
-        let mut row_stride = if nout > 0 { shape[0] } else { 1 };
-        let mut col = 0usize;
-        let mut col_stride = if nout == 0 { shape[0] } else { 1 };
-        for axis in 1..shape.len() {
-            src_start += index[axis] * strides[axis];
-            if axis < nout {
-                row += index[axis] * row_stride;
-                row_stride *= shape[axis];
-            } else {
-                col += index[axis] * col_stride;
-                col_stride *= shape[axis];
-            }
-        }
-        let dst_start = (row_offset + row) + matrix_rows * (col_offset + col);
-        if src_lane_stride == 1 && dst_lane_stride == 1 {
-            matrix[dst_start..dst_start + run].copy_from_slice(&source[src_start..src_start + run]);
-        } else {
-            for lane in 0..run {
-                matrix[dst_start + lane * dst_lane_stride] =
-                    source[src_start + lane * src_lane_stride];
-            }
-        }
-        advance_outer_index(&mut index, shape);
-    }
-}
-
 pub(super) fn copy_mapped_to_strided_diagonal<D, V, F>(
     data: &mut [D],
     offset: usize,

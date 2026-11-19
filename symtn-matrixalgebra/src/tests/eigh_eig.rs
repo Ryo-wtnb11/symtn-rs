@@ -41,7 +41,6 @@ fn checked_only_generic_eigh_validates_every_region_before_dense_work() {
     let before = hermitian.clone();
     let provider_calls = provider.calls.get();
     let mut dense = ScriptedExecutor::<EighCallSpy>::default();
-    let values_fallbacks_rec = crate::probe::record();
 
     let error = eigh_vals_dyn_checked_generic(
         &mut dense,
@@ -56,10 +55,6 @@ fn checked_only_generic_eigh_validates_every_region_before_dense_work() {
         })
     ));
     assert_eq!(dense.counts().of(EIGH_ENTRIES), 0);
-    assert_eq!(
-        values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
-        0
-    );
     assert_eq!(provider.calls.get(), provider_calls);
     assert_eq!(hermitian, before);
 }
