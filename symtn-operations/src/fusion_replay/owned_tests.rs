@@ -157,13 +157,12 @@ fn run_owned<G: Rank2Gemm<f64>>(
     plan: &FusionBlockContractPlan,
     structure: &Arc<BlockStructure>,
     gemm: &mut G,
-    workspace: &mut FusionBlockContractWorkspace<f64>,
+    workspace: &mut FusionBlockContractWorkspace,
     data: &[f64],
     alpha: f64,
 ) -> Result<Vec<f64>, OperationError> {
     plan.execute_owned(
         &mut symtn_dense::CpuEngine::serial(),
-        &mut ObservedKernels::recording(),
         gemm,
         workspace,
         structure,
@@ -177,72 +176,31 @@ fn run_owned<G: Rank2Gemm<f64>>(
 
 #[test]
 fn owned_replay_writes_every_element_from_uninitialized_storage() {
-    // What: direct, packed-operand and scatter-destination groups produce
-    // `alpha * lhs * rhs` on active blocks and `+0.0` on inactive ones,
-    // through the default fresh GEMM.
-    for irregular_first in [false, true] {
-        let (structure, plan) = four_block_plan(irregular_first);
-        let output = plan
-            .execute_owned(
-                &mut symtn_dense::CpuEngine::serial(),
-                &mut ObservedKernels::recording(),
-                &mut NaiveGemm,
-                &mut FusionBlockContractWorkspace::default(),
-                &structure,
-                &structure,
-                &FOUR_BLOCK_LHS,
-                &structure,
-                &FOUR_BLOCK_RHS,
-                2.0,
-            )
-            .unwrap();
-        assert_eq!(output[..2], [42.0, 110.0], "{irregular_first}");
-        assert!(output[2..].iter().all(|v| v.to_bits() == 0));
-    }
-    let structure = Arc::new(BlockStructure::packed_column_major(1, [vec![1], vec![1]]).unwrap());
-    let plan = FusionBlockContractPlan::from_parts(
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Vec::new(),
-        vec![
-            FusionBlockContractGroupPlan::new(
-                scalar_group(0, true, 1.0),
-                scalar_group(0, true, 1.0),
-                scalar_group(0, false, -1.0),
-            )
-            .unwrap(),
-            FusionBlockContractGroupPlan::new(
-                scalar_group(1, true, 1.0),
-                scalar_group(1, true, 1.0),
-                scalar_group(1, true, 1.0),
-            )
-            .unwrap(),
-        ],
-    )
-    .unwrap();
+    // What: direct groups produce `alpha * lhs * rhs` on active blocks and
+    // `+0.0` on inactive ones, through the default fresh GEMM.
+    let (structure, plan) = four_block_plan();
     let output = plan
         .execute_owned(
             &mut symtn_dense::CpuEngine::serial(),
-            &mut ObservedKernels::recording(),
             &mut NaiveGemm,
             &mut FusionBlockContractWorkspace::default(),
             &structure,
             &structure,
-            &[3.0, 5.0],
+            &FOUR_BLOCK_LHS,
             &structure,
-            &[7.0, 11.0],
-            1.0,
+            &FOUR_BLOCK_RHS,
+            2.0,
         )
         .unwrap();
-    assert_eq!(output, [-21.0, 55.0]);
+    assert_eq!(output[..2], [42.0, 110.0]);
+    assert!(output[2..].iter().all(|v| v.to_bits() == 0));
 }
 
 #[test]
 fn zero_alpha_owned_replay_is_zero_with_nonfinite_operands() {
     // What: at `alpha = 0` the GEMM outputs are assigned `+0.0` without
     // forming `0 * Inf`.
-    let (structure, plan) = four_block_plan(false);
+    let (structure, plan) = four_block_plan();
     let output = run_owned(
         &plan,
         &structure,
@@ -264,11 +222,10 @@ fn zero_alpha_owned_replay_refuses_a_broken_engine() {
         engine.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
     }));
     assert!(panicked.is_err() && engine.is_broken());
-    let (structure, plan) = four_block_plan(false);
+    let (structure, plan) = four_block_plan();
     let error = plan
         .execute_owned(
             &mut engine,
-            &mut ObservedKernels::recording(),
             &mut NaiveGemm,
             &mut FusionBlockContractWorkspace::default(),
             &structure,
@@ -455,7 +412,6 @@ fn padded_plan_keeps_initialized_replay_and_zeroes_padding_when_owned() {
     let owned: Vec<f64> = plan
         .execute_owned(
             engine,
-            &mut ObservedKernels::recording(),
             &mut NaiveGemm,
             &mut FusionBlockContractWorkspace::default(),
             &padded,

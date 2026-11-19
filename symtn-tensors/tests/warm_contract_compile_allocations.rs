@@ -9,7 +9,7 @@ use symtn_core::{
 };
 use symtn_tensors::{
     prepare_tensorcontract_fusion_plan_dyn, try_compile_storage_contract_core_route,
-    BoundDynamicFusionMapSpace, DirectCoreExecutor, FusionOperand, OutputAxisOrder, RuleIdentity,
+    BoundDynamicFusionMapSpace, FusionOperand, OutputAxisOrder, RuleIdentity,
     StorageContractResolution, TensorContractFusionExecutionContext, TensorContractSpec,
 };
 
@@ -95,7 +95,7 @@ fn storage_ladder(
     rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
 ) -> StorageContractResolution<f64> {
-    match try_compile_storage_contract_core_route::<DirectCoreExecutor, _>(dst, lhs, rhs, axes)
+    match try_compile_storage_contract_core_route::<_>(dst, lhs, rhs, axes)
         .unwrap()
         .hit()
     {
@@ -125,7 +125,7 @@ fn warm_compile_allocations(engine: &mut dyn Engine, codomain: usize, domain: us
     )
     .unwrap();
     let core = warm_allocations(|| {
-        try_compile_storage_contract_core_route::<DirectCoreExecutor, _>(
+        try_compile_storage_contract_core_route::<_>(
             &composed,
             FusionOperand::direct(lhs.space()),
             FusionOperand::direct(square.space()),
@@ -302,7 +302,7 @@ fn copy_c_plan_allocations(engine: &mut dyn Engine, rank: usize) -> [usize; 2] {
     let group_rejections = coefficient_groups().rejections();
     let copy_c = warm_allocations(|| {
         let resolution = context
-            .plan_contract::<DirectCoreExecutor, _>(
+            .plan_contract::<_>(
                 engine,
                 &dst,
                 FusionOperand::direct(lhs.space()),
@@ -439,7 +439,7 @@ fn rank_six_copy_c_and_dynamic_tree_transforms_stay_co_resident() {
         counting_alloc::start();
         let resolution = if copy_c {
             context
-                .plan_contract::<DirectCoreExecutor, _>(
+                .plan_contract::<_>(
                     engine,
                     &dst,
                     FusionOperand::direct(lhs.space()),

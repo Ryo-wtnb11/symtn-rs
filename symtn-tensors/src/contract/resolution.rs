@@ -471,10 +471,8 @@ where
 }
 
 /// Compiles the core plan of one zero-copy candidate from parent spaces and
-/// lazy operand orientation: the canonical coupled-region plan, and, for an
-/// executor with [`ExecCaps::IRREGULAR_CORE`] (`irregular`), the mode's
-/// packed plan of a non-canonical tiling (#1517) when the canonical one
-/// declines. A twisted [`ContractKind::Contract`] candidate takes only the
+/// lazy operand orientation: the canonical coupled-region plan, or `None`
+/// when the operands' coupled-sector matrices do not line up. A twisted [`ContractKind::Contract`] candidate takes only the
 /// canonical scaled plan; a [`ContractKind::Compose`] is never twisted.
 #[allow(clippy::type_complexity)]
 pub(crate) fn try_compile_oriented_storage_contract_plan<M, R>(
@@ -483,7 +481,6 @@ pub(crate) fn try_compile_oriented_storage_contract_plan<M, R>(
     rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
     kind: ContractKind,
-    irregular: bool,
 ) -> Result<Option<Arc<FusionBlockContractPlan<M::Scalar>>>, M::Error>
 where
     M: PlanningAlgebra<R>,
@@ -516,73 +513,27 @@ where
             rhs.orientation(),
         )?
     } else {
-        match try_compile_oriented_canonical_core_plan(
+        try_compile_oriented_canonical_core_plan(
             &validated,
             dst,
             lhs.storage_space(),
             rhs.storage_space(),
-        )? {
-            Some(plan) => Some(plan),
-            // Only a non-canonical tiling reaches the irregular core: a
-            // canonical parent-owned region never prepares its projection.
-            None if irregular => Some(M::irregular_core(validated, authority, dst, lhs, rhs)?),
-            None => None,
-        }
+        )?
     };
     Ok(plan.map(Arc::new))
 }
 
-/// The route capabilities of one contraction executor, which the planner
-/// reads at compile time (design §2.3): a route an executor cannot run is
-/// never planned for it.
-#[doc(hidden)]
-pub trait ExecCaps: exec_caps::Sealed {
-    /// The executor runs a core plan that is not fully direct: the packed
-    /// pack/GEMM/scatter replay of a non-canonical coupled-sector tiling
-    /// (#1517).
-    const IRREGULAR_CORE: bool;
-}
-
-mod exec_caps {
-    pub trait Sealed {}
-    impl Sealed for super::HostEagerExecutor {}
-    impl Sealed for super::DirectCoreExecutor {}
-}
-
-/// The Host eager executor: it packs a non-canonical tiling around the core
-/// GEMMs.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug)]
-pub struct HostEagerExecutor;
-
-impl ExecCaps for HostEagerExecutor {
-    const IRREGULAR_CORE: bool = true;
-}
-
-/// An executor with the direct core GEMMs only: the device executors and the
-/// stacked Host replay of `ContractPlan`.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug)]
-pub struct DirectCoreExecutor;
-
-impl ExecCaps for DirectCoreExecutor {
-    const IRREGULAR_CORE: bool = false;
-}
-
 /// [`try_compile_oriented_storage_contract_plan`] over every zero-copy
 /// TensorKit candidate ([`try_zero_copy_contract_candidates`]); a uniform
-/// twist is consumed as per-job alpha, a nonuniform one declines, and so does
-/// a candidate whose plan is not fully direct unless `irregular` (a storage
-/// replay has no irregular pack/scatter; the next candidate, or
-/// `DynamicTree`, applies — TensorKit's `mul!` takes every candidate, so
-/// declining never rejects).
+/// twist is consumed as per-job alpha, and a nonuniform one declines (the
+/// next candidate, or `DynamicTree`, applies — TensorKit's `mul!` takes
+/// every candidate, so declining never rejects).
 pub(crate) fn try_compile_oriented_storage_contract_candidate_plan<M, R>(
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
     candidate_seen: &mut bool,
-    irregular: bool,
 ) -> Result<Option<ContractRoute<M::Scalar>>, M::Error>
 where
     M: PlanningAlgebra<R>,
@@ -603,14 +554,11 @@ where
                 core_rhs,
                 core_axes,
                 ContractKind::Contract,
-                irregular,
             )?;
-            Ok(plan
-                .filter(|plan| irregular || plan.is_fully_direct())
-                .map(|plan| ContractRoute::Core {
-                    plan,
-                    swapped: orientation == FusionContractOrientation::RhsLhs,
-                }))
+            Ok(plan.map(|plan| ContractRoute::Core {
+                plan,
+                swapped: orientation == FusionContractOrientation::RhsLhs,
+            }))
         },
     )
 }
@@ -1015,7 +963,7 @@ mod tests {
         let dst = space(single_sector_matrix_space(&*rule, zero, false, false));
         let core_rec = crate::probe::record();
 
-        let route = crate::try_compile_storage_contract_core_route::<HostEagerExecutor, _>(
+        let route = crate::try_compile_storage_contract_core_route::<_>(
             &dst,
             FusionOperand::direct(lhs.space()),
             FusionOperand::direct(rhs.space()),

@@ -275,16 +275,15 @@ where
         assert!(dst.iter().any(|&x| x != 0.0), "{name}: empty fixture");
 
         // What: the device compile route takes the same Core candidate.
-        let resolution =
-            crate::try_compile_storage_contract_core_route::<crate::DirectCoreExecutor, _>(
-                &space,
-                operand(&space, lhs_lazy),
-                operand(&space, rhs_lazy),
-                axes,
-            )
-            .unwrap()
-            .hit()
-            .unwrap_or_else(|| panic!("{name}: device route declined Core"));
+        let resolution = crate::try_compile_storage_contract_core_route::<_>(
+            &space,
+            operand(&space, lhs_lazy),
+            operand(&space, rhs_lazy),
+            axes,
+        )
+        .unwrap()
+        .hit()
+        .unwrap_or_else(|| panic!("{name}: device route declined Core"));
         assert!(!resolution.is_dynamic_tree(), "{name}");
         assert_eq!(
             resolution.is_swapped_core(),

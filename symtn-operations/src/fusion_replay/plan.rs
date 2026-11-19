@@ -106,22 +106,11 @@ where
             .dst_structure
             .required_len()
             .map_err(OperationError::from_core_preserving_context)?;
-        self.fresh = super::owned::FreshLayout::build(
-            len,
-            &self.direct_batch,
-            &self.direct_calls,
-            &self.irregular,
-        )?;
+        self.fresh = super::owned::FreshLayout::build(len, &self.direct_batch, &self.direct_calls)?;
         Ok(self)
     }
 
-    /// True when every group reads and writes coupled-sector matrices directly
-    /// in storage.
-    pub fn is_fully_direct(&self) -> bool {
-        self.irregular.is_empty()
-    }
-
-    /// The destination blocks no GEMM or scatter job writes. A replay into a
+    /// The destination blocks no GEMM job writes. A replay into a
     /// retained (non-zeroed) destination must initialise exactly these; a
     /// fresh zero destination needs nothing (see
     /// [`ContractDestinationInit::Zeroed`]).
@@ -130,9 +119,8 @@ where
     }
 
     /// Assembles a compiled plan; called by the symmetric compile layer.
-    /// Direct groups form one backend batch, while each irregular group owns a
-    /// fixed group-local pack/scatter descriptor in coupled-sector order.
-    /// Overlapping direct destination ranges are rejected because backends may
+    /// The groups form one backend batch; a group whose matrix is not in place
+    /// in storage is unsupported. Overlapping direct destination ranges are rejected because backends may
     /// run the direct batch concurrently.
     pub fn from_parts_generic(
         dst_structure: Arc<BlockStructure>,
@@ -171,8 +159,7 @@ where
             lhs_op,
             rhs_op,
         )?;
-        let (direct_batch, irregular, max_irregular_scratch_len) =
-            compile_group_execution(&groups)?;
+        let direct_batch = compile_group_execution(&groups)?;
         let direct_batch_alpha = vec![C::one(); direct_batch.len()];
         let direct_batch_runs = strided_batch_runs(&direct_batch);
         Self {
@@ -180,14 +167,11 @@ where
             lhs_structure,
             rhs_structure,
             inactive_dst_scale_blocks,
-            groups,
             direct_batch,
             direct_batch_alpha,
             direct_batch_runs,
             direct_calls: Vec::new(),
             fresh: Default::default(),
-            irregular,
-            max_irregular_scratch_len,
             lhs_op,
             rhs_op,
         }
@@ -367,14 +351,11 @@ where
             lhs_structure: Arc::clone(lhs_storage_structure),
             rhs_structure: Arc::clone(rhs_storage_structure),
             inactive_dst_scale_blocks,
-            groups: Vec::new(),
             direct_batch,
             direct_batch_alpha,
             direct_batch_runs,
             direct_calls: Vec::new(),
             fresh: Default::default(),
-            irregular: Vec::new(),
-            max_irregular_scratch_len: 0,
             lhs_op,
             rhs_op,
         }
@@ -439,42 +420,6 @@ pub fn fusion_scale_block_layouts_excluding(
         });
     }
     Ok(layouts)
-}
-
-fn group_scratch_layout<C>(
-    class: FusionGroupExecutionClass,
-    group: &FusionBlockContractGroupPlan<C>,
-) -> Result<FusionGroupScratchLayout, OperationError> {
-    let lhs_len = if class.packs_lhs() {
-        direct_matrix_len(group.lhs.rows, group.lhs.cols)?
-    } else {
-        0
-    };
-    let rhs_len = if class.packs_rhs() {
-        direct_matrix_len(group.rhs.rows, group.rhs.cols)?
-    } else {
-        0
-    };
-    let dst_len = if class.scatters_dst() {
-        direct_matrix_len(group.dst.rows, group.dst.cols)?
-    } else {
-        0
-    };
-    let rhs_offset = lhs_len;
-    let dst_offset = rhs_offset
-        .checked_add(rhs_len)
-        .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    let total_len = dst_offset
-        .checked_add(dst_len)
-        .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    Ok(FusionGroupScratchLayout {
-        lhs_len,
-        rhs_offset,
-        rhs_len,
-        dst_offset,
-        dst_len,
-        total_len,
-    })
 }
 
 fn sorted_coupled_regions(
@@ -558,60 +503,28 @@ fn contiguous_scale_layout(
 
 pub(super) fn compile_group_execution<C>(
     groups: &[FusionBlockContractGroupPlan<C>],
-) -> Result<CompiledGroupExecution, OperationError> {
-    let mut direct_batch = Vec::new();
-    let mut direct_destinations = Vec::new();
-    let mut irregular = Vec::with_capacity(groups.len());
-    let mut max_scratch_len = 0;
-    for (group_index, group) in groups.iter().enumerate() {
-        let class = FusionGroupExecutionClass::compile(group);
-        if let Some(dst_offset) = group.dst.direct_offset {
-            direct_destinations.push(Rank2GemmBatchJob {
-                dst_offset,
-                lhs_offset: 0,
-                rhs_offset: 0,
-                rows: group.dst.rows,
-                contracted: group.lhs.cols,
-                cols: group.dst.cols,
+) -> Result<Vec<Rank2GemmBatchJob>, OperationError> {
+    let mut direct_batch = Vec::with_capacity(groups.len());
+    for group in groups {
+        let (Some(lhs_offset), Some(rhs_offset), Some(dst_offset)) = (
+            group.lhs.direct_offset,
+            group.rhs.direct_offset,
+            group.dst.direct_offset,
+        ) else {
+            return Err(OperationError::UnsupportedTensorContractScope {
+                message: NON_COUPLED_OPERAND_MESSAGE,
             });
-        }
-        if class.is_direct() {
-            let (Some(lhs_offset), Some(rhs_offset), Some(dst_offset)) = (
-                group.lhs.direct_offset,
-                group.rhs.direct_offset,
-                group.dst.direct_offset,
-            ) else {
-                return Err(OperationError::UnsupportedTensorContractScope {
-                    message: "direct fusion contraction class requires direct matrix offsets",
-                });
-            };
-            direct_batch.push(Rank2GemmBatchJob {
-                dst_offset,
-                lhs_offset,
-                rhs_offset,
-                rows: group.lhs.rows,
-                contracted: group.lhs.cols,
-                cols: group.rhs.cols,
-            });
-            continue;
-        }
-        let scratch = group_scratch_layout(class, group)?;
-        max_scratch_len = max_scratch_len.max(scratch.total_len);
-        irregular.push(FusionIrregularGroupExecution {
-            group_index,
-            class,
-            job: Rank2GemmBatchJob {
-                dst_offset: group.dst.direct_offset.unwrap_or(0),
-                lhs_offset: group.lhs.direct_offset.unwrap_or(0),
-                rhs_offset: group.rhs.direct_offset.unwrap_or(0),
-                rows: group.lhs.rows,
-                contracted: group.lhs.cols,
-                cols: group.rhs.cols,
-            },
-            scratch,
+        };
+        direct_batch.push(Rank2GemmBatchJob {
+            dst_offset,
+            lhs_offset,
+            rhs_offset,
+            rows: group.lhs.rows,
+            contracted: group.lhs.cols,
+            cols: group.rhs.cols,
         });
     }
-    validate_disjoint_direct_destinations(&direct_destinations)?;
+    validate_disjoint_direct_destinations(&direct_batch)?;
     direct_batch.sort_by_key(|job| {
         (
             job.rows,
@@ -622,8 +535,7 @@ pub(super) fn compile_group_execution<C>(
             job.rhs_offset,
         )
     });
-
-    Ok((direct_batch, irregular, max_scratch_len))
+    Ok(direct_batch)
 }
 
 fn validate_disjoint_direct_destinations(jobs: &[Rank2GemmBatchJob]) -> Result<(), OperationError> {

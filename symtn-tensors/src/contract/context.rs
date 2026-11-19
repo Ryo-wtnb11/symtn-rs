@@ -37,7 +37,7 @@ use super::planar::PlanarContractOrders;
 use super::resolution::try_compile_oriented_storage_contract_plan;
 use super::resolution::{
     try_compile_oriented_storage_contract_candidate_plan, ContractKind, ContractRoute, CopyCRoute,
-    CoreMiss, CoreRoute, ExecCaps, StorageContractResolution,
+    CoreMiss, CoreRoute, StorageContractResolution,
 };
 use super::route_host::RouteDestination;
 use super::scratch::DynamicFusionScratchWorkspace;
@@ -61,7 +61,7 @@ pub struct TensorContractFusionExecutionContext<
     stage_workspaces: [BT::Workspace; 3],
     contract_backend: BC,
     contract_workspace: BC::Workspace,
-    fusion_block_workspace: FusionBlockContractWorkspace<D>,
+    fusion_block_workspace: FusionBlockContractWorkspace,
     fusion_scratch: DynamicFusionScratchWorkspace<D>,
     copy_c_scratch: HostScratchBuffer<D>,
     #[cfg(test)]
@@ -266,7 +266,7 @@ where
 {
     /// Allocated Host capacity this lane retains between calls: the fusion
     /// lhs/rhs/destination scratch, the `copyC` temporary, the fusion-core
-    /// payload and bookkeeping, the tree-transform workspaces (the tree
+    /// replay bookkeeping, the tree-transform workspaces (the tree
     /// context's and one per contraction stage, coefficient packs included),
     /// the planning scratch and the contract workspace. The dense executors'
     /// staging is reported by the executors themselves.
@@ -443,7 +443,7 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         let output_axes = spec_output_axes(axes, dst_space.rank());
-        self.plan_contract_raw::<super::resolution::HostEagerExecutor, R>(
+        self.plan_contract_raw::<R>(
             engine,
             PlanTarget {
                 rule,
@@ -567,19 +567,15 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         let resolution = match planned {
-            PlannedContraction::Contract(axes) => {
-                plan_contract_in::<super::resolution::HostEagerExecutor, M, R>(
-                    engine,
-                    M::contract_cache(self.tree_context.planning(), txn),
-                    target,
-                    lhs,
-                    rhs,
-                    axes,
-                )?
-            }
-            PlannedContraction::Compose => {
-                plan_compose_in::<super::resolution::HostEagerExecutor, M, R>(target, lhs, rhs)?
-            }
+            PlannedContraction::Contract(axes) => plan_contract_in::<M, R>(
+                engine,
+                M::contract_cache(self.tree_context.planning(), txn),
+                target,
+                lhs,
+                rhs,
+                axes,
+            )?,
+            PlannedContraction::Compose => plan_compose_in::<M, R>(target, lhs, rhs)?,
         };
         #[cfg(test)]
         self.record_contract_route(&resolution);
@@ -601,10 +597,9 @@ where
     /// rhs) + init(dst)`, the composition sibling of
     /// [`Self::tensorcontract_planned_into`]. A's domain against B's
     /// codomain, no fermionic supertrace twist, every braiding style. It
-    /// plans through [`plan_compose`], as `ComposePlan` does, for the Host
-    /// eager executor, whose irregular core packs a non-canonical tiling.
-    /// Lazy adjoints stay storage-conjugate operands; neither is
-    /// materialized.
+    /// plans through [`plan_compose`], as `ComposePlan` does, so the
+    /// destination must have its space's canonical layout. Lazy adjoint
+    /// operands stay storage-conjugate; neither is materialized.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn tensorcompose_planned_into<R>(
@@ -680,8 +675,7 @@ where
         // error in every mode, never a checked plan failure.
         staged_require_destination(&staged, dst_space)?;
         let dst = dst_data()?;
-        let resolution =
-            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(engine, &mut staged)?;
+        let resolution = self.plan_staged::<R, St>(engine, &mut staged)?;
         self.execute_contract_resolution_host(
             engine,
             &resolution,
@@ -699,7 +693,7 @@ where
     /// The planner's ladder over a staged contraction: the lock-free
     /// canonical core, then the rest under this context's planning state or
     /// the call's transaction.
-    fn plan_staged<'a, X: ExecCaps, R, St>(
+    fn plan_staged<'a, R, St>(
         &mut self,
         engine: &mut dyn Engine,
         staged: &mut StagedContract<'a, R, St>,
@@ -708,14 +702,11 @@ where
         St: ContractStageParts<'a, R>,
         St::M: PlanningAlgebra<R, Scalar = C>,
     {
-        match staged_try_core::<X, R, St>(staged)? {
+        match staged_try_core::<R, St>(staged)? {
             CoreRoute::Hit(core) => Ok(core),
-            CoreRoute::Miss(miss) => staged_plan_beyond_core::<X, R, St>(
-                engine,
-                staged,
-                miss,
-                self.tree_context.planning(),
-            ),
+            CoreRoute::Miss(miss) => {
+                staged_plan_beyond_core::<R, St>(engine, staged, miss, self.tree_context.planning())
+            }
         }
     }
 
@@ -760,7 +751,7 @@ where
     /// This concrete cross-crate entrypoint is internal and unstable despite
     /// being public for `symtn`; downstream callers must not rely on it.
     #[doc(hidden)]
-    pub fn plan_staged_contract_beyond_core<X: ExecCaps, R>(
+    pub fn plan_staged_contract_beyond_core<R>(
         &mut self,
         engine: &mut dyn Engine,
         staged: &mut StagedContract<'_, R, MultiplicityFreeContractStage<R>>,
@@ -771,7 +762,7 @@ where
             + CheckedFusionAlgebra
             + TreeTransformRuleCacheKey<Key = RuleKey>,
     {
-        staged_plan_beyond_core::<X, R, MultiplicityFreeContractStage<R>>(
+        staged_plan_beyond_core::<R, MultiplicityFreeContractStage<R>>(
             engine,
             staged,
             miss,
@@ -781,8 +772,7 @@ where
 
     /// The contraction planner: TensorKit `contract!`
     /// (`tensoroperations.jl:314-357` @cfaa073) under `contract_memcost`
-    /// (`:358-368`), for an executor with the capabilities `X`. Every
-    /// contraction route — Host eager, the device, `ContractPlan` and prepared
+    /// (`:358-368`). Every contraction route — Host eager, the device, `ContractPlan` and prepared
     /// — is chosen here.
     ///
     /// The ladder: the canonical fully-direct core
@@ -791,9 +781,11 @@ where
     /// `DynamicTree` artifact. A caller that wants the canonical route
     /// without taking a context lock calls the two halves itself, in that
     /// order. The requested order's zero-copy candidates are walked once.
+    /// A destination without its space's canonical coupled-sector layout (a
+    /// lazy adjoint view) is `InvalidArgument` before planning.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
-    pub fn plan_contract<X: ExecCaps, R>(
+    pub fn plan_contract<R>(
         &mut self,
         engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
@@ -807,7 +799,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        self.plan_contract_raw::<X, R>(
+        self.plan_contract_raw::<R>(
             engine,
             PlanTarget::bound(dst_space),
             lhs,
@@ -819,7 +811,7 @@ where
     /// [`Self::plan_contract`] for a destination given as provider, space and
     /// layout primer, not bound: the test-only raw entries plan with their
     /// caller's rule without binding a space per call.
-    pub(crate) fn plan_contract_raw<X: ExecCaps, R>(
+    pub(crate) fn plan_contract_raw<R>(
         &mut self,
         engine: &mut dyn Engine,
         target: PlanTarget<'_, R>,
@@ -831,7 +823,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        plan_contract_in::<X, MultiplicityFreeAdmissionMode, R>(
+        plan_contract_in::<MultiplicityFreeAdmissionMode, R>(
             engine,
             self.tree_context.planning(),
             target,
@@ -853,7 +845,7 @@ where
     /// returns `None` for it), so TensorKit's memcost never charges it `dim(C)`.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
-    pub fn plan_contract_beyond_core<X: ExecCaps, R>(
+    pub fn plan_contract_beyond_core<R>(
         &mut self,
         engine: &mut dyn Engine,
         miss: CoreMiss,
@@ -868,7 +860,11 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        plan_contract_beyond_core_in::<X, MultiplicityFreeAdmissionMode, R>(
+        require_canonical_destination::<MultiplicityFreeAdmissionMode, R>(
+            dst_space.provider(),
+            dst_space.space(),
+        )?;
+        plan_contract_beyond_core_in::<MultiplicityFreeAdmissionMode, R>(
             engine,
             self.tree_context.planning(),
             miss,
@@ -896,9 +892,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        match try_compile_storage_contract_core_route::<super::resolution::DirectCoreExecutor, R>(
-            dst_space, lhs, rhs, axes,
-        )? {
+        match try_compile_storage_contract_core_route::<R>(dst_space, lhs, rhs, axes)? {
             CoreRoute::Hit(core) => Ok(core),
             CoreRoute::Miss(_) => {
                 self.compile_storage_contract_dynamic_tree(engine, dst_space, lhs, rhs, axes)
@@ -915,10 +909,7 @@ where
     /// context, so its transform structures are the Arcs a device executor's
     /// prepared cache is keyed by.
     ///
-    /// Host eager and the device plan the same route (#1858); the one
-    /// executor difference: owned core geometry over a non-canonical storage
-    /// layout (an adjoint view) is a core with pack/scatter on the
-    /// Host (`IRREGULAR_CORE`) and this artifact on the device.
+    /// Host eager and the device plan the same route (#1858).
     ///
     /// A fermionic contraction twist travels in the artifact, both as the
     /// Host's in-place scale actions and as the sorted per-block scale list
@@ -941,20 +932,23 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
+        let target = PlanTarget::bound(dst_space);
+        require_canonical_destination::<MultiplicityFreeAdmissionMode, R>(
+            target.rule,
+            target.space,
+        )?;
         compile_dynamic_tree_in::<MultiplicityFreeAdmissionMode, R>(
             engine,
             self.tree_context.planning(),
-            PlanTarget::bound(dst_space),
+            target,
             lhs,
             rhs,
             axes,
-            false,
             None,
         )
     }
 
-    /// Replays a planned route ([`Self::plan_contract`] with
-    /// [`HostEagerExecutor`](super::resolution::HostEagerExecutor)) on Host
+    /// Replays a planned route ([`Self::plan_contract`]) on Host
     /// slices through the one Host route executor at one member:
     /// `dst = alpha * contract(lhs, rhs) + beta * dst`.
     ///
@@ -1087,8 +1081,7 @@ where
             (rhs_authority, rhs, rhs_data.len()),
             request,
         )?;
-        let resolution =
-            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(engine, &mut staged)?;
+        let resolution = self.plan_staged::<R, St>(engine, &mut staged)?;
         let data = self.execute_contract_resolution_host_owned(
             engine,
             &resolution,
@@ -1107,8 +1100,7 @@ where
     /// uninitialized memory ([`FusionBlockContractPlan::execute_owned`]):
     /// the output is not zero-filled by the allocator, and inactive blocks
     /// and padding are written `+0.0`. Backend-side output fills (a one-job
-    /// batch, the faer strategy's per-job prefill) and the zero fill of
-    /// scatter blocks remain. A route with an output transform (CopyC, a
+    /// batch, the faer strategy's per-job prefill) remain. A route with an output transform (CopyC, a
     /// DynamicTree output) runs its core into scratch, then the transform
     /// writes every destination element once into an uninitialized payload
     /// ([`DenseTreeTransformOperations::try_tree_transform_structure_overwrite_owned_raw`])
@@ -1354,8 +1346,8 @@ fn staged_contract_axes<'a>(request: ContractRequest<'a>, rank: usize) -> Option
 }
 
 /// The lock-free first half of the planner ([`plan_contract_in`]'s core, or
-/// the whole [`plan_compose_in`]) for an executor with capabilities `X`.
-pub(crate) fn staged_try_core<'a, X: ExecCaps, R, St>(
+/// the whole [`plan_compose_in`]).
+pub(crate) fn staged_try_core<'a, R, St>(
     staged: &StagedContract<'a, R, St>,
 ) -> Result<CoreRoute<ContractStageScalar<'a, R, St>>, ContractStageError<'a, R, St>>
 where
@@ -1371,12 +1363,12 @@ where
     };
     let (lhs, rhs) = staged.operands;
     if let ContractRequest::Planar { orders, .. } = staged.request {
-        return try_planar_core_route::<X, St::M, R>(target, lhs, rhs, orders);
+        return try_planar_core_route::<St::M, R>(target, lhs, rhs, orders);
     }
     let Some((lhs_axes, rhs_axes, output_axes)) =
         staged_contract_axes(staged.request, space.rank())
     else {
-        return plan_compose_in::<X, St::M, R>(target, lhs, rhs).map(CoreRoute::Hit);
+        return plan_compose_in::<St::M, R>(target, lhs, rhs).map(CoreRoute::Hit);
     };
     let axes = TensorContractSpec::new_with_conjugation(
         lhs_axes,
@@ -1385,13 +1377,13 @@ where
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
     );
-    try_compile_core_route::<X, St::M, R>(target, lhs, rhs, axes, ContractKind::Contract)
+    try_compile_core_route::<St::M, R>(target, lhs, rhs, axes, ContractKind::Contract)
 }
 
 /// The rest of [`plan_contract_in`] after `staged_try_core` missed: `copyC`,
 /// then the `DynamicTree` artifact, under the context's planning state or
 /// the call's transaction.
-pub(crate) fn staged_plan_beyond_core<'a, X: ExecCaps, R, St>(
+pub(crate) fn staged_plan_beyond_core<'a, R, St>(
     engine: &mut dyn Engine,
     staged: &mut StagedContract<'a, R, St>,
     miss: CoreMiss,
@@ -1428,7 +1420,6 @@ where
             *lhs,
             *rhs,
             axes,
-            X::IRREGULAR_CORE,
             Some(&plan),
         );
     }
@@ -1439,7 +1430,7 @@ where
         }
         .into());
     };
-    plan_contract_beyond_core_in::<X, St::M, R>(
+    plan_contract_beyond_core_in::<St::M, R>(
         engine,
         St::M::contract_cache(planning, txn),
         miss,
@@ -1504,8 +1495,8 @@ where
     /// The canonical core route, resolved from the operands alone without
     /// any context: a [`CoreRoute::Miss`] continues with
     /// [`TensorContractFusionExecutionContext::plan_staged_contract_beyond_core`].
-    pub fn try_core<X: ExecCaps>(&self) -> Result<CoreRoute<R::Scalar>, OperationError> {
-        staged_try_core::<X, R, MultiplicityFreeContractStage<R>>(self)
+    pub fn try_core(&self) -> Result<CoreRoute<R::Scalar>, OperationError> {
+        staged_try_core::<R, MultiplicityFreeContractStage<R>>(self)
     }
 
     /// The derived destination, after the replay of `resolution`.
@@ -1557,7 +1548,7 @@ where
 /// the operands, so the canonical device contraction takes no Runtime
 /// context lock.
 #[doc(hidden)]
-pub fn try_compile_storage_contract_core_route<X: ExecCaps, R>(
+pub fn try_compile_storage_contract_core_route<R>(
     dst_space: &BoundDynamicFusionMapSpace<R>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
@@ -1567,7 +1558,11 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    try_compile_core_route::<X, MultiplicityFreeAdmissionMode, R>(
+    require_canonical_destination::<MultiplicityFreeAdmissionMode, R>(
+        dst_space.provider(),
+        dst_space.space(),
+    )?;
+    try_compile_core_route::<MultiplicityFreeAdmissionMode, R>(
         PlanTarget::bound(dst_space),
         lhs,
         rhs,
@@ -1579,11 +1574,11 @@ where
 /// The planner for a composition, TensorKit `mul!(C, A, B)`
 /// (`linalg.jl:330-370` @cfaa073): A's domain against B's codomain in
 /// order, the identity output, no twist and no candidate walk, resolved to
-/// `Core { swapped: false }` with unit job coefficients, or the packed core
-/// of a non-canonical tiling for an executor with
-/// [`ExecCaps::IRREGULAR_CORE`]. Any other composition is
-/// `UnsupportedTensorContractScope`: `mul!` has no transform route, so
-/// none is planned.
+/// `Core { swapped: false }` with unit job coefficients. A destination
+/// whose storage is not its space's canonical coupled-sector layout (a lazy
+/// adjoint view) is `InvalidArgument` before planning, as for every
+/// contraction and composition entry; any other composition the core declines is `UnsupportedTensorContractScope`: `mul!` has no
+/// transform route, so none is planned.
 ///
 /// The braiding check stays with the caller: `mul!` admits every braiding
 /// style, since composition has no braid-dependent step.
@@ -1591,7 +1586,7 @@ where
 /// Free function, not a context method: the core resolves entirely from
 /// the operands, so planning a composition takes no Runtime context lock.
 #[doc(hidden)]
-pub fn plan_compose<X: ExecCaps, R>(
+pub fn plan_compose<R>(
     dst_space: &BoundDynamicFusionMapSpace<R>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
@@ -1600,11 +1595,35 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    plan_compose_in::<X, MultiplicityFreeAdmissionMode, R>(PlanTarget::bound(dst_space), lhs, rhs)
+    plan_compose_in::<MultiplicityFreeAdmissionMode, R>(PlanTarget::bound(dst_space), lhs, rhs)
+}
+
+/// Rejects a contraction or composition destination whose storage is not
+/// its space's canonical coupled-sector layout, such as a lazy adjoint view,
+/// before any planning.
+///
+/// Why reject rather than plan: every core GEMM writes a coupled-sector
+/// matrix in place in the destination, and no route packs or scatters into
+/// another tiling, so such a destination has no core and the error would
+/// otherwise surface from a nested plan builder.
+pub(crate) fn require_canonical_destination<M, R>(
+    rule: &R,
+    dst: &DynamicFusionMapSpace,
+) -> Result<(), M::Error>
+where
+    M: PlanningAlgebra<R>,
+{
+    if M::storage_layout_is_canonical(rule, dst)? {
+        return Ok(());
+    }
+    Err(OperationError::InvalidArgument {
+        message: "destination must use its space's canonical coupled-sector layout",
+    }
+    .into())
 }
 
 /// [`plan_compose`] in either admission mode `M`.
-pub(crate) fn plan_compose_in<X: ExecCaps, M, R>(
+pub(crate) fn plan_compose_in<M, R>(
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
@@ -1613,7 +1632,8 @@ where
     M: PlanningAlgebra<R>,
     M::Scalar: DenseBlockScalar,
 {
-    match compose_core_route::<X, M, R>(target, lhs, rhs)? {
+    require_canonical_destination::<M, R>(target.rule, target.space)?;
+    match compose_core_route::<M, R>(target, lhs, rhs)? {
         CoreRoute::Hit(resolution) => Ok(resolution),
         CoreRoute::Miss(_) => Err(OperationError::UnsupportedTensorContractScope {
             message:
@@ -1625,7 +1645,7 @@ where
 
 /// The canonical core of `mul!(C, lhs, rhs)`: A's domain against B's
 /// codomain in order, the identity output, no twist.
-fn compose_core_route<X: ExecCaps, M, R>(
+fn compose_core_route<M, R>(
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
@@ -1644,14 +1664,14 @@ where
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
     );
-    try_compile_core_route::<X, M, R>(target, lhs, rhs, axes, ContractKind::Compose)
+    try_compile_core_route::<M, R>(target, lhs, rhs, axes, ContractKind::Compose)
 }
 
 /// The first rung of a planar contraction, TensorKit `planarcontract!`: when
 /// no operand needs a transpose and the output is the core's, the
 /// composition core (`mul!` on both operands as stored); any other planar
 /// spec goes to the `DynamicTree` artifact of its fixed plan.
-fn try_planar_core_route<X: ExecCaps, M, R>(
+fn try_planar_core_route<M, R>(
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
@@ -1670,13 +1690,13 @@ where
             requested_zero_copy: false,
         }));
     }
-    compose_core_route::<X, M, R>(target, lhs, rhs)
+    compose_core_route::<M, R>(target, lhs, rhs)
 }
 
 /// [`TensorContractFusionExecutionContext::plan_contract`] in admission mode
 /// `M`, deriving spaces and transformers under `cache` (the context's
 /// planning state, or a checked call's transaction).
-pub(crate) fn plan_contract_in<X: ExecCaps, M, R>(
+pub(crate) fn plan_contract_in<M, R>(
     engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
@@ -1688,6 +1708,7 @@ where
     M: PlanningAlgebra<R>,
     M::Scalar: DenseBlockScalar,
 {
+    require_canonical_destination::<M, R>(target.rule, target.space)?;
     let axes = TensorContractSpec::new_with_conjugation(
         lhs_axes,
         rhs_axes,
@@ -1695,10 +1716,10 @@ where
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
     );
-    let core = try_compile_core_route::<X, M, R>(target, lhs, rhs, axes, ContractKind::Contract)?;
+    let core = try_compile_core_route::<M, R>(target, lhs, rhs, axes, ContractKind::Contract)?;
     match core {
         CoreRoute::Hit(core) => Ok(core),
-        CoreRoute::Miss(miss) => plan_contract_beyond_core_in::<X, M, R>(
+        CoreRoute::Miss(miss) => plan_contract_beyond_core_in::<M, R>(
             engine,
             cache,
             miss,
@@ -1710,7 +1731,7 @@ where
     }
 }
 
-fn plan_contract_beyond_core_in<X: ExecCaps, M, R>(
+fn plan_contract_beyond_core_in<M, R>(
     engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     miss: CoreMiss,
@@ -1744,7 +1765,7 @@ where
         true,
     );
     if let Some(orientation) = order {
-        if let Some(copy) = plan_copy_c_in::<X, M, R>(
+        if let Some(copy) = plan_copy_c_in::<M, R>(
             engine,
             cache,
             target,
@@ -1763,21 +1784,12 @@ where
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
     );
-    compile_dynamic_tree_in::<M, R>(
-        engine,
-        cache,
-        target,
-        lhs,
-        rhs,
-        axes,
-        X::IRREGULAR_CORE,
-        None,
-    )
+    compile_dynamic_tree_in::<M, R>(engine, cache, target, lhs, rhs, axes, None)
 }
 
 /// The `CopyC` route in `orientation`, or `None` when its temporary has
 /// no core the executor runs (the `DynamicTree` artifact then applies).
-fn plan_copy_c_in<X: ExecCaps, M, R>(
+fn plan_copy_c_in<M, R>(
     engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
@@ -1820,7 +1832,7 @@ where
         space: &temporary,
         authority: target.authority,
     };
-    let core = try_compile_core_route::<X, M, R>(
+    let core = try_compile_core_route::<M, R>(
         temporary_target,
         first,
         second,
@@ -1876,10 +1888,7 @@ where
 /// contraction the core declined (see
 /// [`TensorContractFusionExecutionContext::compile_storage_contract_dynamic_tree`]).
 ///
-/// `irregular_core`: the executor packs and scatters a core plan that is
-/// not fully direct ([`ExecCaps::IRREGULAR_CORE`]), as the artifact's core
-/// over a non-canonical destination tiling (#1517) is. `plan` is the fixed
-/// plan of a planar contraction; `None` selects the contraction's.
+/// `plan` is the fixed plan of a planar contraction; `None` selects the contraction's.
 #[allow(clippy::too_many_arguments)]
 fn compile_dynamic_tree_in<M, R>(
     engine: &mut dyn Engine,
@@ -1888,7 +1897,6 @@ fn compile_dynamic_tree_in<M, R>(
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
-    irregular_core: bool,
     plan: Option<&FusionContractPlan>,
 ) -> Result<StorageContractResolution<M::Scalar>, M::Error>
 where
@@ -1912,15 +1920,6 @@ where
     } else {
         M::prelowered_dynamic_tree_artifact(engine, cache, target, lhs, rhs, axes, plan)?
     };
-    // Transformed sources are canonical coupled layouts, so only a
-    // non-canonical destination tiling leaves the core plan not fully
-    // direct; a direct-core executor reports it before any device work.
-    if !irregular_core && !artifact.block_plan_is_fully_direct() {
-        return Err(OperationError::UnsupportedTensorContractScope {
-            message: "dynamic-tree core plan over transformed sources is not fully direct",
-        }
-        .into());
-    }
     Ok(StorageContractResolution::new(ContractRoute::DynamicTree(
         Arc::new(artifact),
     )))
@@ -2022,7 +2021,7 @@ where
     )
 }
 
-fn try_compile_core_route<X: ExecCaps, M, R>(
+fn try_compile_core_route<M, R>(
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
@@ -2034,7 +2033,6 @@ where
     M::Scalar: DenseBlockScalar,
 {
     validate_raw_contract_request::<M, R>(target, lhs, rhs, axes)?;
-    let irregular = X::IRREGULAR_CORE;
     // A twist that is not uniform within one coupled-sector matrix has no
     // per-job alpha; the DynamicTree artifact applies it per block instead.
     let mut requested_zero_copy = false;
@@ -2045,12 +2043,10 @@ where
             rhs,
             axes,
             &mut requested_zero_copy,
-            irregular,
         )?,
         ContractKind::Compose => try_compile_oriented_storage_contract_plan::<M, R>(
-            target, lhs, rhs, axes, kind, irregular,
+            target, lhs, rhs, axes, kind,
         )?
-        .filter(|plan| irregular || plan.is_fully_direct())
         .map(|plan| ContractRoute::Core {
             plan,
             swapped: false,
@@ -2101,9 +2097,7 @@ where
         rhs,
         axes,
         ContractKind::Contract,
-        false,
     )?
-    .filter(|plan| plan.is_fully_direct())
     .ok_or_else(|| OperationError::UnsupportedTensorContractScope {
         message:
             "storage-direct contraction supports only canonical fully-direct oriented operands",

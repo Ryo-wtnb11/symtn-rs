@@ -174,84 +174,6 @@ where
     )
 }
 
-pub(crate) fn compile_fusion_block_contract_plan_prelowered_validated<R>(
-    validated: ValidatedCoreContract<'_, R>,
-    dst_space: &DynamicFusionMapSpace,
-    lhs: &FusionOperandLayout<'_>,
-    rhs: &FusionOperandLayout<'_>,
-) -> Result<FusionBlockContractPlan<R::Scalar>, OperationError>
-where
-    R: MultiplicityFreeRigidSymbols,
-    R::Scalar: DenseBlockScalar,
-{
-    if let Some(plan) = try_compile_oriented_canonical_core_plan(
-        &validated,
-        dst_space,
-        lhs.storage_space(),
-        rhs.storage_space(),
-    )? {
-        return Ok(plan);
-    }
-    compile_operand_core_plan_general(dst_space, lhs, rhs)
-}
-
-/// The packed core plan of two operands whose coupled-sector tiling is not
-/// canonical (#1517), a lazy adjoint read through its parent's storage with
-/// [`MatrixOp::Adjoint`]. Structure-only: the core glues `lhs.domain` to
-/// `rhs.codomain` without crossing legs, so every coefficient is 1 in both
-/// modes.
-pub(crate) fn compile_operand_core_plan_general<C>(
-    dst_space: &DynamicFusionMapSpace,
-    lhs: &FusionOperandLayout<'_>,
-    rhs: &FusionOperandLayout<'_>,
-) -> Result<FusionBlockContractPlan<C>, OperationError>
-where
-    C: DenseBlockScalar,
-{
-    let matrix_op = |source: &FusionOperandLayout<'_>| match source.orientation() {
-        FusionTreePairOrientation::Direct => MatrixOp::Identity,
-        FusionTreePairOrientation::Adjoint => MatrixOp::Adjoint,
-    };
-    let (lhs_op, rhs_op) = (matrix_op(lhs), matrix_op(rhs));
-    let compile_source = |source: &FusionOperandLayout<'_>| {
-        if source.is_direct() {
-            FusionBlockMatrixLayout::compile(source.storage_space())
-        } else {
-            FusionBlockMatrixLayout::compile_operand(source)
-        }
-    };
-    let finish_source =
-        |group: FusionBlockMatrixGroupBuilder, source: &FusionOperandLayout<'_>, op| {
-            if source.is_direct() {
-                let storage = source.storage_space();
-                group.finish_generic(storage.structure(), storage.nout())
-            } else {
-                group.finish_operand_generic(source, op)
-            }
-        };
-    let lhs_layout = compile_source(lhs)?;
-    let rhs_layout = compile_source(rhs)?;
-    let dst_layout = FusionBlockMatrixLayout::compile(dst_space)?;
-
-    let (groups, active_dst_blocks) = pair_coupled_groups(
-        lhs_layout,
-        rhs_layout,
-        dst_layout,
-        |group| finish_source(group, lhs, lhs_op),
-        |group| finish_source(group, rhs, rhs_op),
-        |group| group.finish_generic(dst_space.structure(), dst_space.nout()),
-    )?;
-    FusionBlockContractPlan::from_parts_with_ops_generic(
-        Arc::clone(dst_space.structure()),
-        Arc::clone(lhs.storage_space().structure()),
-        Arc::clone(rhs.storage_space().structure()),
-        fusion_scale_block_layouts_excluding(dst_space.structure(), &active_dst_blocks)?,
-        groups,
-        lhs_op,
-        rhs_op,
-    )
-}
-
 /// The per-subblock checked core builder: re-bases tilings whose
 /// coupled-sector trees are not canonically aligned, or reports the same
 /// structure error as before the coupled-region route.
@@ -399,54 +321,6 @@ pub(super) struct FusionBlockMatrixLayout {
 impl FusionBlockMatrixLayout {
     pub(super) fn compile(space: &DynamicFusionMapSpace) -> Result<Self, OperationError> {
         Self::compile_parts(space.structure(), space.nout())
-    }
-
-    pub(super) fn compile_operand(
-        source: &FusionOperandLayout<'_>,
-    ) -> Result<Self, OperationError> {
-        #[cfg(test)]
-        crate::probe::hit(crate::probe::Event::FusionLayoutCompile);
-        let mut builders = Vec::<FusionBlockMatrixGroupBuilder>::new();
-        let mut group_indices = FxHashMap::<SectorId, usize>::default();
-        let storage = source.storage_space();
-        for logical_index in 0..source.logical_block_count() {
-            let key = source.logical_key(logical_index)?;
-            let storage_index = source.storage_index(logical_index)?;
-            let block = storage.structure().block(storage_index)?;
-            let coupled = coupled_sector(key.codomain_tree());
-            if coupled != coupled_sector(key.domain_tree()) {
-                return Err(OperationError::FusionTreeGroupMismatch {
-                    tensor: "fusion",
-                    index: logical_index,
-                });
-            }
-            let group_index = if let Some(&group_index) = group_indices.get(&coupled) {
-                group_index
-            } else {
-                let group_index = builders.len();
-                group_indices.insert(coupled, group_index);
-                builders.push(FusionBlockMatrixGroupBuilder::new(coupled));
-                group_index
-            };
-            let split = storage.nout();
-            let (row_shape, col_shape) = match source.orientation() {
-                FusionTreePairOrientation::Direct => {
-                    (&block.shape()[..split], &block.shape()[split..])
-                }
-                FusionTreePairOrientation::Adjoint => {
-                    (&block.shape()[split..], &block.shape()[..split])
-                }
-            };
-            builders[group_index].add_tree_pair_mapped(
-                key.codomain_tree().clone(),
-                element_count(row_shape)?,
-                key.domain_tree().clone(),
-                element_count(col_shape)?,
-                logical_index,
-                storage_index,
-            )?;
-        }
-        Ok(Self::from_builders(builders, group_indices))
     }
 
     fn compile_parts(
@@ -619,7 +493,6 @@ pub(super) struct FusionBlockMatrixGroupBuilder {
     col_offsets: CoupledMatrixSide<FusionTreeKey, TreeMatrixOffset>,
     tree_pairs: HashSet<(FusionTreeKey, FusionTreeKey)>,
     blocks: Vec<usize>,
-    logical_blocks: Option<Vec<usize>>,
     occupied_elements: usize,
 }
 
@@ -631,7 +504,6 @@ impl FusionBlockMatrixGroupBuilder {
             col_offsets: CoupledMatrixSide::default(),
             tree_pairs: HashSet::new(),
             blocks: Vec::new(),
-            logical_blocks: None,
             occupied_elements: 0,
         }
     }
@@ -643,34 +515,6 @@ impl FusionBlockMatrixGroupBuilder {
         col_tree: FusionTreeKey,
         col_dim: usize,
         block_index: usize,
-    ) -> Result<(), OperationError> {
-        self.add_tree_pair_entry(row_tree, row_dim, col_tree, col_dim, block_index)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn add_tree_pair_mapped(
-        &mut self,
-        row_tree: FusionTreeKey,
-        row_dim: usize,
-        col_tree: FusionTreeKey,
-        col_dim: usize,
-        logical_block_index: usize,
-        storage_block_index: usize,
-    ) -> Result<(), OperationError> {
-        self.add_tree_pair_entry(row_tree, row_dim, col_tree, col_dim, storage_block_index)?;
-        self.logical_blocks
-            .get_or_insert_with(Vec::new)
-            .push(logical_block_index);
-        Ok(())
-    }
-
-    fn add_tree_pair_entry(
-        &mut self,
-        row_tree: FusionTreeKey,
-        row_dim: usize,
-        col_tree: FusionTreeKey,
-        col_dim: usize,
-        storage_block_index: usize,
     ) -> Result<(), OperationError> {
         if !self.tree_pairs.insert((row_tree.clone(), col_tree.clone())) {
             return Err(OperationError::StructureMismatch { tensor: "fusion" });
@@ -701,7 +545,7 @@ impl FusionBlockMatrixGroupBuilder {
             .occupied_elements
             .checked_add(block_elements)
             .ok_or(OperationError::ElementCountOverflow)?;
-        self.blocks.push(storage_block_index);
+        self.blocks.push(block_index);
         Ok(())
     }
 
@@ -780,97 +624,6 @@ impl FusionBlockMatrixGroupBuilder {
             needs_clear: !covers_matrix,
             direct_offset,
             block_indices,
-            subblocks,
-        })
-    }
-
-    /// The operand sibling of [`Self::finish_generic`]: a lazy adjoint's
-    /// subblocks addressed in its parent's storage, laid out for `op`.
-    pub(super) fn finish_operand_generic<C>(
-        self,
-        source: &FusionOperandLayout<'_>,
-        op: MatrixOp,
-    ) -> Result<FusionBlockMatrixGroup<C>, OperationError>
-    where
-        C: DenseBlockScalar,
-    {
-        let storage = source.storage_space();
-        let physical_rows = match op {
-            MatrixOp::Identity => self.row_offsets.extent(),
-            MatrixOp::Transpose | MatrixOp::Adjoint => self.col_offsets.extent(),
-        };
-        let logical_blocks =
-            self.logical_blocks
-                .as_deref()
-                .ok_or(OperationError::StructureMismatch {
-                    tensor: "oriented fusion group",
-                })?;
-        if logical_blocks.len() != self.blocks.len() {
-            return Err(OperationError::StructureMismatch {
-                tensor: "oriented fusion group",
-            });
-        }
-        let mut subblocks = Vec::with_capacity(self.blocks.len());
-        for (&logical_index, &storage_index) in logical_blocks.iter().zip(&self.blocks) {
-            let key = source.logical_key(logical_index)?;
-            let block = storage.structure().block(storage_index)?;
-            let row = self
-                .row_offsets
-                .get(key.codomain_tree())
-                .expect("row tree offset collected before finish");
-            let col = self
-                .col_offsets
-                .get(key.domain_tree())
-                .expect("column tree offset collected before finish");
-            let split = storage.nout();
-            let mut matrix_strides = Vec::<isize>::with_capacity(block.shape().len());
-            matrix_strides.extend(column_major_strides_isize(&block.shape()[..split])?);
-            for stride in column_major_strides_usize(&block.shape()[split..])? {
-                let matrix_stride = stride
-                    .checked_mul(physical_rows)
-                    .ok_or(OperationError::ElementCountOverflow)?;
-                matrix_strides.push(isize::try_from(matrix_stride).map_err(|_| {
-                    OperationError::StrideOverflow {
-                        value: matrix_stride,
-                    }
-                })?);
-            }
-            let matrix_offset = match op {
-                MatrixOp::Identity => col
-                    .offset
-                    .checked_mul(self.row_offsets.extent())
-                    .and_then(|offset| offset.checked_add(row.offset)),
-                MatrixOp::Transpose | MatrixOp::Adjoint => row
-                    .offset
-                    .checked_mul(self.col_offsets.extent())
-                    .and_then(|offset| offset.checked_add(col.offset)),
-            }
-            .ok_or(OperationError::ElementCountOverflow)?;
-            subblocks.push(FusionSubblockMatrixLayout {
-                block: FusionStridedBlockLayout {
-                    shape: block.shape().to_vec(),
-                    strides: strides_to_isize(block.strides())?,
-                    offset: offset_to_isize(block.offset())?,
-                },
-                matrix_offset: offset_to_isize(matrix_offset)?,
-                matrix_strides,
-                coefficient: C::one(),
-            });
-        }
-        let matrix_elements = self
-            .row_offsets
-            .extent()
-            .checked_mul(self.col_offsets.extent())
-            .ok_or(OperationError::ElementCountOverflow)?;
-        let covers_matrix = self.occupied_elements == matrix_elements;
-        let direct_offset = direct_group_matrix_offset_generic(&subblocks, covers_matrix);
-        Ok(FusionBlockMatrixGroup {
-            coupled: self.coupled,
-            rows: self.row_offsets.extent(),
-            cols: self.col_offsets.extent(),
-            needs_clear: !covers_matrix,
-            direct_offset,
-            block_indices: self.blocks,
             subblocks,
         })
     }

@@ -176,7 +176,7 @@ where
                 )?;
                 let mut lease = crate::runtime::ContextLease::new();
                 let lane = lease.context().multiplicity_free_lane::<D>()?;
-                let resolution = lane.plan_contract::<symtn_tensors::DirectCoreExecutor, _>(
+                let resolution = lane.plan_contract::<_>(
                     engine,
                     &space,
                     operands.0,
@@ -196,9 +196,7 @@ where
                 let space = BoundDynamicFusionMapSpace::contracted_multiplicity_free(
                     &lhs.space, &rhs.space, &lhs_axes, &rhs_axes,
                 )?;
-                let resolution = symtn_tensors::plan_compose::<symtn_tensors::DirectCoreExecutor, _>(
-                    &space, operands.0, operands.1,
-                )?;
+                let resolution = symtn_tensors::plan_compose::<_>(&space, operands.0, operands.1)?;
                 (space, resolution)
             }
         };

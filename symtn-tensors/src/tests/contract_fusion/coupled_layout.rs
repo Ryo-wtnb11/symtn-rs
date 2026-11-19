@@ -104,7 +104,6 @@ fn coupled_layout_compose_uses_direct_gemm_groups() {
         )
         .unwrap();
 
-    // What: coupled-layout compose GEMMs directly into destination blocks
-    // (no pack or scatter).
-    assert!(resolution.direct_core().unwrap().0.is_fully_direct());
+    // What: coupled-layout compose GEMMs directly into destination blocks.
+    assert!(resolution.direct_core().is_some());
 }

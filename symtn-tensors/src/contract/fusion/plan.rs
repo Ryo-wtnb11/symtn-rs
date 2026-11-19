@@ -572,6 +572,10 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
+    super::super::require_canonical_destination::<symtn_core::MultiplicityFreeAdmissionMode, R>(
+        dst.provider(),
+        dst.space(),
+    )?;
     // Why not accept a separate rule: the bound destination is the semantic
     // authority, as in the eager entry. The raw core still checks every
     // operand space against it without re-enumerating any fusion-tree grid.

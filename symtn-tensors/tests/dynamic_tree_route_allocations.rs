@@ -22,8 +22,8 @@ use symtn_core::{
     StructureCacheKind, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
-    BoundDynamicFusionMapSpace, DirectCoreExecutor, FusionOperand, HostContractMembersWorkspace,
-    OutputAxisOrder, RuleIdentity, TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
+    BoundDynamicFusionMapSpace, FusionOperand, HostContractMembersWorkspace, OutputAxisOrder,
+    RuleIdentity, TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
 use crate::counting_alloc;
@@ -177,7 +177,7 @@ where
 
     let mut context = Context::default();
     let resolution = context
-        .plan_contract::<DirectCoreExecutor, _>(
+        .plan_contract::<_>(
             engine,
             &dst,
             FusionOperand::direct(case.lhs.space()),

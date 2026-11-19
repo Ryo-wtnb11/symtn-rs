@@ -1,14 +1,10 @@
 use super::*;
 use crate::kernel_adapter::observed::ObservedKernels;
-use crate::test_numerics::numerics::nan_folded_bits;
 use std::ops::{Add, Mul};
 
 use num_complex::Complex64;
 use num_traits::Zero;
-use symtn_core::{
-    FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeFusionSymbols, SectorCodec, SectorLeg,
-    TableRule, TableSector, ZNFusionRule, ZNIrrep,
-};
+use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, ZNFusionRule, ZNIrrep};
 
 fn direct_group(rows: usize, cols: usize, offset: Option<usize>) -> FusionBlockMatrixGroup {
     FusionBlockMatrixGroup {
@@ -154,456 +150,6 @@ fn coefficient_free_calls_infer_f64() {
 }
 
 #[test]
-fn fibonacci_complex_r_symbol_survives_fusion_block_contraction() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = TableRule::fibonacci();
-    let tau = provider.encode_sector(&TableSector::new(2)).unwrap();
-    let vacuum = provider.encode_sector(&TableSector::new(1)).unwrap();
-    let r_tau_tau_vacuum = provider.r_symbol_scalar(tau, tau, vacuum);
-    assert!(
-        r_tau_tau_vacuum.im.abs() > 0.5,
-        "the oracle must exercise a genuinely non-real R-symbol"
-    );
-
-    let structure = Arc::new(BlockStructure::packed_column_major(1, [vec![1]]).unwrap());
-    let group = |direct: bool, coefficient: Complex64| FusionBlockMatrixGroup {
-        coupled: vacuum,
-        rows: 1,
-        cols: 1,
-        needs_clear: false,
-        direct_offset: direct.then_some(0),
-        block_indices: vec![0],
-        subblocks: vec![FusionSubblockMatrixLayout {
-            block: FusionStridedBlockLayout {
-                shape: vec![1],
-                strides: vec![1],
-                offset: 0,
-            },
-            matrix_offset: 0,
-            matrix_strides: vec![1],
-            coefficient,
-        }],
-    };
-    let contract_group = FusionBlockContractGroupPlan::new(
-        group(false, r_tau_tau_vacuum),
-        group(true, Complex64::new(1.0, 0.0)),
-        group(true, Complex64::new(1.0, 0.0)),
-    )
-    .unwrap();
-    let plan = FusionBlockContractPlan::from_parts_generic(
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Vec::new(),
-        vec![contract_group],
-    )
-    .unwrap();
-
-    let lhs = [Complex64::new(2.0, 0.0)];
-    let rhs = [Complex64::new(3.0, 0.0)];
-    let mut dst = [Complex64::new(0.0, 0.0)];
-    let mut kernels = crate::StridedHostKernelAdapter::default();
-    let mut gemm = NaiveGemm;
-    let mut workspace = FusionBlockContractWorkspace::<Complex64>::default();
-    plan.execute_raw(
-        engine,
-        &mut kernels,
-        &mut gemm,
-        &mut workspace,
-        &structure,
-        &mut dst,
-        &structure,
-        &lhs,
-        &structure,
-        &rhs,
-        Complex64::new(1.0, 0.0),
-        Complex64::new(0.0, 0.0),
-    )
-    .unwrap();
-
-    // The non-dyadic R-symbol makes the product order-dependent in its
-    // last bit, so it is compared to the hand value under the tolerance
-    // rule; three factors (R, lhs, rhs) reach the entry.
-    crate::test_numerics::numerics::assert_close(
-        "R(tau, tau; 1) * 2 * 3",
-        dst[0],
-        r_tau_tau_vacuum * Complex64::new(6.0, 0.0),
-        3,
-    );
-    assert_ne!(dst[0].im, 0.0, "discarding the R-symbol phase must fail");
-}
-
-fn all_classes_apply_alpha_beta_and_coefficients<T>()
-where
-    T: DenseBlockScalar
-        + RecouplingCoefficientAction<f64>
-        + From<f64>
-        + Add<Output = T>
-        + Mul<Output = T>
-        + std::fmt::Debug
-        + PartialEq,
-{
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let structure =
-        Arc::new(BlockStructure::packed_column_major(1, (0..8).map(|_| vec![1])).unwrap());
-    let mut groups = Vec::new();
-    for class in 0usize..8 {
-        let pack_lhs = class & usize::from(FusionGroupExecutionClass::PACK_LHS) != 0;
-        let pack_rhs = class & usize::from(FusionGroupExecutionClass::PACK_RHS) != 0;
-        let scatter_dst = class & usize::from(FusionGroupExecutionClass::SCATTER_DST) != 0;
-        groups.push(
-            FusionBlockContractGroupPlan::new(
-                scalar_group(class, !pack_lhs, if pack_lhs { 2.0 } else { 1.0 }),
-                scalar_group(class, !pack_rhs, if pack_rhs { 3.0 } else { 1.0 }),
-                scalar_group(class, !scatter_dst, if scatter_dst { 5.0 } else { 1.0 }),
-            )
-            .unwrap(),
-        );
-    }
-    let plan = FusionBlockContractPlan::from_parts(
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Vec::new(),
-        groups,
-    )
-    .unwrap();
-    assert!(!plan.is_fully_direct());
-    assert_eq!(plan.direct_batch.len(), 1);
-    assert_eq!(plan.irregular.len(), 7);
-    assert_eq!(plan.max_irregular_scratch_len, 3);
-
-    let lhs = (0..8)
-        .map(|index| T::from(index as f64 + 1.0))
-        .collect::<Vec<_>>();
-    let rhs = (0..8)
-        .map(|index| T::from(index as f64 + 2.0))
-        .collect::<Vec<_>>();
-    let initial = (0..8)
-        .map(|index| T::from(index as f64 + 7.0))
-        .collect::<Vec<_>>();
-    let alpha = T::from(1.5);
-    let beta = T::from(-0.25);
-    let mut expected = Vec::new();
-    for class in 0usize..8 {
-        let lhs_coefficient = if class & usize::from(FusionGroupExecutionClass::PACK_LHS) != 0 {
-            T::from(2.0)
-        } else {
-            T::from(1.0)
-        };
-        let rhs_coefficient = if class & usize::from(FusionGroupExecutionClass::PACK_RHS) != 0 {
-            T::from(3.0)
-        } else {
-            T::from(1.0)
-        };
-        let dst_coefficient = if class & usize::from(FusionGroupExecutionClass::SCATTER_DST) != 0 {
-            T::from(5.0)
-        } else {
-            T::from(1.0)
-        };
-        expected.push(
-            dst_coefficient * alpha * lhs_coefficient * lhs[class] * rhs_coefficient * rhs[class]
-                + beta * initial[class],
-        );
-    }
-
-    let mut kernels = crate::StridedHostKernelAdapter::default();
-    let mut gemm = NaiveGemm;
-    let mut workspace = FusionBlockContractWorkspace::<T>::default();
-    let mut dst = initial.clone();
-    plan.execute_raw(
-        engine,
-        &mut kernels,
-        &mut gemm,
-        &mut workspace,
-        &structure,
-        &mut dst,
-        &structure,
-        &lhs,
-        &structure,
-        &rhs,
-        alpha,
-        beta,
-    )
-    .unwrap();
-    assert_eq!(dst, expected);
-    assert_eq!(workspace.scratch.len(), 3);
-
-    workspace.scratch.fill(T::from(99.0));
-    dst.clone_from(&initial);
-    plan.execute_raw(
-        engine,
-        &mut kernels,
-        &mut gemm,
-        &mut workspace,
-        &structure,
-        &mut dst,
-        &structure,
-        &lhs,
-        &structure,
-        &rhs,
-        alpha,
-        beta,
-    )
-    .unwrap();
-    assert_eq!(dst, expected);
-
-    // A zero alpha (either sign) leaves exactly TensorKit's `scale(C,
-    // beta)` in every class, over Inf/NaN operands, a NaN destination and
-    // a NaN-filled scratch: no pack, GEMM or product is formed.
-    let nan = T::from(f64::NAN);
-    let poisoned = |values: &[T], bad: T| {
-        let mut values = values.to_vec();
-        values[0] = bad;
-        values[5] = bad;
-        values
-    };
-    let (bad_lhs, bad_rhs) = (poisoned(&lhs, T::from(f64::INFINITY)), poisoned(&rhs, nan));
-    let dirty = poisoned(&initial, nan);
-    let same = |got: &[T], want: &[T]| {
-        assert_eq!(got.len(), want.len());
-        for (&got, &want) in got.iter().zip(want) {
-            #[allow(clippy::eq_op)]
-            let both_nan = got != got && want != want;
-            assert!(got == want || both_nan, "{got:?} != {want:?}");
-        }
-    };
-    for zero in [0.0, -0.0] {
-        for beta in [0.0, 1.0, 2.0] {
-            let want: Vec<T> = dirty
-                .iter()
-                .map(|&value| match beta {
-                    0.0 => T::zero(),
-                    1.0 => value,
-                    _ => T::from(beta) * value,
-                })
-                .collect();
-            workspace.scratch.fill(nan);
-            dst.clone_from(&dirty);
-            plan.execute_raw(
-                engine,
-                &mut kernels,
-                &mut gemm,
-                &mut workspace,
-                &structure,
-                &mut dst,
-                &structure,
-                &bad_lhs,
-                &structure,
-                &bad_rhs,
-                T::from(zero),
-                T::from(beta),
-            )
-            .unwrap();
-            same(&dst, &want);
-        }
-    }
-
-    // The dirty workspace left by the zero-alpha runs replays a non-zero
-    // alpha exactly as a fresh one does.
-    dst.clone_from(&initial);
-    plan.execute_raw(
-        engine,
-        &mut kernels,
-        &mut gemm,
-        &mut workspace,
-        &structure,
-        &mut dst,
-        &structure,
-        &lhs,
-        &structure,
-        &rhs,
-        alpha,
-        beta,
-    )
-    .unwrap();
-    assert_eq!(dst, expected);
-}
-
-#[test]
-fn all_eight_group_classes_replay_f64() {
-    all_classes_apply_alpha_beta_and_coefficients::<f64>();
-}
-
-#[test]
-fn all_eight_group_classes_replay_c64() {
-    all_classes_apply_alpha_beta_and_coefficients::<Complex64>();
-}
-
-#[test]
-fn sparse_pack_clears_stale_group_scratch() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let lhs_structure = Arc::new(BlockStructure::trivial(&[1, 1]).unwrap());
-    let rhs_structure = Arc::new(BlockStructure::trivial(&[2, 1]).unwrap());
-    let dst_structure = Arc::new(BlockStructure::trivial(&[2, 1]).unwrap());
-    let lhs = FusionBlockMatrixGroup {
-        coupled: SectorId::new(0),
-        rows: 2,
-        cols: 2,
-        needs_clear: true,
-        direct_offset: None,
-        block_indices: vec![0],
-        subblocks: vec![FusionSubblockMatrixLayout {
-            block: FusionStridedBlockLayout {
-                shape: vec![1, 1],
-                strides: vec![1, 1],
-                offset: 0,
-            },
-            matrix_offset: 0,
-            matrix_strides: vec![1, 2],
-            coefficient: 1.0,
-        }],
-    };
-    let plan = FusionBlockContractPlan::from_parts(
-        Arc::clone(&dst_structure),
-        Arc::clone(&lhs_structure),
-        Arc::clone(&rhs_structure),
-        Vec::new(),
-        vec![FusionBlockContractGroupPlan::new(
-            lhs,
-            matrix_group(2, 1, true),
-            matrix_group(2, 1, true),
-        )
-        .unwrap()],
-    )
-    .unwrap();
-    let mut workspace = FusionBlockContractWorkspace::<f64>::default();
-    workspace.scratch.resize_filled(4, 41.0);
-    let mut dst = vec![7.0, 11.0];
-    plan.execute_raw(
-        engine,
-        &mut crate::StridedHostKernelAdapter::default(),
-        &mut NaiveGemm,
-        &mut workspace,
-        &dst_structure,
-        &mut dst,
-        &lhs_structure,
-        &[3.0],
-        &rhs_structure,
-        &[5.0, 13.0],
-        1.0,
-        0.0,
-    )
-    .unwrap();
-    assert_eq!(dst, [15.0, 0.0]);
-    assert_eq!(workspace.scratch.len(), 4);
-}
-
-struct ComplexOpGemm;
-
-impl Rank2Gemm<Complex64> for ComplexOpGemm {
-    fn matmul_rank2(
-        &mut self,
-        _engine: &mut dyn Engine,
-        dst: &mut [Complex64],
-        lhs: &[Complex64],
-        rhs: &[Complex64],
-        _rows: usize,
-        _contracted: usize,
-        _cols: usize,
-        alpha: Complex64,
-        beta: Complex64,
-    ) -> Result<(), OperationError> {
-        dst[0] = alpha * lhs[0] * rhs[0] + beta * dst[0];
-        Ok(())
-    }
-
-    fn matmul_rank2_batch_with_ops(
-        &mut self,
-        _engine: &mut dyn Engine,
-        dst: &mut [Complex64],
-        lhs: &[Complex64],
-        rhs: &[Complex64],
-        jobs: &[Rank2GemmBatchJob],
-        _runs: &[usize],
-        lhs_op: MatrixOp,
-        rhs_op: MatrixOp,
-        alpha: Complex64,
-        beta: Complex64,
-    ) -> Result<(), OperationError> {
-        for job in jobs {
-            let lhs_value = match lhs_op {
-                MatrixOp::Adjoint => lhs[job.lhs_offset].conj(),
-                MatrixOp::Identity | MatrixOp::Transpose => lhs[job.lhs_offset],
-            };
-            let rhs_value = match rhs_op {
-                MatrixOp::Adjoint => rhs[job.rhs_offset].conj(),
-                MatrixOp::Identity | MatrixOp::Transpose => rhs[job.rhs_offset],
-            };
-            let dst_value = &mut dst[job.dst_offset];
-            *dst_value = alpha * lhs_value * rhs_value + beta * *dst_value;
-        }
-        Ok(())
-    }
-}
-
-#[test]
-fn packed_adjoint_is_conjugated_only_by_gemm() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let structure = Arc::new(BlockStructure::trivial(&[1, 1]).unwrap());
-    let plan = FusionBlockContractPlan::from_parts_with_ops(
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Vec::new(),
-        vec![FusionBlockContractGroupPlan::new(
-            matrix_group(1, 1, false),
-            matrix_group(1, 1, true),
-            matrix_group(1, 1, true),
-        )
-        .unwrap()],
-        MatrixOp::Adjoint,
-        MatrixOp::Identity,
-    )
-    .unwrap();
-    let lhs = [Complex64::new(2.0, 3.0)];
-    let rhs = [Complex64::new(5.0, -7.0)];
-    let mut dst = [Complex64::new(11.0, 13.0)];
-    plan.execute_raw(
-        engine,
-        &mut crate::StridedHostKernelAdapter::default(),
-        &mut ComplexOpGemm,
-        &mut FusionBlockContractWorkspace::default(),
-        &structure,
-        &mut dst,
-        &structure,
-        &lhs,
-        &structure,
-        &rhs,
-        Complex64::new(1.0, 0.0),
-        Complex64::new(0.0, 0.0),
-    )
-    .unwrap();
-    assert_eq!(dst[0], lhs[0].conj() * rhs[0]);
-}
-
-#[test]
-fn asymmetric_packed_adjoint_validates_physical_matrix_shape() {
-    let dst_structure = Arc::new(BlockStructure::trivial(&[2, 1]).unwrap());
-    let lhs_structure = Arc::new(BlockStructure::trivial(&[3, 2]).unwrap());
-    let rhs_structure = Arc::new(BlockStructure::trivial(&[3, 1]).unwrap());
-    let mut physical_lhs = matrix_group(3, 2, false);
-    physical_lhs.rows = 2;
-    physical_lhs.cols = 3;
-    let plan = FusionBlockContractPlan::from_parts_with_ops(
-        dst_structure,
-        lhs_structure,
-        rhs_structure,
-        Vec::new(),
-        vec![FusionBlockContractGroupPlan::new(
-            physical_lhs,
-            matrix_group(3, 1, false),
-            matrix_group(2, 1, false),
-        )
-        .unwrap()],
-        MatrixOp::Adjoint,
-        MatrixOp::Identity,
-    )
-    .unwrap();
-    assert!(!plan.is_fully_direct());
-}
-
-#[test]
 fn mixed_active_and_inactive_blocks_apply_beta_once() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let structure = Arc::new(BlockStructure::packed_column_major(1, [vec![1], vec![1]]).unwrap());
@@ -620,7 +166,7 @@ fn mixed_active_and_inactive_blocks_apply_beta_once() {
         Arc::clone(&structure),
         inactive,
         vec![FusionBlockContractGroupPlan::new(
-            scalar_group(0, false, 2.0),
+            scalar_group(0, true, 1.0),
             scalar_group(0, true, 1.0),
             scalar_group(0, true, 1.0),
         )
@@ -643,7 +189,7 @@ fn mixed_active_and_inactive_blocks_apply_beta_once() {
         -3.0,
     )
     .unwrap();
-    assert_eq!(dst, [39.0, -33.0]);
+    assert_eq!(dst, [9.0, -33.0]);
 }
 
 #[test]
@@ -766,7 +312,7 @@ fn packed_matrix_geometry_distinguishes_overlap_gap_and_empty_blocks() {
         matrix_layouts_cover_exactly(&group(4, vec![subblock(0, 2), subblock(1, 2)]), 4, 1)
             .is_err()
     );
-    // What: a disjoint incomplete grid is valid but requires scratch clear.
+    // What: a disjoint incomplete grid is valid but does not cover the matrix.
     assert_eq!(
         matrix_layouts_cover_exactly(&group(5, vec![subblock(0, 2), subblock(3, 2)]), 5, 1),
         Ok(false)
@@ -873,44 +419,12 @@ fn duplicate_destination_group_is_rejected() {
 }
 
 #[test]
-fn mixed_plan_rejects_storage_direct_before_mutation() {
-    let structure = Arc::new(BlockStructure::trivial(&[1]).unwrap());
-    let plan = FusionBlockContractPlan::from_parts(
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Arc::clone(&structure),
-        Vec::new(),
-        vec![FusionBlockContractGroupPlan::new(
-            scalar_group(0, false, 1.0),
-            scalar_group(0, true, 1.0),
-            scalar_group(0, true, 1.0),
-        )
-        .unwrap()],
-    )
-    .unwrap();
-    let lhs = vec![2.0];
-    let rhs = vec![3.0];
-    let mut dst = vec![5.0];
-    let error = plan
-        .execute_direct_on_storage_prezeroed(&mut RejectingStorageGemm, &mut dst, &lhs, &rhs)
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        OperationError::UnsupportedTensorContractScope {
-            message: NON_COUPLED_OPERAND_MESSAGE
-        }
-    ));
-    assert_eq!(dst, [5.0]);
-}
-
-#[test]
 fn direct_batch_lowers_disjoint_groups() {
     let groups = vec![
         group_plan((2, 3, 4), (0, 0, 0)),
         group_plan((3, 2, 5), (6, 12, 8)),
     ];
-    let (batch, irregular, _) = compile_group_execution(&groups).unwrap();
-    assert!(irregular.is_empty());
+    let batch = compile_group_execution(&groups).unwrap();
     assert_eq!(batch.len(), 2);
     assert_eq!(batch[0].dst_offset, 0);
     assert_eq!(batch[0].rows * batch[0].cols, 8);
@@ -927,8 +441,7 @@ fn direct_batch_orders_same_shape_groups_as_strided_runs() {
             group_plan((2, 2, 2), (base, base, base))
         })
         .collect::<Vec<_>>();
-    let (batch, irregular, _) = compile_group_execution(&groups).unwrap();
-    assert!(irregular.is_empty());
+    let batch = compile_group_execution(&groups).unwrap();
     let offsets = batch
         .iter()
         .map(|job| (job.dst_offset, job.lhs_offset, job.rhs_offset))
@@ -976,29 +489,6 @@ fn direct_batch_plan_bakes_run_partition() {
 }
 
 #[test]
-fn non_direct_plan_has_empty_run_partition() {
-    let plan = FusionBlockContractGroupPlan::new(
-        matrix_group(2, 3, false),
-        matrix_group(3, 4, true),
-        matrix_group(2, 4, true),
-    )
-    .unwrap();
-    let dst_structure = Arc::new(BlockStructure::trivial(&[2, 4]).unwrap());
-    let lhs_structure = Arc::new(BlockStructure::trivial(&[2, 3]).unwrap());
-    let rhs_structure = Arc::new(BlockStructure::trivial(&[3, 4]).unwrap());
-    let plan = FusionBlockContractPlan::from_parts(
-        dst_structure,
-        lhs_structure,
-        rhs_structure,
-        Vec::new(),
-        vec![plan],
-    )
-    .unwrap();
-    assert!(!plan.is_fully_direct());
-    assert!(plan.direct_batch_runs().is_empty());
-}
-
-#[test]
 fn direct_batch_rejects_overlapping_destination_ranges() {
     // First dst covers [0, 8); second starts at 7.
     let groups = vec![
@@ -1018,9 +508,8 @@ fn direct_batch_ignores_empty_destination_ranges() {
         group_plan((2, 1, 1), (0, 0, 0)),
         group_plan((0, 1, 1), (0, 0, 1)),
     ];
-    let (direct, irregular, _) = compile_group_execution(&groups).unwrap();
+    let direct = compile_group_execution(&groups).unwrap();
     assert_eq!(direct.len(), 2);
-    assert!(irregular.is_empty());
 }
 
 #[test]
@@ -1095,16 +584,19 @@ fn canonical_direct_plan_rejects_equal_dimension_tree_basis_mismatch() {
 }
 
 #[test]
-fn non_direct_group_compiles_one_irregular_execution() {
+fn a_group_matrix_not_in_place_is_unsupported() {
     let plan = FusionBlockContractGroupPlan::new(
         direct_group(2, 3, None),
         direct_group(3, 4, Some(0)),
         direct_group(2, 4, Some(0)),
     )
     .unwrap();
-    let (direct, irregular, _) = compile_group_execution(&[plan]).unwrap();
-    assert!(direct.is_empty());
-    assert_eq!(irregular.len(), 1);
+    assert!(matches!(
+        compile_group_execution(&[plan]).unwrap_err(),
+        OperationError::UnsupportedTensorContractScope {
+            message: NON_COUPLED_OPERAND_MESSAGE
+        }
+    ));
 }
 
 struct RejectingStorageGemm;
@@ -1235,7 +727,7 @@ fn direct_replay_uses_one_batched_gemm_call() {
     .unwrap();
     let mut kernels = crate::StridedHostKernelAdapter::default();
     let mut gemm = CountingBatchGemm::default();
-    let mut workspace = FusionBlockContractWorkspace::<f64>::default();
+    let mut workspace = FusionBlockContractWorkspace::default();
     let lhs = vec![0.0; 2];
     let rhs = vec![0.0; 2];
     let mut dst = vec![0.0; 2];
@@ -1259,7 +751,6 @@ fn direct_replay_uses_one_batched_gemm_call() {
     assert_eq!(gemm.batch_calls, 1);
     assert_eq!(gemm.rank2_calls, 0);
     assert_eq!(gemm.last_batch_len, 2);
-    assert_eq!(workspace.scratch.len(), 0);
 }
 
 #[derive(Default)]
@@ -1577,12 +1068,9 @@ impl Rank2Gemm<f64> for FailingAtJob {
     }
 }
 
-/// Four scalar blocks: blocks 0 and 1 are active (block 0 irregular when
-/// `irregular_first`, both direct otherwise) and blocks 2 and 3 are the
+/// Four scalar blocks: blocks 0 and 1 are active and blocks 2 and 3 are the
 /// inactive complement.
-pub(super) fn four_block_plan(
-    irregular_first: bool,
-) -> (Arc<BlockStructure>, FusionBlockContractPlan) {
+pub(super) fn four_block_plan() -> (Arc<BlockStructure>, FusionBlockContractPlan) {
     let structure = Arc::new(
         BlockStructure::packed_column_major(1, [vec![1], vec![1], vec![1], vec![1]]).unwrap(),
     );
@@ -1603,7 +1091,7 @@ pub(super) fn four_block_plan(
         inactive,
         vec![
             FusionBlockContractGroupPlan::new(
-                scalar_group(0, !irregular_first, 1.0),
+                scalar_group(0, true, 1.0),
                 scalar_group(0, true, 1.0),
                 scalar_group(0, true, 1.0),
             )
@@ -1633,33 +1121,31 @@ fn zeroed_replay_never_touches_inactive_blocks() {
     // What: on an all-zero destination `Zeroed` runs no scale/copy kernel
     // over the inactive blocks; the active blocks are written by their
     // job with `beta = 0` and the inactive ones keep their zeros.
-    for irregular_first in [false, true] {
-        let (structure, plan) = four_block_plan(irregular_first);
-        let mut kernels = ObservedKernels::recording();
-        let mut dst = vec![0.0; 4];
-        plan.execute_raw_zeroed(
-            engine,
-            &mut kernels,
-            &mut NaiveGemm,
-            &mut FusionBlockContractWorkspace::default(),
-            &structure,
-            &mut dst,
-            &structure,
-            &FOUR_BLOCK_LHS,
-            &structure,
-            &FOUR_BLOCK_RHS,
-            2.0,
-        )
-        .unwrap();
-        assert_eq!(dst, [42.0, 110.0, 0.0, 0.0]);
-        assert!(kernels.scale_offsets().is_empty(), "{irregular_first}");
-        assert!(
-            touched_inactive(&kernels.copy_offsets()).is_empty(),
-            "irregular_first={irregular_first}: {:?}",
-            kernels.copy_offsets()
-        );
-        assert!(dst[2..].iter().all(|v| v.to_bits() == 0));
-    }
+    let (structure, plan) = four_block_plan();
+    let mut kernels = ObservedKernels::recording();
+    let mut dst = vec![0.0; 4];
+    plan.execute_raw_zeroed(
+        engine,
+        &mut kernels,
+        &mut NaiveGemm,
+        &mut FusionBlockContractWorkspace::default(),
+        &structure,
+        &mut dst,
+        &structure,
+        &FOUR_BLOCK_LHS,
+        &structure,
+        &FOUR_BLOCK_RHS,
+        2.0,
+    )
+    .unwrap();
+    assert_eq!(dst, [42.0, 110.0, 0.0, 0.0]);
+    assert!(kernels.scale_offsets().is_empty());
+    assert!(
+        touched_inactive(&kernels.copy_offsets()).is_empty(),
+        "{:?}",
+        kernels.copy_offsets()
+    );
+    assert!(dst[2..].iter().all(|v| v.to_bits() == 0));
 }
 
 #[test]
@@ -1668,37 +1154,35 @@ fn axpby_zero_assigns_inactive_blocks_without_reading_them() {
     // What: `Axpby(0)` is a strong zero: NaN, Inf and -0.0 in the inactive
     // blocks become exactly +0.0 through one copy per block, never a
     // multiply that would keep NaN.
-    for irregular_first in [false, true] {
-        let (structure, plan) = four_block_plan(irregular_first);
-        let mut kernels = ObservedKernels::recording();
-        let mut dst = vec![f64::NAN, f64::INFINITY, f64::NAN, -0.0];
-        plan.execute_raw(
-            engine,
-            &mut kernels,
-            &mut NaiveGemm,
-            &mut FusionBlockContractWorkspace::default(),
-            &structure,
-            &mut dst,
-            &structure,
-            &FOUR_BLOCK_LHS,
-            &structure,
-            &FOUR_BLOCK_RHS,
-            1.0,
-            0.0,
-        )
-        .unwrap();
-        assert_eq!(dst[..2], [21.0, 55.0]);
-        assert_eq!(dst[2].to_bits(), 0);
-        assert_eq!(dst[3].to_bits(), 0);
-        assert!(kernels.scale_offsets().is_empty());
-        assert_eq!(touched_inactive(&kernels.copy_offsets()), [2, 3]);
-    }
+    let (structure, plan) = four_block_plan();
+    let mut kernels = ObservedKernels::recording();
+    let mut dst = vec![f64::NAN, f64::INFINITY, f64::NAN, -0.0];
+    plan.execute_raw(
+        engine,
+        &mut kernels,
+        &mut NaiveGemm,
+        &mut FusionBlockContractWorkspace::default(),
+        &structure,
+        &mut dst,
+        &structure,
+        &FOUR_BLOCK_LHS,
+        &structure,
+        &FOUR_BLOCK_RHS,
+        1.0,
+        0.0,
+    )
+    .unwrap();
+    assert_eq!(dst[..2], [21.0, 55.0]);
+    assert_eq!(dst[2].to_bits(), 0);
+    assert_eq!(dst[3].to_bits(), 0);
+    assert!(kernels.scale_offsets().is_empty());
+    assert_eq!(touched_inactive(&kernels.copy_offsets()), [2, 3]);
 }
 
 #[test]
 fn axpby_one_leaves_inactive_blocks_untouched() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let (structure, plan) = four_block_plan(false);
+    let (structure, plan) = four_block_plan();
     let mut kernels = ObservedKernels::recording();
     let mut dst = vec![1.0, 2.0, 3.0, f64::NAN];
     plan.execute_raw(
@@ -1725,7 +1209,7 @@ fn axpby_one_leaves_inactive_blocks_untouched() {
 #[test]
 fn axpby_general_beta_scales_inactive_blocks_exactly_once() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let (structure, plan) = four_block_plan(false);
+    let (structure, plan) = four_block_plan();
     let mut kernels = ObservedKernels::recording();
     let mut dst = vec![1.0, 2.0, 3.0, 4.0];
     plan.execute_raw(
@@ -1754,7 +1238,7 @@ fn gemm_failure_after_the_first_job_surfaces_without_panicking() {
     // What: an error on a later job returns `Err`; the destination is a
     // valid buffer throughout (born zero, first job written), so nothing
     // uninitialised can be observed and the owner drops it.
-    let (structure, plan) = four_block_plan(false);
+    let (structure, plan) = four_block_plan();
     let mut kernels = ObservedKernels::recording();
     let mut gemm = FailingAtJob {
         calls: 0,
@@ -1887,241 +1371,6 @@ fn canonical_plan_zeroed_replay_skips_the_inactive_coupled_range() {
     assert_eq!(zeroed, assigned);
     assert!(zeroed.iter().all(|v| v.to_bits() == 0 || *v == 4.0));
     assert_eq!(zeroed.iter().filter(|v| **v == 4.0).count(), 4);
-}
-
-/// Payload components that separate a componentwise real scale from a
-/// promoted complex multiply: `0 * inf` and `0 * NaN` pollute the other
-/// component, and `x - 0 * y` can flip the sign of a zero.
-const SPECIAL_COMPONENTS: [(f64, f64); 12] = [
-    (f64::INFINITY, 1.0),
-    (-0.0, -0.0),
-    (f64::from_bits(0x7ff8_0000_0000_1407), 2.5),
-    (1.5, f64::NEG_INFINITY),
-    (-0.0, 3.0),
-    (f64::from_bits(1), -0.0),
-    (0.0, -2.0),
-    (-4.0, f64::from_bits(0xfff8_0000_0000_0042)),
-    (0.75, -0.0),
-    (f64::NEG_INFINITY, -0.0),
-    (-1.25, 0.5),
-    (2.0, f64::INFINITY),
-];
-
-/// Three `2 x 2` storage blocks packed into one `2 x 6` column-major
-/// matrix, each with its own real structural coefficient (`0` included:
-/// `0 * (inf + 1i)` is `(NaN, 0)` componentwise, `(NaN, NaN)` promoted).
-fn three_block_group<C: Copy>(coefficients: [C; 3]) -> FusionBlockMatrixGroup<C> {
-    FusionBlockMatrixGroup {
-        coupled: SectorId::new(0),
-        rows: 2,
-        cols: 6,
-        needs_clear: false,
-        direct_offset: None,
-        block_indices: vec![0, 1, 2],
-        subblocks: coefficients
-            .iter()
-            .enumerate()
-            .map(|(block, &coefficient)| FusionSubblockMatrixLayout {
-                // Storage blocks are transposed against the matrix so the
-                // pack is a genuine strided move.
-                block: FusionStridedBlockLayout {
-                    shape: vec![2, 2],
-                    strides: vec![2, 1],
-                    offset: 4 * block as isize,
-                },
-                matrix_offset: 4 * block as isize,
-                matrix_strides: vec![1, 2],
-                coefficient,
-            })
-            .collect(),
-    }
-}
-
-fn component_bits(values: &[Complex64]) -> Vec<(u64, u64)> {
-    values
-        .iter()
-        .map(|v| (nan_folded_bits(v.re), nan_folded_bits(v.im)))
-        .collect()
-}
-
-fn pair_bits(re: &[f64], im: &[f64]) -> Vec<(u64, u64)> {
-    let _exec = strided_kernel::Exec::serial();
-    re.iter()
-        .zip(im)
-        .map(|(&re, &im)| (nan_folded_bits(re), nan_folded_bits(im)))
-        .collect()
-}
-
-/// What: pack and scatter apply a real structural coefficient to a complex
-/// block componentwise, i.e. exactly as it acts on the two real component
-/// blocks, for coefficients `1`, `-0.5` and `0`, and for scatter `beta`
-/// in `{0, 1, 0.5}`. The coefficient-0 block is VectorInterface's
-/// `scale(strided_kernel::Exec::serial(), strided_kernel::Exec::serial(), x, 0) = zero(strided_kernel::Exec::serial(), x) * 0`, an exact zero that wipes NaN and inf;
-/// the real component runs give the same zeros.
-#[test]
-fn pack_and_scatter_scale_real_coefficients_componentwise() {
-    let mut exec = strided_kernel::Exec::serial();
-    let group = three_block_group([1.0, -0.5, 0.0]);
-    let data: Vec<Complex64> = SPECIAL_COMPONENTS
-        .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect();
-    let re: Vec<f64> = data.iter().map(|v| v.re).collect();
-    let im: Vec<f64> = data.iter().map(|v| v.im).collect();
-    let mut kernels = crate::StridedHostKernelAdapter::default();
-
-    let mut packed = vec![Complex64::zero(); 12];
-    pack_group(exec.reborrow(), &mut kernels, &group, &data, &mut packed).unwrap();
-    let mut packed_re = vec![0.0; 12];
-    let mut packed_im = vec![0.0; 12];
-    pack_group(exec.reborrow(), &mut kernels, &group, &re, &mut packed_re).unwrap();
-    pack_group(exec.reborrow(), &mut kernels, &group, &im, &mut packed_im).unwrap();
-    assert_eq!(component_bits(&packed), pair_bits(&packed_re, &packed_im));
-    // The coefficient-0 block of the `(inf, 1)`-bearing payload is the
-    // sharpest case; pin it independently of the oracle as well:
-    // TensorKit's `scale(strided_kernel::Exec::serial(), complex(Inf, 1.0), 0.0)` is `0.0 + 0.0im`.
-    let zero_block = &packed[8..];
-    assert!(SPECIAL_COMPONENTS[8..]
-        .iter()
-        .any(|&(re, im)| !re.is_finite() || !im.is_finite()));
-    assert_eq!(
-        component_bits(zero_block),
-        vec![(0.0f64.to_bits(), 0.0f64.to_bits()); 4]
-    );
-
-    // Why a finite, nonzero destination for the general beta: beta is a
-    // payload-typed scalar, so `(0.5 + 0i) * dst` is a complex multiply by
-    // design; only the packed side carries the non-finite values there.
-    let finite: Vec<Complex64> = (0..12)
-        .map(|k| Complex64::new(k as f64 * 0.37 - 2.1, 1.3 - k as f64 * 0.29))
-        .collect();
-    for beta in [0.0, 1.0, 0.5] {
-        let initial = if beta == 0.5 { &finite } else { &data };
-        let mut scattered = initial.clone();
-        scatter_group(
-            exec.reborrow(),
-            &mut kernels,
-            &group,
-            &mut scattered,
-            &packed,
-            Complex64::new(beta, 0.0),
-        )
-        .unwrap();
-        let mut scattered_re: Vec<f64> = initial.iter().map(|v| v.re).collect();
-        let mut scattered_im: Vec<f64> = initial.iter().map(|v| v.im).collect();
-        scatter_group(
-            exec.reborrow(),
-            &mut kernels,
-            &group,
-            &mut scattered_re,
-            &packed_re,
-            beta,
-        )
-        .unwrap();
-        scatter_group(
-            exec.reborrow(),
-            &mut kernels,
-            &group,
-            &mut scattered_im,
-            &packed_im,
-            beta,
-        )
-        .unwrap();
-        assert_eq!(
-            component_bits(&scattered),
-            pair_bits(&scattered_re, &scattered_im),
-            "beta = {beta}"
-        );
-    }
-}
-
-/// What: a complex (anyonic) coefficient keeps the full complex multiply,
-/// except that an exact `1 + 0i` does not multiply at all.
-#[test]
-fn pack_keeps_complex_coefficients_complex_and_skips_one() {
-    let coefficients = [
-        Complex64::new(1.0, 0.0),
-        Complex64::new(0.6, 0.8),
-        Complex64::new(-0.5, 0.25),
-    ];
-    let group = three_block_group(coefficients);
-    let data: Vec<Complex64> = SPECIAL_COMPONENTS
-        .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect();
-    let mut kernels = crate::StridedHostKernelAdapter::default();
-    let mut packed = vec![Complex64::zero(); 12];
-    pack_group(
-        strided_kernel::Exec::serial(),
-        &mut kernels,
-        &group,
-        &data,
-        &mut packed,
-    )
-    .unwrap();
-    for (block, coefficient) in coefficients.into_iter().enumerate() {
-        for row in 0..2 {
-            for col in 0..2 {
-                let value = data[4 * block + 2 * row + col];
-                let want = if block == 0 {
-                    value
-                } else {
-                    value * coefficient
-                };
-                let got = packed[4 * block + row + 2 * col];
-                assert_eq!(
-                    (nan_folded_bits(got.re), nan_folded_bits(got.im)),
-                    (nan_folded_bits(want.re), nan_folded_bits(want.im)),
-                    "block {block} ({row}, {col})"
-                );
-            }
-        }
-    }
-}
-
-/// What: for finite payloads the componentwise scale that pack applies is
-/// bit for bit the promoted complex product `(strided_kernel::Exec::serial(), c + 0i)(x + yi)` whenever
-/// both component products are nonzero, and differs only in the sign of a
-/// zero product, where the componentwise result is the real oracle's.
-#[test]
-fn componentwise_pack_matches_promoted_product_on_finite_values() {
-    let mut exec = strided_kernel::Exec::serial();
-    let coefficients = [-0.5, 3.0, 0.1];
-    let group = three_block_group(coefficients);
-    let finite: Vec<Complex64> = (0..12)
-        .map(|k| {
-            let k = k as f64;
-            Complex64::new((k - 5.5) * 0.37, (7.0 - k) * 1.3 + 0.01)
-        })
-        .collect();
-    let mut kernels = crate::StridedHostKernelAdapter::default();
-    let mut packed = vec![Complex64::zero(); 12];
-    pack_group(exec.reborrow(), &mut kernels, &group, &finite, &mut packed).unwrap();
-    for (block, &coefficient) in coefficients.iter().enumerate() {
-        for row in 0..2 {
-            for col in 0..2 {
-                let value = finite[4 * block + 2 * row + col];
-                let promoted = Complex64::new(coefficient, 0.0) * value;
-                let got = packed[4 * block + row + 2 * col];
-                assert_eq!(
-                    (got.re.to_bits(), got.im.to_bits()),
-                    (promoted.re.to_bits(), promoted.im.to_bits())
-                );
-            }
-        }
-    }
-
-    // `-1 * (+0 - 3i)`: componentwise `(-0, 3)`; promoted
-    // `(-1)(+0) - (0)(-3) = -0 - (strided_kernel::Exec::serial(), -0) = +0`.
-    let group = three_block_group([-1.0, -1.0, -1.0]);
-    let data = vec![Complex64::new(0.0, -3.0); 12];
-    let mut packed = vec![Complex64::zero(); 12];
-    pack_group(exec.reborrow(), &mut kernels, &group, &data, &mut packed).unwrap();
-    let promoted = Complex64::new(-1.0, 0.0) * data[0];
-    assert_eq!(promoted.re.to_bits(), 0.0f64.to_bits());
-    assert!(packed
-        .iter()
-        .all(|v| v.re.to_bits() == (-0.0f64).to_bits() && v.im == 3.0));
 }
 
 /// Canonical Z2 plan with job coefficients `+1` (even block, offset 0) and

@@ -54,7 +54,7 @@ where
 }
 
 use super::backend::TensorContractBackend;
-use super::dynamic_space::{DynamicFusionMapSpace, FusionOperandLayout};
+use super::dynamic_space::DynamicFusionMapSpace;
 // Used by the debug-build core geometry assertion and the test-only compile.
 #[cfg(any(test, debug_assertions))]
 use super::fusion::reject_fusion_contract_conjugation;
@@ -578,7 +578,7 @@ where
     D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     C: DenseBlockScalar,
 {
-    let mut fusion_workspace = FusionBlockContractWorkspace::<D>::default();
+    let mut fusion_workspace = FusionBlockContractWorkspace::default();
     plan.execute_raw(
         engine,
         kernels,

@@ -29,10 +29,8 @@ use super::dynamic_space::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand,
     PreparedCheckedGenericDynamicSpace,
 };
-#[cfg(test)]
-use super::resolution::HostEagerExecutor;
 use super::resolution::StorageContractResolution;
-use super::resolution::{CoreMiss, CoreRoute, ExecCaps};
+use super::resolution::{CoreMiss, CoreRoute};
 use super::structure::TensorContractAxisPlan;
 use crate::tree_transform::TreeTransformPlanning;
 
@@ -508,21 +506,19 @@ where
     }
 
     /// The canonical core route, resolved without any context.
-    pub fn try_core<X: ExecCaps>(
-        &self,
-    ) -> Result<CoreRoute<f64>, CheckedGenericPlanError<P::Error>> {
-        staged_try_core::<X, P, CheckedContractStage<'a, P>>(self)
+    pub fn try_core(&self) -> Result<CoreRoute<f64>, CheckedGenericPlanError<P::Error>> {
+        staged_try_core::<P, CheckedContractStage<'a, P>>(self)
     }
 
     /// The rest of the planner after a core miss, under the call's own
     /// transaction (it needs no context).
-    pub fn plan_beyond_core<X: ExecCaps>(
+    pub fn plan_beyond_core(
         &mut self,
         engine: &mut dyn Engine,
         miss: CoreMiss,
     ) -> Result<StorageContractResolution<f64>, CheckedGenericPlanError<P::Error>> {
         // The checked planner never reads the context's planning state.
-        staged_plan_beyond_core::<X, P, CheckedContractStage<'a, P>>(
+        staged_plan_beyond_core::<P, CheckedContractStage<'a, P>>(
             engine,
             self,
             miss,
@@ -608,8 +604,7 @@ where
     ///
     /// It plans through the shared [`plan_compose`](super::plan_compose)
     /// rung in the checked mode and replays on the Host route executor: one
-    /// coefficient-free block GEMM per coupled sector, or the checked
-    /// irregular core for a non-canonical tiling. No leg crosses another,
+    /// coefficient-free block GEMM per coupled sector. No leg crosses another,
     /// hence no braiding style is required. The destination is staged,
     /// planned over as a preview, and committed only after the replay
     /// succeeds (#2063).
@@ -1995,7 +1990,7 @@ mod tests {
             .unwrap();
         let preview = destination.preview();
         let mut txn = CheckedContractTxn::new();
-        let resolution = plan_contract_in::<HostEagerExecutor, CheckedGenericAdmissionMode, _>(
+        let resolution = plan_contract_in::<CheckedGenericAdmissionMode, _>(
             engine,
             &mut txn,
             PlanTarget::checked(authority, &preview),
