@@ -929,7 +929,7 @@ mod tests {
     }
 
     /// What: every block-level scaling entry — the transform op used by
-    /// tree-transform singles and by fusion pack/scatter, and the payload
+    /// tree-transform singles, and the payload
     /// `alpha` copy/add/axpby ops — gives VectorInterface's
     /// `scale(x, 0) = zero(x) * 0` for a zero scale, so `±inf`/NaN sources
     /// contribute zero. Oracle (Julia, TensorOperations 5.6.2):

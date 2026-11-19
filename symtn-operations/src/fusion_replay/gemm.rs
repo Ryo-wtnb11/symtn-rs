@@ -214,9 +214,8 @@ pub(super) fn job_pieces<'a, E>(
     Ok(pieces)
 }
 
-/// One GEMM job addressed inside its selected source and destination buffers.
-/// Fully-direct jobs use tensor storage; irregular jobs use group-local scratch
-/// for exactly the operands selected by their execution class.
+/// One GEMM job addressed inside the tensor storage of its operands and
+/// destination.
 pub type Rank2GemmBatchJob = DenseGemmBatchJob;
 
 /// Placement-aware block GEMM over storage ranges.

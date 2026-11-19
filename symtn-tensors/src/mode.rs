@@ -43,17 +43,15 @@ use symtn_operations::TreeTransformStructure;
 
 use crate::contract::{
     compile_checked_generic_core_plan_general, compile_contract_twist, compile_core_dst,
-    compile_derived_core_plan, compile_fusion_block_contract_plan_prelowered_validated,
-    compile_operand_core_plan_general, compile_prelowered_dynamic_tree,
-    compile_stored_dynamic_tree, compile_transformed_source, contract_axes_require_twist,
-    core_homspace_matches, prepare_tensorcontract_fusion_plan_dyn_raw_canonical,
-    rhs_contract_twist_factor_oriented, select_complete_tensorcontract_fusion_plan,
-    source_is_storage_adjoint, storage_layout_is_canonical, tree_transform_operation_axes,
-    validate_checked_operand_relation, validate_fusion_contract_rule, CheckedAuthority,
-    CheckedContractTxn, DynamicFusionCoreDstEntry, DynamicFusionMapSpace,
-    DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact, FusionContractPlan,
-    FusionOperand, FusionOperandLayout, LayoutKeyBuilder, PlanTarget, PlanarContractOrders,
-    PreparedCheckedGenericDynamicSpace, StorageContractResolution, ValidatedCoreContract,
+    compile_derived_core_plan, compile_prelowered_dynamic_tree, compile_stored_dynamic_tree,
+    compile_transformed_source, contract_axes_require_twist, core_homspace_matches,
+    prepare_tensorcontract_fusion_plan_dyn_raw_canonical, rhs_contract_twist_factor_oriented,
+    select_complete_tensorcontract_fusion_plan, source_is_storage_adjoint,
+    storage_layout_is_canonical, tree_transform_operation_axes, validate_checked_operand_relation,
+    validate_fusion_contract_rule, CheckedAuthority, CheckedContractTxn, DynamicFusionCoreDstEntry,
+    DynamicFusionMapSpace, DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact,
+    FusionContractPlan, FusionOperand, FusionOperandLayout, LayoutKeyBuilder, PlanTarget,
+    PlanarContractOrders, PreparedCheckedGenericDynamicSpace, StorageContractResolution,
     CHECKED_CONTRACTION_REQUIRES_BOSONIC,
 };
 use crate::tree_context::CheckedTreeTransformStage;
@@ -444,18 +442,6 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
         output_axes: &[usize],
         dst: &FusionTreeHomSpace,
     ) -> Result<bool, Self::Error>;
-
-    /// The packed core plan of a validated core whose coupled-sector tiling
-    /// is not canonical (#1517), for an executor with `IRREGULAR_CORE`.
-    fn irregular_core(
-        validated: ValidatedCoreContract<'_, R>,
-        authority: Self::SpaceAuthority<'_>,
-        dst: &DynamicFusionMapSpace,
-        lhs: FusionOperand<'_>,
-        rhs: FusionOperand<'_>,
-    ) -> Result<FusionBlockContractPlan<Self::Scalar>, Self::Error>
-    where
-        Self::Scalar: DenseBlockScalar;
 
     /// The `DynamicTree` candidate of two stored operands (checked Generic:
     /// also a lazy adjoint's logical space, its conjugation in `axes`):
@@ -888,26 +874,6 @@ where
             rhs_contracting_axes,
             output_axes,
             dst,
-        )
-    }
-
-    /// The packed plan over logical-key projections laid out by the primer.
-    fn irregular_core(
-        validated: ValidatedCoreContract<'_, R>,
-        primer: LayoutKeyBuilder<R>,
-        dst: &DynamicFusionMapSpace,
-        lhs: FusionOperand<'_>,
-        rhs: FusionOperand<'_>,
-    ) -> Result<FusionBlockContractPlan<R::Scalar>, OperationError>
-    where
-        R::Scalar: DenseBlockScalar,
-    {
-        let rule = validated.rule();
-        compile_fusion_block_contract_plan_prelowered_validated(
-            validated,
-            dst,
-            &lhs.prepare(rule, primer)?,
-            &rhs.prepare(rule, primer)?,
         )
     }
 
@@ -1553,25 +1519,6 @@ where
         _dst: &FusionTreeHomSpace,
     ) -> Result<bool, Self::Error> {
         Ok(true)
-    }
-
-    /// The structure-only re-base of the stored tilings, a lazy adjoint
-    /// laid out in its parent's block order and read with
-    /// [`MatrixOp::Adjoint`]: the re-base gives every shared GEMM index one
-    /// tree order, so the logical order is not needed, and the stored keys
-    /// are read without the provider (#2046).
-    fn irregular_core(
-        _validated: ValidatedCoreContract<'_, R>,
-        _authority: CheckedAuthority<'_, R>,
-        dst: &DynamicFusionMapSpace,
-        lhs: FusionOperand<'_>,
-        rhs: FusionOperand<'_>,
-    ) -> Result<FusionBlockContractPlan<f64>, Self::Error> {
-        Ok(compile_operand_core_plan_general(
-            dst,
-            &lhs.storage_ordered_layout()?,
-            &rhs.storage_ordered_layout()?,
-        )?)
     }
 
     /// The Complete scorer over the planner's previews: checked spaces are

@@ -1186,11 +1186,6 @@ where
 /// shared; a kernel only replays the planned route on its storage.
 #[doc(hidden)]
 pub trait ContractExec<R, D>: TypedStorage<R, D> {
-    /// The planner capabilities of this storage's route executor: Host's
-    /// eager executor packs an irregular core; the device runs only
-    /// fully-direct cores.
-    type Caps: symtn_tensors::ExecCaps;
-
     /// `contract(lhs, rhs)` into a fresh owned payload of `replay`'s
     /// destination, reading each operand's stored payload (a lazy adjoint's
     /// parent; Host densifies a compact operand).
@@ -1346,8 +1341,6 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
 }
 
 impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
-    type Caps = symtn_tensors::HostEagerExecutor;
-
     fn contract_owned<C: symtn_tensors::DenseBlockScalar>(
         engine: &mut dyn Engine,
         _: ExecToken,

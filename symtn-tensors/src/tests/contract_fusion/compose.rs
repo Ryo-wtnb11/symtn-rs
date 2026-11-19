@@ -42,7 +42,7 @@ where
     R: symtn_core::MultiplicityFreeRigidSymbols<Scalar = f64>,
     G: symtn_operations::fusion_replay::StorageGemm<f64, Vec<f64>, Vec<f64>, Vec<f64>>,
 {
-    let resolution = crate::plan_compose::<crate::DirectCoreExecutor, _>(dst_space, lhs, rhs)?;
+    let resolution = crate::plan_compose::<_>(dst_space, lhs, rhs)?;
     let (plan, swapped) = resolution.direct_core().expect("compose plans the core");
     assert!(!swapped);
     plan.execute_direct_on_storage_prezeroed(gemm, dst, lhs_storage, rhs_storage)

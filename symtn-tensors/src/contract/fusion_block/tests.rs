@@ -91,7 +91,7 @@ fn canonical_region_join_scales_missing_sector_without_layout_compile() {
     let mut output = vec![11.0, 7.0];
     let mut dense = DenseTreeTransformOperations::default();
     let mut dense_workspace = TensorContractWorkspace::default();
-    let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
+    let mut fusion_workspace = FusionBlockContractWorkspace::default();
     plan.execute_raw(
         engine,
         &mut crate::StridedHostKernelAdapter::default(),
@@ -196,7 +196,7 @@ fn generic_multiplicity_grid_uses_canonical_region_gemm() {
     let mut output = vec![0.0; 4];
     let mut dense = DenseTreeTransformOperations::default();
     let mut dense_workspace = TensorContractWorkspace::default();
-    let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
+    let mut fusion_workspace = FusionBlockContractWorkspace::default();
     plan.execute_raw(
         engine,
         &mut crate::StridedHostKernelAdapter::default(),
@@ -294,7 +294,7 @@ fn storage_direct_replay_matches_host_execute_raw() {
     let mut workspace = TensorContractWorkspace::default();
     let mut expected = vec![0.0; len];
     let structure = std::sync::Arc::clone(space.structure());
-    let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
+    let mut fusion_workspace = FusionBlockContractWorkspace::default();
     plan.execute_raw(
         engine,
         &mut crate::StridedHostKernelAdapter::default(),
@@ -322,24 +322,6 @@ fn storage_direct_replay_matches_host_execute_raw() {
     .unwrap();
 
     assert_eq!(direct, expected);
-}
-
-fn z2_adjoint_mapping_spaces() -> (DynamicFusionMapSpace, DynamicFusionMapSpace) {
-    let rule = ZNFusionRule::new(2).unwrap();
-    let leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], false);
-    let storage = DynamicFusionMapSpace::from_final_homspace(
-        &rule,
-        FusionTreeHomSpace::new(
-            FusionProductSpace::new([leg()]),
-            FusionProductSpace::new([leg()]),
-        ),
-    )
-    .unwrap();
-    let logical = storage
-        .validate_rule(&rule)
-        .and_then(|()| storage.adjoint_view())
-        .unwrap();
-    (logical, storage)
 }
 
 /// The DynamicTree scorer charges a borrowable identity adjoint
@@ -430,36 +412,6 @@ fn an_identity_side_is_free_in_selection_over_canonical_layouts() {
 }
 
 #[test]
-fn adjoint_operand_without_canonical_regions_uses_exact_fallback() {
-    let rule = ZNFusionRule::new(2).unwrap();
-    let (logical, storage) = z2_adjoint_mapping_spaces();
-    let dst = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
-        logical,
-        std::sync::Arc::new(rule),
-    )
-    .unwrap();
-    let fusion_operand_projection_prepares_rec = probe::record();
-    let layout_rec = probe::record();
-    let resolution = crate::plan_compose::<crate::HostEagerExecutor, _>(
-        &dst,
-        crate::FusionOperand::adjoint(&storage),
-        crate::FusionOperand::adjoint(&storage),
-    )
-    .unwrap();
-
-    // What: a transposed logical structure without canonical coupled
-    // regions prepares the exact projection and retains the tree-mapped
-    // implementation: the irregular Host core.
-    let (core, swapped) = resolution.direct_core().unwrap();
-    assert!(!swapped && !core.is_fully_direct());
-    assert_eq!(
-        fusion_operand_projection_prepares_rec.get(Event::FusionOperandProjectionPrepare),
-        2
-    );
-    assert!(layout_rec.get(Event::FusionLayoutCompile) > 0);
-}
-
-#[test]
 fn rank22_adjoint_reentry_keeps_matrix_orientation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = ZNFusionRule::new(2).unwrap();
@@ -475,7 +427,7 @@ fn rank22_adjoint_reentry_keeps_matrix_orientation() {
         std::sync::Arc::new(rule),
     )
     .unwrap();
-    let resolution = crate::plan_compose::<crate::HostEagerExecutor, _>(
+    let resolution = crate::plan_compose::<_>(
         &dst,
         crate::FusionOperand::adjoint(&space),
         crate::FusionOperand::adjoint(&space),
@@ -696,7 +648,7 @@ fn run_core_plan(
     let mut output = init.to_vec();
     let mut dense = DenseTreeTransformOperations::default();
     let mut dense_workspace = TensorContractWorkspace::default();
-    let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
+    let mut fusion_workspace = FusionBlockContractWorkspace::default();
     plan.execute_raw(
         engine,
         &mut crate::StridedHostKernelAdapter::default(),
@@ -839,56 +791,5 @@ fn checked_core_plan_uses_coupled_regions_bitwise_equal_to_general_builder() {
             oracle.iter().any(|v| v.abs() > 0.5),
             "{name}: nonzero oracle"
         );
-    }
-
-    // Negative: an operand packed block by block is not a coupled-sector
-    // tiling, so the region route declines and the general builder re-bases.
-    let (lhs, rhs) = (&cases[0].1, &cases[0].2);
-    let packed = Arc::new(
-        crate::tests::packed_fixture_structure(
-            4,
-            (0..lhs.structure().block_count()).map(|index| {
-                let block = lhs.structure().block(index).unwrap();
-                (block.key().clone(), block.shape().to_vec())
-            }),
-        )
-        .unwrap(),
-    );
-    let mut packed_data = vec![0.0; lhs.required_len().unwrap()];
-    let canonical_data = values(lhs, 0.0);
-    for index in 0..packed.block_count() {
-        let source = block_matrix(lhs.structure(), index, &canonical_data);
-        let block = packed.block(index).unwrap();
-        for (mut linear, value) in source.into_iter().enumerate() {
-            let mut at = block.offset();
-            for (&extent, &stride) in block.shape().iter().zip(block.strides()) {
-                at += (linear % extent) * stride;
-                linear /= extent;
-            }
-            packed_data[at] = value;
-        }
-    }
-    let rhs_data = values(rhs, 0.5);
-    let init = values(&dst, 2.0);
-    let layout_rec = probe::record();
-    let fallback = checked_core(dst.structure(), &packed, rhs.structure());
-    assert!(layout_rec.get(Event::FusionLayoutCompile) > 0);
-    let got = run_core_plan(
-        &fallback,
-        dst.structure(),
-        &init,
-        (&packed, packed_data.as_slice()),
-        (rhs.structure(), rhs_data.as_slice()),
-        1.0,
-        0.0,
-    );
-    let oracle = core_oracle(
-        &dst,
-        (&packed, packed_data.as_slice()),
-        (rhs.structure(), rhs_data.as_slice()),
-        2,
-    );
-    for (got, want) in got.iter().zip(&oracle) {
-        assert!((got - want).abs() <= 1e-12 * (1.0 + want.abs()));
     }
 }

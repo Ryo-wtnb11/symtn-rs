@@ -315,7 +315,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     Context::<f64>::default()
-        .plan_contract::<crate::DirectCoreExecutor, _>(
+        .plan_contract::<_>(
             engine,
             &case.dst(),
             FusionOperand::direct(case.lhs.space()),

@@ -14,21 +14,18 @@ pub use symtn_dense::MatrixOp;
 use symtn_dense::{strided_batch_runs, strided_batch_runs_into, DenseGemmBatchJob, Engine};
 
 use crate::host_scalar_kernels::validate_raw_strided_bounds;
-use crate::host_scratch::HostScratchBuffer;
 use crate::placement::ReportsPlacement;
 use crate::strided::{offset_to_isize, strides_to_isize};
 use crate::structure_identity::validate_structure_identity;
 use crate::transform_structure::validate_destination_layouts_injective;
-use crate::{
-    DenseBlockScalar, HostKernelAdapter, OperationError, RecouplingCoefficientAction,
-    TransformScale,
-};
+use crate::{DenseBlockScalar, HostKernelAdapter, OperationError, RecouplingCoefficientAction};
 
-/// Storage-handle replay accepts only operands whose coupled-sector matrices
-/// sit directly in storage. Host replay also supports group-local pack/scatter,
-/// but storage/device kernels do not expose that capability.
+/// Every replay reads and writes each group's coupled-sector matrix in place.
+/// Why no pack/scatter for other group layouts: every public tensor has the
+/// canonical coupled-sector tiling, whose matrices are in place by
+/// construction, so such a group never reaches a plan.
 const NON_COUPLED_OPERAND_MESSAGE: &str =
-    "storage-handle core fusion-block replay requires the coupled sector matrix layout";
+    "core fusion-block replay requires every group matrix in place in storage";
 
 mod execute;
 mod gemm;
@@ -45,94 +42,8 @@ pub use gemm::*;
 pub use plan::*;
 use validate::*;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FusionGroupExecutionClass(u8);
-
-impl FusionGroupExecutionClass {
-    const PACK_LHS: u8 = 1;
-    const PACK_RHS: u8 = 2;
-    const SCATTER_DST: u8 = 4;
-
-    fn compile<C>(group: &FusionBlockContractGroupPlan<C>) -> Self {
-        let mut bits = 0;
-        if group.lhs.direct_offset.is_none() {
-            bits |= Self::PACK_LHS;
-        }
-        if group.rhs.direct_offset.is_none() {
-            bits |= Self::PACK_RHS;
-        }
-        if group.dst.direct_offset.is_none() {
-            bits |= Self::SCATTER_DST;
-        }
-        Self(bits)
-    }
-
-    #[inline]
-    fn is_direct(self) -> bool {
-        self.0 == 0
-    }
-
-    #[inline]
-    fn packs_lhs(self) -> bool {
-        self.0 & Self::PACK_LHS != 0
-    }
-
-    #[inline]
-    fn packs_rhs(self) -> bool {
-        self.0 & Self::PACK_RHS != 0
-    }
-
-    #[inline]
-    fn scatters_dst(self) -> bool {
-        self.0 & Self::SCATTER_DST != 0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct FusionGroupScratchLayout {
-    lhs_len: usize,
-    rhs_offset: usize,
-    rhs_len: usize,
-    dst_offset: usize,
-    dst_len: usize,
-    total_len: usize,
-}
-
-#[derive(Clone, Debug)]
-struct FusionIrregularGroupExecution {
-    group_index: usize,
-    class: FusionGroupExecutionClass,
-    job: Rank2GemmBatchJob,
-    scratch: FusionGroupScratchLayout,
-}
-
-impl FusionIrregularGroupExecution {
-    /// The GEMM operands: the packed scratch regions of `scratch` for the
-    /// operands this group packs, else the caller's payloads.
-    fn operands<'d, D>(&self, scratch: &'d [D], lhs: &'d [D], rhs: &'d [D]) -> (&'d [D], &'d [D]) {
-        let lhs = if self.class.packs_lhs() {
-            &scratch[..self.scratch.lhs_len]
-        } else {
-            lhs
-        };
-        let rhs = if self.class.packs_rhs() {
-            let start = self.scratch.rhs_offset;
-            &scratch[start..start + self.scratch.rhs_len]
-        } else {
-            rhs
-        };
-        (lhs, rhs)
-    }
-}
-
-type CompiledGroupExecution = (
-    Vec<Rank2GemmBatchJob>,
-    Vec<FusionIrregularGroupExecution>,
-    usize,
-);
-
-pub struct HostFusionBlockContractWorkspace<T> {
-    scratch: HostScratchBuffer<T>,
+#[derive(Default)]
+pub struct HostFusionBlockContractWorkspace {
     // Zero-stride source layout of the `Axpby(0)` inactive-block assignment,
     // kept here so a warmed replay allocates nothing.
     zero_strides: Vec<isize>,
@@ -141,31 +52,16 @@ pub struct HostFusionBlockContractWorkspace<T> {
     fresh_reported: Vec<bool>,
 }
 
-pub type FusionBlockContractWorkspace<T> = HostFusionBlockContractWorkspace<T>;
+pub type FusionBlockContractWorkspace = HostFusionBlockContractWorkspace;
 
-impl<T> Default for HostFusionBlockContractWorkspace<T> {
-    fn default() -> Self {
-        Self {
-            scratch: HostScratchBuffer::default(),
-            zero_strides: Vec::new(),
-            fresh_reported: Vec::new(),
-        }
-    }
-}
-
-impl<T> HostFusionBlockContractWorkspace<T> {
-    /// Bytes of every buffer's capacity: the irregular groups' packed payload
-    /// scratch and the zero-stride and fresh-report bookkeeping.
+impl HostFusionBlockContractWorkspace {
+    /// Bytes of every buffer's capacity: the zero-stride and fresh-report
+    /// bookkeeping.
     #[doc(hidden)]
     pub fn retained_bytes(&self) -> usize {
-        self.scratch
+        self.zero_strides
             .capacity()
-            .saturating_mul(std::mem::size_of::<T>())
-            .saturating_add(
-                self.zero_strides
-                    .capacity()
-                    .saturating_mul(std::mem::size_of::<isize>()),
-            )
+            .saturating_mul(std::mem::size_of::<isize>())
             .saturating_add(
                 self.fresh_reported
                     .capacity()
@@ -174,14 +70,14 @@ impl<T> HostFusionBlockContractWorkspace<T> {
     }
 }
 
-impl<T> ReportsPlacement for HostFusionBlockContractWorkspace<T> {
+impl ReportsPlacement for HostFusionBlockContractWorkspace {
     #[inline]
     fn placement(&self) -> Placement {
         Placement::Host
     }
 }
 
-/// How a replay initialises the destination blocks that no GEMM or scatter
+/// How a replay initialises the destination blocks that no GEMM
 /// job writes (the inactive blocks); the active blocks always receive the
 /// corresponding `beta`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -195,13 +91,13 @@ pub enum ContractDestinationInit<D> {
     /// (an `alloc_zeroed` payload or a zero-filled member output; an owned
     /// eager output uses `execute_owned` instead). Inactive blocks are not
     /// touched at all: plan validation proves each destination block is
-    /// owned by exactly one GEMM job, one scatter group, or the inactive
+    /// owned by exactly one GEMM job or the inactive
     /// list, so `Axpby(0)` would only rewrite zeros that are already there.
     Zeroed,
 }
 
 impl<D: Zero> ContractDestinationInit<D> {
-    /// The `beta` handed to the GEMM and scatter jobs of the active blocks.
+    /// The `beta` handed to the GEMM jobs of the active blocks.
     #[inline]
     pub fn active_beta(self) -> D {
         match self {
@@ -217,7 +113,6 @@ pub struct FusionBlockContractPlan<C = f64> {
     lhs_structure: Arc<BlockStructure>,
     rhs_structure: Arc<BlockStructure>,
     inactive_dst_scale_blocks: Vec<FusionScaleBlockLayout>,
-    groups: Vec<FusionBlockContractGroupPlan<C>>,
     direct_batch: Vec<Rank2GemmBatchJob>,
     direct_batch_alpha: Vec<C>,
     // Plan-time run partition of `direct_batch` (see issue #103): the backend
@@ -235,8 +130,6 @@ pub struct FusionBlockContractPlan<C = f64> {
     direct_calls: Vec<owned::DirectCall>,
     // Which call or zero fill initializes each element of an owned output.
     fresh: owned::FreshLayout,
-    irregular: Vec<FusionIrregularGroupExecution>,
-    max_irregular_scratch_len: usize,
     lhs_op: MatrixOp,
     rhs_op: MatrixOp,
 }

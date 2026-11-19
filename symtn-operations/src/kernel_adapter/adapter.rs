@@ -299,9 +299,9 @@ pub(crate) mod sealed {
         ///
         /// Why a hook rather than a branch in `transform_strided_baked`: a
         /// threaded structural scale shares its coefficient across workers,
-        /// which needs `C: Sync`, and that public method also serves fusion
-        /// pack and scatter, whose coefficient type carries no such bound and
-        /// whose layouts carry no plan.
+        /// which needs `C: Sync`, and that public method also serves unplanned
+        /// callers, whose coefficient type carries no such bound and whose
+        /// layouts carry no plan.
         #[allow(clippy::too_many_arguments)]
         fn planned_transform<T, C>(
             &mut self,
@@ -442,7 +442,7 @@ pub(crate) mod sealed {
 /// Backend-neutral low-level kernel adapter for host-slice replay.
 ///
 /// Replay drivers (tree-transform pack/recoupling/scatter, fusion-block
-/// pack/scatter/scale) call these primitives instead of concrete kernel
+/// scale) call these primitives instead of concrete kernel
 /// functions, so the low-level execution backend (scalar loops, strided-rs,
 /// BLAS, future C++ kernels) is replaceable behind one boundary.
 ///

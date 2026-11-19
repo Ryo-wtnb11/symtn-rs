@@ -10,7 +10,7 @@ where
         engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
-        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
+        fusion_workspace: &mut FusionBlockContractWorkspace,
         dst_structure: &Arc<BlockStructure>,
         dst_data: &mut [D],
         lhs_structure: &Arc<BlockStructure>,
@@ -43,7 +43,7 @@ where
 
     /// [`Self::execute_raw`] with `beta = 0` for a destination the caller
     /// proves is all-zero ([`ContractDestinationInit::Zeroed`]): the active
-    /// blocks are overwritten by their GEMM/scatter job and the inactive
+    /// blocks are overwritten by their GEMM job and the inactive
     /// blocks are left untouched.
     #[allow(clippy::too_many_arguments)]
     pub fn execute_raw_zeroed<A, G, D>(
@@ -51,7 +51,7 @@ where
         engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
-        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
+        fusion_workspace: &mut FusionBlockContractWorkspace,
         dst_structure: &Arc<BlockStructure>,
         dst_data: &mut [D],
         lhs_structure: &Arc<BlockStructure>,
@@ -87,7 +87,7 @@ where
         engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
-        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
+        fusion_workspace: &mut FusionBlockContractWorkspace,
         dst_structure: &Arc<BlockStructure>,
         dst_data: &mut [D],
         lhs_structure: &Arc<BlockStructure>,
@@ -112,8 +112,6 @@ where
             rhs_data.len(),
         )?;
 
-        self.prepare_irregular_scratch(fusion_workspace);
-
         // A call that leaves every inactive block as it is opens no section:
         // it only admits the engine, with the entry's own refusals, and takes
         // no token.
@@ -135,20 +133,6 @@ where
             self.execute_direct_batches(engine, gemm, dst_data, lhs_data, rhs_data, alpha, beta)?;
         }
 
-        for execution in &self.irregular {
-            self.execute_irregular_group(
-                engine,
-                kernels,
-                gemm,
-                fusion_workspace,
-                execution,
-                dst_data,
-                lhs_data,
-                rhs_data,
-                alpha,
-                beta,
-            )?;
-        }
         Ok(())
     }
 
@@ -190,114 +174,6 @@ where
                 job_alpha,
                 beta,
             )?;
-        }
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn execute_irregular_group<A, G, D>(
-        &self,
-        engine: &mut dyn Engine,
-        kernels: &mut A,
-        gemm: &mut G,
-        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
-        execution: &FusionIrregularGroupExecution,
-        dst_data: &mut [D],
-        lhs_data: &[D],
-        rhs_data: &[D],
-        alpha: D,
-        beta: D,
-    ) -> Result<(), OperationError>
-    where
-        A: HostKernelAdapter<D>,
-        G: Rank2Gemm<D>,
-        D: DenseBlockScalar + RecouplingCoefficientAction<C>,
-    {
-        let scratch = &mut fusion_workspace.scratch.as_mut_slice()[..execution.scratch.total_len];
-        // `execute_batch` never reads the packed operands at a zero `alpha`.
-        if !alpha.is_zero() {
-            self.pack_operands(engine, kernels, scratch, execution, lhs_data, rhs_data)?;
-        }
-
-        if execution.class.scatters_dst() {
-            let group = &self.groups[execution.group_index];
-            let (inputs, destination) = scratch.split_at_mut(execution.scratch.dst_offset);
-            let destination = &mut destination[..execution.scratch.dst_len];
-            let (lhs, rhs) = execution.operands(inputs, lhs_data, rhs_data);
-            self.execute_batch(
-                engine,
-                gemm,
-                destination,
-                lhs,
-                rhs,
-                std::slice::from_ref(&execution.job),
-                &[1],
-                alpha,
-                D::zero(),
-            )?;
-            crate::host_pool::with_exec(engine, |exec| {
-                scatter_group(exec, kernels, &group.dst, dst_data, destination, beta)
-            })?;
-        } else {
-            let (lhs, rhs) = execution.operands(scratch, lhs_data, rhs_data);
-            self.execute_batch(
-                engine,
-                gemm,
-                dst_data,
-                lhs,
-                rhs,
-                std::slice::from_ref(&execution.job),
-                &[1],
-                alpha,
-                beta,
-            )?;
-        }
-        Ok(())
-    }
-
-    /// Sizes the workspace scratch for the largest irregular group.
-    pub(super) fn prepare_irregular_scratch<D: Clone + Zero>(
-        &self,
-        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
-    ) {
-        fusion_workspace
-            .scratch
-            .resize_filled(self.max_irregular_scratch_len, D::zero());
-    }
-
-    /// Packs the operands `execution` reads from group-local scratch.
-    pub(super) fn pack_operands<A, D>(
-        &self,
-        engine: &mut dyn Engine,
-        kernels: &mut A,
-        scratch: &mut [D],
-        execution: &FusionIrregularGroupExecution,
-        lhs_data: &[D],
-        rhs_data: &[D],
-    ) -> Result<(), OperationError>
-    where
-        A: HostKernelAdapter<D>,
-        D: DenseBlockScalar + RecouplingCoefficientAction<C>,
-    {
-        let group = &self.groups[execution.group_index];
-        if execution.class.packs_lhs() {
-            let lhs = &mut scratch[..execution.scratch.lhs_len];
-            if group.lhs.needs_clear {
-                lhs.fill(D::zero());
-            }
-            crate::host_pool::with_exec(engine, |exec| {
-                pack_group(exec, kernels, &group.lhs, lhs_data, lhs)
-            })?;
-        }
-        if execution.class.packs_rhs() {
-            let start = execution.scratch.rhs_offset;
-            let rhs = &mut scratch[start..start + execution.scratch.rhs_len];
-            if group.rhs.needs_clear {
-                rhs.fill(D::zero());
-            }
-            crate::host_pool::with_exec(engine, |exec| {
-                pack_group(exec, kernels, &group.rhs, rhs_data, rhs)
-            })?;
         }
         Ok(())
     }
@@ -383,11 +259,9 @@ where
     }
 
     /// The preconditions of an unscaled identity-orientation direct replay:
-    /// every group direct, both operands untransformed, every job coefficient
-    /// one.
+    /// both operands untransformed and every job coefficient one.
     #[doc(hidden)]
     pub fn require_identity_direct_replay(&self) -> Result<(), OperationError> {
-        self.require_fully_direct_storage()?;
         self.require_identity_storage_ops()?;
         self.require_unit_direct_batch_alpha()
     }
@@ -398,7 +272,6 @@ where
     where
         C: std::ops::Neg<Output = C>,
     {
-        self.require_fully_direct_storage()?;
         self.require_identity_storage_ops()?;
         if self.direct_batch.len() == self.direct_batch_alpha.len()
             && self
@@ -415,16 +288,6 @@ where
 
     pub(crate) fn direct_batch_alphas(&self) -> &[C] {
         &self.direct_batch_alpha
-    }
-
-    fn require_fully_direct_storage(&self) -> Result<(), OperationError> {
-        if self.is_fully_direct() {
-            Ok(())
-        } else {
-            Err(OperationError::UnsupportedTensorContractScope {
-                message: NON_COUPLED_OPERAND_MESSAGE,
-            })
-        }
     }
 
     fn require_identity_storage_ops(&self) -> Result<(), OperationError> {
@@ -461,10 +324,9 @@ where
     ///
     /// This is the device-side replay seam: the bounds require only
     /// [`TensorStorage`], so no host-slice contract leaks into the path. It
-    /// supports exactly the fully-direct coupled-layout case with one scalar
-    /// per GEMM job; every other case must use the host replay paths until the
-    /// corresponding device kernels (pack/scatter, scale, tree transforms)
-    /// exist behind their own seams. Destination blocks with no contributing
+    /// supports one scalar per GEMM job; every other case must use the host
+    /// replay paths until the corresponding device kernels (scale, tree
+    /// transforms) exist behind their own seams. Destination blocks with no contributing
     /// GEMM (the ones the host path scales by `beta = 0`) are left untouched,
     /// which is exactly the overwrite semantics on a zeroed buffer. The active
     /// blocks are still fully overwritten.
@@ -482,7 +344,6 @@ where
         DLhs: TensorStorage<D>,
         DRhs: TensorStorage<D>,
     {
-        self.require_fully_direct_storage()?;
         if self.direct_batch.len() != self.direct_batch_alpha.len() {
             return Err(OperationError::UnsupportedTensorContractScope {
                 message: "storage-direct plan has misaligned GEMM coefficients",
@@ -568,7 +429,6 @@ where
         DLhs: TensorStorage<D>,
         DRhs: TensorStorage<D>,
     {
-        self.require_fully_direct_storage()?;
         if self.direct_batch.len() != self.direct_batch_alpha.len() {
             return Err(OperationError::UnsupportedTensorContractScope {
                 message: "storage-direct plan has misaligned GEMM coefficients",
@@ -626,73 +486,6 @@ where
         validate_storage_len(lhs_structure, lhs_len)?;
         validate_storage_len(rhs_structure, rhs_len)
     }
-}
-
-pub(super) fn pack_group<A, T, C>(
-    mut exec: crate::host_pool::Exec<'_>,
-    kernels: &mut A,
-    group: &FusionBlockMatrixGroup<C>,
-    data: &[T],
-    packed: &mut [T],
-) -> Result<(), OperationError>
-where
-    A: HostKernelAdapter<T>,
-    T: Copy + One + PartialEq + RecouplingCoefficientAction<C>,
-    C: Copy,
-{
-    for layout in &group.subblocks {
-        kernels.transform_strided_baked(
-            exec.reborrow(),
-            &mut Vec::new(),
-            packed,
-            data,
-            &layout.block.shape,
-            &layout.matrix_strides,
-            &layout.block.strides,
-            layout.matrix_offset,
-            layout.block.offset,
-            false,
-            TransformScale::Structural(layout.coefficient),
-            None,
-            None,
-            None,
-        )?;
-    }
-    Ok(())
-}
-
-pub(super) fn scatter_group<A, T, C>(
-    mut exec: crate::host_pool::Exec<'_>,
-    kernels: &mut A,
-    group: &FusionBlockMatrixGroup<C>,
-    data: &mut [T],
-    packed: &[T],
-    beta: T,
-) -> Result<(), OperationError>
-where
-    A: HostKernelAdapter<T>,
-    T: Copy + One + PartialEq + RecouplingCoefficientAction<C>,
-    C: Copy,
-{
-    for layout in &group.subblocks {
-        kernels.transform_strided_baked(
-            exec.reborrow(),
-            &mut Vec::new(),
-            data,
-            packed,
-            &layout.block.shape,
-            &layout.block.strides,
-            &layout.matrix_strides,
-            layout.block.offset,
-            layout.matrix_offset,
-            false,
-            TransformScale::Structural(layout.coefficient),
-            Some(beta),
-            None,
-            None,
-        )?;
-    }
-    Ok(())
 }
 
 /// Checked mutable `rows x cols` column-major matrix slice at `base`; the

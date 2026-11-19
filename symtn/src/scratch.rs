@@ -5,8 +5,8 @@
 //! `contract_into`, `compose`, the planar contractions, and every step of a
 //! `symtn-network` network) takes its execution scratch from the engine it
 //! runs on and returns it afterwards: the transformed operands, the
-//! permuted-output (`copyC`) temporary and core destination, the irregular
-//! core payload, the tree-transform workspaces, the planning scratch and the
+//! permuted-output (`copyC`) temporary and core destination, the
+//! tree-transform workspaces, the planning scratch and the
 //! dense staging, for every payload type the engine has run. A repeated
 //! contraction on a warm engine therefore allocates no operand or core
 //! scratch, only its owned output.

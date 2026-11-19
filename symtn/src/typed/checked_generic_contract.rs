@@ -633,12 +633,15 @@ where
     // Why the lease waits for a core miss: the canonical core resolves from
     // the operands alone, and the device kernel must not hold a context
     // lease; the Host kernel takes the one lease when planning took none.
-    let (lease, resolution) = match staged.try_core::<S::Caps>()? {
+    let (lease, resolution) = match staged.try_core()? {
         symtn_tensors::CoreRoute::Hit(core) => (None, core),
         symtn_tensors::CoreRoute::Miss(miss) => {
             let mut lease = crate::runtime::ContextLease::checkout(engine);
-            let resolution = D::lane(lease.context())?
-                .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?;
+            let resolution = D::lane(lease.context())?.plan_staged_contract_beyond_core::<R>(
+                engine,
+                &mut staged,
+                miss,
+            )?;
             (Some(lease), resolution)
         }
     };
@@ -726,10 +729,10 @@ where
     )?;
     staged.require_destination(destination.logical_space().space())?;
     let destination = destination_storage_mut(destination)?;
-    let resolution = match staged.try_core::<S::Caps>()? {
+    let resolution = match staged.try_core()? {
         symtn_tensors::CoreRoute::Hit(core) => core,
         symtn_tensors::CoreRoute::Miss(miss) => D::lane(lease.context())?
-            .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?,
+            .plan_staged_contract_beyond_core::<R>(engine, &mut staged, miss)?,
     };
     S::contract_into(
         engine,

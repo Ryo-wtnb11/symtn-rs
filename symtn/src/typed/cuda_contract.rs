@@ -188,8 +188,6 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
     D: CudaPayload,
 {
-    type Caps = symtn_tensors::DirectCoreExecutor;
-
     fn contract_owned<C: symtn_tensors::DenseBlockScalar>(
         engine: &mut dyn Engine,
         _: ExecToken,

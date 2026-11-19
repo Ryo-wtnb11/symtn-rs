@@ -3,8 +3,7 @@
 //! The plan derives a fresh layout from its GEMM destinations: physically
 //! sorted parts tiling `[0, dst_len)`, each owned either by one GEMM call
 //! (a maximal run of adjacent job outputs of that call) or by a zero fill
-//! (inactive blocks, scatter-destination blocks and padding: the complement
-//! of the job outputs). The layout never rejects a plan; padded plans keep
+//! (inactive blocks and padding: the complement of the job outputs). The layout never rejects a plan; padded plans keep
 //! their initialized replay and get `+0.0` padding here.
 //!
 //! Publication: [`FusionBlockContractPlan::execute_owned`] hands each call
@@ -88,18 +87,11 @@ struct FreshPart {
 
 #[derive(Clone, Debug)]
 struct FreshCall {
-    source: CallSource,
+    /// An index into `direct_calls`.
+    source: usize,
     segments: Range<usize>,
     /// Total elements of the call's segments.
     len: usize,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum CallSource {
-    /// An index into `direct_calls`.
-    Direct(usize),
-    /// An index into `irregular` (a direct destination with packed operands).
-    Irregular(usize),
 }
 
 impl FreshLayout {
@@ -107,27 +99,11 @@ impl FreshLayout {
         len: usize,
         direct_batch: &[Rank2GemmBatchJob],
         direct_calls: &[DirectCall],
-        irregular: &[FusionIrregularGroupExecution],
     ) -> Result<Self, OperationError> {
-        let sources = direct_calls
-            .iter()
-            .enumerate()
-            .map(|(index, call)| (CallSource::Direct(index), &direct_batch[call.jobs.clone()]))
-            .chain(
-                irregular
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, execution)| !execution.class.scatters_dst())
-                    .map(|(index, execution)| {
-                        (
-                            CallSource::Irregular(index),
-                            std::slice::from_ref(&execution.job),
-                        )
-                    }),
-            );
-        let mut calls = Vec::with_capacity(direct_calls.len() + irregular.len());
-        let mut outputs = Vec::with_capacity(direct_batch.len() + irregular.len());
-        for (source, jobs) in sources {
+        let mut calls = Vec::with_capacity(direct_calls.len());
+        let mut outputs = Vec::with_capacity(direct_batch.len());
+        for (source, direct_call) in direct_calls.iter().enumerate() {
+            let jobs = &direct_batch[direct_call.jobs.clone()];
             let call = calls.len();
             let mut call_len = 0usize;
             for job in jobs {
@@ -222,22 +198,20 @@ where
     /// `alpha * lhs * rhs` into a fresh owned payload of `dst_structure`,
     /// with no allocator-level zero fill of the whole output: each GEMM call
     /// receives only its own uninitialized job outputs, and symtn writes
-    /// `+0.0` to the rest (inactive blocks, padding, and the blocks scatter
-    /// groups then overwrite). The GEMM backend may still initialize its
-    /// outputs before the product (a one-job batch, the [`Rank2Gemm`]
-    /// default, and tcontract's Faer strategy do), and a scatter block is
-    /// written twice. The caller's engine is admitted before any write.
+    /// `+0.0` to the rest (inactive blocks and padding). The GEMM backend may
+    /// still initialize its outputs before the product (a one-job batch, the
+    /// [`Rank2Gemm`] default, and tcontract's Faer strategy do). The caller's
+    /// engine is admitted before any write.
     ///
     /// The returned payload exists only if every element was written; see
     /// the module documentation for the publication proof.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
-    pub fn execute_owned<A, G, D>(
+    pub fn execute_owned<G, D>(
         &self,
         engine: &mut dyn Engine,
-        kernels: &mut A,
         gemm: &mut G,
-        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
+        fusion_workspace: &mut FusionBlockContractWorkspace,
         dst_structure: &Arc<BlockStructure>,
         lhs_structure: &Arc<BlockStructure>,
         lhs_data: &[D],
@@ -246,7 +220,6 @@ where
         alpha: D,
     ) -> Result<Vec<D>, OperationError>
     where
-        A: HostKernelAdapter<D>,
         G: Rank2Gemm<D>,
         D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     {
@@ -272,11 +245,9 @@ where
         // must still be refused before anything is written, as initialized
         // replay refuses it in its inactive-block region.
         crate::host_pool::admit(engine)?;
-        self.prepare_irregular_scratch(fusion_workspace);
-        let mut data = initialize_owned(len, |spare| {
+        initialize_owned(len, |spare| {
             self.write_fresh(
                 engine,
-                kernels,
                 gemm,
                 fusion_workspace,
                 spare,
@@ -284,42 +255,23 @@ where
                 rhs_data,
                 alpha,
             )
-        })?;
-        for execution in &self.irregular {
-            if execution.class.scatters_dst() {
-                self.execute_irregular_group(
-                    engine,
-                    kernels,
-                    gemm,
-                    fusion_workspace,
-                    execution,
-                    &mut data,
-                    lhs_data,
-                    rhs_data,
-                    alpha,
-                    D::zero(),
-                )?;
-            }
-        }
-        Ok(data)
+        })
     }
 
     /// Initializes every element of `spare` (the `initialize_owned`
     /// obligation): zero parts here, GEMM parts by their calls' reports.
     #[allow(clippy::too_many_arguments)]
-    fn write_fresh<'a, A, G, D>(
+    fn write_fresh<'a, G, D>(
         &self,
         engine: &mut dyn Engine,
-        kernels: &mut A,
         gemm: &mut G,
-        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
+        fusion_workspace: &mut FusionBlockContractWorkspace,
         spare: &'a mut [MaybeUninit<D>],
         lhs_data: &[D],
         rhs_data: &[D],
         alpha: D,
     ) -> Result<(), OperationError>
     where
-        A: HostKernelAdapter<D>,
         G: Rank2Gemm<D>,
         D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     {
@@ -349,58 +301,28 @@ where
                 message: "owned contraction layout does not cover its output",
             });
         }
-        let FusionBlockContractWorkspace {
-            scratch,
-            fresh_reported,
-            ..
-        } = fusion_workspace;
+        let fresh_reported = &mut fusion_workspace.fresh_reported;
         for call in &self.fresh.calls {
             let segments = &mut segments[call.segments.clone()];
-            match call.source {
-                CallSource::Direct(index) => {
-                    let jobs = self.direct_calls[index].jobs.clone();
-                    let coefficient = self.direct_batch_alpha[jobs.start];
-                    let job_alpha = if coefficient == C::one() {
-                        alpha
-                    } else {
-                        alpha.scale_by_coefficient(coefficient)
-                    };
-                    self.fresh_call(
-                        engine,
-                        gemm,
-                        fresh_reported,
-                        segments,
-                        call.len,
-                        base,
-                        lhs_data,
-                        rhs_data,
-                        &self.direct_batch[jobs],
-                        job_alpha,
-                    )?;
-                }
-                CallSource::Irregular(index) => {
-                    let execution = &self.irregular[index];
-                    let scratch = &mut scratch.as_mut_slice()[..execution.scratch.total_len];
-                    if !alpha.is_zero() {
-                        self.pack_operands(
-                            engine, kernels, scratch, execution, lhs_data, rhs_data,
-                        )?;
-                    }
-                    let (lhs, rhs) = execution.operands(scratch, lhs_data, rhs_data);
-                    self.fresh_call(
-                        engine,
-                        gemm,
-                        fresh_reported,
-                        segments,
-                        call.len,
-                        base,
-                        lhs,
-                        rhs,
-                        std::slice::from_ref(&execution.job),
-                        alpha,
-                    )?;
-                }
-            }
+            let jobs = self.direct_calls[call.source].jobs.clone();
+            let coefficient = self.direct_batch_alpha[jobs.start];
+            let job_alpha = if coefficient == C::one() {
+                alpha
+            } else {
+                alpha.scale_by_coefficient(coefficient)
+            };
+            self.fresh_call(
+                engine,
+                gemm,
+                fresh_reported,
+                segments,
+                call.len,
+                base,
+                lhs_data,
+                rhs_data,
+                &self.direct_batch[jobs],
+                job_alpha,
+            )?;
         }
         Ok(())
     }

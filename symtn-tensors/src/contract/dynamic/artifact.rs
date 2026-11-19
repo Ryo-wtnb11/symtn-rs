@@ -119,10 +119,6 @@ impl<C: DenseBlockScalar> DynamicTreeExecutionArtifact<C> {
         &self.block_plan
     }
 
-    pub(crate) fn block_plan_is_fully_direct(&self) -> bool {
-        self.block_plan.is_fully_direct()
-    }
-
     /// The core plan's inactive destination blocks when the core GEMMs write
     /// the caller's destination directly (identity output); `None` when an
     /// output transform writes it.
@@ -491,9 +487,6 @@ where
 /// sector (TensorKit `blas_contract!` `mul!` over `A'`; QSpace
 /// `wbarray<T>::contract` folding `conj` into the `'C'` op). `None` when no
 /// side is such a source or the layouts differ; the caller then copies it.
-///
-/// Why not the irregular packed plan for other layouts: it would pack the
-/// parent per group, the same element traffic as the copy it replaces.
 fn storage_adjoint_core_plan<C: DenseBlockScalar>(
     dst: &DynamicFusionMapSpace,
     orientation: FusionContractOrientation,

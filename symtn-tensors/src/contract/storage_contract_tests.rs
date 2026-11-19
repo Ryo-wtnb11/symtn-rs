@@ -1724,15 +1724,10 @@ fn a_canonical_nonuniform_twist_leaves_the_device_core_route_for_dynamic_tree() 
         FusionOperand::direct(case.rhs.space()),
     );
     assert!(
-        crate::try_compile_storage_contract_core_route::<crate::DirectCoreExecutor, _>(
-            &dst,
-            lhs,
-            rhs,
-            case.axes()
-        )
-        .unwrap()
-        .hit()
-        .is_none()
+        crate::try_compile_storage_contract_core_route::<_>(&dst, lhs, rhs, case.axes())
+            .unwrap()
+            .hit()
+            .is_none()
     );
     let resolution = Context::<f64>::default()
         .compile_storage_contract_resolution(engine, &dst, lhs, rhs, case.axes())
@@ -2554,9 +2549,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let resolution = Context::<f64>::default()
-        .plan_contract::<crate::DirectCoreExecutor, R>(
-            engine, dst, lhs, rhs, lhs_axes, rhs_axes, output,
-        )
+        .plan_contract::<R>(engine, dst, lhs, rhs, lhs_axes, rhs_axes, output)
         .unwrap();
     if resolution.copy_c().is_some() {
         RouteKind::CopyC
@@ -3008,7 +3001,7 @@ fn small_output_takes_copy_c_without_copying_an_operand() {
         );
         let engine = &mut symtn_dense::CpuEngine::serial();
         let resolution = Context::<f64>::default()
-            .plan_contract::<crate::DirectCoreExecutor, _>(
+            .plan_contract::<_>(
                 engine,
                 &case.dst(),
                 FusionOperand::direct(case.lhs.space()),

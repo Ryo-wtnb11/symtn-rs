@@ -9,7 +9,7 @@ use symtn_core::{
 };
 use symtn_operations::ContractDestinationInit;
 use symtn_tensors::{
-    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, HostEagerExecutor,
+    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand,
     TensorContractFusionExecutionContext, TreeTransformRuleCacheKey,
 };
 
@@ -112,7 +112,7 @@ where
             .unwrap();
         let mut actual = expected.clone();
         let prepared = context
-            .plan_contract::<HostEagerExecutor, R>(
+            .plan_contract::<R>(
                 engine,
                 &dst_bound,
                 FusionOperand::direct(lhs_bound.space()),
