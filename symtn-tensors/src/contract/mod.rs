@@ -6,7 +6,8 @@ pub(crate) use checked_generic::{
 };
 mod context;
 pub(crate) use context::{
-    compile_prelowered_dynamic_tree, compile_stored_dynamic_tree, PlanTarget,
+    compile_prelowered_dynamic_tree, compile_stored_dynamic_tree, require_canonical_destination,
+    PlanTarget,
 };
 mod dynamic;
 #[cfg(feature = "cuda")]

@@ -79,6 +79,9 @@ where
 {
     validate_fusion_contract_rule(rule, dst, lhs, rhs)?;
     reject_fusion_contract_conjugation(axes)?;
+    super::super::require_canonical_destination::<symtn_core::MultiplicityFreeAdmissionMode, R>(
+        rule, dst,
+    )?;
     tensorcontract_fusion_block_specs_lowered(rule, dst, lhs, rhs, axes)
 }
 
