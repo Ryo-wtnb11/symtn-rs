@@ -942,21 +942,16 @@ where
     let space = input.space().space();
     if let Some(plan) = compact_factor_plan(input.space())? {
         let adjoint_spaces = if matches!(gauge, CompactSvdGauge::AdjointLeft) {
-            let adjoint = input.space().adjoint_view()?;
+            let adjoint_hom = symtn_tensors::FusionOperand::adjoint(space).logical_homspace();
             let bond = compact_bond_leg(&plan.source_regions);
             Some((
                 build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
+                    input.space(),
+                    adjoint_hom,
                     bond.clone(),
                     FactorSide::Left,
                 )?,
-                build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
-                    bond,
-                    FactorSide::Right,
-                )?,
+                build_bound_factor_space(input.space(), adjoint_hom, bond, FactorSide::Right)?,
             ))
         } else {
             None
@@ -991,20 +986,15 @@ where
             build_bound_factor_space(input.space(), space.homspace(), bond, FactorSide::Right)?,
         ),
         CompactSvdGauge::AdjointLeft => {
-            let adjoint = input.space().adjoint_view()?;
+            let adjoint_hom = symtn_tensors::FusionOperand::adjoint(space).logical_homspace();
             (
                 build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
+                    input.space(),
+                    adjoint_hom,
                     bond.clone(),
                     FactorSide::Left,
                 )?,
-                build_bound_factor_space(
-                    &adjoint,
-                    adjoint.space().homspace(),
-                    bond,
-                    FactorSide::Right,
-                )?,
+                build_bound_factor_space(input.space(), adjoint_hom, bond, FactorSide::Right)?,
             )
         }
     };

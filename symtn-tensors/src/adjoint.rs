@@ -93,11 +93,7 @@ where
     let adjoint_hom =
         FusionTreeHomSpace::new(homspace.domain().clone(), homspace.codomain().clone());
     let prepared = dispatch_prepare(primer, rule, &adjoint_hom)?;
-    let expected_source = homspace
-        .coupled_subblock_structure_from_leg_degeneracies(rule)
-        .map_err(OperationError::from_core_preserving_context)?;
-    validate_adjoint_lazy_source_keys(space.structure(), &expected_source)?;
-    validate_adjoint_source_structure_against(space.structure(), &expected_source)?;
+    debug_assert!(validate_adjoint_source_structure(rule, homspace, space.structure()).is_ok());
 
     DynamicFusionMapSpace::from_final_homspace_with_prepared(rule, adjoint_hom, prepared)
 }
@@ -179,6 +175,8 @@ fn validate_adjoint_data_extent(
     Ok(())
 }
 
+/// Whether `source` is the canonical layout of `homspace`: an invariant of
+/// every dynamic space, checked only in debug builds.
 fn validate_adjoint_source_structure<R>(
     rule: &R,
     homspace: &FusionTreeHomSpace,
@@ -242,28 +240,6 @@ fn validate_adjoint_source_structure_against(
     Ok(())
 }
 
-fn validate_adjoint_lazy_source_keys(
-    source: &BlockStructure,
-    expected: &BlockStructure,
-) -> Result<(), OperationError> {
-    // Why not let target construction discover missing source keys: the final
-    // HomSpace is now the sole target-layout authority, so it deliberately
-    // does not inspect source storage. The metadata path retains its public
-    // MissingBlockKey failure before running the stricter canonical preflight.
-    for index in 0..expected.block_count() {
-        let key = expected
-            .block(index)
-            .map_err(OperationError::from_core_preserving_context)?
-            .key();
-        if source.find_block_index_by_key(key).is_none() {
-            return Err(OperationError::MissingBlockKey {
-                key: Box::new(key.clone()),
-            });
-        }
-    }
-    Ok(())
-}
-
 /// Dynamic-rank adjoint (dagger): returns the adjoint space (codomain and
 /// domain swapped) together with freshly allocated coupled-layout data whose
 /// blocks are the conjugate transposes of the source blocks.
@@ -292,7 +268,9 @@ where
 {
     space.validate_rule(rule)?;
     validate_adjoint_data_extent(space.required_len(), data.len())?;
-    validate_adjoint_source_structure(rule, space.homspace(), space.structure())?;
+    debug_assert!(
+        validate_adjoint_source_structure(rule, space.homspace(), space.structure()).is_ok()
+    );
     // Uncached build: the eager adjoint (SVD/eigh consumers) is a separate,
     // out-of-scope path from the cached lazy `adjoint_space_dyn` (#118),
     // and routing it here keeps the replay-cache-key bound off matrix algebra.
@@ -706,24 +684,6 @@ mod cache_tests {
         DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
     }
 
-    /// The zero-copy adjoint view of a canonical rectangular U(1) source: an
-    /// admitted space whose strides are not the canonical layout of its own
-    /// hom space.
-    fn u1_view_tensor() -> TestTensor<OutputObservedValue> {
-        let rule = U1FusionRule;
-        let zero = SectorId::from(U1Irrep::new(0).unwrap());
-        let homspace = FusionTreeHomSpace::new(
-            FusionProductSpace::new([SectorLeg::new([(zero, 2)], false)]),
-            FusionProductSpace::new([SectorLeg::new([(zero, 3)], false)]),
-        );
-        let parent = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
-        let view = parent
-            .validate_rule(&rule)
-            .and_then(|()| parent.adjoint_view())
-            .unwrap();
-        TestTensor::from_vec_with_fusion_space(vec![OutputObservedValue(1.0); 6], view).unwrap()
-    }
-
     fn toy_generic_bound<const ID: u8>() -> BoundDynamicFusionMapSpace<ToyGenericRule<ID>> {
         let one = SectorId::new(1);
         let homspace = FusionTreeHomSpace::new(
@@ -935,46 +895,6 @@ mod cache_tests {
         assert_eq!(dynamic.nin(), 2);
         assert_eq!(dynamic.homspace(), &stepwise_homspace);
         assert_eq!(dynamic_data, expected_data);
-    }
-
-    #[test]
-    fn eager_adjoint_keeps_rule_mismatch_precedence_over_canonical_preflight() {
-        let su2_provider_rule = su2_rule();
-        // What: a wrong rule is rejected before canonical preflight inspects a
-        // noncanonical (adjoint-view) source.
-        let tensor = u1_view_tensor();
-
-        OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
-        let error = tensor.adjoint(&su2_provider_rule).unwrap_err();
-
-        assert!(matches!(
-            error,
-            OperationError::Core(CoreError::FusionRuleMismatch { .. })
-        ));
-        assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
-    }
-
-    #[test]
-    fn eager_adjoint_rejects_a_noncanonical_source_before_target_work() {
-        // What: a source whose strides differ from the canonical coupled
-        // layout of its hom space fails before the output is initialized.
-        let tensor = u1_view_tensor();
-        OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
-
-        let error = tensor.adjoint(&U1FusionRule).unwrap_err();
-
-        assert_eq!(error, OperationError::StructureMismatch { tensor: "src" });
-        assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
-    }
-
-    #[test]
-    fn lazy_adjoint_rejects_noncanonical_source() {
-        // What: metadata-only dagger construction rejects a noncanonical
-        // source layout.
-        let tensor = u1_view_tensor();
-
-        let error = adjoint_space_dyn(&U1FusionRule, tensor.dynamic_space()).unwrap_err();
-        assert_eq!(error, OperationError::StructureMismatch { tensor: "src" });
     }
 
     #[test]

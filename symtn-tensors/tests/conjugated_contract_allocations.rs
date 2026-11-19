@@ -1,5 +1,5 @@
-//! A warm contraction with a lazy-adjoint source reuses its space's adjoint
-//! structure instead of rebuilding it on every call.
+//! A warm contraction with a lazy-adjoint source reads its parent's storage
+//! in place instead of rebuilding an adjoint layout on every call.
 
 use crate::su2::su2_rule;
 use std::sync::Arc;
@@ -18,13 +18,12 @@ use symtn_tensors::{
 use crate::counting_alloc;
 
 /// Allocation calls and bytes of one warm lazy-adjoint-source contraction
-/// `A† · B` over `A, B: V ← V`, plus the retained bytes of the memoized
-/// adjoint structure.
+/// `A† · B` over `A, B: V ← V`.
 fn warm_conjugated_contract<R>(
     engine: &mut dyn Engine,
     rule: R,
     legs: &[(SectorId, usize)],
-) -> (usize, usize, usize)
+) -> (usize, usize)
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + CheckedFusionAlgebra
@@ -45,7 +44,7 @@ where
     };
     let (lhs, rhs) = (space(), space());
     let dst = BoundDynamicFusionMapSpace::contracted_multiplicity_free_ordered(
-        &space().adjoint_view().unwrap(),
+        &symtn_tensors::adjoint_bound_space_dyn(&space()).unwrap(),
         &rhs,
         &[1],
         &[0],
@@ -78,13 +77,7 @@ where
     counting_alloc::start();
     call();
     let allocs = counting_alloc::stop();
-    let retained = lhs
-        .adjoint_view()
-        .unwrap()
-        .space()
-        .structure()
-        .charged_retained_bytes();
-    (allocs.calls as usize, allocs.bytes as usize, retained)
+    (allocs.calls as usize, allocs.bytes as usize)
 }
 
 fn u1(deg: usize) -> Vec<(SectorId, usize)> {
@@ -114,8 +107,7 @@ fn fz2_u1(deg: usize) -> Vec<(SectorId, usize)> {
 }
 
 /// Purpose: a warm lazy-adjoint-source contraction rebuilds no adjoint
-/// structure: its calls, bytes and the adjoint memo's retained bytes are the
-/// same at degeneracy 2 and 16.
+/// layout: its calls and bytes are the same at degeneracy 2 and 16.
 #[test]
 fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -146,12 +138,8 @@ fn warm_conjugated_contract_allocations_do_not_grow_with_degeneracy() {
     };
     let (small, large) = (rows(2), rows(16));
     // What: the core reads the owned space's lazy adjoint in place, so
-    // nothing the warm call allocates or the memo retains depends on the
-    // degeneracy.
+    // nothing the warm call allocates depends on the degeneracy.
     for ((name, small), (_, large)) in small.into_iter().zip(large) {
-        assert_eq!(
-            small, large,
-            "{name}: (calls, bytes, memo bytes) d2 against d16"
-        );
+        assert_eq!(small, large, "{name}: (calls, bytes) d2 against d16");
     }
 }

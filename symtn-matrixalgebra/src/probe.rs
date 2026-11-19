@@ -272,13 +272,6 @@ impl Recording {
         })
     }
 
-    pub(crate) fn eigh_owned_vectors(&self) -> Vec<usize> {
-        self.observed(|o| match o {
-            Observation::EighOwnedVector(pointer) => Some(*pointer),
-            _ => None,
-        })
-    }
-
     /// The pair pointers of the last checked Hermitian publication.
     pub(crate) fn checked_eigh_pairs(&self) -> Vec<usize> {
         self.observed(|o| match o {
@@ -292,13 +285,6 @@ impl Recording {
     pub(crate) fn checked_svd_stages(&self) -> Vec<(usize, usize)> {
         self.observed(|o| match o {
             Observation::CheckedSvdStage(u, vt) => Some((*u, *vt)),
-            _ => None,
-        })
-    }
-
-    pub(crate) fn mf_svd_fallbacks(&self) -> Vec<(usize, usize)> {
-        self.observed(|o| match o {
-            Observation::MfSvdFallback(u, vt) => Some((*u, *vt)),
             _ => None,
         })
     }

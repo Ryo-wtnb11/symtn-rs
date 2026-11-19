@@ -170,10 +170,7 @@ fn oriented_storage_contract_and_compose_use_parent_rectangular_views() {
             matrix_space(m, k)
         };
         let lhs_logical_typed = if lhs_adjoint {
-            lhs_parent
-                .validate_rule(&rule)
-                .and_then(|()| lhs_parent.adjoint_view())
-                .unwrap()
+            crate::adjoint::adjoint_space_dyn(&rule, &lhs_parent).unwrap()
         } else {
             lhs_parent.clone()
         };
@@ -183,10 +180,7 @@ fn oriented_storage_contract_and_compose_use_parent_rectangular_views() {
             matrix_space(k, n)
         };
         let rhs_logical_typed = if rhs_adjoint {
-            rhs_parent
-                .validate_rule(&rule)
-                .and_then(|()| rhs_parent.adjoint_view())
-                .unwrap()
+            crate::adjoint::adjoint_space_dyn(&rule, &rhs_parent).unwrap()
         } else {
             rhs_parent.clone()
         };
@@ -361,12 +355,26 @@ fn oriented_fermionic_storage_keeps_contract_and_compose_signs_distinct() {
 
     for (lhs_adjoint, rhs_adjoint) in [(false, false), (true, false), (false, true), (true, true)] {
         let lhs_parent = if lhs_adjoint {
-            lhs_logical_typed.adjoint_view().unwrap()
+            DynamicFusionMapSpace::from_final_homspace(
+                &rule,
+                FusionTreeHomSpace::new(
+                    lhs_logical_typed.homspace().domain().clone(),
+                    lhs_logical_typed.homspace().codomain().clone(),
+                ),
+            )
+            .unwrap()
         } else {
             lhs_logical_typed.clone()
         };
         let rhs_parent = if rhs_adjoint {
-            rhs_logical_typed.adjoint_view().unwrap()
+            DynamicFusionMapSpace::from_final_homspace(
+                &rule,
+                FusionTreeHomSpace::new(
+                    rhs_logical_typed.homspace().domain().clone(),
+                    rhs_logical_typed.homspace().codomain().clone(),
+                ),
+            )
+            .unwrap()
         } else {
             rhs_logical_typed.clone()
         };

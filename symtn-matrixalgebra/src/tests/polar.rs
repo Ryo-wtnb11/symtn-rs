@@ -262,81 +262,6 @@ fn polar_second_sector_failure_leaves_the_source_unchanged() {
     }
 }
 
-#[test]
-fn polar_valid_direct_and_fallback_layouts_agree() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: valid fallback matricizations preserve the direct polar factors in both directions.
-    let rule = ZNFusionRule::new(2).unwrap();
-    for (operation, source_rows, source_cols) in [("left_polar", 2, 3), ("right_polar", 3, 2)] {
-        let source = rectangular_svd_tensor(source_rows, source_cols);
-        let transposed = transposed_rectangular_tensor(&source, source_rows, source_cols);
-        let source_bound = bound_tensor(Arc::new(rule.clone()), &source);
-        let direct_bound = bound_tensor(Arc::new(rule.clone()), &transposed);
-        let fallback_space = source_bound.space().adjoint_view().unwrap();
-        let fallback_input =
-            BoundDynamicTensorRef::try_new(&fallback_space, source_bound.data()).unwrap();
-        assert!(
-            crate::factorize::compact_factor_plan_for_test(direct_bound.space())
-                .unwrap()
-                .is_some()
-        );
-        assert!(
-            crate::factorize::compact_factor_plan_for_test(&fallback_space)
-                .unwrap()
-                .is_none()
-        );
-        let mut direct_dense = symtn_dense::DefaultDenseExecutor::new();
-        let mut fallback_dense = symtn_dense::DefaultDenseExecutor::new();
-        let compact_svd_copy_rec = crate::probe::record();
-        let input_pack_bytes_rec = crate::probe::record();
-
-        let (direct_first, direct_second, fallback_first, fallback_second) =
-            if operation == "left_polar" {
-                let LeftPolar {
-                    w: direct_first,
-                    p: direct_second,
-                } = left_polar(engine, &mut direct_dense, &direct_bound.as_ref()).unwrap();
-                let LeftPolar {
-                    w: fallback_first,
-                    p: fallback_second,
-                } = left_polar_dyn(engine, &mut fallback_dense, &fallback_input).unwrap();
-                (
-                    direct_first.data().to_vec(),
-                    direct_second.data().to_vec(),
-                    fallback_first.data().to_vec(),
-                    fallback_second.data().to_vec(),
-                )
-            } else {
-                let RightPolar {
-                    p: direct_first,
-                    wh: direct_second,
-                } = right_polar(engine, &mut direct_dense, &direct_bound.as_ref()).unwrap();
-                let RightPolar {
-                    p: fallback_first,
-                    wh: fallback_second,
-                } = right_polar_dyn(engine, &mut fallback_dense, &fallback_input).unwrap();
-                (
-                    direct_first.data().to_vec(),
-                    direct_second.data().to_vec(),
-                    fallback_first.data().to_vec(),
-                    fallback_second.data().to_vec(),
-                )
-            };
-
-        assert_eq!(direct_first.len(), fallback_first.len());
-        assert_eq!(direct_second.len(), fallback_second.len());
-        for (direct, fallback) in direct_first.iter().zip(&fallback_first) {
-            assert!((direct - fallback).abs() < 1e-10);
-        }
-        for (direct, fallback) in direct_second.iter().zip(&fallback_second) {
-            assert!((direct - fallback).abs() < 1e-10);
-        }
-        // The adjoint-view input is packed once; no SVD factor is laid out.
-        assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
-        assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
-    }
-}
-
 /// An SU(2) map with two legs of spins {0, 1/2} on each side, degeneracy 2
 /// on the long side and 1 on the short side: `tall` has the long side as
 /// codomain, so every coupled-sector matrix has at least as many rows as
@@ -607,9 +532,9 @@ fn polar_factors_are_isometric_and_hermitian_positive_on_both_sides() {
 }
 
 #[test]
-fn polar_validates_every_sector_before_direct_or_fallback_svd_execution() {
+fn polar_validates_every_sector_before_direct_svd_execution() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: a later invalid sector prevents SVD of an earlier valid sector on both layouts.
+    // What: a later invalid sector prevents SVD of an earlier valid sector.
     let rule = ZNFusionRule::new(2).unwrap();
     let direct = mixed_rectangular_tensor((4, 2), (1, 3));
     let direct_bound = bound_tensor(Arc::new(rule.clone()), &direct);
@@ -622,26 +547,6 @@ fn polar_validates_every_sector_before_direct_or_fallback_svd_execution() {
     let direct_error = left_polar(engine, &mut dense, &direct_bound.as_ref()).unwrap_err();
     assert!(matches!(
         direct_error,
-        OperationError::InvalidArgument { message }
-            if message.contains("left_polar")
-                && message.contains("coupled-sector")
-    ));
-    assert_eq!(dense.counts().svd, 0);
-
-    let fallback_source = mixed_rectangular_tensor((2, 4), (3, 1));
-    let fallback_bound = bound_tensor(Arc::new(rule), &fallback_source);
-    let fallback_space = fallback_bound.space().adjoint_view().unwrap();
-    assert!(
-        crate::factorize::compact_factor_plan_for_test(&fallback_space)
-            .unwrap()
-            .is_none()
-    );
-    let fallback_input =
-        BoundDynamicTensorRef::try_new(&fallback_space, fallback_bound.data()).unwrap();
-    let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
-    let fallback_error = left_polar_dyn(engine, &mut dense, &fallback_input).unwrap_err();
-    assert!(matches!(
-        fallback_error,
         OperationError::InvalidArgument { message }
             if message.contains("left_polar")
                 && message.contains("coupled-sector")

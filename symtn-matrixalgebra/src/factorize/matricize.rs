@@ -540,8 +540,8 @@ impl EndomorphismFamily {
     }
 
     /// Why an internal error, not a refusal: an endomorphism's canonical
-    /// layout, and the adjoint view of one, stack row and column trees
-    /// identically, so a mismatch is a broken layout invariant.
+    /// layout stacks row and column trees identically, so a mismatch is a
+    /// broken layout invariant.
     const fn stacking(self) -> &'static str {
         match self {
             Self::EighFull => "internal eigh_full layout invariant violated (row/column tree stacking differs); please report this",

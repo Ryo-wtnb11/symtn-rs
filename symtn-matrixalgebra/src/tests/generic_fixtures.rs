@@ -227,21 +227,6 @@ pub(super) fn flattened_block_value<D: FactorScalar>(
     (offset, data[offset])
 }
 
-/// The diagonal `S` of a generic compact SVD, built from its spectrum on
-/// `u`'s provider.
-pub(super) fn generic_diagonal_factor<R, D>(
-    u: &BoundDynFactor<R, D>,
-    spectrum: &[SectorSpectrum],
-) -> BoundDynFactor<R, D>
-where
-    R: CheckedGenericFusion,
-    D: FactorScalar,
-{
-    let space = spectrum_bond::<CheckedGenericAdmissionMode, _, _>(u.space(), spectrum).unwrap();
-    let data = diagonal_bond_data(space.space(), spectrum, &D::from_real).unwrap();
-    BoundDynFactor::from_bound(space, data, 1, 1).unwrap()
-}
-
 pub(super) struct CheckedOnlyFactorRule {
     pub(super) calls: Cell<usize>,
 }

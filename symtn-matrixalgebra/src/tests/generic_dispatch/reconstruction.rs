@@ -536,10 +536,9 @@ fn full_factorizations_skip_dense_backend_for_disjoint_support() {
 }
 
 /// Values of the eager transposes of `general` and `hermitian` (their
-/// adjoints, conjugated back) on the borrowed region path against the
-/// adjoint views of the originals on the packed path: a zero-copy view swaps
-/// axes without conjugating, so both paths read the same matrices.
-fn assert_value_region_paths_match<R, D>(
+/// adjoints, conjugated back) run on the borrowed region path, with no
+/// values-only matricization fallback.
+fn assert_value_region_paths_borrow<R, D>(
     rule: Arc<R>,
     general: &TestTensor<D>,
     hermitian: &TestTensor<D>,
@@ -562,14 +561,6 @@ fn assert_value_region_paths_match<R, D>(
     };
     let general_bound = bound_tensor(Arc::clone(&rule), &transpose(general));
     let hermitian_bound = bound_tensor(Arc::clone(&rule), &transpose(hermitian));
-    let general_parent = bound_tensor(Arc::clone(&rule), general);
-    let hermitian_parent = bound_tensor(rule, hermitian);
-    let general_view_space = general_parent.space().adjoint_view().unwrap();
-    let hermitian_view_space = hermitian_parent.space().adjoint_view().unwrap();
-    let general_view =
-        BoundDynamicTensorRef::try_new(&general_view_space, general_parent.data()).unwrap();
-    let hermitian_view =
-        BoundDynamicTensorRef::try_new(&hermitian_view_space, hermitian_parent.data()).unwrap();
     assert!(general_bound
         .space()
         .space()
@@ -577,67 +568,49 @@ fn assert_value_region_paths_match<R, D>(
         .coupled_sector_regions(2)
         .unwrap()
         .is_some());
-    let general_before = general_parent.data().to_vec();
-    let hermitian_before = hermitian_parent.data().to_vec();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let values_fallbacks_rec = crate::probe::record();
-    let direct_svd = svd_vals_dyn(engine, &mut dense, &general_bound.as_ref().dynamic()).unwrap();
-    let direct_eigh = eigh_vals_dyn(
+    svd_vals_dyn(engine, &mut dense, &general_bound.as_ref().dynamic()).unwrap();
+    eigh_vals_dyn(
         engine,
         &mut dense,
         &hermitian_bound.as_ref().dynamic(),
         HermitianTol::DEFAULT,
     )
     .unwrap();
-    let direct_eig = eig_vals_dyn(engine, &mut dense, &general_bound.as_ref().dynamic()).unwrap();
+    eig_vals_dyn(engine, &mut dense, &general_bound.as_ref().dynamic()).unwrap();
     assert_eq!(
         values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
         0
     );
-
-    let values_fallbacks_rec = crate::probe::record();
-    let packed_svd = svd_vals_dyn(engine, &mut dense, &general_view).unwrap();
-    let packed_eigh =
-        eigh_vals_dyn(engine, &mut dense, &hermitian_view, HermitianTol::DEFAULT).unwrap();
-    let packed_eig = eig_vals_dyn(engine, &mut dense, &general_view).unwrap();
-    assert_eq!(
-        values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
-        3
-    );
-
-    assert_real_spectra_close(&direct_svd, &packed_svd);
-    assert_real_spectra_close(&direct_eigh, &packed_eigh);
-    assert_complex_spectra_close(&direct_eig, &packed_eig);
-    assert!(general_parent.data() == general_before);
-    assert!(hermitian_parent.data() == hermitian_before);
 }
 
 #[test]
-fn value_region_paths_match_packed_oracles_across_supported_rules() {
+fn value_region_paths_borrow_across_supported_rules() {
     let su2_provider_rule = su2_rule();
-    // What: canonical region borrowing and noncanonical (adjoint-view)
-    // packing agree for Abelian, non-Abelian, fermionic, and product rules.
+    // What: canonical values-only operations borrow coupled regions for
+    // Abelian, non-Abelian, fermionic, and product rules.
     let u1 = [
         SectorId::from(U1Irrep::new(-1).unwrap()),
         SectorId::from(U1Irrep::new(0).unwrap()),
         SectorId::from(U1Irrep::new(1).unwrap()),
     ];
-    assert_value_region_paths_match(
+    assert_value_region_paths_borrow(
         Arc::new(U1FusionRule),
         &tsvd_test_tensor(&U1FusionRule, &u1),
         &hermitian_test_tensor(&U1FusionRule, &u1),
     );
 
     let su2 = [symtn_core::SectorId::new(0), symtn_core::SectorId::new(1)];
-    assert_value_region_paths_match(
+    assert_value_region_paths_borrow(
         Arc::new(su2_provider_rule.clone()),
         &tsvd_test_tensor(&su2_provider_rule, &su2),
         &hermitian_test_tensor(&su2_provider_rule, &su2),
     );
 
     let fz2 = [SectorId::new(0), SectorId::new(1)];
-    assert_value_region_paths_match(
+    assert_value_region_paths_borrow(
         Arc::new(FermionParityFusionRule::new()),
         &tsvd_test_tensor(&FermionParityFusionRule::new(), &fz2),
         &hermitian_test_tensor(&FermionParityFusionRule::new(), &fz2),
@@ -652,7 +625,7 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
         product.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
         product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
-    assert_value_region_paths_match(
+    assert_value_region_paths_borrow(
         Arc::new(product.clone()),
         &tsvd_test_tensor(&product, &product_sectors),
         &hermitian_test_tensor(&product, &product_sectors),
@@ -660,7 +633,7 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
 }
 
 #[test]
-fn value_region_paths_match_packed_oracles_for_complex64() {
+fn value_region_paths_borrow_for_complex64() {
     // What: borrowed C64 spans preserve nonreal general matrices and conjugate
     // off-diagonal Hermitian matrices across all three values-only operations.
     let rule = ZNFusionRule::new(2).unwrap();
@@ -698,7 +671,7 @@ fn value_region_paths_match_packed_oracles_for_complex64() {
     )
     .unwrap();
 
-    assert_value_region_paths_match(Arc::new(rule), &general, &hermitian);
+    assert_value_region_paths_borrow(Arc::new(rule), &general, &hermitian);
 }
 
 fn lowered_z2_binding(tensor: &TestTensor<f64>) -> BoundDynamicFusionMapSpace<ZNFusionRule> {

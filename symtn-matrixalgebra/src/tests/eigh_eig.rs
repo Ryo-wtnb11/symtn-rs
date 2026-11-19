@@ -391,25 +391,6 @@ fn checked_generic_eig_provider_failure_leaves_input_unchanged() {
 }
 
 #[test]
-fn eigh_noncanonical_layout_uses_copy_fallback() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: expert noncanonical EIGH retains positive pack-and-vector-scatter copy evidence.
-    let rule = ZNFusionRule::new(2).unwrap();
-    let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let bound = bound_tensor(Arc::new(rule), &tensor);
-    let adjoint_space = bound.space().adjoint_view().unwrap();
-    let input = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let eigh_copy_rec = crate::probe::record();
-    eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
-    let probe = eigh_copy_rec.eigh_copy();
-
-    assert!(probe.input_pack_bytes > 0);
-    assert!(probe.output_scatter_bytes > 0);
-}
-
-#[test]
 fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical EIGH validates every coupled sector without packing before any driver call.
@@ -446,41 +427,6 @@ fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
         eigh_copy_rec.eigh_copy(),
         crate::probe::EighCopyProbe::default()
     );
-}
-
-#[test]
-fn eigh_fallback_rejects_nonhermitian_complex_input_before_dense_execution() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: a valid noncanonical layout receives the same complex Hermitian preflight after packing.
-    let rule = ZNFusionRule::new(2).unwrap();
-    let real = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let regions = real.structure().coupled_sector_regions(2).unwrap().unwrap();
-    let later = regions.last().unwrap();
-    let mut data = real
-        .data()
-        .iter()
-        .map(|&value| Complex64::new(value, 0.0))
-        .collect::<Vec<_>>();
-    data[later.range().start + 1] += Complex64::new(1.0, 2.0);
-    let tensor =
-        TestTensor::<Complex64>::from_vec_with_fusion_space(data, real.fusion_space().clone())
-            .unwrap();
-    let bound = bound_tensor(Arc::new(rule), &tensor);
-    let adjoint_space = bound.space().adjoint_view().unwrap();
-    let input = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
-    let mut dense = ScriptedExecutor::<EighCallSpy>::default();
-
-    let eigh_copy_rec = crate::probe::record();
-    let error = eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap_err();
-
-    assert_eq!(
-        error,
-        OperationError::InvalidArgument {
-            message: "eigh requires Hermitian coupled-sector blocks",
-        }
-    );
-    assert_eq!(dense.counts().of(EIGH_ENTRIES), 0);
-    assert!(eigh_copy_rec.eigh_copy().input_pack_bytes > 0);
 }
 
 #[test]
@@ -759,53 +705,6 @@ fn eigh_error_preserves_borrowed_input_and_publishes_no_output() {
         .all(|sector| before.windows(sector.len()).any(|window| window == sector)));
 }
 
-fn unequal_fallback_eigh_fixtures() -> (TestTensor<f64>, TestTensor<Complex64>) {
-    let source = mixed_rectangular_tensor((3, 3), (2, 2));
-    let source_regions = source
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        source_regions
-            .iter()
-            .map(|region| region.rows())
-            .collect::<Vec<_>>(),
-        vec![3, 2]
-    );
-    let mut data = vec![0.0; source.data().len()];
-    for region in source_regions.iter() {
-        for diagonal in 0..region.rows() {
-            data[region.range().start + diagonal + region.rows() * diagonal] = match diagonal {
-                0 => -2.0,
-                1 => 2.0,
-                _ => 1.0,
-            };
-        }
-    }
-    let real =
-        TestTensor::<f64>::from_vec_with_fusion_space(data, source.fusion_space().clone()).unwrap();
-    let complex = TestTensor::<Complex64>::from_vec_with_fusion_space(
-        real.data()
-            .iter()
-            .map(|&value| Complex64::new(value, 0.0))
-            .collect(),
-        real.fusion_space().clone(),
-    )
-    .unwrap();
-    let mut complex_data = complex.data().to_vec();
-    for region in source_regions.iter() {
-        complex_data[region.range().start + 1] = Complex64::new(1.2, 1.6);
-        complex_data[region.range().start + region.rows()] = Complex64::new(1.2, -1.6);
-    }
-    let complex = TestTensor::<Complex64>::from_vec_with_fusion_space(
-        complex_data,
-        complex.fusion_space().clone(),
-    )
-    .unwrap();
-    (real, complex)
-}
-
 #[test]
 fn eigh_direct_column_reorder_preserves_the_literal_three_cycle() {
     // What: direct owned vectors reorder in place by destination columns [1, 2, 0].
@@ -842,61 +741,6 @@ fn eigh_rejects_non_finite_owned_eigenvalues_before_sorting() {
             }))
         );
     }
-}
-
-#[test]
-fn eigh_fallback_stages_vectors_apart_from_the_final_scatter_for_every_dtype() {
-    // What: the fallback stages each sector's V apart from the final factor
-    // allocation, which symtn's required structural scatter fills.
-    fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
-        let engine = &mut symtn_dense::CpuEngine::serial();
-        let rule = Arc::new(ZNFusionRule::new(2).unwrap());
-        let bound = bound_tensor(Arc::clone(&rule), tensor);
-        let adjoint = bound.space().adjoint_view().unwrap();
-        assert!(crate::factorize::compact_factor_plan_for_test(&adjoint)
-            .unwrap()
-            .is_none());
-        let input = BoundDynamicTensorRef::try_new(&adjoint, bound.data()).unwrap();
-        let mut dense = ScriptedExecutor::<RejectEighInto>::default();
-        let eigh_vectors_rec = crate::probe::record();
-
-        let eigh = eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
-        let before_scatter = eigh_vectors_rec.eigh_owned_vectors();
-
-        assert!(!before_scatter.is_empty());
-        assert_eq!(dense.counts().eigh_into, 0);
-        assert_eq!(dense.counts().eigh, before_scatter.len());
-        assert!(Arc::ptr_eq(
-            input.space().provider_arc(),
-            eigh.v().space().provider_arc()
-        ));
-        assert!(before_scatter
-            .iter()
-            .all(|&pointer| pointer != eigh.v().data().as_ptr() as usize));
-    }
-
-    let (real, complex) = unequal_fallback_eigh_fixtures();
-    check(&real);
-    let space = real.fusion_space().clone();
-    check(
-        &TestTensor::<f32>::from_vec_with_fusion_space(
-            real.data().iter().map(|&value| value as f32).collect(),
-            space.clone(),
-        )
-        .unwrap(),
-    );
-    check(
-        &TestTensor::<Complex32>::from_vec_with_fusion_space(
-            complex
-                .data()
-                .iter()
-                .map(|value| Complex32::new(value.re as f32, value.im as f32))
-                .collect(),
-            complex.fusion_space().clone(),
-        )
-        .unwrap(),
-    );
-    check(&complex);
 }
 
 #[test]

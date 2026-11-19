@@ -15,8 +15,6 @@ use crate::OperationError;
 /// One observed occurrence in tensor execution. Each fact has one event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Event {
-    /// A lazy adjoint's block structure was built.
-    AdjointViewBuild,
     /// A fusion-aware trace compiled its axis plan.
     TraceAxisPlanDerivation,
     /// A fusion-aware trace derived its selected HomSpace.

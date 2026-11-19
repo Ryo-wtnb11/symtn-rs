@@ -76,8 +76,8 @@ use factorize::{
     left_null_dyn_checked_generic, left_polar, left_polar_dyn, lq_compact, lq_compact_dyn, lq_full,
     lq_full_dyn, qr_compact, qr_compact_dyn, qr_full, qr_full_dyn, right_null, right_null_dyn,
     right_null_dyn_checked_generic, right_polar, right_polar_dyn, scale_axis_by_spectrum,
-    svd_compact, svd_compact_adjoint_factors_dyn, svd_compact_dyn, svd_compact_factors_dyn,
-    svd_full, svd_full_adjoint_dyn, svd_full_dyn, svd_full_dyn_checked_generic, svd_vals,
+    svd_compact, svd_compact_adjoint_factors_dyn, svd_compact_dyn, svd_full, svd_full_adjoint_dyn,
+    svd_full_dyn, svd_full_dyn_checked_generic, svd_vals,
 };
 #[cfg(test)]
 use factorize::{eig_full_dyn, eig_vals_dyn, eigh_vals_dyn};

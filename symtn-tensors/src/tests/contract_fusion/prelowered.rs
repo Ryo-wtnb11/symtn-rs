@@ -195,22 +195,6 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
         )
         .unwrap();
     assert_eq!(ordinary, oracle);
-
-    let ordinary_tensor = TestTensor::<f64>::from_vec_with_fusion_space(
-        eager_lhs_data,
-        canonical_typed
-            .validate_rule(&rule)
-            .and_then(|()| canonical_typed.adjoint_view())
-            .unwrap(),
-    )
-    .unwrap();
-    // What: the ordinary tensor constructor aliases its physical structure to
-    // its fusion subblock structure, so only the prelowered seam needs a
-    // separate storage determinant.
-    assert!(Arc::ptr_eq(
-        ordinary_tensor.structure(),
-        ordinary_tensor.fusion_space().unwrap().structure(),
-    ));
 }
 
 #[test]

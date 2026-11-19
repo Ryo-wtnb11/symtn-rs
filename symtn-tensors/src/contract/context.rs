@@ -781,8 +781,8 @@ where
     /// `DynamicTree` artifact. A caller that wants the canonical route
     /// without taking a context lock calls the two halves itself, in that
     /// order. The requested order's zero-copy candidates are walked once.
-    /// A destination without its space's canonical coupled-sector layout (a
-    /// lazy adjoint view) is `InvalidArgument` before planning.
+    /// The destination is in its space's canonical coupled-sector layout by
+    /// construction: no dynamic space carries another tiling.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn plan_contract<R>(
@@ -860,10 +860,6 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        require_canonical_destination::<MultiplicityFreeAdmissionMode, R>(
-            dst_space.provider(),
-            dst_space.space(),
-        )?;
         plan_contract_beyond_core_in::<MultiplicityFreeAdmissionMode, R>(
             engine,
             self.tree_context.planning(),
@@ -933,10 +929,6 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         let target = PlanTarget::bound(dst_space);
-        require_canonical_destination::<MultiplicityFreeAdmissionMode, R>(
-            target.rule,
-            target.space,
-        )?;
         compile_dynamic_tree_in::<MultiplicityFreeAdmissionMode, R>(
             engine,
             self.tree_context.planning(),
@@ -1558,10 +1550,6 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    require_canonical_destination::<MultiplicityFreeAdmissionMode, R>(
-        dst_space.provider(),
-        dst_space.space(),
-    )?;
     try_compile_core_route::<MultiplicityFreeAdmissionMode, R>(
         PlanTarget::bound(dst_space),
         lhs,
@@ -1574,11 +1562,11 @@ where
 /// The planner for a composition, TensorKit `mul!(C, A, B)`
 /// (`linalg.jl:330-370` @cfaa073): A's domain against B's codomain in
 /// order, the identity output, no twist and no candidate walk, resolved to
-/// `Core { swapped: false }` with unit job coefficients. A destination
-/// whose storage is not its space's canonical coupled-sector layout (a lazy
-/// adjoint view) is `InvalidArgument` before planning, as for every
-/// contraction and composition entry; any other composition the core declines is `UnsupportedTensorContractScope`: `mul!` has no
-/// transform route, so none is planned.
+/// `Core { swapped: false }` with unit job coefficients. The destination is
+/// in its space's canonical coupled-sector layout by construction, as for
+/// every contraction and composition entry; a composition the core declines
+/// is `UnsupportedTensorContractScope`: `mul!` has no transform route, so
+/// none is planned.
 ///
 /// The braiding check stays with the caller: `mul!` admits every braiding
 /// style, since composition has no braid-dependent step.
@@ -1598,30 +1586,6 @@ where
     plan_compose_in::<MultiplicityFreeAdmissionMode, R>(PlanTarget::bound(dst_space), lhs, rhs)
 }
 
-/// Rejects a contraction or composition destination whose storage is not
-/// its space's canonical coupled-sector layout, such as a lazy adjoint view,
-/// before any planning.
-///
-/// Why reject rather than plan: every core GEMM writes a coupled-sector
-/// matrix in place in the destination, and no route packs or scatters into
-/// another tiling, so such a destination has no core and the error would
-/// otherwise surface from a nested plan builder.
-pub(crate) fn require_canonical_destination<M, R>(
-    rule: &R,
-    dst: &DynamicFusionMapSpace,
-) -> Result<(), M::Error>
-where
-    M: PlanningAlgebra<R>,
-{
-    if M::storage_layout_is_canonical(rule, dst)? {
-        return Ok(());
-    }
-    Err(OperationError::InvalidArgument {
-        message: "destination must use its space's canonical coupled-sector layout",
-    }
-    .into())
-}
-
 /// [`plan_compose`] in either admission mode `M`.
 pub(crate) fn plan_compose_in<M, R>(
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
@@ -1632,7 +1596,10 @@ where
     M: PlanningAlgebra<R>,
     M::Scalar: DenseBlockScalar,
 {
-    require_canonical_destination::<M, R>(target.rule, target.space)?;
+    debug_assert!(matches!(
+        M::storage_layout_is_canonical(target.rule, target.space),
+        Ok(true)
+    ));
     match compose_core_route::<M, R>(target, lhs, rhs)? {
         CoreRoute::Hit(resolution) => Ok(resolution),
         CoreRoute::Miss(_) => Err(OperationError::UnsupportedTensorContractScope {
@@ -1708,7 +1675,10 @@ where
     M: PlanningAlgebra<R>,
     M::Scalar: DenseBlockScalar,
 {
-    require_canonical_destination::<M, R>(target.rule, target.space)?;
+    debug_assert!(matches!(
+        M::storage_layout_is_canonical(target.rule, target.space),
+        Ok(true)
+    ));
     let axes = TensorContractSpec::new_with_conjugation(
         lhs_axes,
         rhs_axes,

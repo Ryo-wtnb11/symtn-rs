@@ -743,27 +743,6 @@ pub(super) fn one_sector_rectangular_matrix<D: Clone>(
     TestTensor::from_vec_with_fusion_space(data, space).unwrap()
 }
 
-/// Path agreement of two spectra: sectors and kept counts exact, values under
-/// the workspace rule with the sector's value count as `terms`.
-pub(super) fn assert_spectra_agree(what: &str, lhs: &[SectorSpectrum], rhs: &[SectorSpectrum]) {
-    assert_eq!(lhs.len(), rhs.len(), "{what}");
-    for (lhs, rhs) in lhs.iter().zip(rhs) {
-        assert_eq!(lhs.sector, rhs.sector, "{what}");
-        numerics::assert_slices_close(what, &lhs.values, &rhs.values, lhs.values.len());
-    }
-}
-
-pub(super) fn assert_real_spectra_close(lhs: &[SectorSpectrum], rhs: &[SectorSpectrum]) {
-    assert_eq!(lhs.len(), rhs.len());
-    for (lhs, rhs) in lhs.iter().zip(rhs) {
-        assert_eq!(lhs.sector, rhs.sector);
-        assert_eq!(lhs.values.len(), rhs.values.len());
-        for (&lhs, &rhs) in lhs.values.iter().zip(&rhs.values) {
-            assert!((lhs - rhs).abs() <= 1e-10, "{lhs} vs {rhs}");
-        }
-    }
-}
-
 pub(super) fn assert_identity_matrices(matrices: &[(SectorId, usize, usize, Vec<f64>)]) {
     assert!(!matrices.is_empty());
     for (sector, rows, cols, matrix) in matrices {

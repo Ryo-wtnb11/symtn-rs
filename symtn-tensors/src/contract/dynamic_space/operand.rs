@@ -241,13 +241,12 @@ impl<'a> FusionOperand<'a> {
         OrientedFusionTreeHomSpace::new(self.storage_space.homspace(), self.orientation())
     }
 
-    /// The logical hom space: the parent's own, or its memoized adjoint.
-    pub(crate) fn logical_homspace(self) -> &'a FusionTreeHomSpace {
+    /// The logical HomSpace: the storage space's own, or its adjoint (codomain
+    /// and domain swapped, legs not dualized), memoized on the storage space.
+    pub fn logical_homspace(self) -> &'a FusionTreeHomSpace {
         match self.orientation() {
             FusionTreePairOrientation::Direct => self.storage_space.homspace(),
-            FusionTreePairOrientation::Adjoint => {
-                self.storage_space.adjoint_memo().homspace.as_ref()
-            }
+            FusionTreePairOrientation::Adjoint => self.storage_space.adjoint_homspace(),
         }
     }
 
@@ -274,7 +273,7 @@ impl<'a> FusionOperand<'a> {
 
         // The parent's memoized adjoint HomSpace equals
         // `oriented_homspace().materialize()` without a per-call build.
-        let homspace = Cow::Borrowed(self.storage_space.adjoint_memo().homspace.as_ref());
+        let homspace = Cow::Borrowed(self.storage_space.adjoint_homspace());
         let prepared = dispatch_prepare(layout_primer, rule, homspace.as_ref())?;
         let all_logical_keys = prepared.keys(rule, homspace.as_ref());
         let projection = if matches!(
@@ -318,8 +317,8 @@ impl<'a> FusionOperand<'a> {
         })
     }
 
-    /// Static adjoint views retain the parent's block order, including an
-    /// admitted subset and arbitrary strides. Canonical enumeration would
+    /// A storage-ordered lazy adjoint retains the parent's block order.
+    /// Canonical enumeration would
     /// change group/provider and accumulation order; derive only swapped keys.
     /// TensorKit preserves parent block traversal while swapping trees and axes:
     /// <https://github.com/QuantumKitHub/TensorKit.jl/blob/cfaa073e4d1e3eb2167edcbdc3be9872f41e7d91/src/tensors/adjoint.jl#L22-L50>.

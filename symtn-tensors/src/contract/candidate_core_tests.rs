@@ -203,7 +203,7 @@ fn operand(space: &BoundDynamicFusionMapSpace<impl Sized>, lazy: bool) -> Fusion
 }
 
 /// Every probe on `V⊗V ← V⊗V` operands resolves to Core in its TensorKit
-/// orientation, with no logical projection or adjoint view of a lazy
+/// orientation, with no logical projection of a lazy
 /// operand, on the Host and on the device compile route.
 fn assert_probes_resolve_to_core<R>(provider: &Arc<R>, leg: &SectorLeg)
 where
@@ -224,7 +224,6 @@ where
             rhs_lazy,
         );
         let mut dst = vec![0.0; len];
-        let adjoint_view_build_count_rec = probe::record();
         let fusion_operand_projection_prepares_rec = probe::record();
         if lhs_lazy || rhs_lazy {
             context
@@ -261,14 +260,9 @@ where
         assert!(context.last_resolution_is_core(), "{name}");
         let swapped = (orientation == RHS_LHS).then_some(RHS_LHS);
         assert_eq!(context.last_resolution_orientation(), swapped, "{name}");
-        // What: no logical key projection or adjoint view of a lazy operand.
+        // What: no logical key projection of a lazy operand.
         assert_eq!(
             fusion_operand_projection_prepares_rec.get(Event::FusionOperandProjectionPrepare),
-            0,
-            "{name}"
-        );
-        assert_eq!(
-            adjoint_view_build_count_rec.get(Event::AdjointViewBuild),
             0,
             "{name}"
         );

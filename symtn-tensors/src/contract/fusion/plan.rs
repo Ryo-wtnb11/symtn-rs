@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use symtn_core::{FusionSpaceAdmission, FusionTreeHomSpace, MultiplicityFreeRigidSymbols};
 
 use smallvec::SmallVec;
@@ -572,10 +570,6 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    super::super::require_canonical_destination::<symtn_core::MultiplicityFreeAdmissionMode, R>(
-        dst.provider(),
-        dst.space(),
-    )?;
     // Why not accept a separate rule: the bound destination is the semantic
     // authority, as in the eager entry. The raw core still checks every
     // operand space against it without re-enumerating any fusion-tree grid.
@@ -594,16 +588,13 @@ where
     )
 }
 
-/// `space`, or its lazy adjoint view when `adjoint` is set: the logical
-/// space whose legs a conjugated operand's axes index.
-fn logical_space(
-    space: &DynamicFusionMapSpace,
-    adjoint: bool,
-) -> Result<Cow<'_, DynamicFusionMapSpace>, OperationError> {
+/// The operand a spec flag names: `space`, or its lazy adjoint, whose legs a
+/// conjugated operand's axes index.
+fn oriented_operand(space: &DynamicFusionMapSpace, adjoint: bool) -> FusionOperand<'_> {
     if adjoint {
-        space.adjoint_view().map(Cow::Owned)
+        FusionOperand::adjoint(space)
     } else {
-        Ok(Cow::Borrowed(space))
+        FusionOperand::direct(space)
     }
 }
 
@@ -664,18 +655,17 @@ where
     dst.validate_rule(rule)?;
     lhs.validate_rule(rule)?;
     rhs.validate_rule(rule)?;
-    let lhs = logical_space(lhs, axes.lhs_conjugate())?;
-    let lhs = &*lhs;
-    let rhs = logical_space(rhs, axes.rhs_conjugate())?;
-    let rhs = &*rhs;
-    select_tensorcontract_fusion_plan_from_spaces_with_orientations(
+    let lhs = oriented_operand(lhs, axes.lhs_conjugate());
+    let rhs = oriented_operand(rhs, axes.rhs_conjugate());
+    select_tensorcontract_fusion_plan_with_orientations(
         rule,
         dst,
-        lhs,
-        rhs,
+        &lhs,
+        &rhs,
         axes,
         axes.lhs_conjugate(),
         axes.rhs_conjugate(),
+        None,
         orientations,
     )
 }
@@ -785,15 +775,13 @@ where
     dst.validate_rule(rule)?;
     lhs.validate_rule(rule)?;
     rhs.validate_rule(rule)?;
-    let lhs = logical_space(lhs, axes.lhs_conjugate())?;
-    let lhs = &*lhs;
-    let rhs = logical_space(rhs, axes.rhs_conjugate())?;
-    let rhs = &*rhs;
-    validate_tensorcontract_fusion_plan_inputs(rule, dst, lhs, rhs, axes, None)?;
+    let lhs = oriented_operand(lhs, axes.lhs_conjugate());
+    let rhs = oriented_operand(rhs, axes.rhs_conjugate());
+    validate_tensorcontract_fusion_plan_inputs(rule, dst, &lhs, &rhs, axes, None)?;
     compile_tensorcontract_fusion_plan_from_spaces(
         dst,
-        lhs,
-        rhs,
+        &lhs,
+        &rhs,
         axes,
         axes.lhs_conjugate(),
         axes.rhs_conjugate(),
@@ -815,15 +803,13 @@ where
     dst.validate_rule(rule)?;
     lhs.validate_rule(rule)?;
     rhs.validate_rule(rule)?;
-    let lhs = logical_space(lhs, axes.lhs_conjugate())?;
-    let lhs = &*lhs;
-    let rhs = logical_space(rhs, axes.rhs_conjugate())?;
-    let rhs = &*rhs;
+    let lhs = oriented_operand(lhs, axes.lhs_conjugate());
+    let rhs = oriented_operand(rhs, axes.rhs_conjugate());
     fusion_contract_candidate_facts_from_spaces_with_probe(
         rule,
         dst,
-        lhs,
-        rhs,
+        &lhs,
+        &rhs,
         axes,
         axes.lhs_conjugate(),
         axes.rhs_conjugate(),
@@ -833,41 +819,13 @@ where
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn select_tensorcontract_fusion_plan_from_spaces_with_orientations<R>(
-    rule: &R,
-    dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
-    axes: TensorContractSpec<'_>,
-    lhs_source_conjugate: bool,
-    rhs_source_conjugate: bool,
-    orientations: &[FusionContractOrientation],
-) -> Result<FusionContractPlan, OperationError>
-where
-    R: MultiplicityFreeRigidSymbols,
-    R::Scalar: DenseBlockScalar,
-{
-    select_tensorcontract_fusion_plan_with_orientations(
-        rule,
-        dst,
-        lhs,
-        rhs,
-        axes,
-        lhs_source_conjugate,
-        rhs_source_conjugate,
-        None,
-        orientations,
-    )
-}
-
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn fusion_contract_candidate_facts_from_spaces_with_probe<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: &FusionOperand<'_>,
+    rhs: &FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
     lhs_source_conjugate: bool,
     rhs_source_conjugate: bool,
@@ -914,9 +872,9 @@ where
 }
 
 #[cfg(test)]
-type LayoutProbeBuilder<R> = for<'a> fn(
+type LayoutProbeBuilder<R> = for<'a, 'b> fn(
     &'a R,
-    &'a DynamicFusionMapSpace,
+    &'a FusionOperand<'b>,
     &'a TreeTransformOperation,
     Option<LayoutKeyBuilder<R>>,
 ) -> Result<TransformedLayoutProbe, OperationError>;
@@ -998,7 +956,7 @@ impl ContractPlanSource for FusionOperandLayout<'_> {
 #[cfg(test)]
 fn encoded_layout_probe<R>(
     rule: &R,
-    space: &DynamicFusionMapSpace,
+    operand: &FusionOperand<'_>,
     operation: &TreeTransformOperation,
     _primer: Option<LayoutKeyBuilder<R>>,
 ) -> Result<TransformedLayoutProbe, OperationError>
@@ -1006,12 +964,14 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    space.transformed_layout_probe(rule, operation)
+    operand
+        .storage_space()
+        .transformed_layout_probe(rule, operation, operand.storage_conjugate())
 }
 
-/// Why refuse rather than probe: every producer admits a Complete layout
-/// (canonical, or the adjoint view of one), so the structural scorer is
-/// exact and a non-Complete stamp is a broken invariant.
+/// Why refuse rather than probe: every producer admits a Complete canonical
+/// layout, so the structural scorer is exact and a non-Complete stamp is a
+/// broken invariant.
 #[allow(clippy::too_many_arguments)]
 fn select_tensorcontract_fusion_plan_with_orientations<R, S>(
     rule: &R,
@@ -1598,10 +1558,10 @@ where
 }
 
 #[cfg(test)]
-fn compile_tensorcontract_fusion_plan_from_spaces(
+fn compile_tensorcontract_fusion_plan_from_spaces<S: ContractPlanSource>(
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: &S,
+    rhs: &S,
     axes: TensorContractSpec<'_>,
     lhs_source_conjugate: bool,
     rhs_source_conjugate: bool,
@@ -1934,8 +1894,8 @@ mod tests {
         let exact = super::score_fusion_contract_candidate(
             &rule,
             &dst,
-            &lhs,
-            &rhs,
+            &FusionOperand::direct(&lhs),
+            &FusionOperand::direct(&rhs),
             axis_order,
             plan,
             super::encoded_layout_probe,

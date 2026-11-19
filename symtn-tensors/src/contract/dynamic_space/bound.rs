@@ -142,9 +142,10 @@ impl<R> BoundDynamicFusionMapSpace<R> {
     pub fn validated_layout(&self) -> ValidatedDynamicFusionLayout {
         let mut space = self.space.clone();
         // Why a fresh slot rather than charging the memo: a clone shares the
-        // filled `Arc<AdjointMemo>`, whose block structure can still fill after
-        // the layout was charged, so the charge would go stale. The parked
-        // layout never adjoints itself and a rebound space refills on demand.
+        // filled adjoint HomSpace `Arc`, which the parent can fill after the
+        // layout was charged, so the charge would depend on call order. The
+        // parked layout never adjoints itself and a rebound space refills on
+        // demand.
         space.adjoint = OnceLock::new();
         ValidatedDynamicFusionLayout(space)
     }
@@ -471,8 +472,8 @@ where
         Self::from_derived_with_capability(Arc::clone(&source.provider), space, source.layout_build)
     }
 
-    /// Binds an existing multiplicity-free dynamic layout (a canonical layout
-    /// or an adjoint view of one) to `provider`.
+    /// Binds an existing multiplicity-free canonical dynamic layout to
+    /// `provider`.
     pub fn bind_multiplicity_free(
         space: DynamicFusionMapSpace,
         provider: Arc<R>,
@@ -945,19 +946,8 @@ where
         Self::from_derived_like(self, space)
     }
 
-    /// Creates the zero-copy adjoint lowering/replay view while retaining the
-    /// exact provider allocation of the source binding.
-    ///
-    /// This preserves the source blocks' offsets and strides while swapping
-    /// their logical codomain/domain axes. It is a view used by lazy lowering,
-    /// not an owned ordinary adjoint output layout.
-    pub fn adjoint_view(&self) -> Result<Self, OperationError> {
-        let space = self.space.adjoint_view()?;
-        Self::from_derived_like(self, space)
-    }
-
-    /// Binds an existing multiplicity-aware dynamic layout (a canonical layout
-    /// or an adjoint view of one) to `provider`.
+    /// Binds an existing multiplicity-aware canonical dynamic layout to
+    /// `provider`.
     pub fn bind_generic(
         space: DynamicFusionMapSpace,
         provider: Arc<R>,

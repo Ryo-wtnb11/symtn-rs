@@ -8,13 +8,10 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = ZNFusionRule::new(2).unwrap();
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
-    let lhs_adjoint_space = lhs_space
-        .validate_rule(&rule)
-        .and_then(|()| lhs_space.adjoint_view())
-        .unwrap();
+    let lhs_adjoint_hom = crate::FusionOperand::adjoint(&lhs_space).logical_homspace();
     let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
         &rule,
-        lhs_adjoint_space.homspace(),
+        lhs_adjoint_hom,
         rhs_space.homspace(),
         &[1],
         &[0],
@@ -90,13 +87,10 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule::new();
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
-    let lhs_adjoint_space = lhs_space
-        .validate_rule(&rule)
-        .and_then(|()| lhs_space.adjoint_view())
-        .unwrap();
+    let lhs_adjoint_hom = crate::FusionOperand::adjoint(&lhs_space).logical_homspace();
     let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
         &rule,
-        lhs_adjoint_space.homspace(),
+        lhs_adjoint_hom,
         rhs_space.homspace(),
         &[1],
         &[0],
@@ -172,14 +166,11 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = ZNFusionRule::new(2).unwrap();
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
-    let rhs_adjoint_space = rhs_space
-        .validate_rule(&rule)
-        .and_then(|()| rhs_space.adjoint_view())
-        .unwrap();
+    let rhs_adjoint_hom = crate::FusionOperand::adjoint(&rhs_space).logical_homspace();
     let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
         &rule,
         lhs_space.homspace(),
-        rhs_adjoint_space.homspace(),
+        rhs_adjoint_hom,
         &[1],
         &[0],
         &[0, 1],
@@ -253,14 +244,11 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let rule = FermionParityFusionRule::new();
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
-    let rhs_adjoint_space = rhs_space
-        .validate_rule(&rule)
-        .and_then(|()| rhs_space.adjoint_view())
-        .unwrap();
+    let rhs_adjoint_hom = crate::FusionOperand::adjoint(&rhs_space).logical_homspace();
     let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
         &rule,
         lhs_space.homspace(),
-        rhs_adjoint_space.homspace(),
+        rhs_adjoint_hom,
         &[1],
         &[0],
         &[0, 1],
@@ -335,18 +323,12 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
     let rule = ZNFusionRule::new(2).unwrap();
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
-    let lhs_adjoint_space = lhs_space
-        .validate_rule(&rule)
-        .and_then(|()| lhs_space.adjoint_view())
-        .unwrap();
-    let rhs_adjoint_space = rhs_space
-        .validate_rule(&rule)
-        .and_then(|()| rhs_space.adjoint_view())
-        .unwrap();
+    let lhs_adjoint_hom = crate::FusionOperand::adjoint(&lhs_space).logical_homspace();
+    let rhs_adjoint_hom = crate::FusionOperand::adjoint(&rhs_space).logical_homspace();
     let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
         &rule,
-        lhs_adjoint_space.homspace(),
-        rhs_adjoint_space.homspace(),
+        lhs_adjoint_hom,
+        rhs_adjoint_hom,
         &[1],
         &[0],
         &[0, 1],
@@ -420,18 +402,12 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
     let rule = FermionParityFusionRule::new();
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
-    let lhs_adjoint_space = lhs_space
-        .validate_rule(&rule)
-        .and_then(|()| lhs_space.adjoint_view())
-        .unwrap();
-    let rhs_adjoint_space = rhs_space
-        .validate_rule(&rule)
-        .and_then(|()| rhs_space.adjoint_view())
-        .unwrap();
+    let lhs_adjoint_hom = crate::FusionOperand::adjoint(&lhs_space).logical_homspace();
+    let rhs_adjoint_hom = crate::FusionOperand::adjoint(&rhs_space).logical_homspace();
     let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
         &rule,
-        lhs_adjoint_space.homspace(),
-        rhs_adjoint_space.homspace(),
+        lhs_adjoint_hom,
+        rhs_adjoint_hom,
         &[1],
         &[0],
         &[0, 1],
@@ -668,7 +644,6 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     };
     for pass in 0..2 {
         let mut ctx = crate::TensorContractFusionExecutionContext::<Complex64, _>::default();
-        let adjoint_view_build_count_rec = probe::record();
         let fusion_operand_projection_prepares_rec = probe::record();
         for _ in 0..2 {
             let mut fold = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
@@ -715,10 +690,9 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
             assert_eq!(folded_again, oracle);
             assert!(ctx.last_resolution_is_core());
         }
-        // What: neither cold/reset execution nor NoCache may reconstruct the
-        // full categorical adjoint view or prepare a logical block projection
-        // for a canonical parent-owned coupled-region contraction.
-        assert_eq!(adjoint_view_build_count_rec.get(Event::AdjointViewBuild), 0);
+        // What: neither cold/reset execution nor NoCache may prepare a logical
+        // block projection for a canonical parent-owned coupled-region
+        // contraction.
         assert_eq!(
             fusion_operand_projection_prepares_rec.get(Event::FusionOperandProjectionPrepare),
             0

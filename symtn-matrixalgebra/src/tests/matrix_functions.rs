@@ -6,41 +6,6 @@ use super::*;
 use crate::su2::su2_rule;
 
 #[test]
-fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // The adjoint view of a square endomorphism has the input's hom space but
-    // transposed strides: an admitted, noncanonical output layout.
-    let source = hermitian_test_tensor(
-        &ZNFusionRule::new(2).unwrap(),
-        &[SectorId::new(0), SectorId::new(1)],
-    );
-    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &source);
-    let output = bound.space().adjoint_view().unwrap();
-    assert_eq!(output.space().homspace(), bound.space().space().homspace());
-    assert_ne!(
-        output.space().structure(),
-        bound.space().space().structure()
-    );
-    let called = Cell::new(false);
-    let result = map_square_sectors_dyn_into(
-        engine,
-        &mut ScriptedExecutor::new(RejectExecutorCalls),
-        &bound.as_ref().dynamic(),
-        output,
-        |_| -> Result<(), OperationError> {
-            called.set(true);
-            unreachable!("layout rejection precedes kernel initialization")
-        },
-        |_, _, _, _, _, _| unreachable!("layout rejection precedes dense work"),
-    );
-    assert!(matches!(
-        result,
-        Err(OperationError::UnsupportedTensorContractScope { .. })
-    ));
-    assert!(!called.get());
-}
-
-#[test]
 fn dense_only_matrix_function_refuses_adjoint_and_diagonal_before_leasing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let source = hermitian_test_tensor(
