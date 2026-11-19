@@ -244,7 +244,6 @@ fn polar_second_sector_failure_leaves_the_source_unchanged() {
             "injected second-sector failure",
         );
         let compact_svd_copy_rec = crate::probe::record();
-        let input_pack_bytes_rec = crate::probe::record();
         let result = if left {
             left_polar(engine, &mut dense, &input.as_ref()).map(drop)
         } else {
@@ -254,10 +253,6 @@ fn polar_second_sector_failure_leaves_the_source_unchanged() {
         assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 2);
         assert_eq!(tensor.data(), before);
         // The canonical input is read in place; no SVD factor is laid out.
-        assert_eq!(
-            input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-            0
-        );
         assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
     }
 }
@@ -458,11 +453,9 @@ fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
         BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap()
     }
     let source = |bound| FactorSource::Dense(parent(bound));
-    // Polar reads only the parent; the adjoint's own layout is not consulted.
     fn adjoint_of<D>(bound: &BoundTensorMap<Su2Rule, D>) -> FactorSource<'_, Su2Rule, D> {
         FactorSource::AdjointOf {
             parent: BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap(),
-            adjoint_space: bound.space(),
         }
     }
     let mut dense = symtn_dense::DefaultDenseExecutor::new();

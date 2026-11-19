@@ -1,32 +1,5 @@
 use super::*;
 
-fn assert_compact_svd_direct_copy_probe(recording: &crate::probe::Recording) {
-    let probe = recording.compact_svd_copy();
-    assert_eq!(probe.input_pack_calls, 0);
-    assert_eq!(probe.input_pack_bytes, 0);
-    assert_eq!(probe.output_scatter_calls, 0);
-    assert_eq!(probe.output_scatter_bytes, 0);
-}
-
-#[test]
-fn compact_svd_canonical_layout_skips_input_pack_and_factor_scatter() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: canonical coupled storage reaches final factor destinations without numerical copies.
-    let rule = ZNFusionRule::new(2).unwrap();
-    let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let compact_svd_copy_rec = crate::probe::record();
-    svd_compact(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
-    )
-    .unwrap();
-
-    assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
-}
-
 #[test]
 fn direct_compact_svd_uses_owned_executor_outputs_only() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -310,12 +283,10 @@ fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
     let tensor = rectangular_svd_tensor(rows, cols);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let bound = bound_tensor(Arc::new(rule), &tensor);
-    let compact_svd_copy_rec = crate::probe::record();
     let svd = svd_compact(engine, &mut dense, &bound.as_ref()).unwrap();
     assert_factor_layout_matches_per_tree_shapes(svd.u.space());
     assert_factor_layout_matches_per_tree_shapes(svd.s.space());
     assert_factor_layout_matches_per_tree_shapes(svd.vh.space());
-    assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
     let rank = rows.min(cols);
     if rank == 0 {
         assert!(svd.u.space().space().homspace().domain().legs()[0]
@@ -344,12 +315,8 @@ fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
         }
     }
 
-    let compact_svd_copy_rec = crate::probe::record();
     let adjoint =
         svd_compact_adjoint_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
-    let adjoint_probe = compact_svd_copy_rec.compact_svd_copy();
-    assert_eq!(adjoint_probe.input_pack_calls, 0);
-    assert_eq!(adjoint_probe.output_scatter_calls, 0);
     let adjoint_singular = adjoint
         .2
         .first()
@@ -414,7 +381,6 @@ fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     )
     .unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let compact_svd_copy_rec = crate::probe::record();
 
     let svd = svd_compact(
         engine,
@@ -423,7 +389,6 @@ fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     )
     .unwrap();
 
-    assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
     let input_regions = tensor
         .structure()
         .coupled_sector_regions(1)
@@ -485,7 +450,6 @@ fn compact_svd_c32_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     let rule = ZNFusionRule::new(2).unwrap();
     let tensor = mixed_rectangular_c32_tensor();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let compact_svd_copy_rec = crate::probe::record();
 
     let svd = svd_compact(
         engine,
@@ -494,7 +458,6 @@ fn compact_svd_c32_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     )
     .unwrap();
 
-    assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
     let input_regions = tensor
         .structure()
         .coupled_sector_regions(1)
@@ -1017,10 +980,8 @@ fn compact_svd_adjoint_direct_factors_follow_the_parent_row_gauge() {
     .unwrap();
     let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let compact_svd_copy_rec = crate::probe::record();
     let (u, vh, spectrum) =
         svd_compact_adjoint_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
-    assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
 
     let (mut expected_u, mut expected_vh) = (Vec::new(), Vec::new());
     let mut offset = 0;

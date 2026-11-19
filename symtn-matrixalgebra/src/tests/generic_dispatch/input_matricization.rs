@@ -269,7 +269,6 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
     let before = data.clone();
 
-    let compact_qr_copy_rec = crate::probe::record();
     let checked_inputs_rec = crate::probe::record();
     let mut qr = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Qr);
     let factors = qr_compact_dyn_checked_generic(engine, &mut qr, &input).unwrap();
@@ -281,9 +280,7 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
         &data,
         &regions,
     );
-    assert_eq!(compact_qr_copy_rec.compact_qr_copy().input_pack_calls, 0);
 
-    let compact_svd_copy_rec = crate::probe::record();
     let checked_inputs_rec = crate::probe::record();
     let mut svd = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Svd);
     let factors = svd_compact_dyn_checked_generic(engine, &mut svd, &input).unwrap();
@@ -295,9 +292,7 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
         &data,
         &regions,
     );
-    assert_eq!(compact_svd_copy_rec.compact_svd_copy().input_pack_calls, 0);
 
-    let compact_lq_copy_rec = crate::probe::record();
     let checked_inputs_rec = crate::probe::record();
     let mut lq = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Lq);
     let factors = lq_compact_dyn_checked_generic(engine, &mut lq, &input).unwrap();
@@ -309,7 +304,6 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
         &data,
         &regions,
     );
-    assert_eq!(compact_lq_copy_rec.compact_lq_copy().input_pack_calls, 0);
     assert!(data == before);
 }
 

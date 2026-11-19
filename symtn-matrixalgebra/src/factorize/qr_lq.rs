@@ -101,7 +101,9 @@ impl<R, D: FactorScalar> Run<R, D> for op::QrFull {
 /// magnitudes and `q` the phases (see [`diagonal_phase_magnitude_spectra`]).
 /// A lazy adjoint's dense parent is read in place by `adjoint_lq`, which
 /// also receives the adjoint's own layout, on which LQ of the materialized
-/// adjoint would publish.
+/// adjoint would publish. That layout is derived here from the parent's
+/// HomSpace (codomain and domain swapped) on the parent's provider, before
+/// any value scan or lease, so it is the parent's adjoint by construction.
 fn lq_from_source<M, L, E, R, D>(
     engine: &mut dyn Engine,
     lease: L,
@@ -128,6 +130,14 @@ where
         l: FactorOutput::Dense(l),
         q: FactorOutput::Dense(q),
     };
+    let adjoint_space = match &source {
+        FactorSource::AdjointOf { parent } => {
+            let homspace =
+                symtn_tensors::FusionOperand::adjoint(parent.space().space()).logical_homspace();
+            Some(M::authority(parent.space()).output_space(homspace.clone())?)
+        }
+        FactorSource::Dense(_) | FactorSource::Diagonal { .. } => None,
+    };
     factor_from_source(
         engine,
         lease,
@@ -150,14 +160,14 @@ where
             })
         },
         |engine, executor, input| dense_lq(engine, executor, input).map(dense),
-        Some(
-            |engine: &mut dyn Engine,
-             executor: &mut E,
-             parent: &BoundDynamicTensorRef<'_, R, D>,
-             adjoint_space: &BoundDynamicFusionMapSpace<R>| {
-                adjoint_lq(engine, executor, parent, adjoint_space).map(dense)
-            },
-        ),
+        // `None` exactly for a source that never consults the adjoint route.
+        adjoint_space.map(|adjoint_space| {
+            move |engine: &mut dyn Engine,
+                  executor: &mut E,
+                  parent: &BoundDynamicTensorRef<'_, R, D>| {
+                adjoint_lq(engine, executor, parent, &adjoint_space).map(dense)
+            }
+        }),
     )
 }
 
@@ -875,18 +885,21 @@ type ParentRegions = (Arc<[CoupledSectorRegion]>, Vec<usize>);
 /// layout `adjoint`, the parent region it is the adjoint of: same sector,
 /// rows the parent's column trees and columns its row trees, tree for tree.
 ///
-/// Why a `SpaceMismatch`, not a by-tree route: both layouts are canonical,
-/// and a canonical layout enumerates each side's trees by the fusion walk of
-/// that side's legs, so the trees transpose exactly when `adjoint` lays out
-/// the adjoint of the parent's HomSpace. Anything else is a caller passing
-/// another space as the adjoint's.
+/// Why an internal error, not a by-tree route: the adjoint layout is derived
+/// from the parent's swapped HomSpace (`lq_from_source`), both layouts are
+/// canonical, and a canonical layout enumerates each side's trees by the
+/// fusion walk of that side's legs, so the parent's regions transpose the
+/// adjoint's by construction.
 fn adjoint_parent_regions(
     parent: &BlockStructure,
     parent_nout: usize,
     adjoint: &[CoupledSectorRegion],
 ) -> Result<ParentRegions, OperationError> {
-    let mismatch = || OperationError::SpaceMismatch {
-        message: "lazy adjoint layout is not the adjoint of its parent's space",
+    let mismatch = || {
+        debug_assert!(false, "lazy adjoint regions do not transpose the parent's");
+        OperationError::InvalidArgument {
+            message: "internal lazy adjoint layout invariant violated (regions do not transpose the parent's); please report this",
+        }
     };
     let regions = input_regions(parent, parent_nout)?;
     if regions.len() != adjoint.len() {

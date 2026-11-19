@@ -5,28 +5,6 @@ use super::*;
 use crate::su2::su2_rule;
 
 #[test]
-fn eigh_canonical_layout_skips_input_pack_and_vector_scatter() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: canonical EIGH reads source regions and writes final eigenvector regions directly.
-    let rule = ZNFusionRule::new(2).unwrap();
-    let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let eigh_copy_rec = crate::probe::record();
-    eigh_full(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
-    )
-    .unwrap();
-
-    assert_eq!(
-        eigh_copy_rec.eigh_copy(),
-        crate::probe::EighCopyProbe::default()
-    );
-}
-
-#[test]
 fn checked_only_generic_eigh_validates_every_region_before_dense_work() {
     let (space, mut hermitian, _) = generic_values_endomorphism_input();
     let (provider, space) = bind_checked_only(&space);
@@ -403,7 +381,6 @@ fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
         TestTensor::<f64>::from_vec_with_fusion_space(data, tensor.fusion_space().clone()).unwrap();
     let mut dense = ScriptedExecutor::<EighCallSpy>::default();
 
-    let eigh_copy_rec = crate::probe::record();
     let error = eigh_full(
         engine,
         &mut dense,
@@ -418,10 +395,6 @@ fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
         }
     );
     assert_eq!(dense.counts().of(EIGH_ENTRIES), 0);
-    assert_eq!(
-        eigh_copy_rec.eigh_copy(),
-        crate::probe::EighCopyProbe::default()
-    );
 }
 
 #[test]
@@ -950,12 +923,7 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
         nested.encode_component_ids(product_sectors[0], symtn_core::SectorId::new(0)),
         nested.encode_component_ids(product_sectors[1], symtn_core::SectorId::new(1)),
     ];
-    let eigh_copy_rec = crate::probe::record();
     assert_eigh_reconstructs_rule(&nested, &nested_sectors);
-    assert_eq!(
-        eigh_copy_rec.eigh_copy(),
-        crate::probe::EighCopyProbe::default()
-    );
 }
 
 #[test]

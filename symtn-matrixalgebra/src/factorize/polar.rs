@@ -212,10 +212,7 @@ where
             .map(|(w, p)| (FactorOutput::Dense(w), FactorOutput::Dense(p)))
         },
         Some(
-            |engine: &mut dyn Engine,
-             dense: &mut E,
-             parent: &BoundDynamicTensorRef<'_, R, D>,
-             _: &BoundDynamicFusionMapSpace<R>| {
+            |engine: &mut dyn Engine, dense: &mut E, parent: &BoundDynamicTensorRef<'_, R, D>| {
                 polar_dense(
                     engine,
                     dense,

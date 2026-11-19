@@ -2249,8 +2249,7 @@ impl<R, D: FactorScalar> Run<R, D> for op::SvdCompact {
             Some(
                 |engine: &mut dyn Engine,
                  dense: &mut L::Executor,
-                 parent: &BoundDynamicTensorRef<'_, R, D>,
-                 _: &BoundDynamicFusionMapSpace<R>| {
+                 parent: &BoundDynamicTensorRef<'_, R, D>| {
                     M::svd_compact_adjoint_dense(TOKEN, engine, dense, parent)
                 },
             ),
@@ -2293,8 +2292,7 @@ impl<R, D: FactorScalar> Run<R, D> for op::SvdFull {
             Some(
                 |engine: &mut dyn Engine,
                  dense: &mut L::Executor,
-                 parent: &BoundDynamicTensorRef<'_, R, D>,
-                 _: &BoundDynamicFusionMapSpace<R>| {
+                 parent: &BoundDynamicTensorRef<'_, R, D>| {
                     M::svd_full_adjoint_dense(TOKEN, engine, dense, parent)
                 },
             ),

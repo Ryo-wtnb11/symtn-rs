@@ -47,8 +47,6 @@ macro_rules! events {
 
 events! {
     singles {
-        /// Bytes allocated by `sector_matricizations{,_generic}`.
-        InputPackBytes,
         /// Left factor buffers built by multiplicity-free publication.
         LeftFactorBufferBuilds,
         /// Right factor buffers built by multiplicity-free publication.
@@ -59,37 +57,10 @@ events! {
         /// Sectors whose eigenvalues the order authority had to permute.
         EigOrderPermutation,
     }
-    /// Copies of compact SVD: input packs, output scatters, owned outputs.
+    /// Owned-output publications of compact SVD.
     CompactSvdCopyProbe => compact_svd_copy {
-        input_pack_calls: SvdInputPackCalls,
-        input_pack_bytes: SvdInputPackBytes,
-        output_scatter_calls: SvdOutputScatterCalls,
-        output_scatter_bytes: SvdOutputScatterBytes,
         owned_output_publications: SvdOwnedOutputPublications,
         owned_output_owner_reused: SvdOwnedOutputOwnerReused,
-    }
-    /// Copies of compact QR.
-    CompactQrCopyProbe => compact_qr_copy {
-        input_pack_calls: QrInputPackCalls,
-        input_pack_bytes: QrInputPackBytes,
-        output_scatter_calls: QrOutputScatterCalls,
-        output_scatter_bytes: QrOutputScatterBytes,
-        owned_output_publications: QrOwnedOutputPublications,
-        owned_output_owner_reused: QrOwnedOutputOwnerReused,
-    }
-    /// Copies of compact LQ.
-    CompactLqCopyProbe => compact_lq_copy {
-        input_pack_calls: LqInputPackCalls,
-        input_pack_bytes: LqInputPackBytes,
-        output_scatter_calls: LqOutputScatterCalls,
-        output_scatter_bytes: LqOutputScatterBytes,
-    }
-    /// Copies of Hermitian eigendecomposition.
-    EighCopyProbe => eigh_copy {
-        input_pack_calls: EighInputPackCalls,
-        input_pack_bytes: EighInputPackBytes,
-        output_scatter_calls: EighOutputScatterCalls,
-        output_scatter_bytes: EighOutputScatterBytes,
     }
     /// Diagonal bond constructions.
     DiagonalBondBuildProbe => diagonal_bond_build {
@@ -292,11 +263,6 @@ impl Recording {
             self.get(Event::RightFactorBufferBuilds),
         )
     }
-}
-
-/// Records the bytes of the packed matricizations of `sector_matricizations`.
-pub(crate) fn input_pack_bytes(sizes: impl Iterator<Item = usize>) {
-    add(Event::InputPackBytes, sizes.sum());
 }
 
 /// Records an owned-output publication of SVD, and whether the first

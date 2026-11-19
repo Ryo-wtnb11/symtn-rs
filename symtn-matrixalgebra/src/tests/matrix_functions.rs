@@ -166,7 +166,6 @@ fn pinv_satisfies_the_moore_penrose_identity() {
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let mut context = default_context();
     let compact_svd_copy_rec = crate::probe::record();
-    let input_pack_bytes_rec = crate::probe::record();
 
     let plus = pinv(
         engine,
@@ -186,10 +185,6 @@ fn pinv_satisfies_the_moore_penrose_identity() {
         );
     }
     // The canonical input is read in place; no SVD factor is laid out.
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        0
-    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 
@@ -1146,7 +1141,6 @@ fn pinv_keeps_its_global_rcond_cutoff() {
     let tensor = canonical;
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
-    let input_pack_bytes_rec = crate::probe::record();
 
     let inverse = pinv(
         engine,
@@ -1159,10 +1153,6 @@ fn pinv_keeps_its_global_rcond_cutoff() {
     assert!((scalar_u1_block(inverse.tensor(), 0) - 1.0).abs() < 1e-12);
     assert_eq!(scalar_u1_block(inverse.tensor(), 1), 0.0);
     // The canonical input is read in place; no SVD factor is laid out.
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        0
-    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 

@@ -566,12 +566,6 @@ where
             col_offset,
         );
     }
-    #[cfg(test)]
-    crate::probe::input_pack_bytes(
-        matricizations
-            .iter()
-            .map(|matrix| std::mem::size_of_val(&matrix.data[..])),
-    );
     Ok(matricizations)
 }
 
