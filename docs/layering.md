@@ -86,11 +86,22 @@ factorizations, provider resources and backend scheduling.
 
 ### 3. tenferro and strided-rs (dense backend)
 
-Tenferro owns dense tensors, GEMM and grouped GEMM, factorizations, CPU/GPU
-providers, thread control and provider workspace. Strided owns strided
-movement kernels. symtn submits grouped dense jobs or per-sector
-factorizations through these boundaries; it does not embed replacement dense
-kernels in operator code. Report backend gaps to the owning dependency.
+Tenferro owns dense tensors, regular batched GEMM, factorizations, CPU/GPU
+providers, thread control and provider workspace. Irregular batches (one GEMM
+per block, each with its own shape) are outside the tenferro core: they belong
+to the kernel layer beneath it, `cpueinsum::GroupedPlan`. The BLAS provider
+already submits its grouped jobs there. The native provider still runs its own
+grouped loop over tcontract plans (`symtn-dense/src/block_kernel/gemm.rs`)
+until that layer covers per-operand transposition and work-weighted lane
+placement. Strided owns strided movement
+kernels.
+
+symtn submits grouped dense jobs or per-sector factorizations through these
+boundaries. It keeps every symmetry concept (sectors, fusion trees, which block
+jobs to issue) and the caches of plans it reuses across calls. The kernel
+layer sees only offsets, strides, shapes and coefficients. Operator code does
+not embed replacement dense kernels. Report backend gaps to the owning
+dependency.
 
 ## Inside symtn
 
@@ -105,7 +116,7 @@ contract (symtn)
   -> admit spaces and legs (symtn / symtn-core)
   -> contraction route (symtn-tensors)
   -> operand/output tree transforms (symtn-operations)
-  -> grouped block GEMM (symtn-dense -> Tenferro)
+  -> grouped block GEMM (symtn-dense -> tcontract, or cpueinsum for BLAS)
 
 svd / qr / eigh / eig (symtn)
   -> admit leg roles and source
