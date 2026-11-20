@@ -340,8 +340,12 @@ pub(super) fn trace_source<'t, R, D, S>(
     tensor: &'t TensorMap<R, D, S>,
     braiding: symtn_core::BraidingStyleKind,
     pairs: &[(usize, usize)],
-) -> Result<Option<TraceSource<'t, R, D, S>>, Error> {
-    symtn_tensors::require_symmetric_braiding(braiding, symtn_tensors::SymmetricBraidingOp::Trace)?;
+) -> Result<Option<TraceSource<'t, R, D, S>>, Error>
+where
+    R: TypedSectorAdmission,
+    R::Mode: symtn_tensors::BraidingAdmission,
+{
+    symtn_tensors::admit_braiding::<R::Mode>(symtn_tensors::BraidingOp::Trace, braiding)?;
     let Some(mut axes) = trace_pair_axes(tensor.rank(), tensor.codomain_rank(), pairs)? else {
         return Ok(None);
     };

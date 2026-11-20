@@ -51,14 +51,18 @@ impl<E> From<symtn_tensors::OperationError> for GenericTensorError<E> {
     }
 }
 
-/// Whether an error is an axis misuse, which the facade reports in
-/// [`GenericTensorError::Facade`] exactly as the multiplicity-free mode does
-/// (#1873): it is an argument error, not a plan failure. Below the facade it
-/// has one variant per kind (#1989).
-fn is_axis_misuse(error: &OperationError) -> bool {
+/// Whether an error is an axis misuse or a braiding-style refusal, which the
+/// facade reports in [`GenericTensorError::Facade`] exactly as the
+/// multiplicity-free mode reports them in its [`Error`] (#1873): the first is
+/// an argument error and the second a capability boundary of the request,
+/// not a plan failure. Below the facade each has one variant per kind
+/// (#1989).
+fn is_facade_misuse(error: &OperationError) -> bool {
     matches!(
         error,
-        OperationError::InvalidPermutation { .. } | OperationError::InvalidAxisSet { .. }
+        OperationError::InvalidPermutation { .. }
+            | OperationError::InvalidAxisSet { .. }
+            | OperationError::UnsupportedBraidingStyle { .. }
     )
 }
 
@@ -79,7 +83,7 @@ impl<E> From<CheckedGenericStructureError<E>> for GenericTensorError<E> {
 impl<E> From<CheckedGenericPlanError<E>> for GenericTensorError<E> {
     fn from(error: CheckedGenericPlanError<E>) -> Self {
         match error {
-            CheckedGenericPlanError::Operation(operation) if is_axis_misuse(&operation) => {
+            CheckedGenericPlanError::Operation(operation) if is_facade_misuse(&operation) => {
                 Self::Facade(Error::from(operation))
             }
             other => Self::Plan(other),

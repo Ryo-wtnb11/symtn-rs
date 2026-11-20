@@ -12,7 +12,8 @@ pub type FacadeError<R> =
 
 /// Tensor-side layout admission selected by a provider-owned mode.
 #[doc(hidden)]
-pub trait TypedTensorModeDispatch<R>: typed_admission_private::Sealed
+pub trait TypedTensorModeDispatch<R>:
+    typed_admission_private::Sealed + symtn_tensors::BraidingAdmission
 where
     R: TypedSectorAdmission,
 {

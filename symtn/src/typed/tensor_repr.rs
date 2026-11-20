@@ -159,6 +159,18 @@ impl<'a, R, D, S> From<&'a TensorMap<R, D, S>> for TensorRef<'a, R, D, S> {
 }
 
 impl<'a, R, D, S> TensorRef<'a, R, D, S> {
+    /// The operand's `(nout, rank)`, read without resolving it: an adjoint
+    /// exchanges codomain and domain.
+    pub(super) fn logical_shape(self) -> (usize, usize) {
+        let space = self.base.logical_space().space();
+        let nout = if self.adjoint.is_some() {
+            space.nin()
+        } else {
+            space.nout()
+        };
+        (nout, space.rank())
+    }
+
     /// The operand an owned-lazy-adjoint call would have received. A plain
     /// view is its base, unchanged, so `&t` behaves as the owned tensor, including
     /// the owned lazy adjoint's implicit materialization (#1548). An

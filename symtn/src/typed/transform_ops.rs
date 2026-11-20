@@ -458,7 +458,9 @@ where
     /// support the braiding the requested motion needs. The expert layer's own typed errors are the
     /// contract here: re-validating the axes at this layer would be a second
     /// copy of a rule that already exists one call down, free to drift.
-    /// Checked Generic providers report an axis misuse in
+    /// Checked Generic providers report an axis misuse and a non-identity
+    /// permutation their braiding style refuses
+    /// ([`crate::typed::OperationError::UnsupportedBraidingStyle`]) in
     /// [`GenericTensorError::Facade`] with the same [`Error`], and other
     /// failures in [`GenericTensorError::Plan`] with the concrete provider error
     /// preserved as its source. On CUDA a payload of another device or engine
@@ -607,7 +609,7 @@ where
     /// cannot support the requested braiding; this layer does not re-validate
     /// axes. Checked Generic reports an axis misuse in
     /// [`GenericTensorError::Facade`] and other failures in
-    /// [`GenericTensorError::Plan`].
+    /// [`GenericTensorError::Plan`], as for [`Self::permute`].
     pub fn braid(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
@@ -670,8 +672,8 @@ where
     /// owns the validation this facade passes through; an axis misuse is
     /// [`Error::Operation`] with
     /// [`crate::typed::OperationError::InvalidPermutation`]. Checked Generic
-    /// reports an axis misuse in [`GenericTensorError::Facade`] and other
-    /// failures in [`GenericTensorError::Plan`].
+    /// reports these in [`GenericTensorError::Facade`] or
+    /// [`GenericTensorError::Plan`] as for [`Self::permute`].
     pub fn repartition(
         &self,
         cx: &mut (impl ExecContext + ?Sized),

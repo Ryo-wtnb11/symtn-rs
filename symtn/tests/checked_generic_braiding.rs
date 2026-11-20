@@ -1210,87 +1210,16 @@ fn checked_generic_compose_admits_every_braiding_like_tensorkit_mul() {
 }
 
 #[test]
-fn checked_generic_contract_keeps_its_braiding_boundaries() {
+fn checked_generic_contraction_braiding_matrix() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: general `contract` shares the ordinary contraction's
-    // symmetric-braiding boundary, canonical axes included, and the checked
-    // Generic engine keeps Fermionic general contraction explicitly
-    // unsupported (it needs the supertrace twist). `compose` on the same
-    // operands succeeds for every style; bosonic contracts to the hand oracle.
-    let runtime = Runtime::builder().build().unwrap();
-    for (tag, braiding) in [
-        (20, BraidingStyleKind::NoBraiding),
-        (21, BraidingStyleKind::Anyonic),
-        (22, BraidingStyleKind::Bosonic),
-        (23, BraidingStyleKind::Fermionic),
-    ] {
-        let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, 1.0));
-        let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
-        let mut matrix = |offset: f64| -> TensorMap<_, f64> {
-            TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&unit], |_, index| {
-                offset + (2 * index[0] + index[1]) as f64
-            })
-            .unwrap()
-        };
-        let (lhs, rhs) = (matrix(1.0), matrix(5.0));
-        // Hand oracle: the one block is [[1,2],[3,4]]·[[5,6],[7,8]].
-        let expected =
-            TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&unit], |_, index| {
-                [[19.0, 22.0], [43.0, 50.0]][index[0]][index[1]]
-            })
-            .unwrap();
-        assert_eq!(
-            lhs.compose(engine, &rhs).unwrap().dense_data().unwrap(),
-            expected.dense_data().unwrap()
-        );
-        let contract = lhs.contract(
-            engine,
-            &rhs,
-            &ContractSpec {
-                lhs: &[1],
-                rhs: &[0],
-                codomain: &[0],
-                domain: &[1],
-            },
-        );
-        let expected_message = match braiding {
-            BraidingStyleKind::Bosonic => {
-                assert_eq!(
-                    contract.unwrap().dense_data().unwrap(),
-                    expected.dense_data().unwrap()
-                );
-                continue;
-            }
-            BraidingStyleKind::Fermionic => "checked Generic contraction requires Bosonic braiding",
-            _ => symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
-        };
-        let operation = match &contract {
-            Err(GenericTensorError::Facade(Error::Operation(operation))) => &**operation,
-            Err(GenericTensorError::Plan(CheckedGenericPlanError::Operation(operation))) => {
-                operation
-            }
-            other => panic!("{braiding:?}: {:?}", other.as_ref().err()),
-        };
-        assert!(
-            matches!(
-                operation,
-                symtn::typed::OperationError::UnsupportedTensorContractScope { message }
-                    if *message == expected_message
-            ),
-            "{braiding:?}: {operation:?}"
-        );
-    }
-}
-
-#[test]
-fn checked_generic_planar_contract_is_bosonic_only() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: a Bosonic checked provider's planar contraction is its
-    // ordinary contraction; every other style is the typed
-    // `UnsupportedTensorContractScope` (the checked engine has no planar
-    // route), eager and `_into`, with the destination untouched.
+    // What: every checked facade contraction entry decides braiding in one
+    // place, with one typed refusal per (operation, style), in
+    // `GenericTensorError::Facade` and with the destination untouched.
+    // Bosonic contracts, and its planar contraction is the ordinary one;
+    // Fermionic ordinary contraction needs the supertrace twist the checked
+    // engine lacks; a non-symmetric style refuses ordinary contraction, and
+    // the checked engine has no planar route for any non-Bosonic style.
     let runtime = Runtime::builder().build().unwrap();
     let spec = ContractSpec {
         lhs: &[1],
@@ -1298,11 +1227,24 @@ fn checked_generic_planar_contract_is_bosonic_only() {
         codomain: &[0],
         domain: &[1],
     };
-    for (tag, braiding) in [
-        (40, BraidingStyleKind::NoBraiding),
-        (41, BraidingStyleKind::Anyonic),
-        (42, BraidingStyleKind::Fermionic),
-        (43, BraidingStyleKind::Bosonic),
+    const PLANAR: &str = "checked Generic planar contraction requires Bosonic braiding";
+    for (tag, braiding, ordinary) in [
+        (22, BraidingStyleKind::Bosonic, None),
+        (
+            23,
+            BraidingStyleKind::Fermionic,
+            Some("checked Generic contraction requires Bosonic braiding"),
+        ),
+        (
+            21,
+            BraidingStyleKind::Anyonic,
+            Some(symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED),
+        ),
+        (
+            20,
+            BraidingStyleKind::NoBraiding,
+            Some(symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED),
+        ),
     ] {
         let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, 1.0));
         let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
@@ -1313,45 +1255,67 @@ fn checked_generic_planar_contract_is_bosonic_only() {
             .unwrap()
         };
         let (lhs, rhs) = (matrix(1.0), matrix(5.0));
-        let mut destination = matrix(-3.0);
-        let before = destination.dense_data().unwrap().to_vec();
-        let eager = lhs.planar_contract(engine, &rhs, &spec);
-        let into = lhs.planar_contract_into(engine, &rhs, &spec, &mut destination, 1.0, 1.0);
-        if braiding == BraidingStyleKind::Bosonic {
-            assert_eq!(
-                eager.unwrap().dense_data().unwrap(),
+        // Hand oracle: the one block is [[1,2],[3,4]]·[[5,6],[7,8]] =
+        // [[19,22],[43,50]], stored column-major.
+        let oracle = [19.0, 43.0, 22.0, 50.0];
+        let mut destinations = [matrix(-3.0), matrix(-3.0)];
+        let before = destinations[0].dense_data().unwrap().to_vec();
+        let planar = ordinary.map(|_| PLANAR);
+        let [ordinary_dst, planar_dst] = &mut destinations;
+        let cells = [
+            (
+                "contract",
+                ordinary,
                 lhs.contract(engine, &rhs, &spec)
-                    .unwrap()
-                    .dense_data()
-                    .unwrap()
-            );
-            into.unwrap();
-            continue;
-        }
-        for result in [eager.map(drop), into] {
-            let operation = match &result {
-                Err(GenericTensorError::Facade(Error::Operation(operation))) => &**operation,
-                Err(GenericTensorError::Plan(CheckedGenericPlanError::Operation(operation))) => {
-                    operation
+                    .map(|out| out.dense_data().unwrap().to_vec()),
+            ),
+            (
+                "contract_into",
+                ordinary,
+                lhs.contract_into(engine, &rhs, &spec, ordinary_dst, 1.0, 0.0)
+                    .map(|()| ordinary_dst.dense_data().unwrap().to_vec()),
+            ),
+            (
+                "planar_contract",
+                planar,
+                lhs.planar_contract(engine, &rhs, &spec)
+                    .map(|out| out.dense_data().unwrap().to_vec()),
+            ),
+            (
+                "planar_contract_into",
+                planar,
+                lhs.planar_contract_into(engine, &rhs, &spec, planar_dst, 1.0, 0.0)
+                    .map(|()| planar_dst.dense_data().unwrap().to_vec()),
+            ),
+        ];
+        for (entry, expected, result) in cells {
+            match (expected, result) {
+                (None, Ok(data)) => assert_eq!(data, oracle, "{braiding:?} {entry}"),
+                (Some(message), Err(GenericTensorError::Facade(Error::Operation(operation)))) => {
+                    assert!(
+                        matches!(
+                            *operation,
+                            OperationError::UnsupportedTensorContractScope { message: actual }
+                                if actual == message
+                        ),
+                        "{braiding:?} {entry}: {operation:?}"
+                    )
                 }
-                other => panic!("{braiding:?}: {:?}", other.as_ref().err()),
-            };
-            assert!(
-                matches!(
-                    operation,
-                    symtn::typed::OperationError::UnsupportedTensorContractScope { .. }
-                ),
-                "{braiding:?}: {operation:?}"
-            );
+                (_, other) => panic!("{braiding:?} {entry}: {:?}", other.err()),
+            }
         }
-        let after = destination.dense_data().unwrap();
-        assert!(
-            before
-                .iter()
-                .zip(after.iter())
-                .all(|(x, y)| x.to_bits() == y.to_bits()),
-            "{braiding:?}: destination written"
-        );
+        if ordinary.is_some() {
+            for destination in &destinations {
+                let after = destination.dense_data().unwrap();
+                assert!(
+                    before
+                        .iter()
+                        .zip(after.iter())
+                        .all(|(x, y)| x.to_bits() == y.to_bits()),
+                    "{braiding:?}: destination written"
+                );
+            }
+        }
     }
 }
 
@@ -1363,7 +1327,9 @@ fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
     // other than the current one needs a symmetric braiding. The anyonic
     // provider refuses it with the permute's typed error before any
     // factorization work, while its current split, which needs no braid,
-    // factorizes.
+    // factorizes. A braiding-style refusal is a facade capability boundary,
+    // so a non-identity `permute` and a moved split both report it in
+    // `GenericTensorError::Facade`, as the multiplicity-free mode does.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(40, BraidingStyleKind::Anyonic, 1.0));
     let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
@@ -1389,6 +1355,22 @@ fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
         t.left_null(engine, &[1], &[0]).err().unwrap(),
     ] {
         assert!(anyonic_permute(&error), "{error:?}");
+    }
+    for error in [
+        t.permute(engine, &[1], &[0]).err().unwrap(),
+        t.svd_compact(engine, &[1], &[0]).err().unwrap(),
+    ] {
+        assert!(
+            matches!(
+                &error,
+                GenericTensorError::Facade(Error::Operation(operation))
+                    if matches!(**operation, OperationError::UnsupportedBraidingStyle {
+                        style: BraidingStyleKind::Anyonic,
+                        ..
+                    })
+            ),
+            "{error:?}"
+        );
     }
 
     let square: TensorMap<_, f64> =

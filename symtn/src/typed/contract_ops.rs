@@ -205,6 +205,13 @@ where
     /// Behaviour change (#1372):
     /// a canonical `NoBraiding` contraction was accepted before.
     ///
+    /// Checked Generic providers admit ordinary contraction for Bosonic
+    /// braiding only: the checked engine has no supertrace twist, so a
+    /// Fermionic provider is refused too. The decision depends only on the
+    /// admission mode and the provider's braiding style, never on storage
+    /// form: it is made before `other` is resolved and before the compact
+    /// arms below.
+    ///
     /// For fermionic symmetric braiding this **twists**
     /// dual contracted legs with the fermionic supertrace twist — unlike
     /// composition (TensorKit `A * B` / `mul!`), which never does. Bosonic
@@ -254,11 +261,8 @@ where
     /// mode's own tree transform, so in checked Generic mode a provider
     /// failure there is reported as [`GenericTensorError::Plan`] from that
     /// permute staging, in place of the contraction planning the dense route
-    /// would have run. One outcome is storage-dependent, because the arm
-    /// answers what TensorKit computes where the dense route is unsupported:
-    /// a checked Generic fermionic provider (dense checked contraction
-    /// requires Bosonic braiding). A symmetric rule with complex symbols
-    /// takes both routes, like a real-symbol one.
+    /// would have run. A symmetric rule with complex symbols takes both
+    /// routes, like a real-symbol one.
     ///
     /// The result is bound to `self`'s provider allocation, the same
     /// left-authority rule [`Self::zeros`] uses for its first leg: the two
@@ -320,7 +324,10 @@ where
     ///   runtimes.
     /// - [`Error::Operation`] with
     ///   [`crate::typed::OperationError::UnsupportedTensorContractScope`] for
-    ///   non-symmetric (anyonic or `NoBraiding`) providers, whatever the axes.
+    ///   non-symmetric (anyonic or `NoBraiding`) providers, whatever the axes,
+    ///   and for a checked Generic Fermionic provider (in
+    ///   [`GenericTensorError::Facade`]), before any other check on `other`
+    ///   and before a borrowed adjoint view is resolved.
     /// - [`Error::Operation`] with
     ///   [`crate::typed::OperationError::InvalidAxisSet`] (`tensor` `"lhs"` /
     ///   `"rhs"`) for a malformed contracted-axis list, and with
@@ -376,19 +383,17 @@ where
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
+        let other = other.into();
         // The one check the expert layer cannot make: it never sees the two
         // runtimes, and mixing execution state across them is a trust-boundary
         // violation rather than an algebra error. Scalar type and placement
         // need no arm here — `D` and `S` are type parameters.
-        if !self.runtime.same_runtime(&other.runtime) {
+        if !self.runtime.same_runtime(&other.base.runtime) {
             return Err(Error::RuntimeMismatch.into());
         }
-        reject_non_symmetric_contraction(<R::Mode as TypedTensorModeDispatch<R>>::braiding_style(
-            self.provider(),
-        ))
-        .map_err(Error::from)?;
+        self.admit_braiding(BraidingOp::Contraction)?;
+        let other = other.operand()?;
+        let other = &*other;
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
             if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
                 // The compact arm multiplies spectra itself, before any
@@ -456,8 +461,8 @@ where
     ///
     /// [`Error::RuntimeMismatch`]; then
     /// [`crate::typed::OperationError::UnsupportedTensorContractScope`] for
-    /// non-symmetric (anyonic or `NoBraiding`) providers, as for
-    /// [`Self::contract`]; [`Error::RuleMismatch`];
+    /// non-symmetric (anyonic or `NoBraiding`) and checked Generic
+    /// Fermionic providers, as for [`Self::contract`]; [`Error::RuleMismatch`];
     /// [`Error::InvalidArgument`] for a destination that is not owned dense
     /// storage of its placement or aliases an operand (a lazy adjoint's
     /// parent included); then the contraction's own errors, as for
@@ -513,17 +518,15 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
-        if !self.runtime.same_runtime(&other.runtime)
+        let other = other.into();
+        if !self.runtime.same_runtime(&other.base.runtime)
             || !self.runtime.same_runtime(&destination.runtime)
         {
             return Err(Error::RuntimeMismatch.into());
         }
-        reject_non_symmetric_contraction(<R::Mode as TypedTensorModeDispatch<R>>::braiding_style(
-            self.provider(),
-        ))
-        .map_err(Error::from)?;
+        self.admit_braiding(BraidingOp::Contraction)?;
+        let other = other.operand()?;
+        let other = &*other;
         // The held admitted identities: provider-free, and the provider's
         // own by #2046.
         let identity = self.logical_space().space().admission().rule_identity();
@@ -565,28 +568,40 @@ where
 
     /// The admitted orders of a planar `spec` against `other`, after the
     /// checks `planar_contract` shares with `contract`: placement (Host
-    /// only) and the planarity of `spec`.
+    /// only) and the planarity of `spec`. Both read `other` unresolved, so
+    /// they and the braiding admission precede a borrowed adjoint's
+    /// resolution.
     fn planar_orders(
         &self,
-        other: &Self,
+        other: TensorRef<'_, R, D, S>,
         spec: &ContractSpec<'_>,
     ) -> Result<symtn_tensors::PlanarContractOrders, Error> {
-        if S::as_host(EXEC, self).is_none() || S::as_host(EXEC, other).is_none() {
+        if S::as_host(EXEC, self).is_none() || S::as_host(EXEC, other.base).is_none() {
             return Err(Error::UnsupportedOnDevice(
                 "planar_contract has no device route; transfer with to_host()".to_owned(),
             ));
         }
-        let shape = |tensor: &Self| {
-            let space = tensor.logical_space().space();
-            (space.nout(), space.rank())
-        };
+        let space = self.logical_space().space();
         Ok(symtn_tensors::PlanarContractOrders::validate(
-            shape(self),
-            shape(other),
+            (space.nout(), space.rank()),
+            other.logical_shape(),
             spec.lhs,
             spec.rhs,
             &spec.output_axes(),
             spec.codomain.len(),
+        )?)
+    }
+
+    /// The one braiding admission ([`symtn_tensors::admit_braiding`]) of the
+    /// contraction entries, from `self`'s provider style alone.
+    ///
+    /// Why each entry calls it before resolving `other`: a borrowed adjoint
+    /// view resolves through fallible provider work, which must not decide
+    /// the outcome before the braiding refusal does.
+    fn admit_braiding(&self, op: BraidingOp) -> Result<(), Error> {
+        Ok(symtn_tensors::admit_braiding::<R::Mode>(
+            op,
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider()),
         )?)
     }
 
@@ -639,7 +654,8 @@ where
     /// Frobenius–Schur coefficients only) plus `Σ_c m_c n_c k_c` GEMM work.
     ///
     /// Host storage only; checked Generic providers are admitted for Bosonic
-    /// braiding (the ordinary contraction).
+    /// braiding only (the ordinary contraction): the checked engine has no
+    /// planar route.
     ///
     /// # Errors
     ///
@@ -654,9 +670,13 @@ where
     ///   [`crate::typed::OperationError::InvalidPermutation`] when the output
     ///   is not a rotation of the open boundary. All are reported before any
     ///   provider work.
+    /// - Then, for a non-Bosonic checked Generic provider,
+    ///   [`crate::typed::OperationError::UnsupportedTensorContractScope`] in
+    ///   [`GenericTensorError::Facade`]. Placement, planarity and this
+    ///   braiding admission all read `other` without resolving a borrowed
+    ///   adjoint view.
     /// - Then the errors of [`Self::contract`] for the contracted legs and
-    ///   rule identities; a non-Bosonic checked Generic provider is
-    ///   [`crate::typed::OperationError::UnsupportedTensorContractScope`].
+    ///   rule identities.
     ///
     /// ```
     /// use std::sync::Arc;
@@ -702,15 +722,18 @@ where
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
-        if !self.runtime.same_runtime(&other.runtime) {
+        let other = other.into();
+        if !self.runtime.same_runtime(&other.base.runtime) {
             return Err(Error::RuntimeMismatch.into());
         }
+        // Placement and planarity precede the braiding admission.
         let orders = self.planar_orders(other, spec)?;
+        self.admit_braiding(BraidingOp::PlanarContraction)?;
         if self.is_bosonic() {
             return self.contract(&mut *engine, other, spec);
         }
+        let other = other.operand()?;
+        let other = &*other;
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
             engine,
             self,
@@ -741,9 +764,12 @@ where
     /// [`Error::RuntimeMismatch`]; [`Error::RuleMismatch`];
     /// [`Error::InvalidArgument`] for a destination that is not owned dense
     /// storage or aliases an operand; [`Error::UnsupportedOnDevice`] for CUDA
-    /// storage; then the planarity errors of [`Self::planar_contract`]; then the
-    /// remaining errors of [`Self::contract_into`] (`SpaceMismatch`, length,
-    /// [`Error::DestinationShared`]).
+    /// storage; then the planarity errors of [`Self::planar_contract`]; then
+    /// its braiding refusal of a non-Bosonic checked Generic provider. Every
+    /// check up to and including that braiding admission reads a borrowed
+    /// adjoint view unresolved. Then the remaining errors of
+    /// [`Self::contract_into`] (`SpaceMismatch`, length,
+    /// [`Error::DestinationShared`]), which run after the view is resolved.
     ///
     /// # Failure
     ///
@@ -772,15 +798,18 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
-        if !self.runtime.same_runtime(&other.runtime)
+        let other = other.into();
+        let base = other.base;
+        if !self.runtime.same_runtime(&base.runtime)
             || !self.runtime.same_runtime(&destination.runtime)
         {
             return Err(Error::RuntimeMismatch.into());
         }
+        // An adjoint view has its base's rule identity, and aliases a dense
+        // destination exactly when its base does, so these checks read the
+        // base before it is resolved.
         let identity = self.logical_space().space().admission().rule_identity();
-        if identity != other.logical_space().space().admission().rule_identity()
+        if identity != base.logical_space().space().admission().rule_identity()
             || identity
                 != destination
                     .logical_space()
@@ -791,11 +820,15 @@ where
             return Err(Error::RuleMismatch.into());
         }
         destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
-        destination_precheck(destination, &other.storage_body().data, S::NOUN)?;
+        destination_precheck(destination, &base.storage_body().data, S::NOUN)?;
+        // Placement and planarity precede the braiding admission.
         let orders = self.planar_orders(other, spec)?;
+        self.admit_braiding(BraidingOp::PlanarContraction)?;
         if self.is_bosonic() {
             return self.contract_into(&mut *engine, other, spec, destination, alpha, beta);
         }
+        let other = other.operand()?;
+        let other = &*other;
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
             engine,
             self,
