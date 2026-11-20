@@ -5,6 +5,8 @@ calculation, for tensor4all/cpueinsum-benchmark#18.
 
 ## Files
 
+The digest below is for the capture host (Apple M4 Max, arm64, 4 threads). The threaded SVD can truncate differently on other hardware, so regenerate the corpus and its digest on the host that runs the timing campaign instead of reusing this one.
+
 | file | content | sha256 |
 |---|---|---|
 | `itebd-heff-b705d809-t4.jsonl.gz` | **main corpus**: iTEBD + H_eff on iTEBD-converged bonds | `3f48a98a7208dc6a3bf6482f567b4e64571333e50724b6f7a209d36336114ed9` |
