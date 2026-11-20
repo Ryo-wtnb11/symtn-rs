@@ -116,7 +116,7 @@ impl<C> CoreRoute<C> {
 }
 
 /// A canonical-core miss of one contraction request: the input of
-/// `plan_contract_beyond_core` for that same request, carrying whether the
+/// `plan_contract_beyond_core_in` for that same request, carrying whether the
 /// requested order had a zero-copy candidate (the core rung then declined
 /// it), so the planner walks the requested order once.
 #[doc(hidden)]
@@ -173,8 +173,7 @@ impl<C: DenseBlockScalar> StorageContractResolution<C> {
     /// each must have a device zero region (unsigned strides and offset).
     /// Run by every CUDA entry before device work.
     #[cfg(feature = "cuda")]
-    #[doc(hidden)]
-    pub fn admit_cuda_inactive_regions(&self) -> Result<(), OperationError>
+    pub(crate) fn admit_cuda_inactive_regions(&self) -> Result<(), OperationError>
     where
         C: Copy + PartialEq + num_traits::One,
     {
@@ -183,12 +182,13 @@ impl<C: DenseBlockScalar> StorageContractResolution<C> {
         )
     }
 
+    #[cfg(test)]
     /// True when the route needs the fermionic contraction twist of one
     /// materialized operand: some non-empty block of that operand's
     /// transformed source has `θ_b ≠ 1`. Host and device alike fold `θ_b`
     /// into the source-transform move writing block `b`. A twist that falls
     /// only on zero-element blocks scales no data and reports `false`.
-    pub fn requires_source_twist(&self) -> bool {
+    pub(crate) fn requires_source_twist(&self) -> bool {
         match &self.route {
             ContractRoute::Core { .. } | ContractRoute::CopyC(_) => false,
             ContractRoute::DynamicTree(artifact) => artifact.requires_source_twist(),

@@ -437,8 +437,9 @@ where
             .map_err(<Pair<L, R> as ProductAdmission<L::Error, R::Error>>::codec)
     }
 
+    #[cfg(test)]
     /// Decodes component ids, or returns `None` for an invalid product id.
-    pub fn decode_component_ids(&self, sector: SectorId) -> Option<(SectorId, SectorId)> {
+    pub(crate) fn decode_component_ids(&self, sector: SectorId) -> Option<(SectorId, SectorId)> {
         P::decode(sector)
     }
 }

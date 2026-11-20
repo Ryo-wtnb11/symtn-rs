@@ -148,13 +148,13 @@ impl<'homspace, 'structure> StructurallyValidatedFusionTreeSubset<'homspace, 'st
     }
 }
 
+#[cfg(test)]
 /// Validates that `larger` is the supplied `smaller` layout with one canonical
 /// unit leg inserted in storage order.
 ///
 /// Both structures must come from the ordinary layout authority; this proof
 /// compares supplied metadata and does not enumerate missing blocks.
-#[doc(hidden)]
-pub fn validate_unit_layout_correspondence<R>(
+pub(crate) fn validate_unit_layout_correspondence<R>(
     rule: &R,
     smaller: (&FusionTreeHomSpace, &BlockStructure),
     larger: (&FusionTreeHomSpace, &BlockStructure),

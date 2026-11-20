@@ -2,9 +2,11 @@ use std::hash::Hash;
 use std::sync::Arc;
 use symtn_dense::Engine;
 
+#[cfg(test)]
+use symtn_core::Placement;
 use symtn_core::{
     BlockStructure, CheckedFusionAlgebra, MultiplicityFreeAdmissionMode,
-    MultiplicityFreeRigidSymbols, Placement,
+    MultiplicityFreeRigidSymbols,
 };
 
 use crate::mode::{
@@ -136,7 +138,7 @@ where
     BT: TreeTransformBackend<D, C>,
     BC: TensorContractBackend<D, C>,
 {
-    pub fn with_parts(
+    pub(crate) fn with_parts(
         tree_context: TreeTransformExecutionContext<D, RuleKey, C, BT>,
         contract_backend: BC,
         contract_workspace: BC::Workspace,
@@ -174,31 +176,10 @@ where
         &self.contract_backend
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn contract_backend_mut(&mut self) -> &mut BC {
+    pub(crate) fn contract_backend_mut(&mut self) -> &mut BC {
         &mut self.contract_backend
-    }
-
-    #[inline]
-    pub fn contract_workspace(&self) -> &BC::Workspace {
-        &self.contract_workspace
-    }
-
-    /// Lends the grow-only Host buffer that holds TensorKit
-    /// `blas_contract!`'s `copyC` temporary: the default-output contraction
-    /// an eager caller then permutes into its own result. It lives with this
-    /// context's other execution scratch and is bounded the same way (the
-    /// largest temporary seen by this context). Return it with
-    /// [`Self::restore_copy_c_scratch`]; a buffer lost to an error is simply
-    /// reallocated by the next caller.
-    #[doc(hidden)]
-    pub fn take_copy_c_scratch(&mut self) -> HostScratchBuffer<D> {
-        std::mem::take(&mut self.copy_c_scratch)
-    }
-
-    #[doc(hidden)]
-    pub fn restore_copy_c_scratch(&mut self, scratch: HostScratchBuffer<D>) {
-        self.copy_c_scratch = scratch;
     }
 
     #[cfg(test)]
@@ -298,38 +279,45 @@ where
     BC: TensorContractBackend<D, C> + ReportsPlacement,
     BC::Workspace: ReportsPlacement,
 {
+    #[cfg(test)]
     #[inline]
-    pub fn tree_backend_placement(&self) -> Placement {
+    pub(crate) fn tree_backend_placement(&self) -> Placement {
         self.tree_context.backend_placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn tree_workspace_placement(&self) -> Placement {
+    pub(crate) fn tree_workspace_placement(&self) -> Placement {
         self.tree_context.workspace_placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn contract_backend_placement(&self) -> Placement {
+    pub(crate) fn contract_backend_placement(&self) -> Placement {
         self.contract_backend.placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn contract_workspace_placement(&self) -> Placement {
+    pub(crate) fn contract_workspace_placement(&self) -> Placement {
         self.contract_workspace.placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn fusion_block_workspace_placement(&self) -> Placement {
+    pub(crate) fn fusion_block_workspace_placement(&self) -> Placement {
         self.fusion_block_workspace.placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn fusion_scratch_workspace_placement(&self) -> Placement {
+    pub(crate) fn fusion_scratch_workspace_placement(&self) -> Placement {
         self.fusion_scratch.placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn is_host_context(&self) -> bool {
+    pub(crate) fn is_host_context(&self) -> bool {
         self.tree_context.is_host_context()
             && self.contract_backend.is_host_placement()
             && self.contract_workspace.is_host_placement()
@@ -577,6 +565,7 @@ where
                 rhs,
                 axes,
             )?,
+            #[cfg(test)]
             PlannedContraction::Compose => plan_compose_in::<M, R>(target, lhs, rhs)?,
         };
         #[cfg(test)]
@@ -594,6 +583,7 @@ where
         Ok(resolution)
     }
 
+    #[cfg(test)]
     /// Categorical map composition on the coupled-sector block matrices,
     /// TensorKit `mul!`, into an existing destination: `dst = alpha · (lhs ∘
     /// rhs) + init(dst)`, the composition sibling of
@@ -602,9 +592,8 @@ where
     /// plans through [`plan_compose`], as `ComposePlan` does, so the
     /// destination must have its space's canonical layout. Lazy adjoint
     /// operands stay storage-conjugate; neither is materialized.
-    #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
-    pub fn tensorcompose_planned_into<R>(
+    pub(crate) fn tensorcompose_planned_into<R>(
         &mut self,
         engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
@@ -632,66 +621,7 @@ where
         .map(drop)
     }
 
-    /// [`Self::tensorcontract_in`] writing into an existing destination: the
-    /// same staging, then the space check against `dst_space` before
-    /// `dst_data` runs the caller's remaining checks, then `alpha · op +
-    /// beta · dst` and the same commit. Any error before the write leaves the
-    /// destination untouched; the commit follows the write, so a failed call
-    /// publishes nothing (#2063).
-    ///
-    /// Why the match sits before planning in both modes: no contraction
-    /// staging step is deferred to planning on a memo hit, so the reported
-    /// error does not depend on cache history.
-    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-    pub(super) fn tensorcontract_into_in<'a, 'd, St, R, E>(
-        &mut self,
-        engine: &mut dyn Engine,
-        (lhs_authority, lhs, lhs_data): (
-            &'a BoundDynamicFusionMapSpace<R>,
-            FusionOperand<'a>,
-            &[D],
-        ),
-        (rhs_authority, rhs, rhs_data): (
-            &'a BoundDynamicFusionMapSpace<R>,
-            FusionOperand<'a>,
-            &[D],
-        ),
-        request: ContractRequest<'a>,
-        dst_space: &DynamicFusionMapSpace,
-        dst_data: impl FnOnce() -> Result<&'d mut [D], E>,
-        alpha: D,
-        beta: D,
-    ) -> Result<(), E>
-    where
-        St: ContractStageParts<'a, R>,
-        St::M: PlanningAlgebra<R, Scalar = C>,
-        D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + 'd,
-        E: From<ContractStageError<'a, R, St>> + From<OperationError>,
-    {
-        let mut staged = stage_contract::<R, St>(
-            (lhs_authority, lhs, lhs_data.len()),
-            (rhs_authority, rhs, rhs_data.len()),
-            request,
-        )?;
-        // Why `E` directly: a destination mismatch is the caller's argument
-        // error in every mode, never a checked plan failure.
-        staged_require_destination(&staged, dst_space)?;
-        let dst = dst_data()?;
-        let resolution = self.plan_staged::<R, St>(engine, &mut staged)?;
-        self.execute_contract_resolution_host(
-            engine,
-            &resolution,
-            (staged_destination(&staged).structure(), dst),
-            (lhs.storage_space().structure(), lhs_data),
-            (rhs.storage_space().structure(), rhs_data),
-            alpha,
-            ContractDestinationInit::Axpby(beta),
-        )
-        .map_err(ContractStageError::<'a, R, St>::from)?;
-        staged_commit(staged, &resolution)?;
-        Ok(())
-    }
-
+    #[cfg(test)]
     /// The planner's ladder over a staged contraction: the lock-free
     /// canonical core, then the rest under this context's planning state or
     /// the call's transaction.
@@ -781,7 +711,7 @@ where
     ///
     /// The ladder: the canonical fully-direct core
     /// ([`try_compile_storage_contract_core_route`]), then
-    /// [`Self::plan_contract_beyond_core`] — TensorKit's `copyC`, then the
+    /// the rest of the ladder (`plan_contract_beyond_core_in`) — TensorKit's `copyC`, then the
     /// `DynamicTree` artifact. A caller that wants the canonical route
     /// without taking a context lock calls the two halves itself, in that
     /// order. The requested order's zero-copy candidates are walked once.
@@ -836,46 +766,6 @@ where
             lhs,
             rhs,
             axes,
-        )
-    }
-
-    /// [`Self::plan_contract`] after its canonical core declined (`miss`, from
-    /// [`try_compile_storage_contract_core_route`] on the same request):
-    /// TensorKit's `copyC` (`blas_contract!`, `tensoroperations.jl:436-446`
-    /// @cfaa073) when [`copy_c_order`](super::resolution::copy_c_order) takes it
-    /// — a zero-copy core into a temporary in its own default output, then one
-    /// permute — else the `DynamicTree` artifact.
-    ///
-    /// Why the core precedes `copyC`: a contraction that has the canonical
-    /// core needs no output permute (`copy_c_order`
-    /// returns `None` for it), so TensorKit's memcost never charges it `dim(C)`.
-    ///
-    /// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
-    #[doc(hidden)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn plan_contract_beyond_core<R>(
-        &mut self,
-        engine: &mut dyn Engine,
-        miss: CoreMiss,
-        dst_space: &BoundDynamicFusionMapSpace<R>,
-        lhs: FusionOperand<'_>,
-        rhs: FusionOperand<'_>,
-        lhs_axes: &[usize],
-        rhs_axes: &[usize],
-        output_axes: &[usize],
-    ) -> Result<StorageContractResolution<C>, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
-        D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
-    {
-        plan_contract_beyond_core_in::<MultiplicityFreeAdmissionMode, R>(
-            engine,
-            self.tree_context.planning(),
-            miss,
-            PlanTarget::bound(dst_space),
-            lhs,
-            rhs,
-            (lhs_axes, rhs_axes, output_axes),
         )
     }
 
@@ -1052,6 +942,7 @@ where
     E: symtn_dense::DenseExecutor,
     BC: TensorContractBackend<D, C>,
 {
+    #[cfg(test)]
     /// The one owned Host contraction and composition of both modes, the
     /// steps every storage runs ([`StagedContract`]): stage the destination
     /// (multiplicity-free derives it; checked Generic admits the operands and
@@ -1168,6 +1059,7 @@ fn lazy_operand(space: &DynamicFusionMapSpace, adjoint: bool) -> FusionOperand<'
 #[derive(Clone, Copy)]
 pub(crate) enum PlannedContraction<'s> {
     Contract((&'s [usize], &'s [usize], &'s [usize])),
+    #[cfg(test)]
     Compose,
 }
 
@@ -1552,7 +1444,8 @@ where
 /// over the parent buffers — lazy adjoints as GEMM operand flags and a
 /// uniform fermionic twist folded into per-job alpha. A [`CoreRoute::Miss`]
 /// is the input of the rest of the planner
-/// ([`TensorContractFusionExecutionContext::plan_contract_beyond_core`]).
+/// (`plan_contract_beyond_core_in`, behind
+/// [`TensorContractFusionExecutionContext::plan_contract`]).
 ///
 /// Free function, not a context method: this half resolves entirely from
 /// the operands, so the canonical device contraction takes no Runtime

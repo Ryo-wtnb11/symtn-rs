@@ -65,9 +65,9 @@ mod structure;
 
 #[cfg(test)]
 pub(crate) use backend::tensorcontract_structure_with_dense_executor_raw;
+pub use backend::TensorContractBackend;
 #[cfg(test)]
 pub(crate) use backend::TensorContractWorkspace;
-pub use backend::{HostTensorContractBackend, TensorContractBackend};
 #[cfg(test)]
 pub use context::tensorcontract_fusion_dyn_prelowered_direct_on_storage;
 pub use context::StagedContract;

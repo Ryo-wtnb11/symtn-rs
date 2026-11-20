@@ -396,8 +396,10 @@ impl SectorStructure {
 
     /// The block whose tree pair equals `pair`, searched per side by
     /// content: a borrowed tree never shares this structure's arena.
-    #[doc(hidden)]
-    pub fn find_fusion_tree_pair_view_index(&self, pair: FusionTreePairRef<'_>) -> Option<usize> {
+    pub(crate) fn find_fusion_tree_pair_view_index(
+        &self,
+        pair: FusionTreePairRef<'_>,
+    ) -> Option<usize> {
         if self.key_kind != Some(BlockKeyKind::FusionTree) {
             return None;
         }
@@ -424,8 +426,9 @@ impl SectorStructure {
         self.find_tree_rows(logical_key.domain_tree(), logical_key.codomain_tree())
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn has_compact_lookup(&self) -> bool {
+    pub(crate) fn has_compact_lookup(&self) -> bool {
         self.compact_lookup.is_some()
     }
 
@@ -434,7 +437,8 @@ impl SectorStructure {
         &self.sorted_indices
     }
 
-    pub fn pair_indices_from(&self, src: &Self) -> Result<Vec<usize>, CoreError> {
+    #[cfg(test)]
+    pub(crate) fn pair_indices_from(&self, src: &Self) -> Result<Vec<usize>, CoreError> {
         if self.block_count() != src.block_count() {
             return Err(CoreError::BlockCountMismatch {
                 expected: self.block_count(),
@@ -470,6 +474,7 @@ impl SectorStructure {
         self.pair_indices_from_sorted(src)
     }
 
+    #[cfg(test)]
     fn pair_indices_from_sorted(&self, src: &Self) -> Result<Vec<usize>, CoreError> {
         let mut src_for_dst = vec![usize::MAX; self.block_count()];
         let mut dst_pos = 0usize;

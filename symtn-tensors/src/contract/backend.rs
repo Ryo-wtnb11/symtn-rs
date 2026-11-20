@@ -26,10 +26,8 @@ use super::structure::{
 
 /// Tensor-contraction execution contract over host-accessible data.
 ///
-/// The raw replay methods take host slices. Code that specifically depends on
-/// this host-slice contract may use `HostTensorContractBackend`. Placement-aware
-/// (device or distributed) contraction traits do not inherit from this raw-slice
-/// API.
+/// The raw replay methods take host slices. Placement-aware (device or
+/// distributed) contraction traits do not inherit from this raw-slice API.
 pub trait TensorContractBackend<D, C = f64>
 where
     D: DenseBlockScalar + ConjugateValue + RecouplingCoefficientAction<C>,
@@ -193,27 +191,6 @@ where
             engine, segments, lhs_data, rhs_data, jobs, ops, alpha, written,
         )
     }
-}
-
-/// Explicit marker for the host-slice tensor-contract backend family.
-///
-/// `TensorContractBackend` carries the methods; this marker means “implements the
-/// host-slice replay contract,” not necessarily “physically CPU-native.”
-/// Device or distributed contraction backends use separate placement-aware
-/// execution traits.
-pub trait HostTensorContractBackend<D, C = f64>: TensorContractBackend<D, C>
-where
-    D: DenseBlockScalar + ConjugateValue + RecouplingCoefficientAction<C>,
-    C: Copy + One,
-{
-}
-
-impl<B, D, C> HostTensorContractBackend<D, C> for B
-where
-    B: TensorContractBackend<D, C> + ?Sized,
-    D: DenseBlockScalar + ConjugateValue + RecouplingCoefficientAction<C>,
-    C: Copy + One,
-{
 }
 
 /// Host scratch/replay workspace backed by `Vec<T>`.
@@ -774,18 +751,9 @@ mod tests {
     {
     }
 
-    fn assert_host_tensor_contract_backend<B, D, C>()
-    where
-        B: HostTensorContractBackend<D, C>,
-        D: DenseBlockScalar + ConjugateValue + RecouplingCoefficientAction<C>,
-        C: Copy + One,
-    {
-    }
-
     #[test]
-    fn dense_tree_transform_operations_implements_both_contract_backend_traits() {
+    fn dense_tree_transform_operations_implements_contract_backend() {
         assert_tensor_contract_backend::<DenseTreeTransformOperations, f64, f64>();
-        assert_host_tensor_contract_backend::<DenseTreeTransformOperations, f64, f64>();
     }
 
     #[test]

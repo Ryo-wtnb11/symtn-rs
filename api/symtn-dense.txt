@@ -324,14 +324,10 @@ pub fn symtn_dense::DefaultDenseExecutor::svd_vals(&mut self, &mut dyn tenferro_
 pub fn symtn_dense::DefaultDenseExecutor::with_linalg_scope(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut symtn_dense::DenseLinalgScopeBody<'_>) -> core::result::Result<(), symtn_dense::DenseError>
 pub struct symtn_dense::DenseDotConfig
 impl symtn_dense::DenseDotConfig
-pub fn symtn_dense::DenseDotConfig::lhs_batch_dims(&self) -> &[usize]
 pub fn symtn_dense::DenseDotConfig::lhs_conj(&self) -> bool
-pub fn symtn_dense::DenseDotConfig::lhs_contracting_dims(&self) -> &[usize]
 pub fn symtn_dense::DenseDotConfig::matmul() -> Self
 pub fn symtn_dense::DenseDotConfig::new(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>) -> Self
-pub fn symtn_dense::DenseDotConfig::rhs_batch_dims(&self) -> &[usize]
 pub fn symtn_dense::DenseDotConfig::rhs_conj(&self) -> bool
-pub fn symtn_dense::DenseDotConfig::rhs_contracting_dims(&self) -> &[usize]
 pub fn symtn_dense::DenseDotConfig::with_conjugation(self, bool, bool) -> Self
 impl core::clone::Clone for symtn_dense::DenseDotConfig
 pub fn symtn_dense::DenseDotConfig::clone(&self) -> symtn_dense::DenseDotConfig

@@ -214,7 +214,7 @@ where
     /// The coefficient promoted to the payload type, for adapters that cannot
     /// keep it real.
     #[inline]
-    pub fn into_data(self) -> D {
+    pub(crate) fn into_data(self) -> D {
         match self {
             Self::Structural(coefficient) => D::coefficient_as_data(coefficient),
             Self::Data(scale) => scale,

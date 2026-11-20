@@ -17,8 +17,9 @@ impl FusionBlockContractPlan<f64> {
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub fn from_parts_with_ops(
+    pub(crate) fn from_parts_with_ops(
         dst_structure: Arc<BlockStructure>,
         lhs_structure: Arc<BlockStructure>,
         rhs_structure: Arc<BlockStructure>,
@@ -38,9 +39,9 @@ impl FusionBlockContractPlan<f64> {
         )
     }
 
-    #[doc(hidden)]
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub fn try_from_canonical_coupled_regions_with_ops(
+    pub(crate) fn try_from_canonical_coupled_regions_with_ops(
         dst_structure: &Arc<BlockStructure>,
         dst_nout: usize,
         lhs_storage_structure: &Arc<BlockStructure>,
@@ -62,9 +63,9 @@ impl FusionBlockContractPlan<f64> {
         )
     }
 
-    #[doc(hidden)]
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub fn try_from_canonical_coupled_regions_with_ops_and_alpha(
+    pub(crate) fn try_from_canonical_coupled_regions_with_ops_and_alpha(
         dst_structure: &Arc<BlockStructure>,
         dst_nout: usize,
         lhs_storage_structure: &Arc<BlockStructure>,
@@ -141,7 +142,7 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn from_parts_with_ops_generic(
+    pub(crate) fn from_parts_with_ops_generic(
         dst_structure: Arc<BlockStructure>,
         lhs_structure: Arc<BlockStructure>,
         rhs_structure: Arc<BlockStructure>,

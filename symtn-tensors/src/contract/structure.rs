@@ -207,8 +207,9 @@ impl<C> TensorContractStructure<C>
 where
     C: Copy + One,
 {
+    #[cfg(test)]
     #[inline]
-    pub fn dst_rank(&self) -> usize {
+    pub(crate) fn dst_rank(&self) -> usize {
         self.dst_rank
     }
 
@@ -307,7 +308,7 @@ where
 }
 
 impl<C> TensorContractBlockSpec<C> {
-    pub const fn with_coefficient(
+    pub(crate) const fn with_coefficient(
         dst_block: usize,
         lhs_block: usize,
         rhs_block: usize,

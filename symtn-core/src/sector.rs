@@ -531,9 +531,9 @@ impl SectorLeg {
                 .all(|(&pair, own)| pair == own)
     }
 
+    #[cfg(test)]
     /// Whether `other` borrows this leg's sector and degeneracy storage.
-    #[doc(hidden)]
-    pub fn shares_sector_data_with(&self, other: &Self) -> bool {
+    pub(crate) fn shares_sector_data_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.data, &other.data)
     }
 

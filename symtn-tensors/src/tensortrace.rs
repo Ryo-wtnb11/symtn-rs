@@ -210,8 +210,7 @@ impl<C> TensorTraceFusionStructure<C> {
     /// The compile [`tensortrace_fusion_dyn_owned_checked`] runs, returned
     /// instead of executed, so a device executor replays exactly the Host's
     /// terms, coefficients and strides.
-    #[doc(hidden)]
-    pub fn compile_fusion_dyn_checked<R>(
+    pub(crate) fn compile_fusion_dyn_checked<R>(
         dst: &BoundDynamicFusionMapSpace<R>,
         src: &BoundDynamicFusionMapSpace<R>,
         axes: TensorTraceAxisSpec<'_>,
@@ -468,7 +467,7 @@ impl<C> TensorTraceFusionStructure<C> {
     }
 
     #[inline]
-    pub fn dst_rank(&self) -> usize {
+    pub(crate) fn dst_rank(&self) -> usize {
         self.core.dst_rank
     }
 
@@ -1044,7 +1043,7 @@ pub struct TracePreflight {
 
 impl TracePreflight {
     #[inline]
-    pub fn selected_homspace(&self) -> &FusionTreeHomSpace {
+    pub(crate) fn selected_homspace(&self) -> &FusionTreeHomSpace {
         &self.selected_homspace
     }
 
@@ -1057,7 +1056,7 @@ impl TracePreflight {
     /// that are not mutually dual (TensorKit
     /// `space(tsrc, q₁) == dual(space(tsrc, q₂))`).
     #[inline]
-    pub fn require_dual_pairs(&self) -> Result<(), OperationError> {
+    pub(crate) fn require_dual_pairs(&self) -> Result<(), OperationError> {
         if self.trace_pairs_match {
             Ok(())
         } else {

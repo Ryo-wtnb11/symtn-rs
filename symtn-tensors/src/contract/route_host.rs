@@ -490,8 +490,7 @@ pub(super) struct HostRouteScratch<'a, D, C> {
 /// Why not `resize_filled`: growing in place copies old contents nothing
 /// reads and writes the new tail with an element loop, and shrinking makes a
 /// later regrowth refill the tail. Why the initialized length rather than the
-/// capacity: a buffer handed back through `restore_copy_c_scratch` may hold
-/// spare capacity past its length.
+/// capacity: a reused buffer may hold spare capacity past its length.
 pub(super) fn prepare<D: crate::ZeroBytes>(buffer: &mut HostScratchBuffer<D>, len: usize) {
     if buffer.len() < len {
         *buffer = HostScratchBuffer::zeroed(len);

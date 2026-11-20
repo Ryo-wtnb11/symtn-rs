@@ -128,7 +128,8 @@ impl<'a, S> StackedStorageViewMut<'a, S> {
         })
     }
 
-    pub fn storage_mut(&mut self) -> &mut S {
+    #[cfg(feature = "cuda")]
+    pub(crate) fn storage_mut(&mut self) -> &mut S {
         self.storage
     }
 
