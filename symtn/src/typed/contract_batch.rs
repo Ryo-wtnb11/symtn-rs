@@ -161,7 +161,8 @@ where
         );
         let (space, resolution) = match spec {
             Some(spec) => {
-                symtn_tensors::reject_non_symmetric_contraction(
+                symtn_tensors::admit_braiding::<symtn_core::MultiplicityFreeAdmissionMode>(
+                    symtn_tensors::BraidingOp::Contraction,
                     lhs.space.provider().braiding_style(),
                 )?;
                 let output_axes = spec.output_axes();

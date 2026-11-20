@@ -510,6 +510,8 @@ where
     /// executor, then its replay, `dst = alpha * contract(lhs, rhs) + beta *
     /// dst` (`init`). The one route authority Host eager, the device and
     /// `ContractPlan` share; a lazy adjoint is a storage-conjugate operand.
+    ///
+    /// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn tensorcontract_planned_into<R>(
@@ -750,6 +752,8 @@ where
     ///
     /// This concrete cross-crate entrypoint is internal and unstable despite
     /// being public for `symtn`; downstream callers must not rely on it.
+    ///
+    /// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
     #[doc(hidden)]
     pub fn plan_staged_contract_beyond_core<R>(
         &mut self,
@@ -783,6 +787,8 @@ where
     /// order. The requested order's zero-copy candidates are walked once.
     /// The destination is in its space's canonical coupled-sector layout by
     /// construction: no dynamic space carries another tiling.
+    ///
+    /// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn plan_contract<R>(
@@ -843,6 +849,8 @@ where
     /// Why the core precedes `copyC`: a contraction that has the canonical
     /// core needs no output permute (`copy_c_order`
     /// returns `None` for it), so TensorKit's memcost never charges it `dim(C)`.
+    ///
+    /// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn plan_contract_beyond_core<R>(
@@ -915,6 +923,8 @@ where
     ///
     /// Validates the request itself (provider against the spaces, operand
     /// flags against `axes`), so it is sound to call without the first half.
+    ///
+    /// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
     #[doc(hidden)]
     pub fn compile_storage_contract_dynamic_tree<R>(
         &mut self,
@@ -1460,6 +1470,14 @@ where
     /// operands through the owned derivation, a lazy adjoint through the
     /// oriented one. Each operand is its logical space, its storage operand
     /// (a lazy adjoint is storage-conjugate) and its stored length.
+    ///
+    /// **Braiding precondition.** No multiplicity-free lower contraction
+    /// entry admits braiding for ordinary contraction; its caller does, with
+    /// [`crate::admit_braiding`]. These entries perform no unadmitted braid:
+    /// every strand motion is a tree-transform `permute`, which refuses a
+    /// non-symmetric style, and the core and planar routes cross no strands.
+    /// But a crossing-free request of an anyonic or unbraided rule computes
+    /// the planar value, not the refusal the facade `contract` returns.
     #[allow(clippy::type_complexity)]
     pub fn multiplicity_free(
         lhs: (&'a BoundDynamicFusionMapSpace<R>, FusionOperand<'a>, usize),
@@ -1539,6 +1557,8 @@ where
 /// Free function, not a context method: this half resolves entirely from
 /// the operands, so the canonical device contraction takes no Runtime
 /// context lock.
+///
+/// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
 #[doc(hidden)]
 pub fn try_compile_storage_contract_core_route<R>(
     dst_space: &BoundDynamicFusionMapSpace<R>,

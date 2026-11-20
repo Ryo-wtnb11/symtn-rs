@@ -41,6 +41,7 @@ use symtn_core::{
 };
 use symtn_operations::TreeTransformStructure;
 
+use crate::admission::CHECKED_CONTRACTION_REQUIRES_BOSONIC;
 use crate::contract::{
     compile_checked_generic_core_plan_general, compile_contract_twist, compile_core_dst,
     compile_derived_core_plan, compile_prelowered_dynamic_tree, compile_stored_dynamic_tree,
@@ -52,7 +53,6 @@ use crate::contract::{
     DynamicFusionMapSpace, DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact,
     FusionContractPlan, FusionOperand, FusionOperandLayout, LayoutKeyBuilder, PlanTarget,
     PlanarContractOrders, PreparedCheckedGenericDynamicSpace, StorageContractResolution,
-    CHECKED_CONTRACTION_REQUIRES_BOSONIC,
 };
 use crate::tree_context::CheckedTreeTransformStage;
 use crate::tree_transform::{

@@ -430,7 +430,10 @@ mod checked_generic_contract;
 mod mode_dispatch;
 use checked_generic_contract::write_identity_blocks_generic;
 #[doc(hidden)]
-pub use symtn_tensors::{reject_non_symmetric_contraction, NON_SYMMETRIC_CONTRACTION_UNSUPPORTED};
+pub use symtn_tensors::{
+    admit_braiding, BraidingOp, CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
+    CHECKED_PLANAR_CONTRACTION_UNSUPPORTED, NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
+};
 mod space;
 use space::{
     require_restriction_set, require_selected_leg_of, restricted_space, restriction_runs,

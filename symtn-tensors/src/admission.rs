@@ -1,71 +1,123 @@
 //! Provider and braiding admission shared by every entry that accepts a
-//! checked-Generic provider or needs a symmetric braiding (#1840).
+//! checked-Generic provider or whose admission depends on the braiding style
+//! (#1840).
 //!
 //! The facade, the network preflight and the tensor engines all route through
 //! this one owner, which keeps the checks, their order and the public
 //! messages identical everywhere.
 
 use symtn_core::{
-    BraidingStyleKind, CheckedGenericFusion, CoreError, FusionStyleKind, RuleIdentity,
+    BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CoreError,
+    FusionStyleKind, MultiplicityFreeAdmissionMode, RuleIdentity,
 };
 
 use crate::{BoundDynamicFusionMapSpace, OperationError};
 
-/// The error message of [`reject_non_symmetric_contraction`], shared with the
-/// device network preflight so a network rejection and a typed `contract`
-/// rejection are indistinguishable.
+/// The refusal of ordinary contraction over a non-symmetric braiding, in
+/// every mode.
 #[doc(hidden)]
 pub const NON_SYMMETRIC_CONTRACTION_UNSUPPORTED: &str =
     "ordinary contraction requires symmetric (bosonic or fermionic) braiding; \
      use compose for the composition of morphisms, or planar_contract for a planar contraction";
 
-/// The error message of a fusion trace over a non-symmetric braiding.
+/// The refusal of checked-Generic ordinary contraction over a symmetric but
+/// non-Bosonic (Fermionic) braiding: the checked engine has no contraction
+/// twist.
+#[doc(hidden)]
+pub const CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING: &str =
+    "checked Generic contraction requires Bosonic braiding";
+
+/// The refusal of a checked-Generic planar contraction: the checked engine
+/// has no planar route, so only a Bosonic planar contraction, which the
+/// facade runs as the ordinary one, is admitted.
+#[doc(hidden)]
+pub const CHECKED_PLANAR_CONTRACTION_UNSUPPORTED: &str =
+    "checked Generic planar contraction requires Bosonic braiding";
+
+/// The refusal of a fusion trace over a non-symmetric braiding.
 #[doc(hidden)]
 pub const FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING: &str =
     "fusion tensortrace requires symmetric braiding";
 
-/// The operations that admit only a symmetric braiding; each keeps its own
-/// public message.
+/// The checked engine's internal fail-closed refusal (twist and core-alpha
+/// invariants after admission).
+pub(crate) const CHECKED_CONTRACTION_REQUIRES_BOSONIC: OperationError =
+    OperationError::UnsupportedTensorContractScope {
+        message: CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
+    };
+
+/// The operations whose admission depends on the braiding style.
+///
+/// Composition (TensorKit `mul!`) crosses no strands and is admitted for
+/// every style in every mode, so it has no entry.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SymmetricBraidingOp {
+pub enum BraidingOp {
     /// General-axis contraction (TensorKit `blas_contract!`).
     Contraction,
+    /// Planar contraction (TensorKit `planarcontract!`).
+    PlanarContraction,
     /// Fusion trace (TensorKit `trace_permute!`).
     Trace,
 }
 
-/// Admits `braiding` for `op`: only a symmetric braiding (TensorKit
-/// `SymmetricBraiding`: Bosonic, Fermionic) is accepted.
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for symtn_core::MultiplicityFreeAdmissionMode {}
+    impl Sealed for symtn_core::CheckedGenericAdmissionMode {}
+}
+
+/// The braiding styles an admission mode admits for each [`BraidingOp`].
 #[doc(hidden)]
-pub fn require_symmetric_braiding(
-    braiding: BraidingStyleKind,
-    op: SymmetricBraidingOp,
+pub trait BraidingAdmission: sealed::Sealed {
+    /// Whether `style` is admitted for `op`.
+    fn admits(op: BraidingOp, style: BraidingStyleKind) -> bool;
+}
+
+/// TensorKit: ordinary contraction and trace need a symmetric braiding;
+/// planar contraction admits every style.
+impl BraidingAdmission for MultiplicityFreeAdmissionMode {
+    fn admits(op: BraidingOp, style: BraidingStyleKind) -> bool {
+        match op {
+            BraidingOp::Contraction | BraidingOp::Trace => style.is_symmetric(),
+            BraidingOp::PlanarContraction => true,
+        }
+    }
+}
+
+/// The checked engine implements neither TensorKit `blas_contract!`'s
+/// Fermionic twist nor a planar route, so ordinary and planar contraction
+/// admit Bosonic braiding only; trace follows TensorKit.
+impl BraidingAdmission for CheckedGenericAdmissionMode {
+    fn admits(op: BraidingOp, style: BraidingStyleKind) -> bool {
+        match op {
+            BraidingOp::Trace => style.is_symmetric(),
+            BraidingOp::Contraction | BraidingOp::PlanarContraction => {
+                style == BraidingStyleKind::Bosonic
+            }
+        }
+    }
+}
+
+/// The one braiding admission of contraction and trace: the outcome depends
+/// only on the mode `M`, `op` and `style`, never on storage form, and a
+/// refusal is `UnsupportedTensorContractScope` with the operation's message.
+#[doc(hidden)]
+pub fn admit_braiding<M: BraidingAdmission>(
+    op: BraidingOp,
+    style: BraidingStyleKind,
 ) -> Result<(), OperationError> {
-    if braiding.is_symmetric() {
+    if M::admits(op, style) {
         return Ok(());
     }
     Err(OperationError::UnsupportedTensorContractScope {
-        message: match op {
-            SymmetricBraidingOp::Contraction => NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
-            SymmetricBraidingOp::Trace => FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING,
+        message: match (op, style.is_symmetric()) {
+            (BraidingOp::Contraction, false) => NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
+            (BraidingOp::Contraction, true) => CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
+            (BraidingOp::PlanarContraction, _) => CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
+            (BraidingOp::Trace, _) => FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING,
         },
     })
-}
-
-/// The ordinary-contraction boundary of every `contract` entry, returning or
-/// overwriting, Host or device, typed or network, as by TensorKit
-/// `blas_contract!` before any layout test.
-///
-/// Why not admit the canonical axes of a `NoBraiding` or `Anyonic` rule:
-/// general-axes contraction is defined by braiding legs into place, which is
-/// well defined for arbitrary permutations only under a symmetric braiding.
-/// The one axis pattern that needs no braid is composition (TensorKit
-/// `mul!`), which stays admitted for every braiding style; planar contraction
-/// is the separate `planar_contract` (TensorKit `@planar`, #2284).
-#[doc(hidden)]
-pub fn reject_non_symmetric_contraction(braiding: BraidingStyleKind) -> Result<(), OperationError> {
-    require_symmetric_braiding(braiding, SymmetricBraidingOp::Contraction)
 }
 
 /// Admits checked-Generic providers by value: the rule identities agree,
@@ -117,25 +169,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn symmetric_braiding_keeps_each_operations_message() {
-        for braiding in [BraidingStyleKind::Bosonic, BraidingStyleKind::Fermionic] {
-            assert_eq!(
-                require_symmetric_braiding(braiding, SymmetricBraidingOp::Trace),
-                Ok(())
-            );
+    fn braiding_admission_table() {
+        use BraidingOp::{Contraction, PlanarContraction, Trace};
+        use BraidingStyleKind::{Anyonic, Bosonic, Fermionic, NoBraiding};
+        const NS: &str = NON_SYMMETRIC_CONTRACTION_UNSUPPORTED;
+        const CB: &str = CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING;
+        const CP: &str = CHECKED_PLANAR_CONTRACTION_UNSUPPORTED;
+        const TR: &str = FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING;
+        // (op, [B, F, A, N]); `None` is admitted.
+        let mf: [(BraidingOp, [Option<&str>; 4]); 3] = [
+            (Contraction, [None, None, Some(NS), Some(NS)]),
+            (PlanarContraction, [None; 4]),
+            (Trace, [None, None, Some(TR), Some(TR)]),
+        ];
+        let checked: [(BraidingOp, [Option<&str>; 4]); 3] = [
+            (Contraction, [None, Some(CB), Some(NS), Some(NS)]),
+            (PlanarContraction, [None, Some(CP), Some(CP), Some(CP)]),
+            (Trace, [None, None, Some(TR), Some(TR)]),
+        ];
+        let styles = [Bosonic, Fermionic, Anyonic, NoBraiding];
+        let expect = |message: Option<&'static str>| match message {
+            None => Ok(()),
+            Some(message) => Err(OperationError::UnsupportedTensorContractScope { message }),
+        };
+        for (op, row) in mf {
+            for (style, message) in styles.into_iter().zip(row) {
+                assert_eq!(
+                    admit_braiding::<MultiplicityFreeAdmissionMode>(op, style),
+                    expect(message),
+                    "MF {op:?} {style:?}"
+                );
+            }
         }
-        assert_eq!(
-            reject_non_symmetric_contraction(BraidingStyleKind::Anyonic),
-            Err(OperationError::UnsupportedTensorContractScope {
-                message: NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-            })
-        );
-        assert_eq!(
-            require_symmetric_braiding(BraidingStyleKind::NoBraiding, SymmetricBraidingOp::Trace),
-            Err(OperationError::UnsupportedTensorContractScope {
-                message: FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING
-            })
-        );
+        for (op, row) in checked {
+            for (style, message) in styles.into_iter().zip(row) {
+                assert_eq!(
+                    admit_braiding::<CheckedGenericAdmissionMode>(op, style),
+                    expect(message),
+                    "checked {op:?} {style:?}"
+                );
+            }
+        }
     }
 
     #[test]

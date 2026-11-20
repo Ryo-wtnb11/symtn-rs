@@ -137,7 +137,7 @@ where
         tensors: &[&TensorMap<R, D>],
         contracts: bool,
     ) -> Result<(), FacadeError<R>> {
-        reject_non_symmetric_network(tensors, contracts)
+        admit_network_braiding(tensors, contracts)
     }
 }
 

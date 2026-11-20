@@ -217,12 +217,13 @@ where
     Ok(true)
 }
 
-/// The typed `contract`'s braiding boundary (TensorKit `blas_contract!`
-/// requires symmetric braiding), decided once for a network whose schedule
-/// contracts: the same error the first contraction step would raise, without
-/// the permutes, trace pre-step, sliced accumulator or plan lookup that would
+/// The typed `contract`'s braiding admission (TensorKit `blas_contract!`
+/// requires symmetric braiding; the checked Generic engine, Bosonic), decided
+/// once for a network whose schedule contracts by the same owner and mode:
+/// the same error the first contraction step would raise, without the
+/// permutes, trace pre-step, sliced accumulator or plan lookup that would
 /// otherwise run before it.
-pub(super) fn reject_non_symmetric_network<R, D, S>(
+pub(super) fn admit_network_braiding<R, D, S>(
     tensors: &[&TensorMap<R, D, S>],
     contracts: bool,
 ) -> Result<(), FacadeError<R>>
@@ -236,7 +237,7 @@ where
         return Ok(());
     };
     let braiding = <R::Mode as NetworkModeDispatch<R, D, S>>::braiding_style(first.provider());
-    symtn::typed::reject_non_symmetric_contraction(braiding)
+    symtn::typed::admit_braiding::<R::Mode>(symtn::typed::BraidingOp::Contraction, braiding)
         .map_err(|error| FacadeError::<R>::from(Error::from(error)))
 }
 

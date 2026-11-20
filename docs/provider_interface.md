@@ -234,6 +234,10 @@ selects a lowering that silently drops terms. `Bosonic`/`Fermionic` assert
 symmetric braiding; `Anyonic` and
 `NoBraiding` do not, so ordinary `contract` (and network contraction) rejects
 them, as TensorKit `blas_contract!` does, while `compose` admits every style.
+The checked Generic engine has no supertrace twist and no planar route, so it
+admits ordinary and planar contraction for `Bosonic` braiding only; every
+other style is refused with `UnsupportedTensorContractScope`, whatever the
+operands' storage form.
 
 `fusion_channels` order is part of the convention. Keep it stable; table
 rules use table object order.

@@ -2,7 +2,6 @@ mod backend;
 mod checked_generic;
 pub(crate) use checked_generic::{
     validate_checked_operand_relation, CheckedAuthority, CheckedContractTxn,
-    CHECKED_CONTRACTION_REQUIRES_BOSONIC,
 };
 mod context;
 pub(crate) use context::{

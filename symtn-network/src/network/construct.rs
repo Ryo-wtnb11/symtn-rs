@@ -430,7 +430,7 @@ impl Network {
                 invalid("symmetric sliced execution requires dense Host payloads").into(),
             ));
         }
-        reject_non_symmetric_network(tensors, self.inputs.len() > 1)
+        admit_network_braiding(tensors, self.inputs.len() > 1)
             .map_err(SymmetricSliceExecutionError::Tensor)?;
 
         let bound = self

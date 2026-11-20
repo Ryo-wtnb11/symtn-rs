@@ -3,12 +3,12 @@ use symtn_dense::Engine;
 
 use num_traits::Zero;
 use symtn_core::{
-    BlockStructure, BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericRigidSymbols,
-    CoreError, FusionTreeHomSpace, PermutedMemoTicket, RuleIdentity,
-    StructurallyValidatedFusionTreeSubset,
+    BlockStructure, CheckedGenericAdmissionMode, CheckedGenericRigidSymbols, CoreError,
+    FusionTreeHomSpace, PermutedMemoTicket, RuleIdentity, StructurallyValidatedFusionTreeSubset,
 };
 use symtn_operations::{OutputAxisOrder, TensorContractSpec, TreeTransformBackend};
 
+use crate::admission::{BraidingOp, CHECKED_PLANAR_CONTRACTION_UNSUPPORTED};
 use crate::mode::{ContractRequest, ContractSide, ContractStaging, StagedContraction};
 use crate::tree_transform::{CheckedGenericPlanError, CheckedPendingCoefficients};
 use crate::validate_oriented_fusion_layout;
@@ -38,12 +38,6 @@ type CheckedContractResult<P, D> = Result<
     (BoundDynamicFusionMapSpace<P>, Vec<D>),
     CheckedGenericPlanError<<P as symtn_core::CheckedGenericFusion>::Error>,
 >;
-
-/// The braiding boundary of general checked contraction.
-pub(crate) const CHECKED_CONTRACTION_REQUIRES_BOSONIC: OperationError =
-    OperationError::UnsupportedTensorContractScope {
-        message: "checked Generic contraction requires Bosonic braiding",
-    };
 
 /// What the checked planner derives spaces under (its
 /// `PlanningAlgebra::SpaceAuthority`): the left binding, whose provider
@@ -93,15 +87,20 @@ where
 
     /// General contraction may braid and twist; the checked engine
     /// implements neither TensorKit `blas_contract!`'s fermionic supertrace
-    /// branch nor non-symmetric braiding, so it admits Bosonic braiding only,
-    /// read once from the left provider.
+    /// branch nor non-symmetric braiding, so the shared admission owner
+    /// admits Bosonic braiding only, read once from the left provider.
+    ///
+    /// Why a release-active error rather than a debug assertion behind the
+    /// facade gate: this lower entry is public, and `twist_free = true` would
+    /// let a Fermionic lower call skip the contraction twist.
     pub(crate) fn contraction(
         binding: &'a BoundDynamicFusionMapSpace<P>,
         sides: [CheckedSide<'a>; 2],
     ) -> Result<Self, CheckedGenericPlanError<P::Error>> {
-        if binding.provider().braiding_style() != BraidingStyleKind::Bosonic {
-            return Err(CHECKED_CONTRACTION_REQUIRES_BOSONIC.into());
-        }
+        crate::admission::admit_braiding::<CheckedGenericAdmissionMode>(
+            BraidingOp::Contraction,
+            binding.provider().braiding_style(),
+        )?;
         Ok(Self {
             binding,
             twist_free: true,
@@ -361,11 +360,12 @@ where
                     lhs_nout,
                 )
             }
-            // A Bosonic planar contraction is the ordinary one, which the
-            // facade runs; the checked planner has no planar route.
+            // A route capability, not a braiding decision: the checked
+            // planner has no planar route for any style. A Bosonic planar
+            // contraction is the ordinary one, which the facade runs.
             ContractRequest::Planar { .. } => {
                 return Err(OperationError::UnsupportedTensorContractScope {
-                    message: "checked Generic planar contraction requires Bosonic braiding",
+                    message: CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
                 }
                 .into())
             }
@@ -481,6 +481,12 @@ where
     /// Admits checked Generic operands and stages the destination of
     /// `request`; operands as in [`StagedContract::multiplicity_free`]. The
     /// staging validates the stored lengths.
+    ///
+    /// An ordinary contraction admits braiding through
+    /// [`crate::admit_braiding`] (Bosonic only) after pair admission; a
+    /// refusal is `CheckedGenericPlanError::Operation`. A planar request is
+    /// unsupported in checked Generic mode for every style; the facade runs a
+    /// Bosonic planar contraction as the ordinary contraction.
     #[allow(clippy::type_complexity)]
     pub fn checked_generic(
         lhs: (&'a BoundDynamicFusionMapSpace<P>, FusionOperand<'a>, usize),
@@ -1906,15 +1912,29 @@ mod tests {
         }
     }
 
-    /// What: general checked contraction with a fermionic or anyonic
-    /// provider returns the typed `Unsupported` after the pair admission and
-    /// one braiding read, before any structural query; canonical
-    /// composition crosses no legs and stays admitted.
+    /// What: general checked contraction with a non-Bosonic provider
+    /// returns the typed `Unsupported` (the checked-Bosonic reason for a
+    /// Fermionic rule, the non-symmetric reason otherwise) after the pair
+    /// admission and one braiding read, before any structural query;
+    /// canonical composition crosses no legs and stays admitted.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_requires_bosonic_braiding_and_compose_does_not() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        for braiding in [BraidingStyleKind::Fermionic, BraidingStyleKind::Anyonic] {
+        for (braiding, expected) in [
+            (
+                BraidingStyleKind::Fermionic,
+                "checked Generic contraction requires Bosonic braiding",
+            ),
+            (
+                BraidingStyleKind::Anyonic,
+                crate::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
+            ),
+            (
+                BraidingStyleKind::NoBraiding,
+                crate::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
+            ),
+        ] {
             let (left, lhs, right, rhs) = bound_pair(1, 1);
             left.braiding.set(braiding);
             right.braiding.set(braiding);
@@ -1932,10 +1952,8 @@ mod tests {
                 matches!(
                     error,
                     CheckedGenericPlanError::Operation(
-                        OperationError::UnsupportedTensorContractScope {
-                            message: "checked Generic contraction requires Bosonic braiding",
-                        }
-                    )
+                        OperationError::UnsupportedTensorContractScope { message }
+                    ) if message == expected
                 ),
                 "{braiding:?}: {error:?}"
             );
@@ -1953,6 +1971,40 @@ mod tests {
                 .unwrap();
             assert!(data.iter().any(|&value| value != 0.0), "{braiding:?}");
         }
+    }
+
+    /// What: the checked planner has no planar route, so even a Bosonic
+    /// planar request is refused before pair admission.
+    #[test]
+    fn checked_planar_request_is_unsupported_for_bosonic_braiding() {
+        let (left, lhs, right, rhs) = bound_pair(1, 1);
+        let len = lhs.space().required_len().unwrap();
+        let orders =
+            crate::PlanarContractOrders::validate((1, 2), (1, 2), &[1], &[0], &[0, 1], 1).unwrap();
+        let error = StagedContract::checked_generic(
+            (&lhs, FusionOperand::direct(lhs.space()), len),
+            (&rhs, FusionOperand::direct(rhs.space()), len),
+            ContractRequest::Planar {
+                axes: TensorContractSpec::with_default_output_order(&[1], &[0]),
+                codomain_rank: 1,
+                orders: &orders,
+            },
+        )
+        .err()
+        .unwrap();
+        assert!(
+            matches!(
+                error,
+                CheckedGenericPlanError::Operation(
+                    OperationError::UnsupportedTensorContractScope {
+                        message: "checked Generic planar contraction requires Bosonic braiding",
+                    }
+                )
+            ),
+            "{error:?}"
+        );
+        assert!(left.events.borrow().is_empty());
+        assert!(right.events.borrow().is_empty());
     }
 
     /// What: a staged space the planned route does not replay over, as a

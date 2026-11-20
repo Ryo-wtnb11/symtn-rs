@@ -38,8 +38,9 @@ pub use adjoint::{
 };
 #[doc(hidden)]
 pub use admission::{
-    admit_checked_generic_pair, reject_non_symmetric_contraction, require_symmetric_braiding,
-    SymmetricBraidingOp, NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
+    admit_braiding, admit_checked_generic_pair, BraidingAdmission, BraidingOp,
+    CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING, CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
+    NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
 };
 pub use bound_tensor::BoundDynamicTensorRef;
 #[cfg(test)]

@@ -438,7 +438,8 @@ where
 /// A compact (diagonal) operand has no device payload form (`to_cuda`
 /// densifies), so no device contraction or permute accepts one. A schedule
 /// with a contraction step on a non-symmetric (anyonic or unbraided) provider
-/// is the typed `contract`'s own boundary, checked by the same function
+/// is the typed `contract`'s own boundary, checked by the same owner in the
+/// multiplicity-free mode, the only device mode
 /// (TensorKit `blas_contract!` requires symmetric braiding);
 /// deciding it here, not at the step, keeps earlier steps from allocating.
 #[cfg(any(feature = "cuda", test))]
@@ -456,7 +457,10 @@ pub(super) fn device_operand_admission(
         ));
     }
     if contracts {
-        symtn::typed::reject_non_symmetric_contraction(braiding)?;
+        symtn::typed::admit_braiding::<symtn::sector::MultiplicityFreeAdmissionMode>(
+            symtn::typed::BraidingOp::Contraction,
+            braiding,
+        )?;
     }
     Ok(())
 }

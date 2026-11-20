@@ -445,6 +445,8 @@ struct InjectedGeneric {
     dual_calls: AtomicUsize,
     fail_symbol_at: AtomicUsize,
     symbol_calls: AtomicUsize,
+    /// Reports a Fermionic braiding in place of the inner rule's.
+    fermionic: AtomicBool,
 }
 
 impl InjectedGeneric {
@@ -458,6 +460,7 @@ impl InjectedGeneric {
             dual_calls: AtomicUsize::new(0),
             fail_symbol_at: AtomicUsize::new(0),
             symbol_calls: AtomicUsize::new(0),
+            fermionic: AtomicBool::new(false),
         }
     }
 
@@ -505,7 +508,11 @@ impl CheckedGenericFusion for InjectedGeneric {
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        CheckedGenericFusion::braiding_style(&self.inner)
+        if self.fermionic.load(Ordering::SeqCst) {
+            BraidingStyleKind::Fermionic
+        } else {
+            CheckedGenericFusion::braiding_style(&self.inner)
+        }
     }
 
     fn vacuum(&self) -> SectorId {
@@ -1007,6 +1014,56 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
         recovered.dense_data().unwrap(),
         expected.dense_data().unwrap()
     );
+}
+
+#[test]
+fn checked_generic_fermionic_network_is_refused_before_any_step() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let _serial = crate::counting_alloc::serial();
+    // What: the network preflight applies the checked contraction admission,
+    // so a Fermionic checked network that contracts is refused, eager and
+    // planned, with the typed facade error and before any step queries the
+    // provider; plan construction is metadata only and still succeeds. The
+    // control: the Bosonic execution of the same schedule does query.
+    assert!(cold_query_count(engine, 2, true) > 0);
+    let (provider, tensors, _) = injected_plan_case(engine, 2, true);
+    let refs = tensors.iter().take(2).collect::<Vec<_>>();
+    provider.fermionic.store(true, Ordering::SeqCst);
+    let eager = net(
+        &[op(&["a", "b"], &["c"]), op(&["c"], &["d"])],
+        &["b", "a"],
+        &["d"],
+    );
+    let planned = injected_network(2, true)
+        .plan(&refs, &LabelOrderDenseOptimizer::new(vec!["c".into()]))
+        .unwrap();
+    symtn::cache::clear();
+    provider.reset_symbols();
+    provider.reset_decodes();
+    for error in [
+        eager.contract(engine, &refs).map(drop).unwrap_err(),
+        planned
+            .execute(engine, &refs, &mut Default::default())
+            .map(drop)
+            .unwrap_err(),
+    ] {
+        assert!(
+            matches!(
+                &error,
+                GenericTensorError::Facade(symtn::typed::Error::Operation(operation))
+                    if matches!(
+                        **operation,
+                        symtn::typed::OperationError::UnsupportedTensorContractScope {
+                            message: symtn::typed::CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING
+                        }
+                    )
+            ),
+            "{error:?}"
+        );
+    }
+    assert_eq!(provider.symbol_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.decode_calls.load(Ordering::SeqCst), 0);
+    provider.fermionic.store(false, Ordering::SeqCst);
 }
 
 #[test]

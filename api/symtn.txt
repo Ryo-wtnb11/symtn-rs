@@ -107,6 +107,9 @@ pub use symtn::sector::product_sector
 pub mod symtn::typed
 pub use symtn::typed::BlockKey
 pub use symtn::typed::BlockKeyKind
+pub use symtn::typed::BraidingOp
+pub use symtn::typed::CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING
+pub use symtn::typed::CHECKED_PLANAR_CONTRACTION_UNSUPPORTED
 pub use symtn::typed::CheckedFusionSpaceError
 pub use symtn::typed::CheckedGenericPlanError
 pub use symtn::typed::CheckedGenericStructureError
@@ -138,7 +141,7 @@ pub use symtn::typed::Svd
 pub use symtn::typed::Truncation
 pub use symtn::typed::TruncationError
 pub use symtn::typed::TruncationSpace
-pub use symtn::typed::reject_non_symmetric_contraction
+pub use symtn::typed::admit_braiding
 pub mod symtn::typed::__network
 pub enum symtn::typed::__network::NetworkReuseClass
 pub symtn::typed::__network::NetworkReuseClass::Compact
@@ -1088,7 +1091,7 @@ impl<R, D> symtn::typed::TypedTensorFlipDispatch<R, D> for symtn_sectors::algebr
 pub type symtn_sectors::algebra::MultiplicityFreeAdmissionMode::Coeff = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar
 pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::pivotal_values<'a>(&'a R, &symtn_core::block_structure::structure::BlockStructure, usize, &[(usize, bool)]) -> core::result::Result<impl core::ops::function::Fn(symtn_sectors::SectorId) -> (<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar) + 'a, symtn::typed::Error>
 pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::root(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, symtn::typed::Error>
-pub trait symtn::typed::TypedTensorModeDispatch<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::dispatch::typed_admission_private::Sealed
+pub trait symtn::typed::TypedTensorModeDispatch<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::dispatch::typed_admission_private::Sealed + symtn_tensors::admission::BraidingAdmission
 pub type symtn::typed::TypedTensorModeDispatch::FacadeError: core::error::Error + core::convert::From<symtn::typed::Error> + core::convert::From<symtn_operations::error::OperationError>
 pub fn symtn::typed::TypedTensorModeDispatch::braiding_style(&R) -> symtn_sectors::BraidingStyleKind
 pub fn symtn::typed::TypedTensorModeDispatch::coupled_block_dimension(&R, &symtn_core::fusion_space::product_space::FusionProductSpace, symtn_sectors::SectorId) -> core::result::Result<usize, Self::FacadeError>
