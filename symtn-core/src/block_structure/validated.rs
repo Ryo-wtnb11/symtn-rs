@@ -143,7 +143,8 @@ where
         clippy::type_complexity,
         reason = "the public block API returns source-major transform rows as nested vectors"
     )]
-    pub fn execute_multiplicity_free_braid_for_block_indices<I>(
+    #[cfg(test)]
+    pub(crate) fn execute_multiplicity_free_braid_for_block_indices<I>(
         &self,
         indices: I,
         operation: PreparedTreePairOperation<'_>,
@@ -171,7 +172,8 @@ where
         multiplicity_free_braid_tree_pair_block_proven(batch, &operation)
     }
 
-    pub fn execute_multiplicity_free_braid_ordered_for_block_indices<I>(
+    #[cfg(test)]
+    pub(crate) fn execute_multiplicity_free_braid_ordered_for_block_indices<I>(
         &self,
         indices: I,
         operation: PreparedTreePairOperation<'_>,
@@ -208,7 +210,8 @@ where
         clippy::type_complexity,
         reason = "the public block API returns source-major transform rows as nested vectors"
     )]
-    pub fn execute_multiplicity_free_transpose_for_block_indices<I>(
+    #[cfg(test)]
+    pub(crate) fn execute_multiplicity_free_transpose_for_block_indices<I>(
         &self,
         indices: I,
         operation: PreparedTreePairOperation<'_>,
@@ -236,7 +239,8 @@ where
         multiplicity_free_transpose_tree_pair_block_proven(batch, &operation)
     }
 
-    pub fn execute_multiplicity_free_transpose_ordered_for_block_indices<I>(
+    #[cfg(test)]
+    pub(crate) fn execute_multiplicity_free_transpose_ordered_for_block_indices<I>(
         &self,
         indices: I,
         operation: PreparedTreePairOperation<'_>,

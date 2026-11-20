@@ -1,8 +1,10 @@
 use std::sync::{Arc, OnceLock};
 
+#[cfg(test)]
+use symtn_core::{BlockKey, FusionTreePairKey};
 use symtn_core::{
-    BlockKey, BlockStructure, CoreError, FusionRule, FusionSpaceAdmission, FusionStyleKind,
-    FusionTreeHomSpace, FusionTreePairKey, FusionTreePairOrientation, MultiplicityFreeRigidSymbols,
+    BlockStructure, CoreError, FusionRule, FusionSpaceAdmission, FusionStyleKind,
+    FusionTreeHomSpace, FusionTreePairOrientation, MultiplicityFreeRigidSymbols,
     PreparedBlockStructure, RuleIdentity,
 };
 
@@ -347,6 +349,7 @@ impl DynamicFusionMapSpace {
         })
     }
 
+    #[cfg(test)]
     fn validate_complete_tree_grid(
         &self,
         keys: &[FusionTreePairKey],
@@ -497,6 +500,7 @@ impl DynamicFusionMapSpace {
         })
     }
 
+    #[cfg(test)]
     /// Generic-fusion sibling of [`Self::transformed`]: the permuted /
     /// braided / transposed result space, enumerated with multiplicity-aware
     /// keys. Not cached: the Generic path is not on a hot loop.
@@ -832,6 +836,7 @@ impl DynamicFusionMapSpace {
         )
     }
 
+    #[cfg(test)]
     /// Generic-fusion sibling of [`Self::contracted`]: the
     /// contraction result space for an outer-multiplicity rule, enumerated with
     /// multiplicity-aware fusion-tree keys (`fusion_tree_keys_generic`). Not
@@ -938,12 +943,6 @@ impl DynamicFusionMapSpace {
 
     #[inline]
     pub fn homspace(&self) -> &FusionTreeHomSpace {
-        &self.homspace
-    }
-
-    /// Shared hom-space handle for pointer-identity fast paths in replay
-    /// caches.
-    pub fn homspace_arc(&self) -> &Arc<FusionTreeHomSpace> {
         &self.homspace
     }
 

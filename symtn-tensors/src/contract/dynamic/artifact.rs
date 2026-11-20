@@ -69,6 +69,7 @@ impl<C: DenseBlockScalar> DynamicTreeExecutionArtifact<C> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn requires_source_twist(&self) -> bool {
         !self.source_twist_destination_scales.is_empty()
     }

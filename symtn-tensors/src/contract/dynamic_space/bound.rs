@@ -2,16 +2,20 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
+#[cfg(test)]
+use symtn_core::StructurallyValidatedFusionTreeSubset;
 use symtn_core::{
     CheckedFusionAlgebra, CheckedGenericFusion, CheckedGenericStructureError, CoreError,
     FusionRule, FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace,
     MultiplicityFreeFusionRule, MultiplicityFreeRigidSymbols, PreparedBlockStructure, RuleIdentity,
-    SectorStructure, StructurallyValidatedFusionTreeSubset,
+    SectorStructure,
 };
 
 #[cfg(test)]
+use super::metadata::checked_metadata_operation_error;
+#[cfg(test)]
 use super::metadata::PreparedLayoutKeys;
-use super::metadata::{checked_metadata_operation_error, LayoutBuildCapability, LayoutKeyBuilder};
+use super::metadata::{LayoutBuildCapability, LayoutKeyBuilder};
 use super::{
     validate_generic_provider_style, BoundDynamicFusionMapSpace, DynamicFusionMapSpace,
     PreparedCheckedGenericDynamicSpace, ValidatedDynamicFusionLayout,
@@ -519,6 +523,7 @@ where
         })
     }
 
+    #[cfg(test)]
     /// Checked external-provider admission for an already-constructed
     /// multiplicity-free dynamic layout.
     ///
@@ -526,7 +531,7 @@ where
     /// or admission state is published, and the provider only needs to certify
     /// [`CheckedFusionAlgebra`] rather than the sealed built-in lowered codec.
     /// A matching unchecked Complete stamp is revalidated.
-    pub fn bind_multiplicity_free_checked(
+    pub(crate) fn bind_multiplicity_free_checked(
         mut space: DynamicFusionMapSpace,
         provider: Arc<R>,
     ) -> Result<Self, OperationError>
@@ -668,9 +673,8 @@ where
     /// contraction, the device contraction and the contraction planner's
     /// `CopyC` temporary share. The result is split after `codomain_rank`
     /// output axes, or after every open lhs axis for `None`.
-    #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
-    pub fn contracted_multiplicity_free_oriented(
+    pub(crate) fn contracted_multiplicity_free_oriented(
         lhs_authority: &Self,
         lhs: super::FusionOperand<'_>,
         rhs_authority: &Self,
@@ -824,9 +828,10 @@ where
             .map_err(E::from)
     }
 
+    #[cfg(test)]
     /// Builds a multiplicity-aware contraction result and normalizes its
     /// authority to the lhs provider allocation.
-    pub fn contracted_generic(
+    pub(crate) fn contracted_generic(
         lhs: &Self,
         rhs: &Self,
         lhs_axes: &[usize],
@@ -862,9 +867,9 @@ where
         Self::from_derived(provider, space)
     }
 
+    #[cfg(test)]
     /// Stages one checked Generic final HomSpace without publishing its layout.
-    #[doc(hidden)]
-    pub fn prepare_final_homspace_generic_checked<P>(
+    pub(crate) fn prepare_final_homspace_generic_checked<P>(
         &self,
         provider: &P,
         homspace: FusionTreeHomSpace,
@@ -902,9 +907,9 @@ where
         })
     }
 
+    #[cfg(test)]
     /// Commits a checked Generic final HomSpace under this exact provider.
-    #[doc(hidden)]
-    pub fn commit_final_homspace_generic_checked(
+    pub(crate) fn commit_final_homspace_generic_checked(
         &self,
         prepared: PreparedCheckedGenericDynamicSpace,
     ) -> Result<Self, OperationError> {
@@ -934,8 +939,9 @@ where
         Self::from_derived_like(self, space)
     }
 
+    #[cfg(test)]
     /// Generic tree-transform result retaining the source provider proof.
-    pub fn transformed_generic(
+    pub(crate) fn transformed_generic(
         &self,
         operation: &TreeTransformOperation,
     ) -> Result<Self, OperationError> {

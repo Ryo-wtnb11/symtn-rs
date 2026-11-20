@@ -53,7 +53,7 @@ pub struct CheckedBlockLayout {
 impl CheckedBlockLayout {
     /// Normalizes `shape` against the destination and one source, whose
     /// strides `strides(axis)` returns as `(destination, source)`.
-    pub fn fill_one(
+    pub(crate) fn fill_one(
         &mut self,
         shape: &[usize],
         mut strides: impl FnMut(usize) -> Result<(usize, usize), OperationError>,
@@ -68,7 +68,7 @@ impl CheckedBlockLayout {
     /// strides `strides(axis)` returns as `(destination, lhs, rhs)`.
     ///
     /// [`Self::tensoradd`] then reads the `lhs` strides.
-    pub fn fill_two(
+    pub(crate) fn fill_two(
         &mut self,
         shape: &[usize],
         mut strides: impl FnMut(usize) -> Result<(usize, usize, usize), OperationError>,
@@ -208,7 +208,7 @@ impl CheckedBlockLayout {
     /// All three reachable extents are checked before any write. The two
     /// sources may alias each other.
     #[allow(clippy::too_many_arguments)]
-    pub fn add_two_source<T>(
+    pub(crate) fn add_two_source<T>(
         &mut self,
         dst_data: &mut [T],
         lhs_data: &[T],

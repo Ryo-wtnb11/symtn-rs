@@ -405,13 +405,13 @@ impl FusionTreeHomSpace {
         }
     }
 
+    #[cfg(test)]
     /// Returns the already-published semantic identity without initializing it.
     ///
     /// Why not call [`Self::id`]: fallible metadata builders must validate
     /// algebra before publishing process-local identity state.
-    #[doc(hidden)]
     #[inline]
-    pub fn existing_id(&self) -> Option<HomSpaceId> {
+    pub(crate) fn existing_id(&self) -> Option<HomSpaceId> {
         self.id.get().cloned()
     }
 
@@ -838,27 +838,6 @@ impl FusionTreeHomSpace {
             complete_epoch,
             state: PreparedFusionTreeLayoutState::Cold { key, data },
         })
-    }
-
-    pub fn try_for_each_fusion_tree_key<R, F, E>(&self, rule: &R, mut f: F) -> Result<(), E>
-    where
-        R: MultiplicityFreeFusionRule,
-        F: FnMut(&FusionTreePairKey) -> Result<(), E>,
-    {
-        let layout = self.cached_fusion_tree_layout(rule);
-        for key in layout.keys.iter() {
-            f(key)?;
-        }
-        Ok(())
-    }
-
-    pub fn try_with_fusion_tree_keys<R, F, T, E>(&self, rule: &R, f: F) -> Result<T, E>
-    where
-        R: MultiplicityFreeFusionRule,
-        F: FnOnce(&[FusionTreePairKey]) -> Result<T, E>,
-    {
-        let layout = self.cached_fusion_tree_layout(rule);
-        f(layout.keys.as_ref())
     }
 
     pub(crate) fn cached_fusion_tree_layout<R>(&self, rule: &R) -> Arc<FusionTreeHomSpaceLayout>
@@ -1405,7 +1384,7 @@ impl FusionTreeHomSpace {
     /// coupled fold reports escaped candidates, tainted sectors, or a poisoned
     /// (beyond one-hop) fold, even when the offending sectors could not survive
     /// the codomain∩domain merge — conservative on purpose; use
-    /// [`Self::fusion_tree_keys_generic_for_coupled`] for a single provably
+    /// [`Self::fusion_tree_keys_generic_for_coupled_checked`] for a single provably
     /// clean sector. Unbounded Generic rules never err.
     pub fn fusion_tree_keys_generic<R>(&self, rule: &R) -> Result<Vec<FusionTreePairKey>, CoreError>
     where
@@ -1504,39 +1483,10 @@ impl FusionTreeHomSpace {
 
     /// Block keys of ONE coupled sector, for spaces whose full enumeration is
     /// an `Err` but whose requested sector is provably clean (its complete
-    /// complete tree set stays inside the provider catalog). `Err` when the sector is
+    /// tree set stays inside the provider catalog). `Err` when the sector is
     /// tainted on either side (its trees would need out-of-table intermediates)
     /// or the fold is poisoned; `Ok(vec![])` when the sector is simply not a
     /// shared coupled candidate.
-    pub fn fusion_tree_keys_generic_for_coupled<R>(
-        &self,
-        rule: &R,
-        coupled: SectorId,
-    ) -> Result<Vec<FusionTreePairKey>, CoreError>
-    where
-        R: FusionRule,
-    {
-        let (codomain, codomain_fold) =
-            fusion_trees_by_coupled_for_space_generic(rule, self.codomain());
-        let (domain, domain_fold) = fusion_trees_by_coupled_for_space_generic(rule, self.domain());
-        generic_keys_for_coupled_from_groups(
-            &codomain,
-            &codomain_fold,
-            &domain,
-            &domain_fold,
-            coupled,
-            |side, fold, coupled| {
-                CoreError::FusionOutsideTable {
-                message: format!(
-                    "coupled sector {coupled:?} on the {side} side requires out-of-catalog intermediates. {}",
-                    fusion_fold_error_message(side, fold),
-                ),
-            }
-            },
-        )
-    }
-
-    /// Checked counterpart of [`Self::fusion_tree_keys_generic_for_coupled`].
     pub fn fusion_tree_keys_generic_for_coupled_checked<R>(
         &self,
         rule: &R,
@@ -1574,7 +1524,8 @@ impl FusionTreeHomSpace {
         SectorStructure::from_keys(rank, self.fusion_tree_keys(rule).iter().cloned())
     }
 
-    pub fn unique_fusion_tree_key_from_external_sectors<R>(
+    #[cfg(test)]
+    pub(crate) fn unique_fusion_tree_key_from_external_sectors<R>(
         &self,
         rule: &R,
         sectors: &[SectorId],
@@ -1654,7 +1605,7 @@ impl FusionTreeHomSpace {
     /// degeneracies (the legs are authoritative): for every tree key,
     /// `shape[axis]` must equal the degeneracy the axis' leg stores for the
     /// tree's uncoupled sector on that axis.
-    pub fn validate_degeneracy_shapes<S>(
+    pub(crate) fn validate_degeneracy_shapes<S>(
         &self,
         keys: &[FusionTreePairKey],
         shapes: &[S],
@@ -1715,9 +1666,9 @@ impl FusionTreeHomSpace {
         StructurallyValidatedFusionTreeSubset::try_new(self, structure)?.validate_for_rule(rule)
     }
 
+    #[cfg(test)]
     /// Checked finite-algebra sibling of [`Self::validate_subblock_structure_subset`].
-    #[doc(hidden)]
-    pub fn validate_subblock_structure_subset_checked<R>(
+    pub(crate) fn validate_subblock_structure_subset_checked<R>(
         &self,
         rule: &R,
         structure: &BlockStructure,

@@ -2,6 +2,7 @@ use core::convert::Infallible;
 use core::mem::MaybeUninit;
 use core::ops::Range;
 
+#[cfg(test)]
 use num_complex::Complex64;
 use num_traits::Zero;
 use strided_kernel::{CopyPlan, RawStridedMut, RawStridedRef, StridedError};
@@ -97,19 +98,14 @@ impl OwnedCatCopy {
     }
 
     #[doc(hidden)]
-    pub fn destination_leading_dimension(&self) -> usize {
-        self.destination_leading_dimension
-    }
-
-    #[doc(hidden)]
     pub fn conjugate(&self) -> bool {
         self.conjugate
     }
 }
 
-#[doc(hidden)]
+#[cfg(test)]
 #[derive(Clone, Copy)]
-pub enum OwnedCatC64Source<'a> {
+pub(crate) enum OwnedCatC64Source<'a> {
     F64(&'a [f64]),
     C64(&'a [Complex64]),
 }
@@ -187,9 +183,9 @@ where
     }))
 }
 
+#[cfg(test)]
 /// Returns `None` unless the compiled mixed-dtype copies prove a complete overwrite.
-#[doc(hidden)]
-pub fn try_cat_owned_c64_raw(
+pub(crate) fn try_cat_owned_c64_raw(
     mut exec: crate::host_pool::Exec<'_>,
     required_len: usize,
     side: OwnedCatSide,
@@ -411,6 +407,7 @@ fn copy_strided_rows<D: Copy + Send + Sync>(
     plan.execute_uninit(&mut destination, &source, exec)
 }
 
+#[cfg(test)]
 fn write_widened(destination: &mut [MaybeUninit<Complex64>], source: &[f64], copy: &OwnedCatCopy) {
     if copy.rows == 0 || copy.cols == 0 {
         return;

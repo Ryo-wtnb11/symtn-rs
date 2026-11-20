@@ -283,6 +283,7 @@ where
     }))
 }
 
+#[cfg(test)]
 #[allow(clippy::type_complexity)]
 pub(crate) fn multiplicity_free_braid_tree_pair_block_proven<R>(
     batch: ValidatedMultiplicityFreePairBatch<'_, R>,
@@ -318,6 +319,7 @@ where
     multiplicity_free_braid_tree_pair_block_ordered_validated(group, prepared)
 }
 
+#[cfg(test)]
 #[allow(clippy::type_complexity)]
 pub(crate) fn multiplicity_free_transpose_tree_pair_block_proven<R>(
     batch: ValidatedMultiplicityFreePairBatch<'_, R>,
@@ -407,6 +409,7 @@ where
     multiplicity_free_braid_tree_pair_block_validated(group, &prepared)
 }
 
+#[cfg(any(test, feature = "testing"))]
 #[allow(clippy::type_complexity)]
 fn multiplicity_free_braid_tree_pair_block_validated<R>(
     group: ValidatedTreePairBlockGroup<'_, R>,
@@ -794,6 +797,7 @@ where
     multiplicity_free_transpose_tree_pair_block_validated(group, &prepared)
 }
 
+#[cfg(test)]
 #[allow(clippy::type_complexity)]
 fn multiplicity_free_transpose_tree_pair_block_validated<R>(
     group: ValidatedTreePairBlockGroup<'_, R>,

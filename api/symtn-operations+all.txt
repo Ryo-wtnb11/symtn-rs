@@ -142,7 +142,6 @@ pub fn symtn_operations::cuda_transform::CudaMemberZeroRegions::into_regions(sel
 pub fn symtn_operations::cuda_transform::CudaMemberZeroRegions::max_zero_len(&self) -> usize
 pub fn symtn_operations::cuda_transform::CudaMemberZeroRegions::prepare(&[symtn_operations::fusion_replay::FusionScaleBlockLayout], usize, usize) -> core::result::Result<Self, symtn_operations::OperationError>
 pub fn symtn_operations::cuda_transform::CudaMemberZeroRegions::regions(&self) -> &[symtn_dense::cuda_region::CudaRegion]
-pub fn symtn_operations::cuda_transform::CudaMemberZeroRegions::reserve_templates<D: symtn_dense::cuda_adapter::CudaScalar>(&self, &mut symtn_dense::cuda_adapter::context::CudaDenseContext<'_>, usize) -> core::result::Result<(), symtn_operations::OperationError>
 pub struct symtn_operations::cuda_transform::CudaSingleMemberRegions
 impl symtn_operations::cuda_transform::CudaSingleMemberRegions
 pub fn symtn_operations::cuda_transform::CudaSingleMemberRegions::admit(&symtn_operations::TreeTransformStructure<f64>) -> core::result::Result<(), symtn_operations::OperationError>
@@ -198,9 +197,6 @@ pub fn symtn_operations::fusion_replay::FusionBlockContractGroupPlan<C>::fmt(&se
 pub struct symtn_operations::fusion_replay::FusionBlockContractPlan<C>
 impl symtn_operations::fusion_replay::FusionBlockContractPlan<f64>
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::from_parts(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<f64>>) -> core::result::Result<Self, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::from_parts_with_ops(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<f64>>, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<Self, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::try_from_canonical_coupled_regions_with_ops(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::try_from_canonical_coupled_regions_with_ops_and_alpha(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp, impl core::ops::function::FnMut(symtn_sectors::SectorId) -> core::result::Result<f64, symtn_operations::OperationError>) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
 impl<C> symtn_operations::fusion_replay::FusionBlockContractPlan<C> where C: core::marker::Copy + core::cmp::PartialEq + num_traits::identities::One
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::distinct_direct_gemm_shapes(&self) -> usize
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::execute_direct_on_storage_axpby<G, D, DDst, DLhs, DRhs>(&self, &mut G, &mut DDst, &DLhs, &DRhs, D, D) -> core::result::Result<(), symtn_operations::OperationError> where G: symtn_operations::fusion_replay::StorageGemm<D, DDst, DLhs, DRhs>, D: symtn_operations::RecouplingCoefficientAction<C>, DDst: symtn_core::storage::TensorStorage<D>, DLhs: symtn_core::storage::TensorStorage<D>, DRhs: symtn_core::storage::TensorStorage<D>
@@ -214,7 +210,6 @@ impl<C> symtn_operations::fusion_replay::FusionBlockContractPlan<C> where C: cor
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::execute_owned<G, D>(&self, &mut dyn tenferro_tensor::backend::Engine, &mut G, &mut symtn_operations::fusion_replay::FusionBlockContractWorkspace, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D], &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D], D) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::OperationError> where G: symtn_operations::fusion_replay::Rank2Gemm<D>, D: symtn_operations::DenseBlockScalar + symtn_operations::RecouplingCoefficientAction<C>
 impl<C> symtn_operations::fusion_replay::FusionBlockContractPlan<C> where C: core::marker::Copy + core::cmp::PartialEq + num_traits::identities::One
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::from_parts_generic(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<C>>) -> core::result::Result<Self, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::from_parts_with_ops_generic(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<C>>, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<Self, symtn_operations::OperationError>
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::inactive_destination_regions(&self) -> &[symtn_operations::fusion_replay::FusionScaleBlockLayout]
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::try_from_canonical_coupled_regions_with_ops_and_alpha_generic(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp, impl core::ops::function::FnMut(symtn_sectors::SectorId) -> core::result::Result<C, symtn_operations::OperationError>) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::try_from_canonical_coupled_regions_with_ops_generic(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
@@ -437,8 +432,6 @@ pub fn symtn_operations::DenseTreeTransformOperations<E>::fmt(&self, &mut core::
 impl<E> symtn_operations::ReportsPlacement for symtn_operations::DenseTreeTransformOperations<E>
 pub fn symtn_operations::DenseTreeTransformOperations<E>::is_host_placement(&self) -> bool
 pub fn symtn_operations::DenseTreeTransformOperations<E>::placement(&self) -> symtn_core::storage::Placement
-pub trait symtn_operations::replay_backend::HostTreeTransformBackend<D, C> where D: symtn_operations::TreeTransformScalar, C: core::marker::Copy: symtn_operations::TreeTransformBackend<D, C>
-impl<B, D, C> symtn_operations::HostTreeTransformBackend<D, C> for B where B: symtn_operations::TreeTransformBackend<D, C> + ?core::marker::Sized, D: symtn_operations::TreeTransformScalar, C: core::marker::Copy
 pub trait symtn_operations::replay_backend::TreeTransformBackend<D, C> where D: symtn_operations::TreeTransformScalar, C: core::marker::Copy
 pub type symtn_operations::replay_backend::TreeTransformBackend::Workspace
 pub fn symtn_operations::replay_backend::TreeTransformBackend::tree_transform_structure_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &symtn_operations::TreeTransformStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D, D) -> core::result::Result<(), symtn_operations::OperationError>
@@ -480,7 +473,6 @@ impl<'a, S> symtn_operations::stacked::StackedStorageViewMut<'a, S>
 pub fn symtn_operations::stacked::StackedStorageViewMut<'a, S>::member_stride(&self) -> usize
 pub fn symtn_operations::stacked::StackedStorageViewMut<'a, S>::members(&self) -> usize
 pub fn symtn_operations::stacked::StackedStorageViewMut<'a, S>::new<D>(&'a mut S, usize, usize, usize) -> core::result::Result<Self, symtn_operations::OperationError> where S: symtn_core::storage::TensorStorage<D>
-pub fn symtn_operations::stacked::StackedStorageViewMut<'a, S>::storage_mut(&mut self) -> &mut S
 impl<D, S: symtn_core::storage::TensorStorage<D>> symtn_core::storage::TensorStorage<D> for symtn_operations::stacked::StackedStorageViewMut<'_, S>
 pub fn symtn_operations::stacked::StackedStorageViewMut<'_, S>::len(&self) -> usize
 pub fn symtn_operations::stacked::StackedStorageViewMut<'_, S>::placement(&self) -> symtn_core::storage::Placement
@@ -490,31 +482,6 @@ pub fn symtn_operations::cuda::CudaStackedStorageGemm<'_, '_>::matmul_range_into
 pub fn symtn_operations::cuda::CudaStackedStorageGemm<'_, '_>::matmul_range_with_ops_scaled_into(&mut self, &mut symtn_operations::stacked::StackedStorageViewMut<'_, symtn_operations::cuda::CudaStorage<D>>, usize, &symtn_operations::stacked::StackedStorageView<'_, symtn_operations::cuda::CudaStorage<D>>, usize, &symtn_operations::stacked::StackedStorageView<'_, symtn_operations::cuda::CudaStorage<D>>, usize, usize, usize, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp, D) -> core::result::Result<(), symtn_operations::OperationError>
 pub fn symtn_operations::cuda::CudaStackedStorageGemm<'_, '_>::supports_matmul_with_ops_scaled(&self, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> bool
 pub mod symtn_operations::storage_scratch
-pub struct symtn_operations::storage_scratch::SamePlacementScratchAllocator
-impl symtn_operations::storage_scratch::SamePlacementScratchAllocator
-pub fn symtn_operations::storage_scratch::SamePlacementScratchAllocator::filled_like<T, S>(&self, &S, usize, T) -> <S as symtn_core::storage::SimilarStorage>::Similar where T: core::clone::Clone, S: symtn_core::storage::SimilarStorage<T>
-impl core::clone::Clone for symtn_operations::storage_scratch::SamePlacementScratchAllocator
-pub fn symtn_operations::storage_scratch::SamePlacementScratchAllocator::clone(&self) -> symtn_operations::storage_scratch::SamePlacementScratchAllocator
-impl core::clone::TrivialClone for symtn_operations::storage_scratch::SamePlacementScratchAllocator
-impl core::default::Default for symtn_operations::storage_scratch::SamePlacementScratchAllocator
-pub fn symtn_operations::storage_scratch::SamePlacementScratchAllocator::default() -> symtn_operations::storage_scratch::SamePlacementScratchAllocator
-impl core::fmt::Debug for symtn_operations::storage_scratch::SamePlacementScratchAllocator
-pub fn symtn_operations::storage_scratch::SamePlacementScratchAllocator::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for symtn_operations::storage_scratch::SamePlacementScratchAllocator
-pub struct symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>
-impl<Source, Destination> symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::destination(&self) -> &Destination
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::destination_mut(&mut self) -> &mut Destination
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::from_parts(Source, Destination) -> Self
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::source(&self) -> &Source
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::source_and_destination_mut(&mut self) -> (&Source, &mut Destination)
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::source_mut(&mut self) -> &mut Source
-impl<Source, Destination> core::default::Default for symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination> where Source: core::default::Default, Destination: core::default::Default
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::default() -> Self
-impl<Source: core::clone::Clone, Destination: core::clone::Clone> core::clone::Clone for symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::clone(&self) -> symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>
-impl<Source: core::fmt::Debug, Destination: core::fmt::Debug> core::fmt::Debug for symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>
-pub fn symtn_operations::storage_scratch::TreeTransformScratchBuffers<Source, Destination>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub mod symtn_operations::strided
 pub fn symtn_operations::strided::column_major_strides_isize(&[usize]) -> core::result::Result<alloc::vec::Vec<isize>, symtn_operations::OperationError>
 pub fn symtn_operations::strided::column_major_strides_usize(&[usize]) -> core::result::Result<alloc::vec::Vec<usize>, symtn_operations::OperationError>
@@ -539,12 +506,10 @@ impl<T: core::clone::Clone> core::clone::Clone for symtn_operations::transform_p
 pub fn symtn_operations::transform_plan::SharedTreeTransformGroupPlan<T>::clone(&self) -> symtn_operations::transform_plan::SharedTreeTransformGroupPlan<T>
 pub struct symtn_operations::transform_plan::TreeTransformBlockSpec<T>
 impl<T> symtn_operations::transform_plan::TreeTransformBlockSpec<T>
-pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::dst_blocks(&self) -> &[usize]
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::multi(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<T>) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::recoupling_coefficients_dst_src(&self) -> &[T]
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::single(usize, usize, T) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::source_axes(&self) -> core::option::Option<&[usize]>
-pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::src_blocks(&self) -> &[usize]
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::with_shared_source_axes(self, alloc::sync::Arc<[usize]>) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::with_source_axes<I>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = usize>
 impl<T: core::clone::Clone> core::clone::Clone for symtn_operations::transform_plan::TreeTransformBlockSpec<T>
@@ -584,7 +549,6 @@ pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::compile_stru
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::compile_structures_with_storage_conjugation(&self, &symtn_core::block_structure::structure::BlockStructure, &symtn_core::block_structure::structure::BlockStructure, bool) -> core::result::Result<symtn_operations::TreeTransformStructure<T>, symtn_operations::OperationError>
 impl<T> symtn_operations::transform_plan::TreeTransformGroupPlan<T>
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::from_specs<I>(I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>>
-pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::into_specs(self) -> alloc::vec::Vec<symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>>
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::new(alloc::vec::Vec<symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>>) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::specs(&self) -> &[symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>]
 impl<T: core::clone::Clone> core::clone::Clone for symtn_operations::transform_plan::TreeTransformGroupPlan<T>
@@ -617,10 +581,8 @@ pub mod symtn_operations::transform_replay
 pub struct symtn_operations::transform_replay::HostTreeTransformWorkspace<T>
 impl<T> symtn_operations::HostTreeTransformWorkspace<T>
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::coefficient_pack_builds(&self) -> usize
-pub fn symtn_operations::HostTreeTransformWorkspace<T>::destination_fills(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::destination_len(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::is_host_workspace(&self) -> bool
-pub fn symtn_operations::HostTreeTransformWorkspace<T>::movement_phases(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::placement(&self) -> symtn_core::storage::Placement
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::retained_bytes(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::source_len(&self) -> usize
@@ -936,13 +898,6 @@ impl<'a> core::fmt::Debug for symtn_operations::OutputAxisOrder<'a>
 pub fn symtn_operations::OutputAxisOrder<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Copy for symtn_operations::OutputAxisOrder<'a>
 impl<'a> core::marker::StructuralPartialEq for symtn_operations::OutputAxisOrder<'a>
-pub enum symtn_operations::OwnedCatC64Source<'a>
-pub symtn_operations::OwnedCatC64Source::C64(&'a [num_complex::Complex64])
-pub symtn_operations::OwnedCatC64Source::F64(&'a [f64])
-impl<'a> core::clone::Clone for symtn_operations::OwnedCatC64Source<'a>
-pub fn symtn_operations::OwnedCatC64Source<'a>::clone(&self) -> symtn_operations::OwnedCatC64Source<'a>
-impl<'a> core::clone::TrivialClone for symtn_operations::OwnedCatC64Source<'a>
-impl<'a> core::marker::Copy for symtn_operations::OwnedCatC64Source<'a>
 pub enum symtn_operations::OwnedCatSide
 pub symtn_operations::OwnedCatSide::Codomain
 pub symtn_operations::OwnedCatSide::Domain
@@ -961,7 +916,6 @@ pub symtn_operations::TransformScale::Data(D)
 pub symtn_operations::TransformScale::Structural(C)
 impl<D, C> symtn_operations::TransformScale<D, C> where D: symtn_operations::RecouplingCoefficientAction<C> + num_traits::identities::One + core::cmp::PartialEq, C: core::marker::Copy
 pub fn symtn_operations::TransformScale<D, C>::apply(self, D) -> D where D: core::ops::arith::Mul<D, Output = D>
-pub fn symtn_operations::TransformScale<D, C>::into_data(self) -> D
 pub fn symtn_operations::TransformScale<D, C>::is_identity(self) -> bool
 pub fn symtn_operations::TransformScale<D, C>::is_zero(self) -> bool where D: num_traits::identities::Zero
 pub fn symtn_operations::TransformScale<D, C>::new(D, C) -> Self
@@ -1048,9 +1002,6 @@ pub fn symtn_operations::BlockOverwrite<'_, D>::copy_runs(&mut self, impl core::
 pub fn symtn_operations::BlockOverwrite<'_, D>::zero(&mut self) -> core::result::Result<(), symtn_operations::OperationError>
 pub struct symtn_operations::CheckedBlockLayout
 impl symtn_operations::CheckedBlockLayout
-pub fn symtn_operations::CheckedBlockLayout::add_two_source<T>(&mut self, &mut [T], &[T], &[T], isize, isize, isize, bool, bool, T, T) -> core::result::Result<(), symtn_operations::OperationError> where T: core::marker::Copy + core::ops::arith::Add<T, Output = T> + core::ops::arith::Mul<T, Output = T> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::ConjugateValue
-pub fn symtn_operations::CheckedBlockLayout::fill_one(&mut self, &[usize], impl core::ops::function::FnMut(usize) -> core::result::Result<(usize, usize), symtn_operations::OperationError>) -> core::result::Result<(), symtn_operations::OperationError>
-pub fn symtn_operations::CheckedBlockLayout::fill_two(&mut self, &[usize], impl core::ops::function::FnMut(usize) -> core::result::Result<(usize, usize, usize), symtn_operations::OperationError>) -> core::result::Result<(), symtn_operations::OperationError>
 pub fn symtn_operations::CheckedBlockLayout::tensoradd<T>(&mut self, &mut [T], &[T], isize, isize, bool, T, T) -> core::result::Result<(), symtn_operations::OperationError> where T: core::marker::Copy + core::ops::arith::Add<T, Output = T> + core::ops::arith::Mul<T, Output = T> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::ConjugateValue
 impl core::default::Default for symtn_operations::CheckedBlockLayout
 pub fn symtn_operations::CheckedBlockLayout::default() -> symtn_operations::CheckedBlockLayout
@@ -1121,9 +1072,6 @@ pub fn symtn_operations::fusion_replay::FusionBlockContractGroupPlan<C>::fmt(&se
 pub struct symtn_operations::FusionBlockContractPlan<C>
 impl symtn_operations::fusion_replay::FusionBlockContractPlan<f64>
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::from_parts(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<f64>>) -> core::result::Result<Self, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::from_parts_with_ops(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<f64>>, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<Self, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::try_from_canonical_coupled_regions_with_ops(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<f64>::try_from_canonical_coupled_regions_with_ops_and_alpha(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp, impl core::ops::function::FnMut(symtn_sectors::SectorId) -> core::result::Result<f64, symtn_operations::OperationError>) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
 impl<C> symtn_operations::fusion_replay::FusionBlockContractPlan<C> where C: core::marker::Copy + core::cmp::PartialEq + num_traits::identities::One
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::distinct_direct_gemm_shapes(&self) -> usize
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::execute_direct_on_storage_axpby<G, D, DDst, DLhs, DRhs>(&self, &mut G, &mut DDst, &DLhs, &DRhs, D, D) -> core::result::Result<(), symtn_operations::OperationError> where G: symtn_operations::fusion_replay::StorageGemm<D, DDst, DLhs, DRhs>, D: symtn_operations::RecouplingCoefficientAction<C>, DDst: symtn_core::storage::TensorStorage<D>, DLhs: symtn_core::storage::TensorStorage<D>, DRhs: symtn_core::storage::TensorStorage<D>
@@ -1137,7 +1085,6 @@ impl<C> symtn_operations::fusion_replay::FusionBlockContractPlan<C> where C: cor
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::execute_owned<G, D>(&self, &mut dyn tenferro_tensor::backend::Engine, &mut G, &mut symtn_operations::fusion_replay::FusionBlockContractWorkspace, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D], &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D], D) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::OperationError> where G: symtn_operations::fusion_replay::Rank2Gemm<D>, D: symtn_operations::DenseBlockScalar + symtn_operations::RecouplingCoefficientAction<C>
 impl<C> symtn_operations::fusion_replay::FusionBlockContractPlan<C> where C: core::marker::Copy + core::cmp::PartialEq + num_traits::identities::One
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::from_parts_generic(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<C>>) -> core::result::Result<Self, symtn_operations::OperationError>
-pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::from_parts_with_ops_generic(alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionScaleBlockLayout>, alloc::vec::Vec<symtn_operations::fusion_replay::FusionBlockContractGroupPlan<C>>, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<Self, symtn_operations::OperationError>
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::inactive_destination_regions(&self) -> &[symtn_operations::fusion_replay::FusionScaleBlockLayout]
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::try_from_canonical_coupled_regions_with_ops_and_alpha_generic(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp, impl core::ops::function::FnMut(symtn_sectors::SectorId) -> core::result::Result<C, symtn_operations::OperationError>) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
 pub fn symtn_operations::fusion_replay::FusionBlockContractPlan<C>::try_from_canonical_coupled_regions_with_ops_generic(&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp) -> core::result::Result<core::option::Option<Self>, symtn_operations::OperationError>
@@ -1197,10 +1144,8 @@ pub fn symtn_operations::fusion_replay::HostFusionBlockContractWorkspace::placem
 pub struct symtn_operations::HostTreeTransformWorkspace<T>
 impl<T> symtn_operations::HostTreeTransformWorkspace<T>
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::coefficient_pack_builds(&self) -> usize
-pub fn symtn_operations::HostTreeTransformWorkspace<T>::destination_fills(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::destination_len(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::is_host_workspace(&self) -> bool
-pub fn symtn_operations::HostTreeTransformWorkspace<T>::movement_phases(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::placement(&self) -> symtn_core::storage::Placement
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::retained_bytes(&self) -> usize
 pub fn symtn_operations::HostTreeTransformWorkspace<T>::source_len(&self) -> usize
@@ -1217,7 +1162,6 @@ pub struct symtn_operations::OwnedCatCopy
 impl symtn_operations::OwnedCatCopy
 pub fn symtn_operations::OwnedCatCopy::cols(&self) -> usize
 pub fn symtn_operations::OwnedCatCopy::conjugate(&self) -> bool
-pub fn symtn_operations::OwnedCatCopy::destination_leading_dimension(&self) -> usize
 pub fn symtn_operations::OwnedCatCopy::destination_offset(&self) -> usize
 pub fn symtn_operations::OwnedCatCopy::new(usize, usize, usize, [usize; 2], [usize; 2], usize, core::ops::range::Range<usize>, bool) -> Self
 pub fn symtn_operations::OwnedCatCopy::rows(&self) -> usize
@@ -1323,12 +1267,10 @@ impl<'a> core::marker::Copy for symtn_operations::TensorTraceAxisSpec<'a>
 impl<'a> core::marker::StructuralPartialEq for symtn_operations::TensorTraceAxisSpec<'a>
 pub struct symtn_operations::TreeTransformBlockSpec<T>
 impl<T> symtn_operations::transform_plan::TreeTransformBlockSpec<T>
-pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::dst_blocks(&self) -> &[usize]
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::multi(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<T>) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::recoupling_coefficients_dst_src(&self) -> &[T]
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::single(usize, usize, T) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::source_axes(&self) -> core::option::Option<&[usize]>
-pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::src_blocks(&self) -> &[usize]
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::with_shared_source_axes(self, alloc::sync::Arc<[usize]>) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformBlockSpec<T>::with_source_axes<I>(self, I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = usize>
 impl<T: core::clone::Clone> core::clone::Clone for symtn_operations::transform_plan::TreeTransformBlockSpec<T>
@@ -1368,7 +1310,6 @@ pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::compile_stru
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::compile_structures_with_storage_conjugation(&self, &symtn_core::block_structure::structure::BlockStructure, &symtn_core::block_structure::structure::BlockStructure, bool) -> core::result::Result<symtn_operations::TreeTransformStructure<T>, symtn_operations::OperationError>
 impl<T> symtn_operations::transform_plan::TreeTransformGroupPlan<T>
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::from_specs<I>(I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>>
-pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::into_specs(self) -> alloc::vec::Vec<symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>>
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::new(alloc::vec::Vec<symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>>) -> Self
 pub fn symtn_operations::transform_plan::TreeTransformGroupPlan<T>::specs(&self) -> &[symtn_operations::transform_plan::TreeTransformGroupBlockSpec<T>]
 impl<T: core::clone::Clone> core::clone::Clone for symtn_operations::transform_plan::TreeTransformGroupPlan<T>
@@ -1622,8 +1563,6 @@ pub fn symtn_operations::kernel_adapter::StridedHostKernelAdapter::copy_scale_st
 pub fn symtn_operations::kernel_adapter::StridedHostKernelAdapter::recoupling_src_times_u_transpose<C>(&mut self, threadteam::exec::Exec<'_>, &mut [T], &[T], &[C], usize, usize, usize) -> core::result::Result<(), symtn_operations::OperationError> where C: core::marker::Copy, T: symtn_operations::RecouplingCoefficientAction<C>
 pub fn symtn_operations::kernel_adapter::StridedHostKernelAdapter::scale_strided(&mut self, threadteam::exec::Exec<'_>, &mut [T], &[usize], &[isize], isize, T) -> core::result::Result<(), symtn_operations::OperationError>
 pub fn symtn_operations::kernel_adapter::StridedHostKernelAdapter::transform_strided_baked<C>(&mut self, threadteam::exec::Exec<'_>, &mut alloc::vec::Vec<isize>, &mut [T], &[T], &[usize], &[isize], &[isize], isize, isize, bool, symtn_operations::TransformScale<T, C>, core::option::Option<T>, core::option::Option<symtn_operations::kernel_adapter::BakedFusedLayout<'_>>, core::option::Option<&mut [usize]>) -> core::result::Result<(), symtn_operations::OperationError> where C: core::marker::Copy, T: symtn_operations::RecouplingCoefficientAction<C> + num_traits::identities::One + core::cmp::PartialEq
-pub trait symtn_operations::HostTreeTransformBackend<D, C> where D: symtn_operations::TreeTransformScalar, C: core::marker::Copy: symtn_operations::TreeTransformBackend<D, C>
-impl<B, D, C> symtn_operations::HostTreeTransformBackend<D, C> for B where B: symtn_operations::TreeTransformBackend<D, C> + ?core::marker::Sized, D: symtn_operations::TreeTransformScalar, C: core::marker::Copy
 pub trait symtn_operations::Rank2Gemm<D>
 pub fn symtn_operations::Rank2Gemm::matmul_rank2(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut [D], &[D], &[D], usize, usize, usize, D, D) -> core::result::Result<(), symtn_operations::OperationError>
 pub fn symtn_operations::Rank2Gemm::matmul_rank2_batch(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut [D], &[D], &[D], &[symtn_operations::fusion_replay::Rank2GemmBatchJob], &[usize], D, D) -> core::result::Result<(), symtn_operations::OperationError> where D: core::marker::Copy
@@ -1756,7 +1695,6 @@ pub fn symtn_operations::tree_transform_members_overwrite_raw<A, E, D, C>(&mut d
 pub fn symtn_operations::tree_transform_structure_overwrite_with_strided_kernel_raw<A, D, C>(threadteam::exec::Exec<'_>, &mut A, &mut symtn_operations::TreeTransformWorkspace<D>, &symtn_operations::TreeTransformStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D) -> core::result::Result<(), symtn_operations::OperationError> where A: symtn_operations::kernel_adapter::HostKernelAdapter<D>, D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::ConjugateValue + core::marker::Send + core::marker::Sync + symtn_operations::RecouplingCoefficientAction<C>, C: core::marker::Copy
 pub fn symtn_operations::tree_transform_structure_overwrite_with_structural_recoupling_raw<A, E, D, C>(&mut dyn tenferro_tensor::backend::Engine, &mut A, &mut E, &mut symtn_operations::TreeTransformWorkspace<D>, &symtn_operations::TreeTransformStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D, &[(usize, C)]) -> core::result::Result<(), symtn_operations::OperationError> where A: symtn_operations::kernel_adapter::HostKernelAdapter<D> + core::clone::Clone + core::marker::Send + core::marker::Sync, E: symtn_dense::executor::DenseExecutor, D: symtn_operations::DenseRecouplingScalar + symtn_operations::RecouplingCoefficientAction<C> + symtn_operations::ConjugateValue, C: core::marker::Copy + core::marker::Sync
 pub fn symtn_operations::tree_transform_structure_with_strided_kernel_raw<A, D, C>(threadteam::exec::Exec<'_>, &mut A, &mut symtn_operations::TreeTransformWorkspace<D>, &symtn_operations::TreeTransformStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D, D) -> core::result::Result<(), symtn_operations::OperationError> where A: symtn_operations::kernel_adapter::HostKernelAdapter<D>, D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::ConjugateValue + core::marker::Send + core::marker::Sync + symtn_operations::RecouplingCoefficientAction<C>, C: core::marker::Copy
-pub fn symtn_operations::try_cat_owned_c64_raw(threadteam::exec::Exec<'_>, usize, symtn_operations::OwnedCatSide, &[symtn_operations::OwnedCatCopy], [symtn_operations::OwnedCatC64Source<'_>; 2]) -> core::option::Option<alloc::vec::Vec<num_complex::Complex64>>
 pub fn symtn_operations::try_cat_owned_mixed_raw<D>(threadteam::exec::Exec<'_>, usize, symtn_operations::OwnedCatSide, &[symtn_operations::OwnedCatCopy], [core::option::Option<&[D]>; 2], [usize; 2], &[core::option::Option<&[D]>]) -> core::option::Option<alloc::vec::Vec<D>> where D: symtn_operations::ConjugateValue + core::marker::Send + core::marker::Sync + num_traits::identities::Zero
 pub fn symtn_operations::try_cat_owned_raw<D: symtn_operations::ConjugateValue + core::marker::Send + core::marker::Sync>(threadteam::exec::Exec<'_>, usize, symtn_operations::OwnedCatSide, &[symtn_operations::OwnedCatCopy], [&[D]; 2]) -> core::option::Option<alloc::vec::Vec<D>>
 pub fn symtn_operations::try_tensortrace_owned_raw<'s, 't, D, C, F>(&'s symtn_core::block_structure::structure::BlockStructure, usize, &'s symtn_core::block_structure::structure::BlockStructure, &[D], bool, usize, &'s [usize], &'s [usize], F, D) -> core::result::Result<core::option::Option<alloc::vec::Vec<D>>, symtn_operations::OperationError> where D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + num_traits::identities::Zero + num_traits::identities::One + core::cmp::PartialEq + symtn_operations::ConjugateValue + symtn_operations::RecouplingCoefficientAction<C>, C: core::marker::Copy + 't, F: core::ops::function::Fn(usize) -> symtn_operations::OwnedTraceTerm<'t, C>

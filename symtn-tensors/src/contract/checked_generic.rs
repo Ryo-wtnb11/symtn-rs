@@ -6,7 +6,9 @@ use symtn_core::{
     BlockStructure, CheckedGenericAdmissionMode, CheckedGenericRigidSymbols, CoreError,
     FusionTreeHomSpace, PermutedMemoTicket, RuleIdentity, StructurallyValidatedFusionTreeSubset,
 };
-use symtn_operations::{OutputAxisOrder, TensorContractSpec, TreeTransformBackend};
+#[cfg(test)]
+use symtn_operations::OutputAxisOrder;
+use symtn_operations::TensorContractSpec;
 
 use crate::admission::{BraidingOp, CHECKED_PLANAR_CONTRACTION_UNSUPPORTED};
 use crate::mode::{ContractRequest, ContractSide, ContractStaging, StagedContraction};
@@ -34,6 +36,7 @@ use super::resolution::{CoreMiss, CoreRoute};
 use super::structure::TensorContractAxisPlan;
 use crate::tree_transform::TreeTransformPlanning;
 
+#[cfg(test)]
 type CheckedContractResult<P, D> = Result<
     (BoundDynamicFusionMapSpace<P>, Vec<D>),
     CheckedGenericPlanError<<P as symtn_core::CheckedGenericFusion>::Error>,
@@ -556,6 +559,7 @@ where
     X: symtn_dense::DenseExecutor,
     BC: TensorContractBackend<D, f64>,
 {
+    #[cfg(test)]
     /// Contracts two checked Generic tensors, the result split after its
     /// first `codomain_rank` output axes (TensorOperations `pAB`) and owned
     /// by the left provider allocation. Each operand is its logical space,
@@ -570,13 +574,10 @@ where
     /// the replay succeeds is the destination committed, then the
     /// intermediates the route used, then the staged transformers (#2063).
     ///
-    /// This concrete cross-crate entrypoint is internal and unstable despite
-    /// being public for `symtn`; downstream callers must not rely on it.
     ///
     /// [`plan_contract`]: TensorContractFusionExecutionContext::plan_contract
-    #[doc(hidden)]
     #[allow(clippy::type_complexity)]
-    pub fn tensorcontract_checked_generic_in<P>(
+    pub(crate) fn tensorcontract_checked_generic_in<P>(
         &mut self,
         engine: &mut dyn Engine,
         (lhs_space, lhs, lhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
@@ -604,6 +605,7 @@ where
         )
     }
 
+    #[cfg(test)]
     /// Canonical composition (TensorKit `mul!`) of two checked Generic
     /// tensors: `lhs.domain` is glued to `rhs.codomain` in order; operands
     /// as in [`Self::tensorcontract_checked_generic_in`].
@@ -614,12 +616,8 @@ where
     /// hence no braiding style is required. The destination is staged,
     /// planned over as a preview, and committed only after the replay
     /// succeeds (#2063).
-    ///
-    /// This concrete cross-crate entrypoint is internal and unstable despite
-    /// being public for `symtn`; downstream callers must not rely on it.
-    #[doc(hidden)]
     #[allow(clippy::type_complexity)]
-    pub fn tensorcompose_checked_generic_in<P>(
+    pub(crate) fn tensorcompose_checked_generic_in<P>(
         &mut self,
         engine: &mut dyn Engine,
         lhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
@@ -633,66 +631,6 @@ where
             lhs,
             rhs,
             ContractRequest::Compose,
-        )
-    }
-}
-
-impl<D, BT, BC> TensorContractFusionExecutionContext<D, RuleIdentity, BT, BC>
-where
-    D: DenseRecouplingScalar
-        + RecouplingCoefficientAction<f64>
-        + ConjugateValue
-        + Copy
-        + Zero
-        + ZeroBytes,
-    BT: TreeTransformBackend<D, f64>,
-    BC: TensorContractBackend<D, f64>,
-{
-    /// `dst = alpha · contract(lhs, rhs) + beta · dst` for checked Generic
-    /// operands (as in [`Self::tensorcontract_checked_generic_in`]) and an
-    /// existing destination: the same staging, the staged destination
-    /// compared with `dst_space` before `dst_data` is asked for the buffer,
-    /// the write, then the same commit and publication (#2063).
-    ///
-    /// This concrete cross-crate entrypoint is internal and unstable despite
-    /// being public for `symtn`; downstream callers must not rely on it.
-    #[doc(hidden)]
-    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-    pub fn tensorcontract_into_checked_generic_in<'d, P, E>(
-        &mut self,
-        engine: &mut dyn Engine,
-        (lhs_space, lhs, lhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
-        (rhs_space, rhs, rhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
-        (lhs_axes, rhs_axes, output_order): (&[usize], &[usize], OutputAxisOrder<'_>),
-        codomain_rank: usize,
-        dst_space: &DynamicFusionMapSpace,
-        dst_data: impl FnOnce() -> Result<&'d mut [D], E>,
-        alpha: D,
-        beta: D,
-    ) -> Result<(), E>
-    where
-        P: CheckedGenericRigidSymbols<Scalar = f64>,
-        E: From<CheckedGenericPlanError<P::Error>> + From<OperationError>,
-        D: 'd,
-    {
-        self.tensorcontract_into_in::<CheckedContractStage<'_, P>, P, E>(
-            engine,
-            (lhs_space, lhs, lhs_data),
-            (rhs_space, rhs, rhs_data),
-            ContractRequest::Contract {
-                axes: TensorContractSpec::new_with_conjugation(
-                    lhs_axes,
-                    rhs_axes,
-                    output_order,
-                    lhs.storage_conjugate(),
-                    rhs.storage_conjugate(),
-                ),
-                codomain_rank,
-            },
-            dst_space,
-            dst_data,
-            alpha,
-            beta,
         )
     }
 }

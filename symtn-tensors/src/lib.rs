@@ -60,8 +60,7 @@ pub use contract::{
 };
 pub use contract::{
     prepare_tensorcontract_fusion_plan_dyn, tensorcontract_fusion_block_specs, FusionContractPlan,
-    HostTensorContractBackend, TensorContractBackend, TensorContractBlockSpec,
-    TensorContractFusionExecutionContext,
+    TensorContractBackend, TensorContractBlockSpec, TensorContractFusionExecutionContext,
 };
 pub use contract::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, ValidatedDynamicFusionLayout,
@@ -80,8 +79,8 @@ pub(crate) use oriented_elementwise::validate_oriented_fusion_layout;
 #[doc(hidden)]
 pub use oriented_elementwise::{
     fusion_scatter_add_assign, oriented_fusion_add_owned, oriented_fusion_axpby_into,
-    oriented_fusion_inner, oriented_fusion_inner_with, oriented_fusion_restrict_owned,
-    stacked_fusion_restrict_owned, SectorRunTable, SelectedRuns,
+    oriented_fusion_inner_with, oriented_fusion_restrict_owned, stacked_fusion_restrict_owned,
+    SectorRunTable, SelectedRuns,
 };
 #[doc(hidden)]
 pub use physical::{expand_physical_host, project_physical_host, PhysicalConversionError};

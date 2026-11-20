@@ -151,10 +151,10 @@ impl PreparedFusionTreeLayout {
         Ok(structure.into_shared())
     }
 
+    #[cfg(test)]
     /// Finalizes a checked complete multiplicity-free layout through the core
     /// structural cache after all fallible leg-derived storage work succeeds.
-    #[doc(hidden)]
-    pub fn build_complete_from_leg_degeneracies(
+    pub(crate) fn build_complete_from_leg_degeneracies(
         &self,
         homspace: &FusionTreeHomSpace,
     ) -> Result<Arc<BlockStructure>, CoreError> {

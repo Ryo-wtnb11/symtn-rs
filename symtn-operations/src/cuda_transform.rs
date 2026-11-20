@@ -143,27 +143,6 @@ impl CudaMemberZeroRegions {
     pub fn max_zero_len(&self) -> usize {
         self.max_zero_len
     }
-
-    /// Sizes the dtype's zero template for the largest block over `members`
-    /// members, and the ones template when any region exists, so the fills
-    /// upload nothing.
-    pub fn reserve_templates<D: CudaScalar>(
-        &self,
-        ctx: &mut CudaDenseContext,
-        members: usize,
-    ) -> Result<(), OperationError> {
-        ctx.reserve_zero_template::<D>(
-            self.max_zero_len
-                .checked_mul(members)
-                .ok_or(OperationError::ElementCountOverflow)?,
-        )
-        .map_err(OperationError::Dense)?;
-        if !self.regions.is_empty() {
-            ctx.reserve_ones_template::<D>(1)
-                .map_err(OperationError::Dense)?;
-        }
-        Ok(())
-    }
 }
 
 /// A block's strides and offset as a device region's unsigned ones.

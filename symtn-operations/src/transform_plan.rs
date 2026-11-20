@@ -305,12 +305,12 @@ impl<T> TreeTransformBlockSpec<T> {
     }
 
     #[inline]
-    pub fn dst_blocks(&self) -> &[usize] {
+    pub(crate) fn dst_blocks(&self) -> &[usize] {
         self.entries.dst()
     }
 
     #[inline]
-    pub fn src_blocks(&self) -> &[usize] {
+    pub(crate) fn src_blocks(&self) -> &[usize] {
         self.entries.src()
     }
 
@@ -742,10 +742,6 @@ impl<T> TreeTransformGroupPlan<T> {
     #[inline]
     pub fn specs(&self) -> &[TreeTransformGroupBlockSpec<T>] {
         &self.specs
-    }
-
-    pub fn into_specs(self) -> Vec<TreeTransformGroupBlockSpec<T>> {
-        self.specs
     }
 }
 

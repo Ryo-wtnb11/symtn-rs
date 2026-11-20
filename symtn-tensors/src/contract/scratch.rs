@@ -89,8 +89,8 @@ mod tests {
 
     #[test]
     fn route_scratch_growth_is_judged_by_initialized_length_and_is_fresh_zeros() {
-        // What: a short initialized length with spare capacity (as
-        // `restore_copy_c_scratch` may hand in) still grows to the request,
+        // What: a short initialized length with spare capacity (as a reused
+        // buffer may have) still grows to the request,
         // and growth yields exact-length zeros for real and complex scalars
         // instead of copying the old contents.
         let mut buffer = HostScratchBuffer::filled(8, 7.0_f64);

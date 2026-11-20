@@ -52,22 +52,22 @@ impl DenseDotConfig {
     }
 
     #[inline]
-    pub fn lhs_contracting_dims(&self) -> &[usize] {
+    pub(crate) fn lhs_contracting_dims(&self) -> &[usize] {
         &self.lhs_contracting_dims
     }
 
     #[inline]
-    pub fn rhs_contracting_dims(&self) -> &[usize] {
+    pub(crate) fn rhs_contracting_dims(&self) -> &[usize] {
         &self.rhs_contracting_dims
     }
 
     #[inline]
-    pub fn lhs_batch_dims(&self) -> &[usize] {
+    pub(crate) fn lhs_batch_dims(&self) -> &[usize] {
         &self.lhs_batch_dims
     }
 
     #[inline]
-    pub fn rhs_batch_dims(&self) -> &[usize] {
+    pub(crate) fn rhs_batch_dims(&self) -> &[usize] {
         &self.rhs_batch_dims
     }
 }

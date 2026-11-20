@@ -168,23 +168,8 @@ impl FusionTreePairKey {
         sectors
     }
 
-    pub fn external_sector<R>(&self, rule: &R, axis: usize) -> Option<SectorId>
-    where
-        R: FusionRule,
-    {
-        let codomain_len = self.codomain_tree.uncoupled().len();
-        if axis < codomain_len {
-            self.codomain_tree.uncoupled().get(axis).copied()
-        } else {
-            self.domain_tree
-                .uncoupled()
-                .get(axis.checked_sub(codomain_len)?)
-                .copied()
-                .map(|sector| rule.dual(sector))
-        }
-    }
-
-    pub fn external_is_dual(&self) -> Vec<bool> {
+    #[cfg(test)]
+    pub(crate) fn external_is_dual(&self) -> Vec<bool> {
         let mut is_dual = Vec::with_capacity(
             self.codomain_tree.is_dual().len() + self.domain_tree.is_dual().len(),
         );
@@ -220,7 +205,7 @@ impl OpaqueBlockKey {
     }
 
     /// Construct an opaque key from any sequence of words.
-    pub fn from_words<I>(words: I) -> Self
+    pub(crate) fn from_words<I>(words: I) -> Self
     where
         I: IntoIterator<Item = u64>,
     {
@@ -302,21 +287,6 @@ impl BlockKey {
         Self::Opaque(OpaqueBlockKey::ordinal(supported_usize_to_u64(index)))
     }
 
-    /// Return whether this is the anonymous dense key.
-    #[inline]
-    pub fn is_dense(&self) -> bool {
-        matches!(self, Self::Dense)
-    }
-
-    /// Borrow the opaque identity, if this key is application-defined.
-    #[inline]
-    pub fn as_opaque(&self) -> Option<&OpaqueBlockKey> {
-        match self {
-            Self::Opaque(key) => Some(key),
-            _ => None,
-        }
-    }
-
     /// Borrow the categorical tree pair, if this key names fusion-tree data.
     #[inline]
     pub fn as_fusion_tree_pair(&self) -> Option<&FusionTreePairKey> {
@@ -344,7 +314,7 @@ impl BlockKey {
         }
     }
 
-    pub fn fusion_tree_group_key(&self) -> Option<FusionTreeGroupKey> {
+    pub(crate) fn fusion_tree_group_key(&self) -> Option<FusionTreeGroupKey> {
         match self {
             Self::Dense => None,
             Self::Opaque(_) => None,

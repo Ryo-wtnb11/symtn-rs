@@ -479,32 +479,32 @@ impl FusionContractPlan {
     }
 
     #[inline]
-    pub fn lhs_transform(&self) -> &TreeTransformOperation {
+    pub(crate) fn lhs_transform(&self) -> &TreeTransformOperation {
         &self.lhs_transform
     }
 
     #[inline]
-    pub fn rhs_transform(&self) -> &TreeTransformOperation {
+    pub(crate) fn rhs_transform(&self) -> &TreeTransformOperation {
         &self.rhs_transform
     }
 
     #[inline]
-    pub fn output_transform(&self) -> &TreeTransformOperation {
+    pub(crate) fn output_transform(&self) -> &TreeTransformOperation {
         &self.output_transform
     }
 
     #[inline]
-    pub fn core_axes(&self) -> &TensorContractSpecOwned {
+    pub(crate) fn core_axes(&self) -> &TensorContractSpecOwned {
         &self.core_axes
     }
 
     #[inline]
-    pub fn core_dst_open_lhs_rank(&self) -> usize {
+    pub(crate) fn core_dst_open_lhs_rank(&self) -> usize {
         self.core_dst_open_lhs_rank
     }
 
     #[inline]
-    pub fn core_dst_open_rhs_rank(&self) -> usize {
+    pub(crate) fn core_dst_open_rhs_rank(&self) -> usize {
         self.core_dst_open_rhs_rank
     }
 
@@ -519,32 +519,12 @@ impl FusionContractPlan {
     }
 
     #[inline]
-    pub fn lhs_open_rank(&self) -> usize {
-        self.lhs_open_rank
-    }
-
-    #[inline]
-    pub fn lhs_contract_rank(&self) -> usize {
-        self.lhs_contract_rank
-    }
-
-    #[inline]
-    pub fn rhs_contract_rank(&self) -> usize {
-        self.rhs_contract_rank
-    }
-
-    #[inline]
-    pub fn rhs_open_rank(&self) -> usize {
-        self.rhs_open_rank
-    }
-
-    #[inline]
-    pub fn lhs_source_conjugate(&self) -> bool {
+    pub(crate) fn lhs_source_conjugate(&self) -> bool {
         self.lhs_source_conjugate
     }
 
     #[inline]
-    pub fn rhs_source_conjugate(&self) -> bool {
+    pub(crate) fn rhs_source_conjugate(&self) -> bool {
         self.rhs_source_conjugate
     }
 }
