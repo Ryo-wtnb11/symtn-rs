@@ -315,8 +315,9 @@ impl<'e> CudaDenseContext<'e> {
     ///
     /// The bytes it pins stay resident until [`Self::release_scalar_operands`]
     /// or the context is dropped, and are reported by
-    /// [`Self::scalar_operand_bytes`]. It is the only device zero source;
-    /// tenferro-rs#1834's native device fill would remove it.
+    /// [`Self::scalar_operand_bytes`]. It is the only device zero source:
+    /// Tenferro's `Engine` surface has no fill of an existing `TensorWrite`
+    /// region, so a zero is a region move from this template.
     pub fn reserve_zero_template<D: CudaScalar>(&mut self, len: usize) -> Result<(), DenseError> {
         if len == 0 {
             return Ok(());

@@ -1205,10 +1205,10 @@ impl CudaTreeTransformExecutor {
             .and_then(|len| len.checked_mul(core::mem::size_of::<D>()))
             .ok_or(OperationError::ElementCountOverflow)?;
         // Growth costs one host↔device transfer of zeros per buffer, the same
-        // way every other device allocation in symtn is made (#740), rather
-        // than through `cubecl::Session::alloc_zero_output` (tenferro-rs#1833).
-        // The values are irrelevant — every column is fully written before it
-        // is read — and a warm replay pays none of it.
+        // way every other device allocation in symtn is made (#740): Tenferro's
+        // `Engine` surface has no device allocation entry. The values are
+        // irrelevant — every column is fully written before it is read — and a
+        // warm replay pays none of it.
         let source = CudaDenseStorage::upload_owned::<D>(ctx, vec![D::ZERO; source_len])
             .map_err(OperationError::Dense)?;
         let destination = CudaDenseStorage::upload_owned::<D>(ctx, vec![D::ZERO; destination_len])

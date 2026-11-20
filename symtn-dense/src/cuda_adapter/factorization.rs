@@ -458,9 +458,7 @@ pub(super) fn validate_svd_factor_shapes(
 /// device inside the QR primitive, so no diagonal crosses to the host and no
 /// symtn-side re-gauging selector exists.
 ///
-/// Every [`CudaScalar`] payload is admitted. Up to Tenferro 0.5.0 the complex
-/// payloads could not be: the gauge's `triu` fill materialized its complex zero
-/// as `E::cast_from(0u32)`, which NVRTC rejected (tenferro-rs#1833, #1271).
+/// Every [`CudaScalar`] payload is admitted.
 pub fn cuda_qr_region<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
     src: &CudaDenseStorage,
