@@ -372,9 +372,18 @@ jobs:
       # `#![cfg(feature = "cgc-gen")]` compiled to nothing in CI
       # (#1293); `--tests` runs those integration tests and the lib unit tests,
       # not doctests.
+      # Why the timeout and trace: runners have been lost about 47 minutes into
+      # this step, which also deletes its log. A timed-out step keeps the log,
+      # libtest names any test running over 60 s, and the trace tells a CPU spin
+      # from memory growth.
       - name: test symtn --tests (cgc-gen)
         if: ${{ !cancelled() }}
-        run: cargo test --locked -p symtn --no-default-features --features "cgc-gen,cpu-faer" --tests
+        timeout-minutes: 15
+        run: |
+          ( while sleep 30; do date -u +%T; free -m | sed -n 2p; ps -eo pid,rss,pcpu,etime,comm --sort=-pcpu | head -4; done ) >&2 &
+          trace=$!
+          trap 'kill "$trace"' EXIT
+          cargo test --locked -p symtn --no-default-features --features "cgc-gen,cpu-faer" --tests
         working-directory: symtn
       - name: test symtn-network checked_generic_network (cgc-gen)
         if: ${{ !cancelled() }}
@@ -591,8 +600,14 @@ jobs:
         working-directory: symtn
         env:
           CARGO_PROFILE_TEST_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
+      # Why: see `test symtn --tests (cgc-gen)`; this step runs the same binaries.
       - name: Run remaining workspace tests
-        run: cargo llvm-cov --locked --no-report --workspace --exclude symtn-tensors --tests
+        timeout-minutes: 25
+        run: |
+          ( while sleep 30; do date -u +%T; free -m | sed -n 2p; ps -eo pid,rss,pcpu,etime,comm --sort=-pcpu | head -4; done ) >&2 &
+          trace=$!
+          trap 'kill "$trace"' EXIT
+          cargo llvm-cov --locked --no-report --workspace --exclude symtn-tensors --tests
         working-directory: symtn
         env:
           CARGO_PROFILE_TEST_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
