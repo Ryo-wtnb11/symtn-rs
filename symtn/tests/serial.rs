@@ -98,6 +98,9 @@ mod composed_coefficient_cache;
 
 mod factorization_foreign_threads;
 
+#[cfg(feature = "gemm-trace")]
+mod gemm_trace;
+
 mod solve_leg_roles;
 
 mod typed_cuda_transform_contracts;

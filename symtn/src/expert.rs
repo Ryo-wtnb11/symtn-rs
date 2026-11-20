@@ -15,6 +15,10 @@ pub use symtn_core::{
     BlockLayout, BlockRef, BlockView, HostReadableStorage, Placement, SectorLeg,
     SectorLegConstructionError, TensorStorage,
 };
+/// Process-wide capture of the grouped GEMM calls the default executor
+/// receives.
+#[cfg(feature = "gemm-trace")]
+pub use symtn_dense::gemm_trace;
 /// Per-thread CUDA boundary counters.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{cuda_transfer_stats, reset_cuda_transfer_stats, CudaTransferStats};

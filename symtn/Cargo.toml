@@ -31,6 +31,9 @@ krylov = ["dep:krylov"]
 # Its per-token record allocates, so only in-workspace tests may enable it,
 # never a `--workspace` run whose allocation tests it would break.
 ledger-roots = ["dep:tenferro-cpu"]
+# Unstable, off by default: `expert::gemm_trace`, a process-wide capture of
+# the grouped GEMM calls the default dense executor receives.
+gemm-trace = ["symtn-dense/gemm-trace"]
 
 # The CUDA batch timing harness needs a device runtime.
 [[bench]]
@@ -41,6 +44,10 @@ required-features = ["cuda"]
 [[example]]
 name = "cuda_transfer"
 required-features = ["cuda"]
+
+[[example]]
+name = "gemm_trace_capture"
+required-features = ["gemm-trace"]
 
 [dependencies]
 krylov = { version = "0.3", optional = true, default-features = false }

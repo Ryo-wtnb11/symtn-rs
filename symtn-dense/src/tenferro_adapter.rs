@@ -1498,6 +1498,16 @@ impl DenseExecutor for DefaultDenseExecutor {
         alpha: DenseScalar,
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
+        #[cfg(feature = "gemm-trace")]
+        crate::gemm_trace::record(
+            lhs.dtype(),
+            [MatrixOp::Identity; 2],
+            alpha,
+            Some(beta),
+            with_cpu_engine(engine, |cpu| cpu.num_threads()).unwrap_or(0),
+            jobs,
+            runs,
+        );
         self.matmul_batch_axpby_dispatch(
             engine,
             output,
@@ -1528,6 +1538,16 @@ impl DenseExecutor for DefaultDenseExecutor {
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
             return self.matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta);
         }
+        #[cfg(feature = "gemm-trace")]
+        crate::gemm_trace::record(
+            lhs.dtype(),
+            [lhs_op, rhs_op],
+            alpha,
+            Some(beta),
+            with_cpu_engine(engine, |cpu| cpu.num_threads()).unwrap_or(0),
+            jobs,
+            runs,
+        );
         #[cfg(not(feature = "cpu-blas-core"))]
         return self.matmul_batch_axpby_dispatch(
             engine,
@@ -1558,6 +1578,16 @@ impl DenseExecutor for DefaultDenseExecutor {
         ops: [MatrixOp; 2],
         alpha: DenseScalar,
     ) -> Result<(), DenseError> {
+        #[cfg(feature = "gemm-trace")]
+        crate::gemm_trace::record(
+            lhs.dtype(),
+            ops,
+            alpha,
+            None,
+            with_cpu_engine(engine, |cpu| cpu.num_threads()).unwrap_or(0),
+            jobs,
+            &[],
+        );
         host_cpu(engine, FRESH_OP, |cpu| {
             dispatch_fresh!(FRESH_OP, segments, lhs, rhs, |parts, lhs, rhs| {
                 self.matmul_batch_fresh_typed(cpu, parts, lhs, rhs, jobs, ops, alpha)

@@ -65,6 +65,9 @@ pub mod engine_slot;
 #[cfg(feature = "tenferro")]
 #[doc(hidden)]
 pub mod lanes;
+// Unstable: capture of the grouped GEMM calls the default executor receives.
+#[cfg(all(feature = "tenferro", feature = "gemm-trace"))]
+pub mod gemm_trace;
 #[cfg(test)]
 mod probe;
 #[cfg(feature = "tenferro")]
