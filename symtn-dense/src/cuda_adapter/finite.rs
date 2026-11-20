@@ -7,18 +7,11 @@ use super::*;
 /// One device pass computes `sum(x - x)`. `x - x` is `0` for a finite
 /// component and `NaN` for `NaN` or `±Inf` (`Inf - Inf`), with no overflow,
 /// so the sum is `0` exactly when every component is finite. The sum is
-/// downloaded as one real-lane scalar: one D2H, which synchronizes the
+/// downloaded as one payload-typed scalar: one D2H, which synchronizes the
 /// stream. An empty payload is finite with no device work.
 ///
-/// Why `abs` before the complex sum: Tenferro 0.7.1's full `reduce_sum` of a
-/// complex tensor fails NVRTC compilation (tensor4all/tenferro-rs#2133).
-/// `|x - x|` keeps the `{0, NaN}` set componentwise (`hypot(0, NaN)` is
-/// `NaN`) and lands in the real lane, where the reduction compiles.
-///
-/// Cost: one `sub`, (complex) one `abs`, one `reduce_sum` over the payload,
-/// one transient payload-sized buffer, and the D2H sync. Tenferro 0.7.1's
-/// full reduction runs on a single warp (tensor4all/tenferro-rs#2134), so the
-/// reduction, not the elementwise pass, dominates on large payloads.
+/// Cost: one `sub` and one `reduce_sum` over the payload, one transient
+/// payload-sized buffer, and the D2H sync.
 #[doc(hidden)]
 pub fn cuda_all_finite<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
@@ -52,13 +45,6 @@ pub fn cuda_all_finite<D: CudaScalar>(
             TensorRead::from_tensor(payload),
         )
         .map_err(|err| cuda_error(OP, err))?;
-    let diff = if D::IS_COMPLEX {
-        ctx.backend
-            .abs_read(TensorRead::from_tensor(&diff))
-            .map_err(|err| cuda_error(OP, err))?
-    } else {
-        diff
-    };
     let sum = ctx
         .backend
         .reduce_sum_read(TensorRead::from_tensor(&diff), &axes)
@@ -70,7 +56,7 @@ pub fn cuda_all_finite<D: CudaScalar>(
     } else {
         sum
     };
-    Ok(download_values::<D::Real>(ctx, &sum)?
+    Ok(download_scalars::<D>(ctx, &sum)?
         .iter()
-        .all(|value| *value == 0.0))
+        .all(|value| *value == D::ZERO))
 }

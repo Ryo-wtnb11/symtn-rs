@@ -431,15 +431,27 @@ fn download_values<R: CudaRealScalar>(
     ctx: &CudaDenseContext,
     tensor: &Tensor,
 ) -> Result<Vec<f64>, DenseError> {
+    Ok(download_scalars::<R>(ctx, tensor)?
+        .into_iter()
+        .map(R::widen)
+        .collect())
+}
+/// Downloads a small device tensor of dtype `T` as host values, counted as
+/// metadata traffic: the transfer under [`download_values`], and the payload
+/// scalar of a device reduction.
+fn download_scalars<T: TenferroScalar>(
+    ctx: &CudaDenseContext,
+    tensor: &Tensor,
+) -> Result<Vec<T>, DenseError> {
     let host =
         download_tensor(&ctx.runtime, tensor).map_err(|err| cuda_error("cuda_download", err))?;
-    if host.dtype() != R::dtype() {
+    if host.dtype() != T::dtype() {
         return Err(cuda_error(
             "cuda_download",
-            format!("expected {:?} values, got {:?}", R::dtype(), host.dtype()),
+            format!("expected {:?} values, got {:?}", T::dtype(), host.dtype()),
         ));
     }
-    let typed = R::into_typed(host).map_err(|err| cuda_error("cuda_download", err))?;
+    let typed = T::into_typed(host).map_err(|err| cuda_error("cuda_download", err))?;
     let values = typed
         .into_host_vec()
         .map_err(|err| cuda_error("cuda_download", err))?;
@@ -447,5 +459,5 @@ fn download_values<R: CudaRealScalar>(
     #[cfg(test)]
     crate::probe::add(crate::probe::Event::CudaMetadataDownloadBytes, bytes);
     record_d2h(bytes);
-    Ok(values.into_iter().map(R::widen).collect())
+    Ok(values)
 }

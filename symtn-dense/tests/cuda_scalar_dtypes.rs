@@ -4,8 +4,7 @@
 //! What this file owns that the `f64`/`Complex64` suites do not: the paths
 //! that were typed by `f64` rather than by the payload's real lane — the
 //! spectrum and reduction downloads, the normalizers of the Hermitian
-//! test, and its tolerance — plus complex device QR, the last
-//! dtype gate (Tenferro lacked it: tenferro-rs#1833).
+//! test, and its tolerance — plus complex device QR.
 //!
 //! Oracles are host computations in **double precision** over the widened
 //! fixture: a single-precision device answer is compared against `f64` host

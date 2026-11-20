@@ -779,8 +779,8 @@ fn assert_finite_scan_decides_every_component<D: FiniteFixture>(ctx: &mut CudaDe
                 assert_eq!(decided, finite, "{len} [{at}] = ({re}, {im})");
                 assert_eq!(
                     (stats.h2d_calls, stats.d2h_calls, stats.d2h_bytes),
-                    (0, 1, std::mem::size_of::<D::Real>() as u64),
-                    "one real-lane scalar download, nothing uploaded"
+                    (0, 1, std::mem::size_of::<D>() as u64),
+                    "one payload scalar download, nothing uploaded"
                 );
             }
         }
@@ -793,7 +793,7 @@ fn the_finite_scan_refuses_exactly_nan_and_infinite_components() {
     // What: `cuda_all_finite` is false exactly when some real or imaginary
     // component is NaN or infinite, wherever it lies, and true for the
     // extremes of the finite range (MAX, MAX+MAX*i, subnormals, -0), at the
-    // cost of one real-lane scalar download.
+    // cost of one payload scalar download.
     let mut ctx_engine = cuda_engine(0);
     let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     assert_finite_scan_decides_every_component::<f32>(&mut ctx);
