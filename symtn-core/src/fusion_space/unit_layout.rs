@@ -186,7 +186,8 @@ where
     )
 }
 
-/// Checked finite-algebra sibling of [`validate_unit_layout_correspondence`].
+/// Validates, for a checked finite-algebra rule, that `larger` is the supplied
+/// `smaller` layout with one canonical unit leg inserted in storage order.
 #[doc(hidden)]
 pub fn validate_unit_layout_correspondence_checked<R>(
     rule: &R,
