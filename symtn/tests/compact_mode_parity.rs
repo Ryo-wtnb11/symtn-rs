@@ -1153,7 +1153,8 @@ fn declined_compact_arms_report_the_dense_route_error() {
     let _serial = crate::counting_alloc::serial();
     // What: a pair the arms cannot answer — providers with different rule
     // identities, or a dense leg that is not the bond — falls through to the
-    // dense route, so compact and materialized operands fail alike.
+    // dense route, so compact and materialized operands fail alike, with that
+    // route's own mismatch error.
     macro_rules! assert_same_error {
         ($compact:expr, $dense:expr, $what:expr) => {
             assert_eq!(
@@ -1166,16 +1167,15 @@ fn declined_compact_arms_report_the_dense_route_error() {
     }
     let real = |x: f64| x;
 
-    let fixture = bond_fixture(
-        &z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0)),
-        parity,
-        real,
+    // Bosonic, so the checked contraction is admitted and reaches the arms;
+    // one runtime, so the salt alone separates the two operands.
+    let runtime = host_runtime();
+    let (leg, foreign_leg) = (
+        z2_leg(CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0)),
+        z2_leg(CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0).with_salt(1)),
     );
-    let foreign = bond_fixture(
-        &z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -0.5)),
-        parity,
-        real,
-    );
+    let fixture = bond_fixture_on(&runtime, &leg, &leg, parity, real);
+    let foreign = bond_fixture_on(&runtime, &foreign_leg, &foreign_leg, parity, real);
     let (d, foreign_d) = (&fixture.d, &foreign.d);
     let (dense_d, dense_foreign) = (
         d.materialize(engine).unwrap(),
@@ -1191,6 +1191,17 @@ fn declined_compact_arms_report_the_dense_route_error() {
         fixture.a.compose(engine, &dense_foreign),
         "t * D'"
     );
+    assert!(
+        matches!(
+            d.contract(engine, &foreign.b, &spec(&[1], &[0], &[0], &[1, 2])),
+            Err(symtn::typed::GenericTensorError::Plan(
+                symtn::typed::CheckedGenericPlanError::Core(
+                    symtn_core::CoreError::FusionRuleMismatch { .. }
+                )
+            ))
+        ),
+        "D . t' must reach the dense route's rule-identity check"
+    );
     assert_same_error!(
         d.contract(engine, &foreign.b, &spec(&[1], &[0], &[0], &[1, 2])),
         dense_d.contract(engine, &foreign.b, &spec(&[1], &[0], &[0], &[1, 2])),
@@ -1204,7 +1215,7 @@ fn declined_compact_arms_report_the_dense_route_error() {
         ),
         (
             "checked",
-            non_composable_errors(|| CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0)),
+            non_composable_errors(|| CheckedZ2::new(BraidingStyleKind::Bosonic, 1.0)),
         ),
     ] {
         for (what, (compact, dense)) in ["t * D", "D . t"].into_iter().zip(errors) {
@@ -1226,17 +1237,33 @@ where
         [(R::Sector::of(0), 1), (R::Sector::of(1), 4)],
     )
     .unwrap();
-    let t = TensorMap::<_, f64>::from_subblock_fn(
-        engine,
-        &host_runtime(),
-        [&other],
-        [&other],
-        |_, index| index[0] as f64 - 0.5 * index[1] as f64,
-    )
-    .unwrap();
-    let fixture = bond_fixture(&z2_leg(rule()), parity, |x: f64| x);
+    let runtime = host_runtime();
+    let t =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&other], [&other], |_, index| {
+            index[0] as f64 - 0.5 * index[1] as f64
+        })
+        .unwrap();
+    let leg = z2_leg(rule());
+    let fixture = bond_fixture_on(&runtime, &leg, &leg, parity, |x: f64| x);
     let dense = fixture.d.materialize(engine).unwrap();
-    let message = |result: Result<TensorMap<R, f64>, _>| format!("{}", result.unwrap_err());
+    // Each error must be the dense route's mismatch of `t`'s leg against
+    // the bond, not an earlier boundary.
+    let message = |result: Result<TensorMap<R, f64>, symtn::typed::FacadeError<R>>| {
+        let error = result.unwrap_err();
+        assert!(
+            matches!(
+                cause::<symtn_core::CoreError>(&error),
+                Some(symtn_core::CoreError::LegDegeneracyMismatch { .. })
+            ) || matches!(
+                cause::<symtn::typed::OperationError>(&error),
+                Some(symtn::typed::OperationError::Core(
+                    symtn_core::CoreError::LegDegeneracyMismatch { .. }
+                ))
+            ),
+            "{error:?}"
+        );
+        format!("{error}")
+    };
     let one_leg = spec(&[1], &[0], &[0], &[1]);
     [
         (

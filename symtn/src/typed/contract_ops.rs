@@ -765,10 +765,11 @@ where
     /// [`Error::InvalidArgument`] for a destination that is not owned dense
     /// storage or aliases an operand; [`Error::UnsupportedOnDevice`] for CUDA
     /// storage; then the planarity errors of [`Self::planar_contract`]; then
-    /// its braiding refusal of a non-Bosonic checked Generic provider; then
-    /// the remaining errors of [`Self::contract_into`] (`SpaceMismatch`,
-    /// length, [`Error::DestinationShared`]). None of these resolves a
-    /// borrowed adjoint view.
+    /// its braiding refusal of a non-Bosonic checked Generic provider. Every
+    /// check up to and including that braiding admission reads a borrowed
+    /// adjoint view unresolved. Then the remaining errors of
+    /// [`Self::contract_into`] (`SpaceMismatch`, length,
+    /// [`Error::DestinationShared`]), which run after the view is resolved.
     ///
     /// # Failure
     ///
