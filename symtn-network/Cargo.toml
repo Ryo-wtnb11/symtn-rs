@@ -27,6 +27,8 @@ cuda = ["symtn/cuda"]
 opt-path = ["dep:opt-einsum-path"]
 # Calls the installed Python `cotengra` package as an external path planner.
 cotengra-python = ["dep:command-group", "dep:libc", "dep:serde_json"]
+# Unstable, off by default: the `gemm_trace_capture` example's GEMM capture.
+gemm-trace = ["symtn/gemm-trace"]
 
 [dependencies]
 command-group = { version = "5.0.1", optional = true }
@@ -45,6 +47,10 @@ symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"]
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", optional = true }
+
+[[example]]
+name = "gemm_trace_capture"
+required-features = ["gemm-trace"]
 
 [[bench]]
 name = "cuda_operation_matrix"
