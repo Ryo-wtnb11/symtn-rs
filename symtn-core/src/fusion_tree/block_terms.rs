@@ -438,6 +438,7 @@ pub(super) struct CompactMultiplicityFreeTreePairBlock<S> {
     pub(super) records_dimensions: bool,
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(super) type CompactMultiplicityFreeTreePairRows<S> = Vec<Vec<(FusionTreePairKey, S)>>;
 
 impl CompactMultiplicityFreeTreePairBasis {

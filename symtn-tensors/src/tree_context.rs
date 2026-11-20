@@ -5,9 +5,11 @@ use std::sync::Arc;
 use symtn_dense::Engine;
 
 use num_traits::Zero;
+#[cfg(test)]
+use symtn_core::Placement;
 use symtn_core::{
     BlockStructure, CheckedGenericAdmissionMode, CheckedGenericRigidSymbols,
-    MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, Placement, RuleIdentity,
+    MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, RuleIdentity,
 };
 
 use crate::contract::{BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand};
@@ -93,7 +95,7 @@ where
 {
     /// Completed tree transformers are resolved through the process-global
     /// cache (`symtn::cache`); a context owns only its backend and workspace.
-    pub fn with_parts(backend: B, workspace: B::Workspace) -> Self {
+    pub(crate) fn with_parts(backend: B, workspace: B::Workspace) -> Self {
         Self {
             backend,
             workspace,
@@ -108,7 +110,7 @@ where
     }
 
     #[inline]
-    pub fn backend_mut(&mut self) -> &mut B {
+    pub(crate) fn backend_mut(&mut self) -> &mut B {
         &mut self.backend
     }
 
@@ -610,6 +612,7 @@ impl<D>
 where
     D: crate::DenseRecouplingScalar + RecouplingCoefficientAction<f64> + crate::ConjugateValue,
 {
+    #[cfg(test)]
     /// The owned checked Generic permute, braid, transpose or repartition
     /// `alpha · operation(logical)`, into a fresh payload. `adjoint_of` is
     /// `None` for a direct source stored as `logical`, or the parent whose
@@ -619,12 +622,8 @@ where
     /// destination preview; the destination structure, composed coefficients
     /// and completed transformer become visible only after those fallible
     /// stages succeed.
-    ///
-    /// This concrete cross-crate entrypoint is internal and unstable despite
-    /// being public for `symtn`; downstream callers must not rely on it.
-    #[doc(hidden)]
     #[allow(clippy::type_complexity)]
-    pub fn tree_transform_owned_checked_generic_in<R>(
+    pub(crate) fn tree_transform_owned_checked_generic_in<R>(
         &mut self,
         engine: &mut dyn Engine,
         logical: &BoundDynamicFusionMapSpace<R>,
@@ -736,18 +735,21 @@ where
     B: TreeTransformBackend<D, C> + ReportsPlacement,
     B::Workspace: ReportsPlacement,
 {
+    #[cfg(test)]
     #[inline]
-    pub fn backend_placement(&self) -> Placement {
+    pub(crate) fn backend_placement(&self) -> Placement {
         self.backend.placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn workspace_placement(&self) -> Placement {
+    pub(crate) fn workspace_placement(&self) -> Placement {
         self.workspace.placement()
     }
 
+    #[cfg(test)]
     #[inline]
-    pub fn is_host_context(&self) -> bool {
+    pub(crate) fn is_host_context(&self) -> bool {
         self.backend.is_host_placement() && self.workspace.is_host_placement()
     }
 }
@@ -820,8 +822,9 @@ where
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
-    pub fn tree_transform_dyn_into_ref<R>(
+    pub(crate) fn tree_transform_dyn_into_ref<R>(
         &mut self,
         engine: &mut dyn Engine,
         rule: &R,

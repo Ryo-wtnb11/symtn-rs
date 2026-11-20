@@ -475,6 +475,7 @@ fn record_compact_block_dimensions<S>(
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn scatter_compact_block<S: Clone>(
     basis: CompactMultiplicityFreeTreePairBasis,
     columns: DenseColumns<S>,
@@ -576,6 +577,7 @@ pub(super) fn order_block_columns<S>(
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(super) fn scatter_compact_tree_pair_block<S: Clone>(
     block: CompactMultiplicityFreeTreePairBlock<S>,
 ) -> CompactMultiplicityFreeTreePairRows<S> {

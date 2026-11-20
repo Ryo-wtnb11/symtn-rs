@@ -6,7 +6,7 @@ use symtn_core::SimilarStorage;
 /// storage from an existing storage reference but does not expose host slices or
 /// choose an execution backend.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct SamePlacementScratchAllocator;
+pub(crate) struct SamePlacementScratchAllocator;
 
 impl SamePlacementScratchAllocator {
     #[inline]
@@ -26,7 +26,7 @@ impl SamePlacementScratchAllocator {
 /// destination packs. Current host replay instantiates both slots with
 /// `HostScratchBuffer<T>`.
 #[derive(Clone, Debug)]
-pub struct TreeTransformScratchBuffers<Source, Destination> {
+pub(crate) struct TreeTransformScratchBuffers<Source, Destination> {
     source: Source,
     destination: Destination,
 }
@@ -45,6 +45,7 @@ where
 }
 
 impl<Source, Destination> TreeTransformScratchBuffers<Source, Destination> {
+    #[cfg(test)]
     #[inline]
     pub fn from_parts(source: Source, destination: Destination) -> Self {
         Self {
@@ -59,7 +60,7 @@ impl<Source, Destination> TreeTransformScratchBuffers<Source, Destination> {
     }
 
     #[inline]
-    pub fn source_mut(&mut self) -> &mut Source {
+    pub(crate) fn source_mut(&mut self) -> &mut Source {
         &mut self.source
     }
 
@@ -69,12 +70,12 @@ impl<Source, Destination> TreeTransformScratchBuffers<Source, Destination> {
     }
 
     #[inline]
-    pub fn destination_mut(&mut self) -> &mut Destination {
+    pub(crate) fn destination_mut(&mut self) -> &mut Destination {
         &mut self.destination
     }
 
     #[inline]
-    pub fn source_and_destination_mut(&mut self) -> (&Source, &mut Destination) {
+    pub(crate) fn source_and_destination_mut(&mut self) -> (&Source, &mut Destination) {
         (&self.source, &mut self.destination)
     }
 

@@ -439,6 +439,7 @@ where
     Ok(grouped)
 }
 
+#[cfg(test)]
 /// Generic-fusion (outer-multiplicity) sibling of
 /// [`fusion_trees_by_coupled_for_space`]: emits multiplicity-aware fusion-tree
 /// keys (one per vertex-label combination) through the same
@@ -586,7 +587,7 @@ pub(crate) fn fusion_fold_error_message(side: &str, fold: &CoupledSectorFold) ->
     format!(
         "bounded Generic provider cannot represent this space exactly ({}); block \
          dimensions are either exact or an error, never truncated. Use \
-         fusion_tree_keys_generic_for_coupled for provably-clean sectors, or \
+         fusion_tree_keys_generic_for_coupled_checked for provably-clean sectors, or \
          extend the provider catalog.",
         parts.join("; ")
     )

@@ -125,10 +125,7 @@ mod owned_trace;
 #[cfg(any(test, feature = "testing"))]
 mod probe;
 #[doc(hidden)]
-pub use owned_cat::{
-    try_cat_owned_c64_raw, try_cat_owned_mixed_raw, try_cat_owned_raw, OwnedCatC64Source,
-    OwnedCatCopy, OwnedCatSide,
-};
+pub use owned_cat::{try_cat_owned_mixed_raw, try_cat_owned_raw, OwnedCatCopy, OwnedCatSide};
 #[doc(hidden)]
 pub use owned_trace::{try_tensortrace_owned_raw, OwnedTraceTerm};
 

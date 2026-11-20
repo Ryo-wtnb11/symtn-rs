@@ -276,21 +276,21 @@ impl<T> HostTreeTransformWorkspace<T> {
         self.coefficient_pack_builds
     }
 
+    #[cfg(test)]
     /// Packed-destination elements this workspace's parallel replays have
     /// initialized: a fresh or grown scratch inside the first chunk's pack,
     /// a short one's tail on the caller; a warm replay initializes none.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
-    pub fn destination_fills(&self) -> usize {
+    pub(crate) fn destination_fills(&self) -> usize {
         self.destination_fills
     }
 
+    #[cfg(test)]
     /// Completed movement engine entries of this workspace's parallel
     /// replays (width above one): one direct phase, then one pack and one
     /// scatter per chunk. A serial replay adds none.
-    #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
-    pub fn movement_phases(&self) -> usize {
+    pub(crate) fn movement_phases(&self) -> usize {
         self.movement_phases
     }
 

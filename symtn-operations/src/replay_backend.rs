@@ -13,10 +13,8 @@ use crate::{
 
 /// Tree-transform execution contract over host-accessible data.
 ///
-/// The raw replay methods take host slices. Code that specifically depends on
-/// this host-slice contract may use `HostTreeTransformBackend`. Placement-aware
-/// (device or distributed) transform traits do not inherit from this raw-slice
-/// API.
+/// The raw replay methods take host slices. Placement-aware (device or
+/// distributed) transform traits do not inherit from this raw-slice API.
 pub trait TreeTransformBackend<D, C>
 where
     D: TreeTransformScalar,
@@ -215,27 +213,6 @@ where
         )?;
     }
     Ok(())
-}
-
-/// Explicit marker for the host-slice tree-transform backend family.
-///
-/// `TreeTransformBackend` carries the methods; this marker means “implements the
-/// host-slice replay contract,” not necessarily “physically CPU-native.”
-/// Device or distributed transform backends use separate placement-aware
-/// execution traits.
-pub trait HostTreeTransformBackend<D, C>: TreeTransformBackend<D, C>
-where
-    D: TreeTransformScalar,
-    C: Copy,
-{
-}
-
-impl<B, D, C> HostTreeTransformBackend<D, C> for B
-where
-    B: TreeTransformBackend<D, C> + ?Sized,
-    D: TreeTransformScalar,
-    C: Copy,
-{
 }
 
 #[derive(Debug)]

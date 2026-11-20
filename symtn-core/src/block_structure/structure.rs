@@ -461,8 +461,9 @@ impl BlockStructure {
         coupled_sector_matrix_from_validated_keys(nout, rank, blocks)
     }
 
+    #[cfg(test)]
     /// Checked finite-algebra sibling of [`Self::coupled_sector_matrix_with_keys`].
-    pub fn coupled_sector_matrix_with_keys_checked<R>(
+    pub(crate) fn coupled_sector_matrix_with_keys_checked<R>(
         rule: &R,
         nout: usize,
         rank: usize,
@@ -531,7 +532,7 @@ impl BlockStructure {
     }
 
     #[inline]
-    pub fn degeneracy_structure(&self) -> &DegeneracyStructure {
+    pub(crate) fn degeneracy_structure(&self) -> &DegeneracyStructure {
         &self.content.degeneracy
     }
 
@@ -582,10 +583,6 @@ impl BlockStructure {
         self.content.sector.find_fusion_tree_pair_view_index(pair)
     }
 
-    pub fn pair_block_indices_from(&self, src: &BlockStructure) -> Result<Vec<usize>, CoreError> {
-        self.content.sector.pair_indices_from(&src.content.sector)
-    }
-
     pub fn only_block(&self) -> Result<BlockRef<'_>, CoreError> {
         if self.block_count() == 1 {
             self.block(0)
@@ -604,7 +601,8 @@ impl BlockStructure {
         })
     }
 
-    pub fn block_by_key(&self, key: &BlockKey) -> Result<BlockRef<'_>, CoreError> {
+    #[cfg(test)]
+    pub(crate) fn block_by_key(&self, key: &BlockKey) -> Result<BlockRef<'_>, CoreError> {
         let index =
             self.find_block_index_by_key(key)
                 .ok_or_else(|| CoreError::MissingBlockKey {

@@ -9,10 +9,10 @@ selection knob or retained execution state. Preserve the
 ## Selection
 
 `symtn-dense` owns `DenseExecutor`; `symtn-operations` owns
-`TreeTransformBackend`; `symtn-tensors` owns `TensorContractBackend` and
-`HostTensorContractBackend`. Operators describe spaces, axes, conjugation and
-output order; backend adapters choose dense kernels. Do not put raw BLAS calls or
-threshold-selected numerical kernels in operator code.
+`TreeTransformBackend`; `symtn-tensors` owns `TensorContractBackend`.
+Operators describe spaces, axes, conjugation and output order; backend adapters
+choose dense kernels. Do not put raw BLAS calls or threshold-selected numerical
+kernels in operator code.
 
 The CPU provider is a compile-time choice: faer by default, BLAS/LAPACK
 when `cpu-blas` or a `blas-*` feature is enabled (OpenBLAS, MKL or

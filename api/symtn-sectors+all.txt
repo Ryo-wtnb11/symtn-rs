@@ -599,7 +599,6 @@ pub fn symtn_sectors::LieGroupFusionRule<M>::hash<H: core::hash::Hasher>(&self, 
 pub struct symtn_sectors::MultiplicityFreeAdmissionMode
 pub struct symtn_sectors::ProductFusionRule<L, R, P> where L: symtn_sectors::CategoryProvider, R: symtn_sectors::CategoryProvider
 impl<L, R, P> symtn_sectors::ProductFusionRule<L, R, P> where L: symtn_sectors::CategoryProvider, R: symtn_sectors::CategoryProvider, (<L as symtn_sectors::TypedSectorAdmission>::Mode, <R as symtn_sectors::TypedSectorAdmission>::Mode): symtn_sectors::ProductAdmission<<L as symtn_sectors::TypedSectorAdmission>::Error, <R as symtn_sectors::TypedSectorAdmission>::Error>, P: symtn_sectors::ProductSectorCodec + 'static
-pub fn symtn_sectors::ProductFusionRule<L, R, P>::decode_component_ids(&self, symtn_sectors::SectorId) -> core::option::Option<(symtn_sectors::SectorId, symtn_sectors::SectorId)>
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::encode_component_ids(&self, symtn_sectors::SectorId, symtn_sectors::SectorId) -> symtn_sectors::SectorId
 pub const fn symtn_sectors::ProductFusionRule<L, R, P>::left_rule(&self) -> &L
 pub const fn symtn_sectors::ProductFusionRule<L, R, P>::right_rule(&self) -> &R

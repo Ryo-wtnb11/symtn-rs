@@ -1,11 +1,9 @@
 use super::*;
 
 /// Inline storage for one-based outer-multiplicity vertex labels.
-pub type MultiplicityVec = SmallVec<[MultiplicityIndex; 8]>;
+pub(crate) type MultiplicityVec = SmallVec<[MultiplicityIndex; 8]>;
 /// Inline storage for `usize` metadata (dims, strides, indices, permutations).
 pub type DimVec = SmallVec<[usize; 8]>;
-/// Inline storage for per-leg duality flags.
-pub type DualVec = SmallVec<[bool; 8]>;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Placement {
@@ -45,8 +43,6 @@ pub trait HostReadableStorage<T>: TensorStorage<T> {
 pub trait HostWritableStorage<T>: HostReadableStorage<T> {
     fn as_mut_slice(&mut self) -> &mut [T];
 }
-
-pub type HostStorage<T> = Vec<T>;
 
 impl<T> TensorStorage<T> for Vec<T> {
     #[inline]

@@ -673,6 +673,7 @@ where
     Ok(())
 }
 
+#[cfg(test)]
 /// Quantum-dimension-weighted oriented inner product.
 ///
 /// `sector_weight` supplies `dim(c)` per logical block, as the provider's own

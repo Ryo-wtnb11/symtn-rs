@@ -298,8 +298,9 @@ impl FusionTreeKey {
         Ok(tree)
     }
 
+    #[cfg(test)]
     /// Construct and validate a fusion tree through checked finite algebra.
-    pub fn try_new_for_rule_checked<R, Uncoupled, Dual, Innerlines, Vertices>(
+    pub(crate) fn try_new_for_rule_checked<R, Uncoupled, Dual, Innerlines, Vertices>(
         rule: &R,
         uncoupled: Uncoupled,
         coupled: SectorId,
@@ -416,11 +417,12 @@ impl FusionTreeKey {
         )
     }
 
+    #[cfg(test)]
     /// Construct and checked-validate a fusion tree from numeric labels.
     ///
     /// Sector values are provider-local IDs. Vertex values are one-based
     /// outer-multiplicity labels.
-    pub fn try_from_sector_ids_for_rule_checked<R, Uncoupled, Dual, Innerlines, Vertices>(
+    pub(crate) fn try_from_sector_ids_for_rule_checked<R, Uncoupled, Dual, Innerlines, Vertices>(
         rule: &R,
         uncoupled: Uncoupled,
         coupled: usize,
