@@ -10,6 +10,7 @@ The digest below is for the capture host (Apple M4 Max, arm64, 4 threads). The t
 | file | content | sha256 |
 |---|---|---|
 | `itebd-heff-b705d809-t4.jsonl.gz` | **main corpus**: iTEBD + H_eff on iTEBD-converged bonds | `3f48a98a7208dc6a3bf6482f567b4e64571333e50724b6f7a209d36336114ed9` |
+| `itebd-heff-c96fb0c9-t4-x86_64.jsonl.gz` | same workload on Intel Xeon Platinum 9242 (x86_64, 4 threads), lg node CPUcluster020 | `56c8830be1b823a202c6d9a1e24583858963eac1a99e71e313739a47edea7d1e` |
 | `summarize.py` | per-workload summary table below | - |
 
 ## Provenance
@@ -24,7 +25,7 @@ The digest below is for the capture host (Apple M4 Max, arm64, 4 threads). The t
 - Provider `cpu-faer` (default features), engine width 4
   (`CpuEngine` with a 4-thread pool), release build, Apple M4 Max (arm64),
   rustc 1.100.0. Calls are recorded at executor entry, before dispatch, so
-  the job lists do not depend on the provider; they can depend on the engine
+  the jobs do not depend on the provider; they can depend on the engine
   width (lane splitting), hence the `threads` field.
 
 ## Workload
@@ -125,3 +126,7 @@ mkn, half of each call's work in its largest job). SU(2) issues many calls
 with one job each at chi <= 256 (one call per fusion-tree pair) and 2-5 jobs at
 chi = 1024; per-call largest-job share is 1.00 below chi = 1024. Shapes are
 strongly rectangular: H_eff n reaches 4.1e5 against m, k <= 1348.
+
+## Cross-host comparison (arm64 vs x86_64)
+
+Bond dimensions and the per-job multiset of (m, n, k, lda, ldb, ldc) are identical on both hosts in every (model, chi, scalar, step) group, and total work matches. 47 of 54 groups are identical call by call. The other 7 are all SU(2) chi = 256 (heff.L_theta, heff.W1, heff.W2 in f64 and c64, and itebd.theta): arm64 issues single-job calls, while x86_64 groups 3-4 jobs into one call (for example runs [1,1,2]), so call counts differ (L_theta 15 vs 7, W1 23 vs 7, W2 25 vs 7, itebd.theta 40 vs 20). The likely cause is symtn's lane placement (`symtn-dense/src/lanes/placement.rs`, `allocate`), which groups jobs according to the host's modeled widths; this has not been confirmed. Each capture is repeatable on its host: an x86_64 rerun was byte-identical. Jobs therefore compare across hosts, but per-call grouping does not, so capture on every host that runs the campaign.
