@@ -19,15 +19,11 @@ impl<'a> core::marker::Copy for symtn_operations::OutputAxisOrder<'a>
 impl<'a> core::marker::StructuralPartialEq for symtn_operations::OutputAxisOrder<'a>
 pub struct symtn_operations::axis::TensorContractSpec<'a>
 impl<'a> symtn_operations::TensorContractSpec<'a>
-pub fn symtn_operations::TensorContractSpec<'a>::lhs_conjugate(&self) -> bool
 pub fn symtn_operations::TensorContractSpec<'a>::lhs_contracting_axes(&self) -> &'a [usize]
 pub fn symtn_operations::TensorContractSpec<'a>::new(&'a [usize], &'a [usize], symtn_operations::OutputAxisOrder<'a>) -> Self
-pub fn symtn_operations::TensorContractSpec<'a>::new_with_conjugation(&'a [usize], &'a [usize], symtn_operations::OutputAxisOrder<'a>, bool, bool) -> Self
 pub fn symtn_operations::TensorContractSpec<'a>::output_permutation(&self) -> symtn_operations::OutputAxisOrder<'a>
-pub fn symtn_operations::TensorContractSpec<'a>::rhs_conjugate(&self) -> bool
 pub fn symtn_operations::TensorContractSpec<'a>::rhs_contracting_axes(&self) -> &'a [usize]
 pub fn symtn_operations::TensorContractSpec<'a>::with_default_output_order(&'a [usize], &'a [usize]) -> Self
-pub fn symtn_operations::TensorContractSpec<'a>::with_default_output_order_and_conjugation(&'a [usize], &'a [usize], bool, bool) -> Self
 impl<'a> core::clone::Clone for symtn_operations::TensorContractSpec<'a>
 pub fn symtn_operations::TensorContractSpec<'a>::clone(&self) -> symtn_operations::TensorContractSpec<'a>
 impl<'a> core::clone::TrivialClone for symtn_operations::TensorContractSpec<'a>
@@ -42,13 +38,10 @@ impl<'a> core::marker::StructuralPartialEq for symtn_operations::TensorContractS
 pub struct symtn_operations::axis::TensorContractSpecOwned
 impl symtn_operations::TensorContractSpecOwned
 pub fn symtn_operations::TensorContractSpecOwned::as_spec(&self) -> symtn_operations::TensorContractSpec<'_>
-pub fn symtn_operations::TensorContractSpecOwned::from_axis_vecs(symtn_operations::AxisVec, symtn_operations::AxisVec, symtn_operations::AxisVec, bool, bool) -> Self
-pub fn symtn_operations::TensorContractSpecOwned::lhs_conjugate(&self) -> bool
+pub fn symtn_operations::TensorContractSpecOwned::from_axis_vecs(symtn_operations::AxisVec, symtn_operations::AxisVec, symtn_operations::AxisVec) -> Self
 pub fn symtn_operations::TensorContractSpecOwned::lhs_contracting_axes(&self) -> &[usize]
 pub fn symtn_operations::TensorContractSpecOwned::new(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>) -> Self
-pub fn symtn_operations::TensorContractSpecOwned::new_with_conjugation(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, bool, bool) -> Self
 pub fn symtn_operations::TensorContractSpecOwned::output_axes(&self) -> &[usize]
-pub fn symtn_operations::TensorContractSpecOwned::rhs_conjugate(&self) -> bool
 pub fn symtn_operations::TensorContractSpecOwned::rhs_contracting_axes(&self) -> &[usize]
 impl core::clone::Clone for symtn_operations::TensorContractSpecOwned
 pub fn symtn_operations::TensorContractSpecOwned::clone(&self) -> symtn_operations::TensorContractSpecOwned
@@ -1021,15 +1014,11 @@ pub fn symtn_operations::kernel_adapter::StridedHostKernelAdapter::scale_strided
 pub fn symtn_operations::kernel_adapter::StridedHostKernelAdapter::transform_strided_baked<C>(&mut self, threadteam::exec::Exec<'_>, &mut alloc::vec::Vec<isize>, &mut [T], &[T], &[usize], &[isize], &[isize], isize, isize, bool, symtn_operations::TransformScale<T, C>, core::option::Option<T>, core::option::Option<symtn_operations::kernel_adapter::BakedFusedLayout<'_>>, core::option::Option<&mut [usize]>) -> core::result::Result<(), symtn_operations::OperationError> where C: core::marker::Copy, T: symtn_operations::RecouplingCoefficientAction<C> + num_traits::identities::One + core::cmp::PartialEq
 pub struct symtn_operations::TensorContractSpec<'a>
 impl<'a> symtn_operations::TensorContractSpec<'a>
-pub fn symtn_operations::TensorContractSpec<'a>::lhs_conjugate(&self) -> bool
 pub fn symtn_operations::TensorContractSpec<'a>::lhs_contracting_axes(&self) -> &'a [usize]
 pub fn symtn_operations::TensorContractSpec<'a>::new(&'a [usize], &'a [usize], symtn_operations::OutputAxisOrder<'a>) -> Self
-pub fn symtn_operations::TensorContractSpec<'a>::new_with_conjugation(&'a [usize], &'a [usize], symtn_operations::OutputAxisOrder<'a>, bool, bool) -> Self
 pub fn symtn_operations::TensorContractSpec<'a>::output_permutation(&self) -> symtn_operations::OutputAxisOrder<'a>
-pub fn symtn_operations::TensorContractSpec<'a>::rhs_conjugate(&self) -> bool
 pub fn symtn_operations::TensorContractSpec<'a>::rhs_contracting_axes(&self) -> &'a [usize]
 pub fn symtn_operations::TensorContractSpec<'a>::with_default_output_order(&'a [usize], &'a [usize]) -> Self
-pub fn symtn_operations::TensorContractSpec<'a>::with_default_output_order_and_conjugation(&'a [usize], &'a [usize], bool, bool) -> Self
 impl<'a> core::clone::Clone for symtn_operations::TensorContractSpec<'a>
 pub fn symtn_operations::TensorContractSpec<'a>::clone(&self) -> symtn_operations::TensorContractSpec<'a>
 impl<'a> core::clone::TrivialClone for symtn_operations::TensorContractSpec<'a>
@@ -1044,13 +1033,10 @@ impl<'a> core::marker::StructuralPartialEq for symtn_operations::TensorContractS
 pub struct symtn_operations::TensorContractSpecOwned
 impl symtn_operations::TensorContractSpecOwned
 pub fn symtn_operations::TensorContractSpecOwned::as_spec(&self) -> symtn_operations::TensorContractSpec<'_>
-pub fn symtn_operations::TensorContractSpecOwned::from_axis_vecs(symtn_operations::AxisVec, symtn_operations::AxisVec, symtn_operations::AxisVec, bool, bool) -> Self
-pub fn symtn_operations::TensorContractSpecOwned::lhs_conjugate(&self) -> bool
+pub fn symtn_operations::TensorContractSpecOwned::from_axis_vecs(symtn_operations::AxisVec, symtn_operations::AxisVec, symtn_operations::AxisVec) -> Self
 pub fn symtn_operations::TensorContractSpecOwned::lhs_contracting_axes(&self) -> &[usize]
 pub fn symtn_operations::TensorContractSpecOwned::new(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>) -> Self
-pub fn symtn_operations::TensorContractSpecOwned::new_with_conjugation(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, bool, bool) -> Self
 pub fn symtn_operations::TensorContractSpecOwned::output_axes(&self) -> &[usize]
-pub fn symtn_operations::TensorContractSpecOwned::rhs_conjugate(&self) -> bool
 pub fn symtn_operations::TensorContractSpecOwned::rhs_contracting_axes(&self) -> &[usize]
 impl core::clone::Clone for symtn_operations::TensorContractSpecOwned
 pub fn symtn_operations::TensorContractSpecOwned::clone(&self) -> symtn_operations::TensorContractSpecOwned

@@ -85,8 +85,8 @@ fn run_nan_poisoned_destination_case(
     let plan = super::super::fusion::prepare_tensorcontract_fusion_plan_dyn_raw(
         provider.as_ref(),
         dst.space(),
-        lhs.space(),
-        rhs.space(),
+        crate::FusionOperand::direct(lhs.space()),
+        crate::FusionOperand::direct(rhs.space()),
         axes,
     )
     .unwrap();
@@ -299,7 +299,11 @@ fn execution_layout_primer_runs_once_per_derivation() {
     .unwrap();
     let output = output_bound.space().clone();
     let plan = super::super::fusion::prepare_tensorcontract_fusion_plan_dyn_raw(
-        &rule, &output, &source, &scalar, axes,
+        &rule,
+        &output,
+        crate::FusionOperand::direct(&source),
+        crate::FusionOperand::direct(&scalar),
+        axes,
     )
     .unwrap();
     assert!(!plan.output_transform_is_identity());

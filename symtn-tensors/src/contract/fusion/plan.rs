@@ -377,8 +377,6 @@ impl CandidatePlan {
                 (open_lhs..open_lhs + self.lhs_contract_rank).collect(),
                 (0..self.rhs_contract_rank).collect(),
                 (0..open_lhs + self.core_dst_open_rhs_rank).collect(),
-                false,
-                false,
             ),
             core_dst_open_lhs_rank: self.core_dst_open_lhs_rank,
             core_dst_open_rhs_rank: self.core_dst_open_rhs_rank,
@@ -453,8 +451,6 @@ impl FusionContractPlan {
                 (lhs_open_rank..lhs_open_rank + contract_rank).collect(),
                 (0..contract_rank).collect(),
                 (0..lhs_open_rank + rhs_open_rank).collect(),
-                false,
-                false,
             ),
             core_dst_open_lhs_rank: lhs_open_rank,
             core_dst_open_rhs_rank: rhs_open_rank,
@@ -556,33 +552,17 @@ where
     prepare_tensorcontract_fusion_plan_dyn_raw(
         dst.provider(),
         dst.space(),
-        lhs.storage_space(),
-        rhs.storage_space(),
-        TensorContractSpec::new_with_conjugation(
-            lhs_axes,
-            rhs_axes,
-            OutputAxisOrder::from_axes(output_axes),
-            lhs.storage_conjugate(),
-            rhs.storage_conjugate(),
-        ),
+        lhs,
+        rhs,
+        TensorContractSpec::new(lhs_axes, rhs_axes, OutputAxisOrder::from_axes(output_axes)),
     )
-}
-
-/// The operand a spec flag names: `space`, or its lazy adjoint, whose legs a
-/// conjugated operand's axes index.
-fn oriented_operand(space: &DynamicFusionMapSpace, adjoint: bool) -> FusionOperand<'_> {
-    if adjoint {
-        FusionOperand::adjoint(space)
-    } else {
-        FusionOperand::direct(space)
-    }
 }
 
 pub(crate) fn prepare_tensorcontract_fusion_plan_dyn_raw<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
 ) -> Result<FusionContractPlan, OperationError>
 where
@@ -602,8 +582,8 @@ where
 pub(crate) fn prepare_tensorcontract_fusion_plan_dyn_raw_canonical<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
 ) -> Result<FusionContractPlan, OperationError>
 where
@@ -623,8 +603,8 @@ where
 fn prepare_tensorcontract_fusion_plan_dyn_raw_with_orientations<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
     orientations: &[FusionContractOrientation],
 ) -> Result<FusionContractPlan, OperationError>
@@ -633,18 +613,16 @@ where
     R::Scalar: DenseBlockScalar,
 {
     dst.validate_rule(rule)?;
-    lhs.validate_rule(rule)?;
-    rhs.validate_rule(rule)?;
-    let lhs = oriented_operand(lhs, axes.lhs_conjugate());
-    let rhs = oriented_operand(rhs, axes.rhs_conjugate());
+    lhs.storage_space().validate_rule(rule)?;
+    rhs.storage_space().validate_rule(rule)?;
     select_tensorcontract_fusion_plan_with_orientations(
         rule,
         dst,
         &lhs,
         &rhs,
         axes,
-        axes.lhs_conjugate(),
-        axes.rhs_conjugate(),
+        lhs.storage_conjugate(),
+        rhs.storage_conjugate(),
         None,
         orientations,
     )
@@ -674,8 +652,8 @@ where
 pub(crate) fn prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
     candidate: &ContractAxisOrderCandidate,
 ) -> Result<FusionContractPlan, OperationError>
@@ -697,13 +675,8 @@ where
             message: "candidate must preserve contracted axis sets",
         });
     }
-    let candidate_axes = TensorContractSpec::new_with_conjugation(
-        candidate.lhs(),
-        candidate.rhs(),
-        axes.output_permutation(),
-        axes.lhs_conjugate(),
-        axes.rhs_conjugate(),
-    );
+    let candidate_axes =
+        TensorContractSpec::new(candidate.lhs(), candidate.rhs(), axes.output_permutation());
     prepare_tensorcontract_fusion_plan_dyn_raw_fixed(rule, dst, lhs, rhs, candidate_axes)
 }
 
@@ -711,8 +684,8 @@ where
 pub(crate) fn prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
     candidate: &ContractAxisOrderCandidate,
     orientation: FusionContractOrientation,
@@ -744,8 +717,8 @@ pub(crate) fn orient_fusion_contract_plan(
 fn prepare_tensorcontract_fusion_plan_dyn_raw_fixed<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
 ) -> Result<FusionContractPlan, OperationError>
 where
@@ -753,18 +726,16 @@ where
     R::Scalar: DenseBlockScalar,
 {
     dst.validate_rule(rule)?;
-    lhs.validate_rule(rule)?;
-    rhs.validate_rule(rule)?;
-    let lhs = oriented_operand(lhs, axes.lhs_conjugate());
-    let rhs = oriented_operand(rhs, axes.rhs_conjugate());
+    lhs.storage_space().validate_rule(rule)?;
+    rhs.storage_space().validate_rule(rule)?;
     validate_tensorcontract_fusion_plan_inputs(rule, dst, &lhs, &rhs, axes, None)?;
     compile_tensorcontract_fusion_plan_from_spaces(
         dst,
         &lhs,
         &rhs,
         axes,
-        axes.lhs_conjugate(),
-        axes.rhs_conjugate(),
+        lhs.storage_conjugate(),
+        rhs.storage_conjugate(),
     )
 }
 
@@ -772,8 +743,8 @@ where
 pub(crate) fn prepare_tensorcontract_fusion_candidate_facts_dyn_raw<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    lhs: FusionOperand<'_>,
+    rhs: FusionOperand<'_>,
     axes: TensorContractSpec<'_>,
 ) -> Result<Vec<FusionContractCandidateFacts>, OperationError>
 where
@@ -781,18 +752,16 @@ where
     R::Scalar: DenseBlockScalar,
 {
     dst.validate_rule(rule)?;
-    lhs.validate_rule(rule)?;
-    rhs.validate_rule(rule)?;
-    let lhs = oriented_operand(lhs, axes.lhs_conjugate());
-    let rhs = oriented_operand(rhs, axes.rhs_conjugate());
+    lhs.storage_space().validate_rule(rule)?;
+    rhs.storage_space().validate_rule(rule)?;
     fusion_contract_candidate_facts_from_spaces_with_probe(
         rule,
         dst,
         &lhs,
         &rhs,
         axes,
-        axes.lhs_conjugate(),
-        axes.rhs_conjugate(),
+        lhs.storage_conjugate(),
+        rhs.storage_conjugate(),
         encoded_layout_probe::<R>,
         None,
         &CACHED_ORIENTATIONS,
@@ -1024,24 +993,12 @@ where
     R::Scalar: DenseBlockScalar,
 {
     dst.validate_rule(rule)?;
-    if axes.lhs_conjugate() != lhs.storage_conjugate()
-        || axes.rhs_conjugate() != rhs.storage_conjugate()
-    {
-        return Err(OperationError::InvalidArgument {
-            message: "prelowered operand flags must match the contraction cache key",
-        });
-    }
-    let logical_axes = TensorContractSpec::new(
-        axes.lhs_contracting_axes(),
-        axes.rhs_contracting_axes(),
-        axes.output_permutation(),
-    );
     select_tensorcontract_fusion_plan_with_orientations(
         rule,
         dst,
         lhs,
         rhs,
-        logical_axes,
+        axes,
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
         Some(primer),
@@ -1306,9 +1263,9 @@ where
     .map(|((), facts)| Some(facts.total_materialized_elements()))
 }
 
-/// The `DynamicTree` candidate of two operands over Complete logical spaces,
-/// a lazy adjoint marked by `axes`' conjugation flags (borrowed only under
-/// an identity transform, read in its parent's storage), the destination
+/// The `DynamicTree` candidate of two operands, each given as its Complete
+/// logical space and its operand (a lazy adjoint is borrowed only under an
+/// identity transform, read in its parent's storage), the destination
 /// derived from them by construction:
 /// the Complete scorer
 /// of the selector ([`prepare_tensorcontract_fusion_plan_dyn_raw_canonical`]),
@@ -1318,8 +1275,8 @@ where
 pub(crate) fn select_complete_tensorcontract_fusion_plan<E>(
     twist: impl Fn(&FusionTreeHomSpace, &[usize]) -> Result<bool, E>,
     dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
+    (lhs, lhs_operand): (&DynamicFusionMapSpace, FusionOperand<'_>),
+    (rhs, rhs_operand): (&DynamicFusionMapSpace, FusionOperand<'_>),
     axes: TensorContractSpec<'_>,
 ) -> Result<FusionContractPlan, E>
 where
@@ -1336,8 +1293,8 @@ where
             lhs.rank(),
             rhs.rank(),
             candidate_axes,
-            axes.lhs_conjugate(),
-            axes.rhs_conjugate(),
+            lhs_operand.storage_conjugate(),
+            rhs_operand.storage_conjugate(),
         )?
         .orient(orientation);
         let facts = score_complete_fusion_contract_candidate(
@@ -1646,8 +1603,8 @@ mod tests {
         let plan = prepare_tensorcontract_fusion_plan_dyn_raw(
             &rule,
             &dst,
-            &lhs,
-            &rhs,
+            crate::FusionOperand::direct(&lhs),
+            crate::FusionOperand::direct(&rhs),
             TensorContractSpec::with_default_output_order(&[2, 3], &[1, 0]),
         )
         .unwrap();
@@ -1754,11 +1711,20 @@ mod tests {
         let dst = single_sector_space(&rule, [11, 13, 5, 7]);
         let axes =
             TensorContractSpec::new(&[1, 0], &[2, 3], OutputAxisOrder::from_axes(&[2, 3, 0, 1]));
-        let facts =
-            prepare_tensorcontract_fusion_candidate_facts_dyn_raw(&rule, &dst, &lhs, &rhs, axes)
-                .unwrap();
+        let facts = prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
+            &rule,
+            &dst,
+            crate::FusionOperand::direct(&lhs),
+            crate::FusionOperand::direct(&rhs),
+            axes,
+        )
+        .unwrap();
         let selected = super::prepare_tensorcontract_fusion_plan_dyn_raw_canonical(
-            &rule, &dst, &lhs, &rhs, axes,
+            &rule,
+            &dst,
+            crate::FusionOperand::direct(&lhs),
+            crate::FusionOperand::direct(&rhs),
+            axes,
         )
         .unwrap();
 
@@ -1816,8 +1782,14 @@ mod tests {
 
         let candidate_score_calls_rec = probe::record();
         let candidate_build_calls_rec = probe::record();
-        prepare_tensorcontract_fusion_plan_dyn_raw_canonical(&rule, &dst, &lhs, &rhs, axes)
-            .unwrap();
+        prepare_tensorcontract_fusion_plan_dyn_raw_canonical(
+            &rule,
+            &dst,
+            crate::FusionOperand::direct(&lhs),
+            crate::FusionOperand::direct(&rhs),
+            axes,
+        )
+        .unwrap();
         // What: Complete cold selection performs one semantic HomSpace preflight
         // and scores all stable candidates without constructing their layouts.
         assert_eq!(
@@ -1901,8 +1873,8 @@ mod tests {
         let facts = prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
             &rule,
             &dst,
-            &lhs,
-            &rhs,
+            crate::FusionOperand::direct(&lhs),
+            crate::FusionOperand::direct(&rhs),
             TensorContractSpec::with_default_output_order(&[2, 3], &[1, 0]),
         )
         .unwrap();
@@ -1945,8 +1917,8 @@ mod tests {
         let facts = prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
             &rule,
             &dst,
-            &lhs,
-            &rhs,
+            crate::FusionOperand::direct(&lhs),
+            crate::FusionOperand::direct(&rhs),
             TensorContractSpec::new(&[2, 3], &[1, 0], OutputAxisOrder::from_axes(&[1, 0, 3, 2])),
         )
         .unwrap();
@@ -1994,15 +1966,9 @@ mod tests {
         let facts = prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
             &rule,
             &dst,
-            &lhs,
-            &rhs,
-            TensorContractSpec::new_with_conjugation(
-                &[],
-                &[],
-                OutputAxisOrder::identity(),
-                true,
-                false,
-            ),
+            crate::FusionOperand::adjoint(&lhs),
+            crate::FusionOperand::direct(&rhs),
+            TensorContractSpec::new(&[], &[], OutputAxisOrder::identity()),
         )
         .unwrap();
 
@@ -2024,15 +1990,9 @@ mod tests {
         let reverse = prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
             &rule,
             &dst,
-            &lhs,
-            &rhs,
-            TensorContractSpec::new_with_conjugation(
-                &[],
-                &[],
-                OutputAxisOrder::identity(),
-                true,
-                false,
-            ),
+            crate::FusionOperand::adjoint(&lhs),
+            crate::FusionOperand::direct(&rhs),
+            TensorContractSpec::new(&[], &[], OutputAxisOrder::identity()),
             &candidate,
             FusionContractOrientation::RhsLhs,
         )

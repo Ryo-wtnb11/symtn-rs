@@ -443,16 +443,16 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
         dst: &FusionTreeHomSpace,
     ) -> Result<bool, Self::Error>;
 
-    /// The `DynamicTree` candidate of two stored operands (checked Generic:
-    /// also a lazy adjoint's logical space, its conjugation in `axes`):
+    /// The `DynamicTree` candidate of two operands (checked Generic: a lazy
+    /// adjoint planned over its logical space in the authority):
     /// TensorKit `contract!`'s `_contract_memcost` selection
     /// (`tensoroperations.jl:314-378`).
     fn dynamic_tree_plan(
         rule: &R,
         authority: Self::SpaceAuthority<'_>,
         dst: &DynamicFusionMapSpace,
-        lhs: &DynamicFusionMapSpace,
-        rhs: &DynamicFusionMapSpace,
+        lhs: FusionOperand<'_>,
+        rhs: FusionOperand<'_>,
         axes: TensorContractSpec<'_>,
     ) -> Result<FusionContractPlan, Self::Error>
     where
@@ -548,8 +548,8 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub enum ContractRequest<'s> {
-    /// `lhs·rhs` over `axes`, whose conjugation flags are the operands',
-    /// split after the first `codomain_rank` output axes.
+    /// `lhs·rhs` over `axes`, split after the first `codomain_rank` output
+    /// axes. Operand conjugation is the staged operands' own.
     Contract {
         axes: TensorContractSpec<'s>,
         codomain_rank: usize,
@@ -881,8 +881,8 @@ where
         rule: &R,
         _primer: LayoutKeyBuilder<R>,
         dst: &DynamicFusionMapSpace,
-        lhs: &DynamicFusionMapSpace,
-        rhs: &DynamicFusionMapSpace,
+        lhs: FusionOperand<'_>,
+        rhs: FusionOperand<'_>,
         axes: TensorContractSpec<'_>,
     ) -> Result<FusionContractPlan, OperationError>
     where
@@ -1528,8 +1528,8 @@ where
         rule: &R,
         authority: CheckedAuthority<'_, R>,
         dst: &DynamicFusionMapSpace,
-        lhs: &DynamicFusionMapSpace,
-        rhs: &DynamicFusionMapSpace,
+        lhs: FusionOperand<'_>,
+        rhs: FusionOperand<'_>,
         axes: TensorContractSpec<'_>,
     ) -> Result<FusionContractPlan, Self::Error> {
         select_complete_tensorcontract_fusion_plan(
@@ -1537,8 +1537,8 @@ where
                 contract_axes_require_twist::<Self, R>(rule, authority, homspace, axes)
             },
             dst,
-            lhs,
-            rhs,
+            (authority.logical_of(lhs)?, lhs),
+            (authority.logical_of(rhs)?, rhs),
             axes,
         )
     }
@@ -1773,7 +1773,7 @@ where
     }
 
     /// The stored artifact compiler over the operands' logical spaces: the
-    /// plan is selected on them with the operands' conjugation, and a lazy
+    /// plan is selected on them with the operands' own conjugation, and a lazy
     /// adjoint source is transformed through its parent's storage
     /// ([`Self::transformed_source`]). Why not the multiplicity-free
     /// prelowered layouts: their layout primer has no checked counterpart,
@@ -1792,10 +1792,12 @@ where
             txn,
             target,
             (
+                lhs,
                 target.authority.logical_of(lhs)?,
                 lhs.storage_space().structure(),
             ),
             (
+                rhs,
                 target.authority.logical_of(rhs)?,
                 rhs.storage_space().structure(),
             ),

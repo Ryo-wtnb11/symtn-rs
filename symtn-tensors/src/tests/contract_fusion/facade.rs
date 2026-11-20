@@ -370,6 +370,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         2.0,
         3.0,
     )
@@ -392,6 +393,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         2.0,
         3.0,
     )
@@ -407,6 +409,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         2.0,
         3.0,
     )
@@ -422,6 +425,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         2.0,
         3.0,
     )
@@ -467,6 +471,7 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
         &lhs,
         &rhs,
         TensorContractSpec::new(&[3, 2], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])),
+        (false, false),
         1.0,
         0.0,
     )
@@ -495,6 +500,7 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
         &lhs,
         &rhs_permuted,
         TensorContractSpec::with_default_output_order(&[2, 3], &[0, 1]),
+        (false, false),
         1.0,
         0.0,
     )
@@ -516,19 +522,11 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
             crate::contract::FusionContractOrientation::LhsRhs,
             crate::contract::FusionContractOrientation::RhsLhs,
         ] {
-            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-                &rule,
-                &dst_dyn,
-                &lhs_dyn,
-                &rhs_dyn,
-                TensorContractSpec::new(
+            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(&rule, &dst_dyn, crate::FusionOperand::direct(&lhs_dyn), crate::FusionOperand::direct(&rhs_dyn), TensorContractSpec::new(
                     &[3, 2],
                     &[0, 1],
                     OutputAxisOrder::from_axes(&[0, 1, 2, 3]),
-                ),
-                &candidate,
-                orientation,
-            )
+                ), &candidate, orientation)
             .unwrap();
             let mut actual =
                 TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], tensor_space.clone())

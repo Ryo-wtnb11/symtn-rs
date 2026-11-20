@@ -244,13 +244,7 @@ fn oriented_storage_contract_and_compose_use_parent_rectangular_views() {
             &lhs_values,
             rhs_operand,
             &rhs_values,
-            TensorContractSpec::new_with_conjugation(
-                &[1],
-                &[0],
-                crate::OutputAxisOrder::identity(),
-                lhs_adjoint,
-                rhs_adjoint,
-            ),
+            TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity()),
         )
         .unwrap();
         assert_eq!(contracted, expected);
@@ -417,13 +411,7 @@ fn oriented_fermionic_storage_keeps_contract_and_compose_signs_distinct() {
             &lhs_values,
             rhs,
             &rhs_values,
-            TensorContractSpec::new_with_conjugation(
-                &[1],
-                &[0],
-                crate::OutputAxisOrder::identity(),
-                lhs_adjoint,
-                rhs_adjoint,
-            ),
+            TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity()),
         )
         .unwrap();
         assert_eq!(contracted, [-6.0]);

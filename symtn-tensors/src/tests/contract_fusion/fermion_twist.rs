@@ -53,6 +53,7 @@ fn tensorcontract_fusion_fermion_rhs_dual_codomain_twists_like_tensorkit() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         1.0,
         0.0,
     )
@@ -103,8 +104,8 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
         crate::contract::prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
             &rule,
             &dst.fusion_space().unwrap().as_ref().clone(),
-            &lhs.fusion_space().unwrap().as_ref().clone(),
-            &rhs.fusion_space().unwrap().as_ref().clone(),
+            crate::FusionOperand::direct(&lhs.fusion_space().unwrap().as_ref().clone()),
+            crate::FusionOperand::direct(&rhs.fusion_space().unwrap().as_ref().clone()),
             TensorContractSpec::with_default_output_order(&[1], &[0]),
         )
         .unwrap();
@@ -136,6 +137,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         alpha,
         beta,
     )
@@ -170,15 +172,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
     let lhs_dynamic = lhs.fusion_space().unwrap().as_ref().clone();
     let rhs_dynamic = rhs.fusion_space().unwrap().as_ref().clone();
     let candidate = crate::contract::contracted_axis_order_candidates(&[1], &[0]).remove(0);
-    let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-        &rule,
-        &dst_dynamic,
-        &lhs_dynamic,
-        &rhs_dynamic,
-        TensorContractSpec::with_default_output_order(&[1], &[0]),
-        &candidate,
-        crate::contract::FusionContractOrientation::RhsLhs,
-    )
+    let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(&rule, &dst_dynamic, crate::FusionOperand::direct(&lhs_dynamic), crate::FusionOperand::direct(&rhs_dynamic), TensorContractSpec::with_default_output_order(&[1], &[0]), &candidate, crate::contract::FusionContractOrientation::RhsLhs)
     .unwrap();
     let mut reverse_dst = TestTensor::<f64>::from_vec_with_dynamic_space(
         initial.to_vec(),
@@ -245,6 +239,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         alpha,
         beta,
     )
@@ -325,8 +320,8 @@ fn fermion_twist_folds_into_core_alpha_by_hand_calculation() {
         crate::contract::prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
             &rule,
             &dst_space.clone(),
-            &lhs.fusion_space().unwrap().as_ref().clone(),
-            &rhs.fusion_space().unwrap().as_ref().clone(),
+            crate::FusionOperand::direct(&lhs.fusion_space().unwrap().as_ref().clone()),
+            crate::FusionOperand::direct(&rhs.fusion_space().unwrap().as_ref().clone()),
             axes,
         )
         .unwrap();
@@ -349,7 +344,18 @@ fn fermion_twist_folds_into_core_alpha_by_hand_calculation() {
     };
     // The eager entry.
     let mut plain = new_dst();
-    fusion_contract_into(engine, &rule, &mut plain, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(
+        engine,
+        &rule,
+        &mut plain,
+        &lhs,
+        &rhs,
+        axes,
+        (false, false),
+        alpha,
+        beta,
+    )
+    .unwrap();
     // The same entry through an explicit context: it records the route the
     // eager call takes.
     let mut artifact = new_dst();
@@ -362,6 +368,7 @@ fn fermion_twist_folds_into_core_alpha_by_hand_calculation() {
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )

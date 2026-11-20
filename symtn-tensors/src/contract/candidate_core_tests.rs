@@ -216,13 +216,7 @@ where
     let (lhs_data, rhs_data) = (data(len, 1), data(len, 2));
     let mut context = Context::default();
     for (name, lhs_lazy, rhs_lazy, lhs_axes, rhs_axes, output, orientation) in PROBES {
-        let axes = TensorContractSpec::new_with_conjugation(
-            lhs_axes,
-            rhs_axes,
-            OutputAxisOrder::from_axes(output),
-            lhs_lazy,
-            rhs_lazy,
-        );
+        let axes = TensorContractSpec::new(lhs_axes, rhs_axes, OutputAxisOrder::from_axes(output));
         let mut dst = vec![0.0; len];
         let fusion_operand_projection_prepares_rec = probe::record();
         if lhs_lazy || rhs_lazy {

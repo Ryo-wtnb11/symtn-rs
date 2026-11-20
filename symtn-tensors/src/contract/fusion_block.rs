@@ -57,7 +57,6 @@ use super::backend::TensorContractBackend;
 use super::dynamic_space::DynamicFusionMapSpace;
 // Used by the debug-build core geometry assertion and the test-only compile.
 #[cfg(any(test, debug_assertions))]
-use super::fusion::reject_fusion_contract_conjugation;
 use super::structure::TensorContractAxisPlan;
 
 mod compile;
@@ -325,7 +324,7 @@ pub(crate) fn debug_assert_core_geometry<R>(
 ) where
     R: FusionRule,
 {
-    let checked = reject_fusion_contract_conjugation(core_axes).and_then(|()| {
+    let checked = (|| -> Result<(), OperationError> {
         validate_fusion_contract_rule(rule, dst, lhs, rhs)?;
         let preflight = CoreContractPreflight::compile_oriented_unobserved(
             rule,
@@ -336,7 +335,7 @@ pub(crate) fn debug_assert_core_geometry<R>(
         )?;
         require_core_form(preflight.validate_core_geometry_with(contracted_homspace_matches)?)
             .map(|_| ())
-    });
+    })();
     debug_assert!(
         checked.is_ok(),
         "plan-derived core operands failed the core preflight: {checked:?}"

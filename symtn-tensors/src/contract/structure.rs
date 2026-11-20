@@ -42,12 +42,14 @@ impl TensorContractStructure<f64> {
         lhs_structure: &BlockStructure,
         rhs_structure: &BlockStructure,
         axes: TensorContractSpec<'_>,
+        conjugate: (bool, bool),
     ) -> Result<Self, OperationError> {
         Self::compile_shared_structures(
             Arc::new(dst_structure.clone()),
             Arc::new(lhs_structure.clone()),
             Arc::new(rhs_structure.clone()),
             axes,
+            conjugate,
         )
     }
 
@@ -56,6 +58,7 @@ impl TensorContractStructure<f64> {
         lhs_structure: &BlockStructure,
         rhs_structure: &BlockStructure,
         axes: TensorContractSpec<'_>,
+        conjugate: (bool, bool),
         block_specs: &[TensorContractBlockSpec<f64>],
     ) -> Result<Self, OperationError> {
         Self::compile_structures_with_block_specs_generic(
@@ -63,6 +66,7 @@ impl TensorContractStructure<f64> {
             lhs_structure,
             rhs_structure,
             axes,
+            conjugate,
             block_specs,
         )
     }
@@ -72,6 +76,7 @@ impl TensorContractStructure<f64> {
         lhs_structure: Arc<BlockStructure>,
         rhs_structure: Arc<BlockStructure>,
         axes: TensorContractSpec<'_>,
+        conjugate: (bool, bool),
     ) -> Result<Self, OperationError> {
         if dst_structure.block_count() != 1
             || lhs_structure.block_count() != 1
@@ -90,6 +95,7 @@ impl TensorContractStructure<f64> {
             lhs_structure,
             rhs_structure,
             axes,
+            conjugate,
             &block_specs,
         )
     }
@@ -104,6 +110,7 @@ where
         lhs_structure: &BlockStructure,
         rhs_structure: &BlockStructure,
         axes: TensorContractSpec<'_>,
+        conjugate: (bool, bool),
         block_specs: &[TensorContractBlockSpec<C>],
     ) -> Result<Self, OperationError> {
         Self::compile_shared_structures_with_block_specs(
@@ -113,10 +120,12 @@ where
             Arc::new(lhs_structure.clone()),
             Arc::new(rhs_structure.clone()),
             axes,
+            conjugate,
             block_specs,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_shared_structures_with_block_specs(
         dst_structure: Arc<BlockStructure>,
         lhs_structure: Arc<BlockStructure>,
@@ -124,6 +133,7 @@ where
         lhs_storage_structure: Arc<BlockStructure>,
         rhs_storage_structure: Arc<BlockStructure>,
         axes: TensorContractSpec<'_>,
+        conjugate: (bool, bool),
         block_specs: &[TensorContractBlockSpec<C>],
     ) -> Result<Self, OperationError> {
         Self::compile_shared_structures_with_block_specs_inner(
@@ -133,10 +143,12 @@ where
             lhs_storage_structure,
             rhs_storage_structure,
             axes,
+            conjugate,
             block_specs,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn compile_shared_structures_with_block_specs_inner(
         dst_structure: Arc<BlockStructure>,
         lhs_structure: Arc<BlockStructure>,
@@ -144,6 +156,7 @@ where
         lhs_storage_structure: Arc<BlockStructure>,
         rhs_storage_structure: Arc<BlockStructure>,
         axes: TensorContractSpec<'_>,
+        conjugate: (bool, bool),
         block_specs: &[TensorContractBlockSpec<C>],
     ) -> Result<Self, OperationError> {
         let dst_rank = dst_structure.rank();
@@ -166,6 +179,7 @@ where
         }
         let descriptor = TensorContractDescriptor::compile(
             &axis_plan,
+            conjugate,
             &terms,
             &dst_structure,
             &lhs_structure,
@@ -189,8 +203,8 @@ where
             lhs_contracting_axes: axis_plan.lhs_contracting_axes.into_vec(),
             rhs_contracting_axes: axis_plan.rhs_contracting_axes.into_vec(),
             output_axes: axis_plan.output_axes.into_vec(),
-            lhs_conjugate: axis_plan.lhs_conjugate,
-            rhs_conjugate: axis_plan.rhs_conjugate,
+            lhs_conjugate: conjugate.0,
+            rhs_conjugate: conjugate.1,
             terms,
             descriptor,
             inactive_dst_scale_blocks,
@@ -392,8 +406,6 @@ pub(super) struct TensorContractAxisPlan {
     pub(super) lhs_open_axes: AxisVec,
     pub(super) rhs_open_axes: AxisVec,
     pub(super) output_axes: AxisVec,
-    pub(super) lhs_conjugate: bool,
-    pub(super) rhs_conjugate: bool,
 }
 
 impl TensorContractAxisPlan {
@@ -443,8 +455,6 @@ impl TensorContractAxisPlan {
             lhs_open_axes,
             rhs_open_axes,
             output_axes,
-            lhs_conjugate: axes.lhs_conjugate(),
-            rhs_conjugate: axes.rhs_conjugate(),
         })
     }
 }
@@ -552,6 +562,7 @@ where
 
     fn compile(
         axis_plan: &TensorContractAxisPlan,
+        conjugate: (bool, bool),
         terms: &[TensorContractStructureTerm<C>],
         dst_structure: &BlockStructure,
         lhs_structure: &BlockStructure,
@@ -559,6 +570,7 @@ where
     ) -> Result<Self, OperationError> {
         let dense_route = TensorContractDenseRoute::select(
             axis_plan,
+            conjugate,
             terms,
             dst_structure,
             lhs_structure,
@@ -568,12 +580,8 @@ where
         // swaps which physical tensor becomes the dot lhs (see
         // `dot_lhs_contracting_axes`), so the conj flags swap with it.
         let (dot_lhs_conj, dot_rhs_conj) = match dense_route.order {
-            TensorContractDenseRouteOrder::LhsRhs => {
-                (axis_plan.lhs_conjugate, axis_plan.rhs_conjugate)
-            }
-            TensorContractDenseRouteOrder::RhsLhs => {
-                (axis_plan.rhs_conjugate, axis_plan.lhs_conjugate)
-            }
+            TensorContractDenseRouteOrder::LhsRhs => (conjugate.0, conjugate.1),
+            TensorContractDenseRouteOrder::RhsLhs => (conjugate.1, conjugate.0),
         };
         let mut descriptor = Self {
             dot_config: DenseDotConfig::new(
@@ -589,8 +597,8 @@ where
             rhs_contracting_axes: dense_route.rhs_contracting_axes,
             lhs_open_axes: axis_plan.lhs_open_axes.to_vec(),
             rhs_open_axes: axis_plan.rhs_open_axes.to_vec(),
-            lhs_conjugate: axis_plan.lhs_conjugate,
-            rhs_conjugate: axis_plan.rhs_conjugate,
+            lhs_conjugate: conjugate.0,
+            rhs_conjugate: conjugate.1,
             terms: Vec::new(),
             lhs_shapes: Vec::new(),
             lhs_strides: Vec::new(),
@@ -785,6 +793,7 @@ impl TensorContractDenseRouteCandidate<'_> {
 impl TensorContractDenseRoute {
     fn select<C>(
         axis_plan: &TensorContractAxisPlan,
+        conjugate: (bool, bool),
         terms: &[TensorContractStructureTerm<C>],
         dst_structure: &BlockStructure,
         lhs_structure: &BlockStructure,
@@ -817,6 +826,7 @@ impl TensorContractDenseRoute {
         };
         let lhs_cost = dense_route_memcost(
             axis_plan,
+            conjugate,
             terms,
             dst_structure,
             lhs_structure,
@@ -825,6 +835,7 @@ impl TensorContractDenseRoute {
         )?;
         let rhs_cost = dense_route_memcost(
             axis_plan,
+            conjugate,
             terms,
             dst_structure,
             lhs_structure,
@@ -838,7 +849,7 @@ impl TensorContractDenseRoute {
             (forward_rhs, rhs_cost)
         };
 
-        if axis_plan.lhs_conjugate || axis_plan.rhs_conjugate {
+        if conjugate.0 || conjugate.1 {
             return Ok(forward.into_owned());
         }
 
@@ -858,6 +869,7 @@ impl TensorContractDenseRoute {
         };
         let reverse_lhs_cost = dense_route_memcost(
             axis_plan,
+            conjugate,
             terms,
             dst_structure,
             lhs_structure,
@@ -866,6 +878,7 @@ impl TensorContractDenseRoute {
         )?;
         let reverse_rhs_cost = dense_route_memcost(
             axis_plan,
+            conjugate,
             terms,
             dst_structure,
             lhs_structure,
@@ -911,6 +924,7 @@ impl TensorContractDenseRoute {
 
 fn dense_route_memcost<C>(
     axis_plan: &TensorContractAxisPlan,
+    conjugate: (bool, bool),
     terms: &[TensorContractStructureTerm<C>],
     dst_structure: &BlockStructure,
     lhs_structure: &BlockStructure,
@@ -933,7 +947,7 @@ fn dense_route_memcost<C>(
                 lhs_block.strides(),
                 &axis_plan.lhs_open_axes,
                 candidate.lhs_contracting_axes,
-                axis_plan.lhs_conjugate,
+                conjugate.0,
             )?,
             TensorContractDenseRouteOrder::RhsLhs => {
                 let mut reversed_lhs_contracting_axes = candidate.lhs_contracting_axes.to_vec();
@@ -943,7 +957,7 @@ fn dense_route_memcost<C>(
                     lhs_block.strides(),
                     &reversed_lhs_contracting_axes,
                     &axis_plan.lhs_open_axes,
-                    axis_plan.lhs_conjugate,
+                    conjugate.0,
                 )?
             }
         };
@@ -958,7 +972,7 @@ fn dense_route_memcost<C>(
                 rhs_block.strides(),
                 candidate.rhs_contracting_axes,
                 &axis_plan.rhs_open_axes,
-                axis_plan.rhs_conjugate,
+                conjugate.1,
             )?,
             TensorContractDenseRouteOrder::RhsLhs => {
                 let mut reversed_rhs_contracting_axes = candidate.rhs_contracting_axes.to_vec();
@@ -968,7 +982,7 @@ fn dense_route_memcost<C>(
                     rhs_block.strides(),
                     &axis_plan.rhs_open_axes,
                     &reversed_rhs_contracting_axes,
-                    axis_plan.rhs_conjugate,
+                    conjugate.1,
                 )?
             }
         };

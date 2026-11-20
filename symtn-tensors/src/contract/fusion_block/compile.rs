@@ -113,7 +113,6 @@ where
     R::Scalar: DenseBlockScalar,
 {
     validate_fusion_contract_rule(rule, dst_space, lhs_space, rhs_space)?;
-    reject_fusion_contract_conjugation(axes)?;
     let validated = CoreContractPreflight::compile_homspaces(
         rule,
         dst_space.homspace(),

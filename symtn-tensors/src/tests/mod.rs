@@ -41,11 +41,10 @@ pub(crate) fn direct_side<'a, R, D>(
     (space, crate::FusionOperand::direct(space.space()), data)
 }
 
-/// The axes of a contraction entry, from a spec without conjugation.
+/// The axes of a contraction entry, from a spec.
 pub(crate) fn entry_axes(
     axes: symtn_operations::TensorContractSpec<'_>,
 ) -> (&[usize], &[usize], symtn_operations::OutputAxisOrder<'_>) {
-    assert!(!axes.lhs_conjugate() && !axes.rhs_conjugate());
     (
         axes.lhs_contracting_axes(),
         axes.rhs_contracting_axes(),
@@ -61,7 +60,9 @@ pub(crate) fn fixture_space<T>(
 }
 
 /// The eager fusion contraction `dst = alpha * contract(lhs, rhs) + beta *
-/// dst` of fixtures through `context`'s dynamic entry.
+/// dst` of fixtures through `context`'s dynamic entry. A set `conjugate`
+/// flag lowers that operand to its lazy adjoint, whose legs `axes` index
+/// (TensorKit `tensorcontract!`'s `conjA`/`conjB`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn context_contract_into<BT, BC, R, D>(
     engine: &mut dyn Engine,
@@ -71,6 +72,7 @@ pub(crate) fn context_contract_into<BT, BC, R, D>(
     lhs: &TestTensor<D>,
     rhs: &TestTensor<D>,
     axes: TensorContractSpec<'_>,
+    conjugate: (bool, bool),
     alpha: D,
     beta: D,
 ) -> Result<(), OperationError>
@@ -90,14 +92,26 @@ where
         rule,
         &dst_space,
         dst.data_mut(),
-        &lhs_space,
+        fixture_operand(&lhs_space, conjugate.0),
         lhs.data(),
-        &rhs_space,
+        fixture_operand(&rhs_space, conjugate.1),
         rhs.data(),
         axes,
         alpha,
         beta,
     )
+}
+
+/// `space` as a direct contraction operand, or as its lazy adjoint.
+pub(crate) fn fixture_operand(
+    space: &DynamicFusionMapSpace,
+    adjoint: bool,
+) -> crate::FusionOperand<'_> {
+    if adjoint {
+        crate::FusionOperand::adjoint(space)
+    } else {
+        crate::FusionOperand::direct(space)
+    }
 }
 
 /// Plans the eager fusion contraction of fixtures once, for
@@ -123,8 +137,8 @@ where
         engine,
         rule,
         &fixture_space(dst)?,
-        &fixture_space(lhs)?,
-        &fixture_space(rhs)?,
+        crate::FusionOperand::direct(&fixture_space(lhs)?),
+        crate::FusionOperand::direct(&fixture_space(rhs)?),
         axes,
     )
 }
@@ -171,6 +185,7 @@ pub(crate) fn fusion_contract_into<R, D>(
     lhs: &TestTensor<D>,
     rhs: &TestTensor<D>,
     axes: TensorContractSpec<'_>,
+    conjugate: (bool, bool),
     alpha: D,
     beta: D,
 ) -> Result<(), OperationError>
@@ -194,6 +209,7 @@ where
         lhs,
         rhs,
         axes,
+        conjugate,
         alpha,
         beta,
     )
@@ -215,7 +231,13 @@ where
     dst.validate_rule(rule)?;
     lhs.validate_rule(rule)?;
     rhs.validate_rule(rule)?;
-    crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw(rule, dst, lhs, rhs, axes)
+    crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw(
+        rule,
+        dst,
+        crate::FusionOperand::direct(lhs),
+        crate::FusionOperand::direct(rhs),
+        axes,
+    )
 }
 
 /// Executes a caller-supplied fusion contraction plan step by step (source
@@ -259,6 +281,7 @@ pub(crate) fn dense_contract_into<D>(
     lhs: &TestTensor<D>,
     rhs: &TestTensor<D>,
     axes: TensorContractSpec<'_>,
+    conjugate: (bool, bool),
     alpha: D,
     beta: D,
 ) -> Result<(), OperationError>
@@ -270,6 +293,7 @@ where
         lhs.structure(),
         rhs.structure(),
         axes,
+        conjugate,
     )?;
     replay_contract_structure_into(
         &mut DenseTreeTransformOperations::default_executor(),
@@ -1761,6 +1785,7 @@ where
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         D::one() + D::one(),
         D::one() + D::one() + D::one(),
     )
@@ -1784,6 +1809,7 @@ where
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         &[TensorContractBlockSpec::with_coefficient(0, 0, 0, 0.5)],
     )
     .unwrap();

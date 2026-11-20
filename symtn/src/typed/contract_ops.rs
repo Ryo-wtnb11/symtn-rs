@@ -139,23 +139,19 @@ impl ContractSpec<'_> {
     }
 }
 
-/// The staged request of `spec` between `lhs` and `rhs`, whose output order
-/// is `output_axes` (`spec.output_axes()`) and whose conjugation flags are
-/// the operands': the ordinary contraction, or with `planar` the planar one
-/// over those admitted orders.
+/// The staged request of `spec`, whose output order is `output_axes`
+/// (`spec.output_axes()`): the ordinary contraction, or with `planar` the
+/// planar one over those admitted orders. Operand conjugation is the staged
+/// operands' own.
 pub(super) fn contract_request<'a>(
-    lhs: symtn_tensors::FusionOperand<'_>,
-    rhs: symtn_tensors::FusionOperand<'_>,
     spec: &ContractSpec<'a>,
     output_axes: &'a [usize],
     planar: Option<&'a symtn_tensors::PlanarContractOrders>,
 ) -> symtn_tensors::ContractRequest<'a> {
-    let axes = symtn_tensors::TensorContractSpec::new_with_conjugation(
+    let axes = symtn_tensors::TensorContractSpec::new(
         spec.lhs,
         spec.rhs,
         OutputAxisOrder::from_axes(output_axes),
-        lhs.storage_conjugate(),
-        rhs.storage_conjugate(),
     );
     let codomain_rank = spec.codomain.len();
     match planar {

@@ -27,6 +27,7 @@ fn coupled_layout_complex_scalar_contraction_matches_closed_form() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[], &[]),
+        (false, false),
         alpha,
         beta,
     )
@@ -98,8 +99,8 @@ fn coupled_layout_compose_uses_direct_gemm_groups() {
             engine,
             &rule,
             &dst_dyn,
-            &lhs_dyn,
-            &rhs_dyn,
+            crate::FusionOperand::direct(&lhs_dyn),
+            crate::FusionOperand::direct(&rhs_dyn),
             TensorContractSpec::new(&[2, 3], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])),
         )
         .unwrap();

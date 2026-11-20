@@ -78,7 +78,6 @@ where
     R::Scalar: DenseBlockScalar,
 {
     validate_fusion_contract_rule(rule, dst, lhs, rhs)?;
-    reject_fusion_contract_conjugation(axes)?;
     tensorcontract_fusion_block_specs_lowered(rule, dst, lhs, rhs, axes)
 }
 
@@ -315,21 +314,8 @@ where
     Ok(specs)
 }
 
-pub(crate) const FUSION_TENSORCONTRACT_CONJUGATION_REQUIRES_CATEGORICAL_ADJOINT: &str =
-    "fusion tensorcontract with conjugation requires categorical adjoint lowering";
 pub(crate) const SOURCE_TRANSFORM_REQUIRES_EXPLICIT: &str =
     "fusion contraction requiring source tree-pair transforms is not implemented; pre-transform operands explicitly";
-
-pub(crate) fn reject_fusion_contract_conjugation(
-    axes: TensorContractSpec<'_>,
-) -> Result<(), OperationError> {
-    if axes.lhs_conjugate() || axes.rhs_conjugate() {
-        return Err(OperationError::UnsupportedTensorContractScope {
-            message: FUSION_TENSORCONTRACT_CONJUGATION_REQUIRES_CATEGORICAL_ADJOINT,
-        });
-    }
-    Ok(())
-}
 
 pub(crate) fn rhs_contract_twist_factor<R>(
     rule: &R,

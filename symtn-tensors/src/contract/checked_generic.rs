@@ -593,13 +593,7 @@ where
             (lhs_space, lhs, lhs_data),
             (rhs_space, rhs, rhs_data),
             ContractRequest::Contract {
-                axes: TensorContractSpec::new_with_conjugation(
-                    lhs_axes,
-                    rhs_axes,
-                    output_order,
-                    lhs.storage_conjugate(),
-                    rhs.storage_conjugate(),
-                ),
+                axes: TensorContractSpec::new(lhs_axes, rhs_axes, output_order),
                 codomain_rank,
             },
         )

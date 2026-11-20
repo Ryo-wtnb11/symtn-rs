@@ -600,9 +600,6 @@ where
 
     /// Builds a checked contraction result directly in the requested output
     /// order while retaining the exact lhs provider allocation.
-    ///
-    /// Why not accept [`TensorContractSpec`]: conjugation flags belong to the
-    /// numerical execution plan after categorical adjoints have been lowered.
     /// Destination metadata is derived from the already-visible bound spaces.
     pub fn contracted_multiplicity_free_ordered(
         lhs: &Self,

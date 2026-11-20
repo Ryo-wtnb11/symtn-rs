@@ -804,8 +804,7 @@ where
         planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError> {
         let output_axes = spec.output_axes();
-        let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
-        let request = contract_request(lhs_operand, rhs_operand, spec, &output_axes, planar);
+        let request = contract_request(spec, &output_axes, planar);
         checked_generic_contract_owned(engine, lhs, rhs, request)
     }
 
@@ -834,7 +833,7 @@ where
                 rhs_operand,
                 transform_source_len(rhs.storage_body())?,
             ),
-            contract_request(lhs_operand, rhs_operand, spec, &output_axes, planar),
+            contract_request(spec, &output_axes, planar),
         )?;
         staged.require_destination(destination.logical_space().space())?;
         let destination = destination_storage_mut(destination)?;
