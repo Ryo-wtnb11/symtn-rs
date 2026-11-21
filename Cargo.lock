@@ -261,6 +261,44 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
+name = "colmat"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "377a0236b482724d72c85121804a30499ac73a38ae3d6b7a5e0e54a0e90264fc"
+dependencies = [
+ "bytemuck",
+ "colmat-traits",
+ "dyn-stack",
+ "equator 0.6.0",
+ "generativity",
+ "libm",
+ "nano-gemm",
+ "num-complex",
+ "num-traits",
+ "pulp",
+ "reborrow",
+ "t4a-gemm",
+ "t4a-private-gemm-x86",
+]
+
+[[package]]
+name = "colmat-traits"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bbf08552b8f5b652984a82f5e67a4560528fdbe70db32f19fc3f6cb7b49414c"
+dependencies = [
+ "bytemuck",
+ "dyn-stack",
+ "generativity",
+ "libm",
+ "num-complex",
+ "num-traits",
+ "pulp",
+ "qd",
+ "reborrow",
+]
+
+[[package]]
 name = "command-group"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1179,11 +1217,11 @@ dependencies = [
 
 [[package]]
 name = "krylov"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40cd155b23417d685a9f3f962388d357ffe1e4e0922af7456d259ed6e865502d"
+checksum = "530cb6129cc66664ece4704a9ccc75b03a106c0f39d75493b4a63768a54ed5ad"
 dependencies = [
- "lapack",
+ "colmat",
  "num-complex",
  "num-traits",
 ]

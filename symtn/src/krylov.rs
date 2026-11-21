@@ -80,14 +80,6 @@
 //! assert!((values[0] - 3.0).abs() < 1e-10);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
-//!
-//! # LAPACK provider
-//!
-//! krylov declares the LAPACK routines of its small dense problems; the
-//! final binary must link a provider. Enable one of symtn's `blas-*`
-//! features (`blas-openblas`, `blas-accelerate`, `blas-mkl`) or link one
-//! yourself. The default `cpu-faer` links none, and a missing provider is a
-//! link error, never a fallback.
 
 pub use ::krylov::*;
 
