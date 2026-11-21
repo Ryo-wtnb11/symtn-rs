@@ -487,7 +487,7 @@ where
     fn zeros_like_impl(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
             let parent = self.parent_of(view).zeros_like(&mut *engine)?;
-            return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
+            return Ok(parent.lazy_adjoint_on(&view.adjoint)?);
         }
         if let Some(spectrum) = self.spectrum() {
             admit_host_engine(engine)?;

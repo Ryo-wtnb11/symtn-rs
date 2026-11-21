@@ -120,10 +120,7 @@ where
                 probe::hit(probe::Event::AdjointMaterialization);
                 (
                     dense(view.parent.data.as_ref())?,
-                    Some(symtn_tensors::AdjointBlockMap::new(
-                        view.parent.space.space(),
-                        view.logical_space.space(),
-                    )),
+                    Some(view.adjoint.block_map()),
                 )
             }
         };

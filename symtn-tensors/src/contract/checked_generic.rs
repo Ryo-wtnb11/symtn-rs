@@ -13,7 +13,6 @@ use symtn_operations::TensorContractSpec;
 use crate::admission::{BraidingOp, CHECKED_PLANAR_CONTRACTION_UNSUPPORTED};
 use crate::mode::{ContractRequest, ContractSide, ContractStaging, StagedContraction};
 use crate::tree_transform::{CheckedGenericPlanError, CheckedPendingCoefficients};
-use crate::validate_oriented_fusion_layout;
 use crate::{
     ConjugateValue, DenseRecouplingScalar, DenseTreeTransformOperations, OperationError,
     RecouplingCoefficientAction, ZeroBytes,
@@ -28,7 +27,7 @@ use super::context::{
     staged_require_destination, staged_try_core, ContractStageParts, StageParts, StagedContract,
 };
 use super::dynamic_space::{
-    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand,
+    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, FusionSource,
     PreparedCheckedGenericDynamicSpace,
 };
 use super::resolution::StorageContractResolution;
@@ -243,44 +242,16 @@ impl CheckedContractTxn {
     }
 }
 
-/// That `logical` is the logical space of `operand`: the storage space
-/// itself, or for a lazy adjoint the swapped HomSpace whose every block maps
-/// onto a parent block of the transposed shape. Provider-free.
-pub(crate) fn validate_checked_operand_relation(
-    logical: &DynamicFusionMapSpace,
-    operand: FusionOperand<'_>,
-) -> Result<(), OperationError> {
-    let storage = operand.storage_space();
-    if !operand.storage_conjugate() {
-        return if std::ptr::eq(logical, storage) {
-            Ok(())
-        } else {
-            Err(OperationError::StructureMismatch {
-                tensor: "checked direct operand",
-            })
-        };
-    }
-    if logical.nout() != storage.nin()
-        || logical.nin() != storage.nout()
-        || logical.homspace().codomain() != storage.homspace().domain()
-        || logical.homspace().domain() != storage.homspace().codomain()
-    {
-        return Err(OperationError::StructureMismatch {
-            tensor: "checked adjoint relation",
-        });
-    }
-    validate_oriented_fusion_layout(logical.structure(), operand)
-}
-
 fn validate_contract_local<P>(
-    (lhs, lhs_operand, lhs_len): ContractSide<'_, P>,
-    (rhs, rhs_operand, rhs_len): ContractSide<'_, P>,
+    (lhs_source, lhs_len): ContractSide<'_, P>,
+    (rhs_source, rhs_len): ContractSide<'_, P>,
     axes: TensorContractSpec<'_>,
     dst_nout: usize,
 ) -> Result<TensorContractAxisPlan, CheckedGenericPlanError<P::Error>>
 where
     P: CheckedGenericRigidSymbols<Scalar = f64>,
 {
+    let (lhs, rhs) = (lhs_source.logical(), rhs_source.logical());
     let output_rank = lhs
         .space()
         .rank()
@@ -301,8 +272,8 @@ where
         }
         .into());
     }
-    for (len, logical, operand) in [(lhs_len, lhs, lhs_operand), (rhs_len, rhs, rhs_operand)] {
-        let storage = operand.storage_space();
+    for (len, source) in [(lhs_len, lhs_source), (rhs_len, rhs_source)] {
+        let storage = source.storage().space();
         let expected = storage.required_len()?;
         if len != expected {
             return Err(OperationError::ElementCountMismatch {
@@ -320,14 +291,13 @@ where
                 .is_ok(),
             "checked operand structure must match its HomSpace by construction"
         );
-        validate_checked_operand_relation(logical.space(), operand)?;
     }
     Ok(axis_plan)
 }
 
 /// A lazy adjoint is a storage-conjugate operand, as in the
-/// multiplicity-free mode; its relation to its logical space is checked
-/// locally. The staging order is the provider-event order: local
+/// multiplicity-free mode; its relation to its logical space holds by
+/// construction ([`crate::LazyAdjointSpace`]). The staging order is the provider-event order: local
 /// validation, pair admission, the contraction's braiding check, then the
 /// staged destination, whose producer derives the HomSpace from the
 /// logical spaces.
@@ -339,13 +309,15 @@ where
     type ContractStage = (PreparedCheckedGenericDynamicSpace, DynamicFusionMapSpace);
 
     fn stage_contraction<'a>(
-        (lhs, lhs_operand, lhs_len): ContractSide<'a, P>,
-        (rhs, rhs_operand, rhs_len): ContractSide<'a, P>,
+        lhs_side: ContractSide<'a, P>,
+        rhs_side: ContractSide<'a, P>,
         request: ContractRequest<'_>,
     ) -> Result<
         StagedContraction<Self::ContractStage, CheckedAuthority<'a, P>, CheckedContractTxn>,
         CheckedGenericPlanError<P::Error>,
     > {
+        let (lhs, lhs_operand) = (lhs_side.0.logical(), lhs_side.0.operand());
+        let (rhs, rhs_operand) = (rhs_side.0.logical(), rhs_side.0.operand());
         let compose_axes;
         let (axes, codomain_rank) = match request {
             ContractRequest::Contract {
@@ -373,12 +345,7 @@ where
                 .into())
             }
         };
-        let axis_plan = validate_contract_local(
-            (lhs, lhs_operand, lhs_len),
-            (rhs, rhs_operand, rhs_len),
-            axes,
-            codomain_rank,
-        )?;
+        let axis_plan = validate_contract_local(lhs_side, rhs_side, axes, codomain_rank)?;
         let provider = crate::admission::admit_checked_generic_pair(lhs, rhs)?;
         let sides = [(lhs_operand, lhs.space()), (rhs_operand, rhs.space())];
         let authority = match request {
@@ -492,8 +459,8 @@ where
     /// Bosonic planar contraction as the ordinary contraction.
     #[allow(clippy::type_complexity)]
     pub fn checked_generic(
-        lhs: (&'a BoundDynamicFusionMapSpace<P>, FusionOperand<'a>, usize),
-        rhs: (&'a BoundDynamicFusionMapSpace<P>, FusionOperand<'a>, usize),
+        lhs: (FusionSource<'a, P>, usize),
+        rhs: (FusionSource<'a, P>, usize),
         request: ContractRequest<'a>,
     ) -> Result<Self, CheckedGenericPlanError<P::Error>> {
         stage_contract(lhs, rhs, request)
@@ -562,10 +529,9 @@ where
     #[cfg(test)]
     /// Contracts two checked Generic tensors, the result split after its
     /// first `codomain_rank` output axes (TensorOperations `pAB`) and owned
-    /// by the left provider allocation. Each operand is its logical space,
-    /// its storage operand (a lazy adjoint is storage-conjugate) and its
-    /// storage payload, as in the multiplicity-free entry; the conjugation
-    /// flags are the operands'.
+    /// by the left provider allocation. Each operand is its source (a lazy
+    /// adjoint is read storage-conjugate) and its storage payload, as in the
+    /// multiplicity-free entry; the conjugation flags are the operands'.
     ///
     /// It plans through the shared [`plan_contract`] ladder in the checked
     /// mode (the canonical core, TensorKit's `copyC`, the `DynamicTree`
@@ -580,8 +546,8 @@ where
     pub(crate) fn tensorcontract_checked_generic_in<P>(
         &mut self,
         engine: &mut dyn Engine,
-        (lhs_space, lhs, lhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
-        (rhs_space, rhs, rhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
+        lhs: (FusionSource<'_, P>, &[D]),
+        rhs: (FusionSource<'_, P>, &[D]),
         (lhs_axes, rhs_axes, output_order): (&[usize], &[usize], OutputAxisOrder<'_>),
         codomain_rank: usize,
     ) -> CheckedContractResult<P, D>
@@ -590,8 +556,8 @@ where
     {
         self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(
             engine,
-            (lhs_space, lhs, lhs_data),
-            (rhs_space, rhs, rhs_data),
+            lhs,
+            rhs,
             ContractRequest::Contract {
                 axes: TensorContractSpec::new(lhs_axes, rhs_axes, output_order),
                 codomain_rank,
@@ -614,8 +580,8 @@ where
     pub(crate) fn tensorcompose_checked_generic_in<P>(
         &mut self,
         engine: &mut dyn Engine,
-        lhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
-        rhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
+        lhs: (FusionSource<'_, P>, &[D]),
+        rhs: (FusionSource<'_, P>, &[D]),
     ) -> CheckedContractResult<P, D>
     where
         P: CheckedGenericRigidSymbols<Scalar = f64>,
@@ -1309,25 +1275,17 @@ mod tests {
         }
     }
 
-    /// What: local request errors (axes, adjoint relation, rank, payload
+    /// What: local request errors (axes, rank, payload
     /// length) are reported before any provider query.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_rejects_local_errors_before_provider_queries() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let (left, lhs, right, rhs) = bound_pair(1, 1);
-        // A parent whose adjoint is not `lhs`: rank 3 against rank 2.
-        let (_, parent, _, _) = bound_pair(2, 1);
         let lhs_data = vec![0.0; lhs.space().required_len().unwrap()];
         let rhs_data = vec![0.0; rhs.space().required_len().unwrap()];
-        let parent_data = vec![0.0; parent.space().required_len().unwrap()];
         let short = vec![0.0; rhs_data.len() - 1];
         let direct = direct_side(&lhs, &lhs_data);
-        let adjoint = (
-            &lhs,
-            FusionOperand::adjoint(parent.space()),
-            &parent_data[..],
-        );
         let default = || TensorContractSpec::with_default_output_order(&[1], &[0]);
         let cases = [
             (
@@ -1337,7 +1295,6 @@ mod tests {
                 1,
                 &rhs_data,
             ),
-            ("adjoint relation", adjoint, default(), 1, &rhs_data),
             ("rank", direct, default(), 3, &rhs_data),
             ("length", direct, default(), 1, &short),
         ];
@@ -1914,8 +1871,8 @@ mod tests {
         let orders =
             crate::PlanarContractOrders::validate((1, 2), (1, 2), &[1], &[0], &[0, 1], 1).unwrap();
         let error = StagedContract::checked_generic(
-            (&lhs, FusionOperand::direct(lhs.space()), len),
-            (&rhs, FusionOperand::direct(rhs.space()), len),
+            (FusionSource::Direct(&lhs), len),
+            (FusionSource::Direct(&rhs), len),
             ContractRequest::Planar {
                 axes: TensorContractSpec::with_default_output_order(&[1], &[0]),
                 codomain_rank: 1,
@@ -2020,27 +1977,33 @@ mod tests {
         assert!(resident(temporary));
     }
 
-    /// One side of the checked entry: logical space, storage operand and
-    /// storage payload.
-    type Side<'a> = (&'a SpySpace, FusionOperand<'a>, &'a [f64]);
+    /// One side of the checked entry: its source and storage payload.
+    type Side<'a> = (FusionSource<'a, CheckedGenericSpy>, &'a [f64]);
 
     /// The lazy adjoint of `parent`: its logical space and `copy(parent')`,
     /// the owned materialization through the eager storage-mapped transform
     /// (its own oracles in `tree_transform_plan::checked_generic`), which no
     /// contraction route reads.
-    fn adjoint_of(
+    fn lazy_and_owned_adjoint(
         engine: &mut dyn Engine,
         parent: &SpySpace,
         data: &[f64],
-    ) -> (SpySpace, SpySpace, Vec<f64>) {
-        let logical = crate::adjoint_bound_space_dyn_generic_checked(parent).unwrap();
-        let (nout, rank) = (logical.space().nout(), logical.space().rank());
+    ) -> (
+        crate::LazyAdjointSpace<CheckedGenericSpy>,
+        SpySpace,
+        Vec<f64>,
+    ) {
+        let logical =
+            crate::LazyAdjointSpace::new::<CheckedGenericAdmissionMode>(parent.clone()).unwrap();
+        let (nout, rank) = (
+            logical.logical().space().nout(),
+            logical.logical().space().rank(),
+        );
         let (owned, owned_data) =
             crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
                 .tree_transform_owned_checked_generic_in(
                     engine,
-                    &logical,
-                    Some(parent),
+                    FusionSource::Adjoint(&logical),
                     data,
                     &crate::TreeTransformOperation::permute(0..nout, nout..rank),
                     1.0,
@@ -2083,20 +2046,22 @@ mod tests {
             let (_left, lhs, _right, rhs) = bound_pair(n, n);
             let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
             let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
-            let (lhs_logical, lhs_owned, lhs_owned_data) = adjoint_of(engine, &lhs, &lhs_data);
-            let (rhs_logical, rhs_owned, rhs_owned_data) = adjoint_of(engine, &rhs, &rhs_data);
+            let (lhs_logical, lhs_owned, lhs_owned_data) =
+                lazy_and_owned_adjoint(engine, &lhs, &lhs_data);
+            let (rhs_logical, rhs_owned, rhs_owned_data) =
+                lazy_and_owned_adjoint(engine, &rhs, &rhs_data);
             let axes = || fixture_axes(lhs_axes, rhs_axes, output);
             let mut transformers = Vec::new();
             for (lazy_lhs, lazy_rhs) in [(false, false), (true, false), (false, true), (true, true)]
             {
                 let what = format!("{name} lazy lhs {lazy_lhs} rhs {lazy_rhs}");
                 let lhs_side: Side<'_> = if lazy_lhs {
-                    (&lhs_logical, FusionOperand::adjoint(lhs.space()), &lhs_data)
+                    (FusionSource::Adjoint(&lhs_logical), &lhs_data)
                 } else {
                     direct_side(&lhs, &lhs_data)
                 };
                 let rhs_side: Side<'_> = if lazy_rhs {
-                    (&rhs_logical, FusionOperand::adjoint(rhs.space()), &rhs_data)
+                    (FusionSource::Adjoint(&rhs_logical), &rhs_data)
                 } else {
                     direct_side(&rhs, &rhs_data)
                 };
@@ -2154,8 +2119,9 @@ mod tests {
         let (_left, lhs, _right, rhs) = bound_pair(1, 1);
         let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
         let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
-        let (lhs_logical, lhs_owned, lhs_owned_data) = adjoint_of(engine, &lhs, &lhs_data);
-        let lazy: Side<'_> = (&lhs_logical, FusionOperand::adjoint(lhs.space()), &lhs_data);
+        let (lhs_logical, lhs_owned, lhs_owned_data) =
+            lazy_and_owned_adjoint(engine, &lhs, &lhs_data);
+        let lazy: Side<'_> = (FusionSource::Adjoint(&lhs_logical), &lhs_data);
         let owned = direct_side(&lhs_owned, &lhs_owned_data);
         for (what, actual, expected) in [
             (
@@ -2205,12 +2171,13 @@ mod tests {
             let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
             let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
             symtn_core::clear_structure_caches();
-            let logical = crate::adjoint_bound_space_dyn_generic_checked(&lhs).unwrap();
+            let logical =
+                crate::LazyAdjointSpace::new::<CheckedGenericAdmissionMode>(lhs.clone()).unwrap();
             let axes = || fixture_axes(lhs_axes, rhs_axes, output);
             let mut run = |context: &mut FailingContext| {
                 context.tensorcontract_checked_generic_in(
                     engine,
-                    (&logical, FusionOperand::adjoint(lhs.space()), &lhs_data),
+                    (FusionSource::Adjoint(&logical), &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(axes()),
                     nout,
@@ -2491,15 +2458,12 @@ mod tests {
     /// One owned checked transform on a fresh default context.
     fn transform(
         engine: &mut dyn Engine,
-        logical: &SpySpace,
-        adjoint_of: Option<&SpySpace>,
+        source: FusionSource<'_, CheckedGenericSpy>,
         data: &[f64],
         operation: &crate::TreeTransformOperation,
     ) -> Result<(SpySpace, Vec<f64>), CheckedGenericPlanError<SpyError>> {
         crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
-            .tree_transform_owned_checked_generic_in(
-                engine, logical, adjoint_of, data, operation, 1.0,
-            )
+            .tree_transform_owned_checked_generic_in(engine, source, data, operation, 1.0)
     }
 
     /// What: a warm owned checked permute, braid or transpose, of a
@@ -2533,16 +2497,17 @@ mod tests {
                 symtn_core::clear_structure_caches();
                 let (provider, parent, _, _) = bound_pair(2, 2);
                 let data = ramp(parent.space().required_len().unwrap(), 0.5, -1.0);
-                let lazy = adjoint
-                    .then(|| crate::adjoint_bound_space_dyn_generic_checked(&parent).unwrap());
-                let (logical, adjoint_of) = match &lazy {
-                    Some(lazy) => (lazy, Some(&parent)),
-                    None => (&parent, None),
+                let lazy = adjoint.then(|| {
+                    crate::LazyAdjointSpace::new::<CheckedGenericAdmissionMode>(parent.clone())
+                        .unwrap()
+                });
+                let source = match &lazy {
+                    Some(lazy) => FusionSource::Adjoint(lazy),
+                    None => FusionSource::Direct(&parent),
                 };
                 let mut run = || {
                     provider.reset();
-                    let (space, out) =
-                        transform(engine, logical, adjoint_of, &data, operation).unwrap();
+                    let (space, out) = transform(engine, source, &data, operation).unwrap();
                     (space, out, provider.events.borrow().clone())
                 };
                 let (cold_space, cold_data, _) = run();
@@ -2590,9 +2555,9 @@ mod tests {
                 }
                 provider.braiding.set(braiding);
                 let data = ramp(space.space().required_len().unwrap(), 0.5, -1.0);
-                transform(engine, &space, None, &data, &braid).unwrap();
+                transform(engine, FusionSource::Direct(&space), &data, &braid).unwrap();
                 provider.reset();
-                let result = transform(engine, &space, None, &data, &permute)
+                let result = transform(engine, FusionSource::Direct(&space), &data, &permute)
                     .map(|(space, out)| (space.space().clone(), folded_bits(&out)));
                 let events = provider.events.borrow().clone();
                 (result, events)
@@ -2712,10 +2677,12 @@ mod tests {
                 let (left, lhs, right, rhs) = bound_pair(*n, *n);
                 let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
                 let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
-                let logical =
-                    adjoint.then(|| crate::adjoint_bound_space_dyn_generic_checked(&lhs).unwrap());
+                let logical = adjoint.then(|| {
+                    crate::LazyAdjointSpace::new::<CheckedGenericAdmissionMode>(lhs.clone())
+                        .unwrap()
+                });
                 let lhs_side = match &logical {
-                    Some(logical) => (logical, FusionOperand::adjoint(lhs.space()), &lhs_data[..]),
+                    Some(logical) => (FusionSource::Adjoint(logical), &lhs_data[..]),
                     None => direct_side(&lhs, &lhs_data),
                 };
                 let mut run = || {

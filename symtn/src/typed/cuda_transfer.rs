@@ -100,7 +100,7 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
         let repr = match &self.repr {
             TypedTensorRepr::Owned(body) => TypedTensorRepr::Owned(upload(body)?),
             TypedTensorRepr::Adjoint(view) => TypedTensorRepr::Adjoint(Arc::new(
-                TypedAdjointView::new(upload(&view.parent)?, view.logical_space.clone()),
+                TypedAdjointView::new(upload(&view.parent)?, view.adjoint.clone()),
             )),
         };
         Ok(TensorMap {
@@ -145,7 +145,7 @@ impl<R, D: CudaPayload> TensorMap<R, D, CudaStorage<D>> {
         let repr = match &self.repr {
             TypedTensorRepr::Owned(body) => TypedTensorRepr::Owned(download(body)?),
             TypedTensorRepr::Adjoint(view) => TypedTensorRepr::Adjoint(Arc::new(
-                TypedAdjointView::new(download(&view.parent)?, view.logical_space.clone()),
+                TypedAdjointView::new(download(&view.parent)?, view.adjoint.clone()),
             )),
         };
         Ok(TensorMap {

@@ -31,8 +31,8 @@ pub(crate) use metadata::{
     dispatch_final, dispatch_prepare, encoded_layout_primer, LayoutKeyBuilder, MetadataOutput,
     MetadataRequest, PreparedLayoutKeys,
 };
-pub use operand::FusionOperand;
 pub(crate) use operand::FusionOperandLayout;
+pub use operand::{FusionOperand, FusionSource, LazyAdjointSpace};
 
 use super::fusion::FusionContractPlan;
 use super::structure::TensorContractAxisPlan;

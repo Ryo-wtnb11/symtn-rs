@@ -48,10 +48,10 @@ use crate::contract::{
     compile_transformed_source, contract_axes_require_twist, core_homspace_matches,
     prepare_tensorcontract_fusion_plan_dyn_raw_canonical, rhs_contract_twist_factor_oriented,
     select_complete_tensorcontract_fusion_plan, source_is_storage_adjoint,
-    storage_layout_is_canonical, tree_transform_operation_axes, validate_checked_operand_relation,
-    validate_fusion_contract_rule, CheckedAuthority, CheckedContractTxn, DynamicFusionCoreDstEntry,
-    DynamicFusionMapSpace, DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact,
-    FusionContractPlan, FusionOperand, FusionOperandLayout, LayoutKeyBuilder, PlanTarget,
+    storage_layout_is_canonical, tree_transform_operation_axes, validate_fusion_contract_rule,
+    CheckedAuthority, CheckedContractTxn, DynamicFusionCoreDstEntry, DynamicFusionMapSpace,
+    DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact, FusionContractPlan,
+    FusionOperand, FusionOperandLayout, FusionSource, LayoutKeyBuilder, PlanTarget,
     PlanarContractOrders, PreparedCheckedGenericDynamicSpace, StorageContractResolution,
 };
 use crate::tree_context::CheckedTreeTransformStage;
@@ -353,12 +353,10 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
         proof: Option<&Self::SourceProof<'_>>,
     ) -> Result<TreeTransformStructure<Self::Scalar>, Self::Error>;
 
-    /// Admits an eager owned transform of `logical` (stored as the parent
-    /// `adjoint_of` when it is that parent's lazy adjoint, `src_len`
+    /// Admits an eager owned transform of `source` (`src_len` stored
     /// elements) and stages its destination.
     fn stage_transform<'a>(
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
     ) -> Result<StagedTransform<Self::TransformStage, Self::SourceProof<'a>>, Self::Error>;
@@ -566,9 +564,9 @@ pub enum ContractRequest<'s> {
     },
 }
 
-/// One contraction operand: its logical space (the authority its
-/// destination derives from), its storage operand and its payload length.
-pub(crate) type ContractSide<'a, R> = (&'a BoundDynamicFusionMapSpace<R>, FusionOperand<'a>, usize);
+/// One contraction operand: its source (whose logical space is the
+/// authority its destination derives from) and its payload length.
+pub(crate) type ContractSide<'a, R> = (FusionSource<'a, R>, usize);
 
 /// One owned contraction between its staged destination and commit.
 pub(crate) struct StagedContraction<S, A, T> {
@@ -759,25 +757,18 @@ where
     }
 
     fn stage_transform<'a>(
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
     ) -> Result<StagedTransform<BoundDynamicFusionMapSpace<R>, ()>, OperationError> {
-        let expected = adjoint_of.unwrap_or(logical).space().required_len()?;
+        let expected = source.storage().space().required_len()?;
         if src_len != expected {
             return Err(OperationError::ElementCountMismatch {
                 expected,
                 actual: src_len,
             });
         }
-        if let Some(parent) = adjoint_of {
-            validate_checked_operand_relation(
-                logical.space(),
-                FusionOperand::adjoint(parent.space()),
-            )?;
-        }
-        let destination = logical.transformed_multiplicity_free(operation)?;
+        let destination = source.logical().transformed_multiplicity_free(operation)?;
         Ok(StagedTransform {
             preview: Arc::clone(destination.space().structure()),
             nout: destination.space().nout(),
@@ -1015,13 +1006,15 @@ where
     /// Two direct operands derive through the owned derivation, a lazy
     /// adjoint through the oriented one.
     fn stage_contraction<'a>(
-        (lhs, lhs_operand, _): ContractSide<'a, R>,
-        (rhs, rhs_operand, _): ContractSide<'a, R>,
+        (lhs_source, _): ContractSide<'a, R>,
+        (rhs_source, _): ContractSide<'a, R>,
         request: ContractRequest<'_>,
     ) -> Result<
         StagedContraction<BoundDynamicFusionMapSpace<R>, LayoutKeyBuilder<R>, ()>,
         OperationError,
     > {
+        let (lhs, lhs_operand) = (lhs_source.logical(), lhs_source.operand());
+        let (rhs, rhs_operand) = (rhs_source.logical(), rhs_source.operand());
         let direct = !lhs_operand.storage_conjugate() && !rhs_operand.storage_conjugate();
         let destination = match request {
             // A planar contraction's destination is its contraction's:
@@ -1279,20 +1272,20 @@ where
         Ok(built)
     }
 
-    /// The identity, style and storage-relation checks; then the
-    /// destination memo of the source's cache entry, or else the plan
-    /// preflight of the logical source followed by the destination's
-    /// derivation, so preflight errors precede destination errors and the
-    /// structure build reuses the proof.
+    /// The identity and style checks; then the destination memo of the
+    /// source's cache entry, or else the plan preflight of the logical source
+    /// followed by the destination's derivation, so preflight errors precede
+    /// destination errors and the structure build reuses the proof. A lazy
+    /// adjoint's relation to its parent holds by construction
+    /// ([`crate::LazyAdjointSpace::new`]), so it is not re-checked.
     fn stage_transform<'a>(
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        fusion_source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
     ) -> Result<StagedTransform<Self::TransformStage, Self::SourceProof<'a>>, Self::Error> {
+        let logical = fusion_source.logical();
         let source = logical.space();
-        let storage = adjoint_of.unwrap_or(logical);
-        let storage_source = storage.space();
+        let storage_source = fusion_source.storage().space();
         let provider = logical.provider();
         let expected = storage_source.required_len()?;
         if src_len != expected {
@@ -1325,26 +1318,14 @@ where
                         }
                         .into());
                     }
-                    if let Some(parent) = adjoint_of {
-                        if !Arc::ptr_eq(logical.provider_arc(), parent.provider_arc()) {
-                            return Err(OperationError::StructureMismatch {
-                                tensor: "checked adjoint provider",
-                            }
-                            .into());
-                        }
-                        if storage_source
-                            .validate_transformed_generic_checked_identity(provider_identity)?
-                            != actual
-                        {
-                            return Err(OperationError::StructureMismatch {
-                                tensor: "checked adjoint identity",
-                            }
-                            .into());
-                        }
-                        validate_checked_operand_relation(
-                            source,
-                            FusionOperand::adjoint(storage_source),
-                        )?;
+                    if let FusionSource::Adjoint(adjoint) = fusion_source {
+                        debug_assert!(Arc::ptr_eq(
+                            logical.provider_arc(),
+                            adjoint.parent().provider_arc()
+                        ));
+                        debug_assert!(storage_source
+                            .validate_transformed_generic_checked_identity(provider_identity)
+                            .is_ok_and(|parent| parent == actual));
                     }
                     identity.set(actual).expect("checked admission runs once");
                     Ok(())

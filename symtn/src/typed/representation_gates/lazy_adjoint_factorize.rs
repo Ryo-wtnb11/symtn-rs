@@ -29,7 +29,7 @@ fn svd_vals_reads_the_parent_without_materializing_the_adjoint() {
                 unreachable!()
             };
             assert!(Arc::ptr_eq(
-                view.logical_space.provider_arc(),
+                view.logical_space().provider_arc(),
                 source.logical_space().provider_arc()
             ));
         }};

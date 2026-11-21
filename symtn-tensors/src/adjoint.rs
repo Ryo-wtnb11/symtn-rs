@@ -286,7 +286,9 @@ where
 /// CUDA: strided copies or an element table).
 ///
 /// Borrowed and lookup-only, so building it allocates nothing. It does no
-/// provider work: callers derive and admit `adjoint_space` first.
+/// provider work: a lazy adjoint's map comes from
+/// [`crate::LazyAdjointSpace::block_map`], whose pair is related by
+/// construction.
 #[doc(hidden)]
 #[derive(Clone, Copy)]
 pub struct AdjointBlockMap<'a> {
@@ -305,7 +307,10 @@ pub struct AdjointBlockSource<'a> {
 
 impl<'a> AdjointBlockMap<'a> {
     /// The map from `space` (the parent) to its admitted `adjoint_space`.
-    pub fn new(space: &'a DynamicFusionMapSpace, adjoint_space: &'a DynamicFusionMapSpace) -> Self {
+    pub(crate) fn new(
+        space: &'a DynamicFusionMapSpace,
+        adjoint_space: &'a DynamicFusionMapSpace,
+    ) -> Self {
         Self {
             parent: FusionOperand::adjoint(space),
             adjoint_space,

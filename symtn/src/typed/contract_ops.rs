@@ -1,16 +1,12 @@
 use super::*;
 
 impl<R, D, S> TensorMap<R, D, S> {
-    /// The storage operand a contraction stages and plans with: an owned
+    /// The source a contraction or transform stages and plans with: an owned
     /// tensor direct, a lazy adjoint its parent read storage-conjugate.
-    pub(super) fn fusion_operand(&self) -> symtn_tensors::FusionOperand<'_> {
+    pub(super) fn fusion_source(&self) -> symtn_tensors::FusionSource<'_, R> {
         match &self.repr {
-            TypedTensorRepr::Owned(body) => {
-                symtn_tensors::FusionOperand::direct(body.space.space())
-            }
-            TypedTensorRepr::Adjoint(view) => {
-                symtn_tensors::FusionOperand::adjoint(view.parent.space.space())
-            }
+            TypedTensorRepr::Owned(body) => symtn_tensors::FusionSource::Direct(&body.space),
+            TypedTensorRepr::Adjoint(view) => symtn_tensors::FusionSource::Adjoint(&view.adjoint),
         }
     }
 }

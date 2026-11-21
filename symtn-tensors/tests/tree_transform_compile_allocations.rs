@@ -42,7 +42,12 @@ where
 {
     let src_len = source.space().required_len().unwrap();
     context
-        .stage_tree_transform_multiplicity_free_in(engine, source, None, src_len, operation)
+        .stage_tree_transform_multiplicity_free_in(
+            engine,
+            symtn_tensors::FusionSource::Direct(source),
+            src_len,
+            operation,
+        )
         .unwrap()
         .structure()
         .clone()
@@ -651,21 +656,23 @@ fn unique_cache_three_misses_reuse_the_context_tree_pair_scratch() {
     // cache-3 miss allocates it, for the direct and the lazy-adjoint compile.
     const SCRATCH_BUFFERS: u64 = 9;
     let parent = rank_six_u1_layout();
-    let adjoint = symtn_tensors::adjoint_bound_space_dyn(&parent).unwrap();
+    let adjoint =
+        symtn_tensors::LazyAdjointSpace::new::<symtn_core::MultiplicityFreeAdmissionMode>(
+            parent.clone(),
+        )
+        .unwrap();
     let parent_len = parent.space().required_len().unwrap();
     let operation = TreeTransformOperation::permute([5, 4, 3], [2, 1, 0]);
     let mut miss = |context: &mut TreeTransformExecutionContext<f64, RuleIdentity>, lazy: bool| {
         symtn_core::clear_structure_caches();
-        let (logical, adjoint_of) = if lazy {
-            (&adjoint, Some(&parent))
+        let source = if lazy {
+            symtn_tensors::FusionSource::Adjoint(&adjoint)
         } else {
-            (&parent, None)
+            symtn_tensors::FusionSource::Direct(&parent)
         };
         counting_alloc::start();
         let staged = context
-            .stage_tree_transform_multiplicity_free_in(
-                engine, logical, adjoint_of, parent_len, &operation,
-            )
+            .stage_tree_transform_multiplicity_free_in(engine, source, parent_len, &operation)
             .unwrap();
         let allocs = counting_alloc::stop();
         std::hint::black_box(staged);
