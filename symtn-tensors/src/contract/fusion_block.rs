@@ -235,7 +235,7 @@ where
 
 #[cfg(any(test, debug_assertions))]
 fn require_core_form<T>(validated: Option<T>) -> Result<T, OperationError> {
-    validated.ok_or(OperationError::UnsupportedTensorContractScope {
+    validated.ok_or(OperationError::Internal {
         message: "core fusion-block contraction requires core source and output axes",
     })
 }

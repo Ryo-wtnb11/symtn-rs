@@ -115,7 +115,7 @@ where
         axis_plan.lhs_contracting_axes.as_slice(),
         axis_plan.rhs_contracting_axes.as_slice(),
     ) {
-        return Err(OperationError::UnsupportedTensorContractScope {
+        return Err(OperationError::Internal {
             message: SOURCE_TRANSFORM_REQUIRES_EXPLICIT,
         });
     }

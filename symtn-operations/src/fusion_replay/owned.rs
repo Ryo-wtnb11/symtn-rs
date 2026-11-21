@@ -35,7 +35,7 @@ pub(super) fn direct_calls<C: Copy + PartialEq>(
     runs: &[usize],
 ) -> Result<Vec<DirectCall>, OperationError> {
     if jobs != alphas.len() {
-        return Err(OperationError::UnsupportedTensorContractScope {
+        return Err(OperationError::Internal {
             message: "direct plan has misaligned GEMM coefficients",
         });
     }
@@ -46,17 +46,14 @@ pub(super) fn direct_calls<C: Copy + PartialEq>(
         let mut end = start;
         let first_run = run;
         while end < jobs && alphas[end] == coefficient {
-            let len =
-                runs.get(run)
-                    .copied()
-                    .ok_or(OperationError::UnsupportedTensorContractScope {
-                        message: "direct plan runs do not cover its jobs",
-                    })?;
+            let len = runs.get(run).copied().ok_or(OperationError::Internal {
+                message: "direct plan runs do not cover its jobs",
+            })?;
             end += len;
             run += 1;
         }
         if end > jobs || alphas[start..end].iter().any(|&alpha| alpha != coefficient) {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "direct plan runs cross a coefficient change",
             });
         }
@@ -131,7 +128,7 @@ impl FreshLayout {
                 .checked_add(job_len)
                 .ok_or(OperationError::ElementCountOverflow)?;
             if start < cursor || end > len {
-                return Err(OperationError::UnsupportedTensorContractScope {
+                return Err(OperationError::Internal {
                     message: "core contraction groups must write disjoint destination ranges",
                 });
             }

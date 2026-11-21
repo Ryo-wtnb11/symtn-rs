@@ -185,9 +185,8 @@ where
     /// # Errors
     ///
     /// [`Error::InvalidArgument`] for leg roles other than the current split;
-    /// the eager structural errors (not an endomorphism, a non-square
-    /// coupled-sector block); or `UnsupportedTensorContractScope` for a
-    /// layout without packed coupled-sector regions.
+    /// or the eager structural errors (not an endomorphism, a non-square
+    /// coupled-sector block).
     pub fn new(
         cx: &mut (impl ExecContext + ?Sized),
         source: &StackedTensorMap<R, D, S>,
@@ -224,7 +223,7 @@ where
         let regions = space
             .structure()
             .coupled_sector_regions(space.nout())?
-            .ok_or(OperationError::UnsupportedTensorContractScope {
+            .ok_or(OperationError::Internal {
                 message: "a prepared eigh needs packed coupled-sector regions",
             })?;
         if regions.iter().any(|region| region.rows() != region.cols()) {

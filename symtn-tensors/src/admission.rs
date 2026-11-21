@@ -15,10 +15,9 @@ use crate::{BoundDynamicFusionMapSpace, BraidingOp, OperationError};
 
 /// The checked engine's internal fail-closed refusal (twist and core-alpha
 /// invariants after admission).
-pub(crate) const CHECKED_CONTRACTION_REQUIRES_BOSONIC: OperationError =
-    OperationError::UnsupportedTensorContractScope {
-        message: "checked Generic contraction requires Bosonic braiding",
-    };
+pub(crate) const CHECKED_CONTRACTION_REQUIRES_BOSONIC: OperationError = OperationError::Internal {
+    message: "checked Generic contraction requires Bosonic braiding",
+};
 
 mod sealed {
     pub trait Sealed {}

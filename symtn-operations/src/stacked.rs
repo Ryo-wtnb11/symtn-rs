@@ -200,7 +200,7 @@ where
             });
         }
         if plan.direct_batch().len() != plan.direct_batch_alphas().len() {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "storage-direct plan has misaligned GEMM coefficients",
             });
         }
@@ -391,7 +391,7 @@ where
         SR: HostReadableStorage<D>,
     {
         if !self.negative_jobs.is_empty() && negative_alpha.is_none() {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "signed stacked replay requires signed Host execution",
             });
         }

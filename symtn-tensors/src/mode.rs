@@ -676,7 +676,7 @@ where
     {
         let mut row_trees = row_trees.into_iter();
         let Some(first) = row_trees.next() else {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "canonical RHS coupled region has no row fusion tree",
             });
         };
@@ -1178,7 +1178,7 @@ where
                 Some((logical, operand)),
             ),
             TreeStructureSource::Oriented(_) => {
-                return Err(OperationError::UnsupportedTensorContractScope {
+                return Err(OperationError::Internal {
                     message: "checked Generic tree structure requires a stored source",
                 }
                 .into())
