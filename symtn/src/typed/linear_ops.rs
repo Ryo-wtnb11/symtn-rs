@@ -232,10 +232,10 @@ where
     /// # Errors
     ///
     /// [`Error::RuntimeMismatch`]; `SpaceMismatch` when the two tensors live
-    /// on different spaces or block layouts; [`Error::InvalidArgument`] when `destination`
-    /// is not owned dense storage, or when it aliases `self`;
-    /// [`Error::DestinationShared`] when `destination` shares its storage with
-    /// a clone. TensorKit checks the destination space before the kernel, so
+    /// on different spaces or block layouts;
+    /// [`Error::UnsupportedDestination`] when `destination` is a lazy adjoint
+    /// or a compact diagonal; [`Error::DestinationShared`] when `destination`
+    /// aliases `self` or shares its storage with a clone. TensorKit checks the destination space before the kernel, so
     /// every destination error precedes a storage capability error.
     ///
     /// # Failure
@@ -703,17 +703,15 @@ pub(super) fn require_destination_space(
 /// The destination checks a `*_into` shares on every placement, in one
 /// order: [`destination_precheck`], the result's space and block layout,
 /// then [`destination_postcheck`].
-/// `storage` names the placement in the messages ("host", "CUDA").
 pub(super) fn unique_dense_destination<'d, R, D, S>(
     destination: &'d TensorMap<R, D, S>,
     input: &Arc<TypedData<D, S>>,
     expected: &DynamicFusionMapSpace,
-    storage: &str,
 ) -> Result<&'d S, Error>
 where
     S: TensorStorage<D>,
 {
-    destination_precheck(destination, input, storage)?;
+    destination_precheck(destination, input)?;
     require_destination_space(destination.logical_space().space(), expected)?;
     destination_postcheck(destination, expected.required_len()?)
 }
@@ -723,20 +721,11 @@ where
 pub(super) fn destination_precheck<R, D, S>(
     destination: &TensorMap<R, D, S>,
     input: &Arc<TypedData<D, S>>,
-    storage: &str,
 ) -> Result<(), Error> {
-    let body = match &destination.repr {
-        TypedTensorRepr::Owned(body) if matches!(body.data.as_ref(), TypedData::Dense(_)) => body,
-        _ => {
-            return Err(Error::InvalidArgument(format!(
-                "destination must use ordinary dense {storage} storage"
-            )))
-        }
-    };
-    if Arc::ptr_eq(&body.data, input) {
-        return Err(Error::InvalidArgument(
-            "destination storage must not alias an input".to_string(),
-        ));
+    batched::dense_payload(destination)
+        .map_err(|representation| Error::UnsupportedDestination { representation })?;
+    if Arc::ptr_eq(&destination.storage_body().data, input) {
+        return Err(Error::DestinationShared);
     }
     Ok(())
 }
@@ -834,7 +823,6 @@ where
         destination,
         &x.storage_body().data,
         x.logical_space().space(),
-        S::NOUN,
     )?;
     S::axpby_into(engine, EXEC, x, destination, alpha, beta)
 }

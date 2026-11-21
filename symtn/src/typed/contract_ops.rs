@@ -455,9 +455,9 @@ where
     /// [`crate::typed::OperationError::UnsupportedTensorContractScope`] for
     /// non-symmetric (anyonic or `NoBraiding`) and checked Generic
     /// Fermionic providers, as for [`Self::contract`]; [`Error::RuleMismatch`];
-    /// [`Error::InvalidArgument`] for a destination that is not owned dense
-    /// storage of its placement or aliases an operand (a lazy adjoint's
-    /// parent included); then the contraction's own errors, as for
+    /// [`Error::UnsupportedDestination`] for a lazy-adjoint or compact
+    /// diagonal destination, and [`Error::DestinationShared`] for one that
+    /// aliases an operand (a lazy adjoint's parent included); then the contraction's own errors, as for
     /// [`Self::contract`]; `SpaceMismatch` for a destination of the wrong
     /// space or layout; [`Error::DestinationShared`] when `destination` shares its
     /// storage with a clone; on CUDA storage, [`Error::PlacementMismatch`]
@@ -532,8 +532,8 @@ where
             return Err(Error::RuleMismatch.into());
         }
         // Why the storage bodies: a lazy-adjoint operand aliases its parent.
-        destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
-        destination_precheck(destination, &other.storage_body().data, S::NOUN)?;
+        destination_precheck(destination, &self.storage_body().data)?;
+        destination_precheck(destination, &other.storage_body().data)?;
         if let (Some(lhs), Some(rhs), Some(dst)) = (
             S::as_host(EXEC, self),
             S::as_host(EXEC, other),
@@ -753,8 +753,9 @@ where
     /// # Errors
     ///
     /// [`Error::RuntimeMismatch`]; [`Error::RuleMismatch`];
-    /// [`Error::InvalidArgument`] for a destination that is not owned dense
-    /// storage or aliases an operand; [`Error::UnsupportedOnDevice`] for CUDA
+    /// [`Error::UnsupportedDestination`] for a lazy-adjoint or compact
+    /// diagonal destination, and [`Error::DestinationShared`] for one that
+    /// aliases an operand; [`Error::UnsupportedOnDevice`] for CUDA
     /// storage; then the planarity errors of [`Self::planar_contract`]; then
     /// its braiding refusal of a non-Bosonic checked Generic provider. Every
     /// check up to and including that braiding admission reads a borrowed
@@ -810,8 +811,8 @@ where
         {
             return Err(Error::RuleMismatch.into());
         }
-        destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
-        destination_precheck(destination, &base.storage_body().data, S::NOUN)?;
+        destination_precheck(destination, &self.storage_body().data)?;
+        destination_precheck(destination, &base.storage_body().data)?;
         // Placement and planarity precede the braiding admission.
         let orders = self.planar_orders(other, spec)?;
         self.admit_braiding(BraidingOp::PlanarContraction)?;

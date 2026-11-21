@@ -513,9 +513,10 @@ where
     /// [`Error::RuntimeMismatch`], [`Error::RuleMismatch`];
     /// [`crate::typed::OperationError::UnsupportedTensorContractScope`] for a
     /// non-symmetric braiding, even with an empty `pairs`; the pair-list errors
-    /// of [`Self::trace_pairs`]; [`Error::InvalidArgument`] for a destination
-    /// that is not owned dense storage of its placement or aliases the
-    /// source's storage (a lazy adjoint's parent included); then, in TensorKit
+    /// of [`Self::trace_pairs`]; [`Error::UnsupportedDestination`] for a
+    /// lazy-adjoint or compact diagonal destination, and
+    /// [`Error::DestinationShared`] for one that aliases the source's storage
+    /// (a lazy adjoint's parent included); then, in TensorKit
     /// `trace_permute!`'s order, the staging errors of [`Self::trace_pairs`]
     /// (checked Generic: provider and preflight errors), `SpaceMismatch` for
     /// a destination whose HomSpace is not the result's, the duality error of
@@ -570,7 +571,7 @@ where
             return Ok(axpby_into_checked(engine, self, destination, alpha, beta)?);
         };
         // Why the storage body: a lazy adjoint is read through its parent.
-        destination_precheck(destination, &source.body.data, S::NOUN)?;
+        destination_precheck(destination, &source.body.data)?;
         <R::Mode as TypedTensorTraceDispatch<R, D>>::trace_into(
             engine,
             self,

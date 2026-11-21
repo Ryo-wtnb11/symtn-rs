@@ -67,9 +67,6 @@ impl<D> sealed::Sealed for Vec<D> {
 /// ```
 #[doc(hidden)]
 pub trait TypedStorage<R, D>: TensorStorage<D> + sealed::Sealed + Sized + 'static {
-    /// The storage noun in shared error messages ("host", "CUDA").
-    const NOUN: &'static str;
-
     /// The compact-representation bridge: `Some(t)` on Host, `None` on CUDA.
     ///
     /// Only compact arms may branch on it; CUDA tensors never hold compact
@@ -86,8 +83,6 @@ pub trait TypedStorage<R, D>: TensorStorage<D> + sealed::Sealed + Sized + 'stati
 }
 
 impl<R, D: 'static> TypedStorage<R, D> for Vec<D> {
-    const NOUN: &'static str = "host";
-
     fn as_host(_: ExecToken, t: &TensorMap<R, D, Self>) -> Option<&TensorMap<R, D>> {
         Some(t)
     }

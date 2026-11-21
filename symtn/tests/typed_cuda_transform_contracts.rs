@@ -41,7 +41,7 @@ use symtn::typed::Direction;
 
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
 use symtn::sector::U1FusionRule;
-use symtn::typed::Error;
+use symtn::typed::{Error, PayloadRepresentation};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::legs::u1_leg_2_1_2;
@@ -210,14 +210,6 @@ fn device_transform_rejections_happen_before_any_device_work() {
 // `*_into` contracts
 // ---------------------------------------------------------------------------
 
-/// The device wording of a Host message. The device mirrors Host's error
-/// variants, messages and order; only the storage noun names the placement,
-/// as in `contract_into`. That these are the exact
-/// Host strings is pinned without a device in `typed_transform_host_side.rs`.
-fn as_device_message(host: &str) -> String {
-    host.replace("ordinary dense host storage", "ordinary dense CUDA storage")
-}
-
 /// A device payload as raw bits, so a NaN-poisoned destination compares equal
 /// to itself.
 fn payload_bits<R>(
@@ -322,18 +314,17 @@ fn device_into_rejections_happen_before_any_device_work() {
             .unwrap();
     }
 
-    // Asserts one device rejection: the Host's error text (with the placement
-    // noun), no transfer, allocation or executor-state change, and a
+    // Asserts one device rejection: the Host's error, no transfer, allocation or executor-state change, and a
     // byte-identical witness — the owned device tensor whose payload the
     // destination is (itself, or, for a lazy destination, its parent).
     macro_rules! rejects_like_host {
         ($what:expr, $host_call:expr, $witness:ident, $device_call:expr) => {{
-            let expected_message = as_device_message(&$host_call.unwrap_err().report());
+            let expected = $host_call.unwrap_err();
             // Bitwise: the poisoned destinations are NaN, which is not equal
             // to itself.
             let before = payload_bits(cuda, &$witness);
             let (error, counters) = delta(|| $device_call.unwrap_err());
-            assert_eq!(error.report(), expected_message, "{}", $what);
+            assert_eq!(error, expected, "{}", $what);
             assert_eq!(
                 counters,
                 CudaTransferStats::default(),
@@ -425,9 +416,11 @@ fn device_into_rejections_happen_before_any_device_work() {
         lazy_parent,
         lazy_source.permute_into(cuda, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
     );
-    assert!(
-        error.report().contains("ordinary dense CUDA storage"),
-        "{error}"
+    assert_eq!(
+        error,
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        }
     );
 
     // 4. A lazy-adjoint destination alone.
@@ -445,9 +438,11 @@ fn device_into_rejections_happen_before_any_device_work() {
         lazy_parent,
         source.permute_into(cuda, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
     );
-    assert!(
-        error.report().contains("ordinary dense CUDA storage"),
-        "{error}"
+    assert_eq!(
+        error,
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        }
     );
 
     // 5. Alias through a clone: `TensorMap` clones share the payload `Arc`, so
@@ -463,7 +458,7 @@ fn device_into_rejections_happen_before_any_device_work() {
             witness,
             source.permute_into(cuda, &[0, 0], &[1, 3], &mut alias, 1.0, 0.0)
         );
-        assert!(error.report().contains("must not alias"), "{error}");
+        assert_eq!(error, Error::DestinationShared);
     }
 
     // 5b. A lazy-adjoint source aliasing its parent's payload: the alias
@@ -485,7 +480,7 @@ fn device_into_rejections_happen_before_any_device_work() {
             witness,
             lazy_source.permute_into(cuda, &[2, 0], &[1, 3], &mut parent_alias, 1.0, 0.0)
         );
-        assert!(error.report().contains("must not alias"), "{error}");
+        assert_eq!(error, Error::DestinationShared);
     }
 
     // 6. A destination on the wrong space, held shared: the space check

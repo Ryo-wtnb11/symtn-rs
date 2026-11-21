@@ -128,10 +128,10 @@ pub enum SignatureField {
     BlockStructure,
 }
 
-/// A payload representation a [`StackedTensorMap`] cannot hold.
+/// A payload representation that is not an owned dense buffer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum BatchMemberRepresentation {
+pub enum PayloadRepresentation {
     /// A lazy adjoint view over its parent's payload.
     LazyAdjoint,
     /// A compact diagonal spectrum, whose dense layout is not stored.
@@ -734,14 +734,16 @@ impl std::error::Error for BatchError {
     }
 }
 
-/// The owned dense payload of `tensor`, or the representation a stack
-/// cannot hold.
-fn dense_payload<R, D>(tensor: &TensorMap<R, D>) -> Result<&[D], BatchMemberRepresentation> {
+/// The owned dense payload of `tensor`, or its representation when it is not
+/// an owned dense buffer.
+pub(super) fn dense_payload<R, D, S>(
+    tensor: &TensorMap<R, D, S>,
+) -> Result<&S, PayloadRepresentation> {
     match &tensor.repr {
-        TypedTensorRepr::Adjoint(_) => Err(BatchMemberRepresentation::LazyAdjoint),
+        TypedTensorRepr::Adjoint(_) => Err(PayloadRepresentation::LazyAdjoint),
         TypedTensorRepr::Owned(body) => match body.data.as_ref() {
             TypedData::Dense(data) => Ok(data),
-            TypedData::Diagonal(_) => Err(BatchMemberRepresentation::CompactDiagonal),
+            TypedData::Diagonal(_) => Err(PayloadRepresentation::CompactDiagonal),
         },
     }
 }

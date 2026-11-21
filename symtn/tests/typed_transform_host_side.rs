@@ -132,33 +132,30 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     // destination is what it reports.
     let lazy_source = source.adjoint(engine).unwrap();
     let mut lazy_destination = destination(engine).adjoint(engine).unwrap();
+    let lazy = symtn::typed::Error::UnsupportedDestination {
+        representation: symtn::typed::PayloadRepresentation::LazyAdjoint,
+    };
     assert_eq!(
-        message(
-            lazy_source
-                .permute_into(engine, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
-                .unwrap_err()
-        ),
-        "invalid argument: destination must use ordinary dense host storage"
+        lazy_source
+            .permute_into(engine, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
+            .unwrap_err(),
+        lazy
     );
     assert_eq!(
-        message(
-            source
-                .permute_into(engine, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
-                .unwrap_err()
-        ),
-        "invalid argument: destination must use ordinary dense host storage"
+        source
+            .permute_into(engine, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
+            .unwrap_err(),
+        lazy
     );
 
     // The alias check precedes the operation build, so malformed axes do not
     // mask it.
     let mut alias = source.clone();
     assert_eq!(
-        message(
-            source
-                .permute_into(engine, &[0, 0], &[1, 3], &mut alias, 1.0, 0.0)
-                .unwrap_err()
-        ),
-        "invalid argument: destination storage must not alias an input"
+        source
+            .permute_into(engine, &[0, 0], &[1, 3], &mut alias, 1.0, 0.0)
+            .unwrap_err(),
+        symtn::typed::Error::DestinationShared
     );
 
     // The space check precedes the unique-ownership check.

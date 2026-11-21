@@ -12,9 +12,7 @@
 
 #![cfg(feature = "cuda")]
 
-use crate::report;
 use crate::su2::{su2_irrep, su2_rule};
-use report::Report;
 
 use std::sync::Arc;
 
@@ -99,7 +97,8 @@ fn check<R, D>(
         + symtn::sector::TypedSectorAdmission,
     R::Mode: symtn::typed::TypedAdjointSpace<R>
         + symtn::typed::TypedTensorConstructionDispatch<R, D>
-        + symtn::typed::TypedTensorTransformDispatch<R, D>,
+        + symtn::typed::TypedTensorTransformDispatch<R, D>
+        + symtn::typed::TypedTensorModeDispatch<R, FacadeError = symtn::typed::Error>,
     D: Bits + symtn::typed::CudaPayload,
 {
     assert!(host.subblock_count() >= 2, "{what}: multi-block fixture");
@@ -229,19 +228,17 @@ fn check<R, D>(
         "{what}: input unchanged"
     );
     let mut alias = device.clone();
-    assert!(device
-        .permute_into(
+    assert!(matches!(
+        device.permute_into(
             cuda,
             &codomain,
             &domain,
             &mut alias,
             D::two(),
             D::from_real(0.0)
-        )
-        .err()
-        .unwrap()
-        .report()
-        .contains("must not alias an input"));
+        ),
+        Err(symtn::typed::Error::DestinationShared)
+    ));
 }
 
 fn fixtures<R, D>(
@@ -257,7 +254,8 @@ fn fixtures<R, D>(
         + symtn::sector::TypedSectorAdmission,
     R::Mode: symtn::typed::TypedAdjointSpace<R>
         + symtn::typed::TypedTensorConstructionDispatch<R, D>
-        + symtn::typed::TypedTensorTransformDispatch<R, D>,
+        + symtn::typed::TypedTensorTransformDispatch<R, D>
+        + symtn::typed::TypedTensorModeDispatch<R, FacadeError = symtn::typed::Error>,
     D: Bits + symtn::typed::CudaPayload,
 {
     let dual = leg.try_dual().unwrap();

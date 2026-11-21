@@ -13,8 +13,6 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
     D: CudaPayload,
 {
-    const NOUN: &'static str = "CUDA";
-
     fn as_host(_: ExecToken, _: &TensorMap<R, D, Self>) -> Option<&TensorMap<R, D>> {
         None
     }
