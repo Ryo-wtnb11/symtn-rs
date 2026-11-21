@@ -67,6 +67,8 @@ pub use contract::{
 };
 #[doc(hidden)]
 pub use contract::{CopyCRoute, CoreRoute, PreparedCheckedGenericRoot};
+#[doc(hidden)]
+pub use contract::{FusionSource, LazyAdjointSpace};
 #[cfg(test)]
 pub(crate) use contract::{
     PreparedCheckedGenericDynamicSpace, TensorContractStructure, TensorContractWorkspace,
@@ -75,7 +77,6 @@ pub(crate) use contract::{
 pub use mode::ContractRequest;
 #[doc(hidden)]
 pub use mode::{CoefficientAlgebra, PivotalCoefficientAlgebra, RigidCoefficientAlgebra};
-pub(crate) use oriented_elementwise::validate_oriented_fusion_layout;
 #[doc(hidden)]
 pub use oriented_elementwise::{
     fusion_scatter_add_assign, oriented_fusion_add_owned, oriented_fusion_axpby_into,

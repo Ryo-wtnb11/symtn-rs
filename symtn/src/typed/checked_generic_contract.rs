@@ -617,18 +617,10 @@ where
     D: TensorScalar + crate::runtime::MultiplicityFreeCoefficientLane<R::Scalar>,
     S: ContractExec<R, D>,
 {
-    let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
+    let (lhs_source, rhs_source) = (lhs.fusion_source(), rhs.fusion_source());
     let mut staged = symtn_tensors::StagedContract::multiplicity_free(
-        (
-            lhs.logical_space(),
-            lhs_operand,
-            transform_source_len(lhs.storage_body())?,
-        ),
-        (
-            rhs.logical_space(),
-            rhs_operand,
-            transform_source_len(rhs.storage_body())?,
-        ),
+        (lhs_source, transform_source_len(lhs.storage_body())?),
+        (rhs_source, transform_source_len(rhs.storage_body())?),
         request,
     )?;
     // Why the lease waits for a core miss: the canonical core resolves from
@@ -653,7 +645,7 @@ where
             lease,
             &resolution,
             (staged.destination(), staged.destination_len()),
-            (lhs_operand, rhs_operand),
+            (lhs_source.operand(), rhs_source.operand()),
         ),
         lhs,
         rhs,
@@ -717,18 +709,10 @@ where
     let output_axes = spec.output_axes();
     let mut lease = crate::runtime::ContextLease::checkout(engine);
     D::lane(lease.context())?;
-    let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
+    let (lhs_source, rhs_source) = (lhs.fusion_source(), rhs.fusion_source());
     let mut staged = symtn_tensors::StagedContract::multiplicity_free(
-        (
-            lhs.logical_space(),
-            lhs_operand,
-            transform_source_len(lhs.storage_body())?,
-        ),
-        (
-            rhs.logical_space(),
-            rhs_operand,
-            transform_source_len(rhs.storage_body())?,
-        ),
+        (lhs_source, transform_source_len(lhs.storage_body())?),
+        (rhs_source, transform_source_len(rhs.storage_body())?),
         contract_request(spec, &output_axes, planar),
     )?;
     staged.require_destination(destination.logical_space().space())?;
@@ -745,7 +729,7 @@ where
             Some(lease),
             &resolution,
             (staged.destination(), staged.destination_len()),
-            (lhs_operand, rhs_operand),
+            (lhs_source.operand(), rhs_source.operand()),
         ),
         lhs,
         rhs,

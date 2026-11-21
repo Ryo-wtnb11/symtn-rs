@@ -33,12 +33,8 @@ where
 pub(crate) fn direct_side<'a, R, D>(
     space: &'a crate::BoundDynamicFusionMapSpace<R>,
     data: &'a [D],
-) -> (
-    &'a crate::BoundDynamicFusionMapSpace<R>,
-    crate::FusionOperand<'a>,
-    &'a [D],
-) {
-    (space, crate::FusionOperand::direct(space.space()), data)
+) -> (crate::FusionSource<'a, R>, &'a [D]) {
+    (crate::FusionSource::Direct(space), data)
 }
 
 /// The axes of a contraction entry, from a spec.

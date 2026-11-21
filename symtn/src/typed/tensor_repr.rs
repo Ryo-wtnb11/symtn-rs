@@ -69,7 +69,8 @@ impl<R, D, S> TypedTensorBody<R, D, S> {
 
 pub(super) struct TypedAdjointView<R, D, S = Vec<D>> {
     pub(super) parent: Arc<TypedTensorBody<R, D, S>>,
-    pub(super) logical_space: BoundDynamicFusionMapSpace<R>,
+    /// `parent`'s space and its adjoint, derived together.
+    pub(super) adjoint: symtn_tensors::LazyAdjointSpace<R>,
     /// Set only on the operation-local header a [`TensorRef`] resolves to:
     /// the materialization path refuses it instead of copying.
     pub(super) borrowed: bool,
@@ -85,19 +86,34 @@ impl<R, D, S> TypedAdjointView<R, D, S> {
     /// re-wrap parents that are already dense. Why not a dense-only parent
     /// type: `parent` is the same `Arc` an owned tensor holds, which keeps
     /// adjoint-of-adjoint an `O(1)` handle swap.
+    ///
+    /// `adjoint` must be derived from `parent`'s space: the lower crate
+    /// reads `adjoint.parent()` as the layout of `parent`'s payload.
     pub(super) fn new(
         parent: Arc<TypedTensorBody<R, D, S>>,
-        logical_space: BoundDynamicFusionMapSpace<R>,
+        adjoint: symtn_tensors::LazyAdjointSpace<R>,
     ) -> Self {
         debug_assert!(
             matches!(parent.data.as_ref(), TypedData::Dense(_)),
             "a lazy adjoint never holds a compact diagonal parent"
         );
+        debug_assert!(
+            Arc::ptr_eq(
+                adjoint.parent().space().structure(),
+                parent.space.space().structure()
+            ) || adjoint.parent().space() == parent.space.space(),
+            "a lazy adjoint's space pair belongs to its parent"
+        );
         Self {
             parent,
-            logical_space,
+            adjoint,
             borrowed: false,
         }
+    }
+
+    /// The adjoint space the view reads as.
+    pub(super) fn logical_space(&self) -> &BoundDynamicFusionMapSpace<R> {
+        self.adjoint.logical()
     }
 }
 
@@ -212,8 +228,7 @@ impl<R, D, S> TensorMap<R, D, S> {
             unique.borrowed = true;
             return self;
         }
-        let mut marked =
-            TypedAdjointView::new(Arc::clone(&view.parent), view.logical_space.clone());
+        let mut marked = TypedAdjointView::new(Arc::clone(&view.parent), view.adjoint.clone());
         marked.borrowed = true;
         *view = Arc::new(marked);
         self
@@ -580,7 +595,7 @@ impl<R, D, S> TensorMap<R, D, S> {
     pub(super) fn logical_space(&self) -> &BoundDynamicFusionMapSpace<R> {
         match &self.repr {
             TypedTensorRepr::Owned(body) => &body.space,
-            TypedTensorRepr::Adjoint(view) => &view.logical_space,
+            TypedTensorRepr::Adjoint(view) => view.logical_space(),
         }
     }
 

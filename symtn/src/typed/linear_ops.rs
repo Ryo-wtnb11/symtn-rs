@@ -159,7 +159,7 @@ where
                 &other.parent_of(y),
                 FactorScalar::adjoint(beta),
             )?;
-            return sum.lazy_adjoint_on(&x.logical_space);
+            return sum.lazy_adjoint_on(&x.adjoint);
         }
         S::combine(engine, EXEC, self, alpha, Some((other, beta)))
     }
@@ -201,7 +201,7 @@ where
             let parent = self
                 .parent_of(view)
                 .scale(&mut *engine, FactorScalar::adjoint(factor))?;
-            return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
+            return Ok(parent.lazy_adjoint_on(&view.adjoint)?);
         }
         Ok(S::combine(engine, EXEC, self, factor, None)?)
     }
@@ -299,11 +299,11 @@ impl<R, D, S> TensorMap<R, D, S> {
 
     /// `adjoint(self)` for an owned dense result whose adjoint space is
     /// already known: the elementwise redirects through a lazy parent keep
-    /// the parent's space, so the operand's logical space is the result's,
+    /// the parent's space, so the operand's space pair is the result's,
     /// with no adjoint-space query.
     pub(super) fn lazy_adjoint_on(
         self,
-        logical_space: &BoundDynamicFusionMapSpace<R>,
+        adjoint: &symtn_tensors::LazyAdjointSpace<R>,
     ) -> Result<Self, Error> {
         let TypedTensorRepr::Owned(parent) = self.repr else {
             return Err(internal_layout_error(
@@ -314,7 +314,7 @@ impl<R, D, S> TensorMap<R, D, S> {
             runtime: self.runtime,
             repr: TypedTensorRepr::Adjoint(Arc::new(TypedAdjointView::new(
                 parent,
-                logical_space.clone(),
+                adjoint.clone(),
             ))),
         })
     }

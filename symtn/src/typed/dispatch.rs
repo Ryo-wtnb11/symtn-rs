@@ -307,7 +307,7 @@ where
 
 /// Z-isomorphism execution selected by the admitted provider mode.
 #[doc(hidden)]
-pub trait TypedTensorFlipDispatch<R, D>: TypedTensorModeDispatch<R>
+pub trait TypedTensorFlipDispatch<R, D>: TypedAdjointSpace<R>
 where
     R: TypedSectorAdmission,
     D: TensorScalar,
@@ -493,8 +493,8 @@ where
         V: SpectrumMagnitude;
 }
 
-/// The one coefficient step `adjoint` needs from a mode: the adjoint space
-/// (`symtn_tensors::CoefficientAlgebra::adjoint_space`) with its error in the
+/// The one coefficient step `adjoint` needs from a mode: the lazy-adjoint
+/// space pair (`symtn_tensors::LazyAdjointSpace::new`) with its error in the
 /// facade's type. Implemented for every mode that has both, so `adjoint` and
 /// the operations built on it are one body for every mode.
 #[doc(hidden)]
@@ -502,9 +502,9 @@ pub trait TypedAdjointSpace<R>: TypedTensorModeDispatch<R>
 where
     R: TypedSectorAdmission,
 {
-    fn adjoint_space(
-        space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError>;
+    fn lazy_adjoint(
+        parent: &BoundDynamicFusionMapSpace<R>,
+    ) -> Result<symtn_tensors::LazyAdjointSpace<R>, Self::FacadeError>;
 }
 
 impl<R, M> TypedAdjointSpace<R> for M
@@ -513,10 +513,10 @@ where
     M: TypedTensorModeDispatch<R> + symtn_tensors::CoefficientAlgebra<R>,
     M::FacadeError: From<<M as symtn_tensors::CoefficientAlgebra<R>>::Error>,
 {
-    fn adjoint_space(
-        space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
-        <M as symtn_tensors::CoefficientAlgebra<R>>::adjoint_space(space).map_err(Into::into)
+    fn lazy_adjoint(
+        parent: &BoundDynamicFusionMapSpace<R>,
+    ) -> Result<symtn_tensors::LazyAdjointSpace<R>, Self::FacadeError> {
+        symtn_tensors::LazyAdjointSpace::new::<M>(parent.clone()).map_err(Into::into)
     }
 }
 

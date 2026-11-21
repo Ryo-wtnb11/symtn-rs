@@ -27,7 +27,8 @@ use super::backend::TensorContractBackend;
 #[cfg(test)]
 use super::dynamic_space::encoded_layout_primer;
 use super::dynamic_space::{
-    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, LayoutKeyBuilder,
+    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, FusionSource,
+    LayoutKeyBuilder,
 };
 #[cfg(test)]
 use super::fusion::FusionContractOrientation;
@@ -942,16 +943,8 @@ where
     pub(super) fn tensorcontract_in<'a, St, R>(
         &mut self,
         engine: &mut dyn Engine,
-        (lhs_authority, lhs, lhs_data): (
-            &'a BoundDynamicFusionMapSpace<R>,
-            FusionOperand<'a>,
-            &[D],
-        ),
-        (rhs_authority, rhs, rhs_data): (
-            &'a BoundDynamicFusionMapSpace<R>,
-            FusionOperand<'a>,
-            &[D],
-        ),
+        (lhs, lhs_data): (FusionSource<'a, R>, &[D]),
+        (rhs, rhs_data): (FusionSource<'a, R>, &[D]),
         request: ContractRequest<'a>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, Vec<D>), ContractStageError<'a, R, St>>
     where
@@ -959,18 +952,15 @@ where
         St::M: PlanningAlgebra<R, Scalar = C>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ZeroBytes,
     {
-        let mut staged = stage_contract::<R, St>(
-            (lhs_authority, lhs, lhs_data.len()),
-            (rhs_authority, rhs, rhs_data.len()),
-            request,
-        )?;
+        let mut staged =
+            stage_contract::<R, St>((lhs, lhs_data.len()), (rhs, rhs_data.len()), request)?;
         let resolution = self.plan_staged::<R, St>(engine, &mut staged)?;
         let data = self.execute_contract_resolution_host_owned(
             engine,
             &resolution,
             staged_destination(&staged).structure(),
-            (lhs.storage_space().structure(), lhs_data),
-            (rhs.storage_space().structure(), rhs_data),
+            (lhs.storage().space().structure(), lhs_data),
+            (rhs.storage().space().structure(), rhs_data),
         )?;
         let destination = staged_commit(staged, &resolution)?;
         Ok((destination, data))
@@ -1165,8 +1155,8 @@ where
 {
     let parts = St::M::stage_contraction(lhs, rhs, request)?;
     Ok(StagedContract {
-        lhs: lhs.0,
-        operands: (lhs.1, rhs.1),
+        lhs: lhs.0.logical(),
+        operands: (lhs.0.operand(), rhs.0.operand()),
         request,
         stage: St::wrap(parts),
     })
@@ -1333,8 +1323,8 @@ where
 {
     /// Derives the destination of a multiplicity-free `request`: two direct
     /// operands through the owned derivation, a lazy adjoint through the
-    /// oriented one. Each operand is its logical space, its storage operand
-    /// (a lazy adjoint is storage-conjugate) and its stored length.
+    /// oriented one. Each operand is its source (a lazy adjoint is read
+    /// storage-conjugate through its parent) and its stored length.
     ///
     /// **Braiding precondition.** No multiplicity-free lower contraction
     /// entry admits braiding for ordinary contraction; its caller does, with
@@ -1345,8 +1335,8 @@ where
     /// the planar value, not the refusal the facade `contract` returns.
     #[allow(clippy::type_complexity)]
     pub fn multiplicity_free(
-        lhs: (&'a BoundDynamicFusionMapSpace<R>, FusionOperand<'a>, usize),
-        rhs: (&'a BoundDynamicFusionMapSpace<R>, FusionOperand<'a>, usize),
+        lhs: (FusionSource<'a, R>, usize),
+        rhs: (FusionSource<'a, R>, usize),
         request: ContractRequest<'a>,
     ) -> Result<Self, OperationError> {
         stage_contract(lhs, rhs, request)

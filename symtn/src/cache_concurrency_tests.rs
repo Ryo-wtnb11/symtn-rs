@@ -74,8 +74,7 @@ fn resolve(
         .tree_context_mut()
         .stage_tree_transform_multiplicity_free_in(
             engine,
-            source,
-            None,
+            symtn_tensors::FusionSource::Direct(source),
             source.space().required_len().unwrap(),
             &operation(),
         )
@@ -219,8 +218,7 @@ fn cache_concurrency_ambient_pool_without_a_runtime() {
                 context
                     .stage_tree_transform_multiplicity_free_in(
                         &mut CpuEngine::serial(),
-                        &source,
-                        None,
+                        symtn_tensors::FusionSource::Direct(&source),
                         src_len,
                         &operation(),
                     )

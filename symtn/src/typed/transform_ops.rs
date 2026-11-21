@@ -895,17 +895,12 @@ where
         }
         Ok(match &self.repr {
             TypedTensorRepr::Owned(parent) => {
-                let logical_space =
-                    <R::Mode as TypedAdjointSpace<R>>::adjoint_space(&parent.space)?;
-                debug_assert!(Arc::ptr_eq(
-                    parent.space.provider_arc(),
-                    logical_space.provider_arc()
-                ));
+                let adjoint = <R::Mode as TypedAdjointSpace<R>>::lazy_adjoint(&parent.space)?;
                 Self {
                     runtime: self.runtime.clone(),
                     repr: TypedTensorRepr::Adjoint(Arc::new(TypedAdjointView::new(
                         Arc::clone(parent),
-                        logical_space,
+                        adjoint,
                     ))),
                 }
             }

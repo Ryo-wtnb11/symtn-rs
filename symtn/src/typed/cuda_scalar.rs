@@ -456,13 +456,8 @@ where
                 "{operation} requires dense CUDA storage"
             )));
         };
-        let lowering = super::cuda_transfer::cuda_adjoint_lowering(
-            &symtn_tensors::AdjointBlockMap::new(
-                view.parent.space.space(),
-                view.logical_space.space(),
-            ),
-            false,
-        )?;
+        let lowering =
+            super::cuda_transfer::cuda_adjoint_lowering(&view.adjoint.block_map(), false)?;
         Ok(CudaOrientedRead {
             source,
             moves: lowering.copies,

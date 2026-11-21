@@ -1,8 +1,6 @@
 mod backend;
 mod checked_generic;
-pub(crate) use checked_generic::{
-    validate_checked_operand_relation, CheckedAuthority, CheckedContractTxn,
-};
+pub(crate) use checked_generic::{CheckedAuthority, CheckedContractTxn};
 mod context;
 pub(crate) use context::{
     compile_prelowered_dynamic_tree, compile_stored_dynamic_tree, PlanTarget,
@@ -76,14 +74,16 @@ pub use context::{
 };
 #[cfg(test)]
 pub(crate) use dynamic_space::{
-    checked_layout_primer, checked_metadata_dispatcher, MetadataOutput, MetadataRequest,
+    checked_layout_primer, checked_metadata_dispatcher, dispatch_prepare, MetadataOutput,
+    MetadataRequest,
 };
 pub(crate) use dynamic_space::{
-    dispatch_prepare, tree_transform_operation_axes, FusionOperandLayout, LayoutKeyBuilder,
+    tree_transform_operation_axes, FusionOperandLayout, LayoutKeyBuilder,
 };
 pub use dynamic_space::{
-    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand,
-    PreparedCheckedGenericDynamicSpace, PreparedCheckedGenericRoot, ValidatedDynamicFusionLayout,
+    BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, FusionSource,
+    LazyAdjointSpace, PreparedCheckedGenericDynamicSpace, PreparedCheckedGenericRoot,
+    ValidatedDynamicFusionLayout,
 };
 #[cfg(test)]
 pub(crate) use fusion::contracted_fusion_tree_basis_matches;

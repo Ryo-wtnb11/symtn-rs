@@ -106,17 +106,12 @@ where
         )?);
     }
     let operation = operation()?;
-    let adjoint_of = match &source.repr {
-        TypedTensorRepr::Owned(_) => None,
-        TypedTensorRepr::Adjoint(view) => Some(&view.parent.space),
-    };
     let destination_space = destination.logical_space().space().clone();
     let staged = D::lane(lease.context())?
         .tree_context_mut()
         .stage_tree_transform_into_multiplicity_free_in(
             engine,
-            source.logical_space(),
-            adjoint_of,
+            source.fusion_source(),
             transform_source_len(source.storage_body())?,
             &operation,
             &destination_space,
@@ -182,8 +177,7 @@ where
         .tree_context_mut()
         .stage_tree_transform_multiplicity_free_in(
             engine,
-            &body.space,
-            None,
+            symtn_tensors::FusionSource::Direct(&body.space),
             src_len,
             &operation,
         )?;

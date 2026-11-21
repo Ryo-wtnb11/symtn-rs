@@ -12,7 +12,7 @@ use symtn_core::{
     MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, RuleIdentity,
 };
 
-use crate::contract::{BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand};
+use crate::contract::{BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionSource};
 use crate::mode::{PlanningAlgebra, StagedTransform, TreeStructureSource};
 use crate::tree_transform::{
     CheckedGenericPlanError, TreeTransformOperation, TreeTransformPlanning,
@@ -165,13 +165,17 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
         self.tree_transform_owned_in::<MultiplicityFreeAdmissionMode, R>(
-            engine, src, None, src_data, operation, alpha,
+            engine,
+            FusionSource::Direct(src),
+            src_data,
+            operation,
+            alpha,
         )
     }
 
     /// Stages and resolves the multiplicity-free permute, braid, transpose or
-    /// repartition of `logical` (stored as the parent `adjoint_of` when it is
-    /// that parent's lazy adjoint, `src_len` stored elements): the owned
+    /// repartition of `source` (a lazy adjoint is stored as its parent;
+    /// `src_len` stored elements): the owned
     /// entry's staging, with the replay left to the caller's storage and the
     /// commit to [`StagedTreeTransform::commit`].
     ///
@@ -181,8 +185,7 @@ where
     pub fn stage_tree_transform_multiplicity_free_in<'a, R>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
     ) -> Result<StagedTreeTransform<'a, R, BoundDynamicFusionMapSpace<R>, C>, OperationError>
@@ -190,9 +193,12 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
         let resolved = self.stage_resolve::<MultiplicityFreeAdmissionMode, R>(
-            engine, logical, adjoint_of, src_len, operation,
+            engine, source, src_len, operation,
         )?;
-        Ok(StagedTreeTransform { logical, resolved })
+        Ok(StagedTreeTransform {
+            logical: source.logical(),
+            resolved,
+        })
     }
 
     /// [`Self::stage_tree_transform_multiplicity_free_in`] for an existing
@@ -207,8 +213,7 @@ where
     pub fn stage_tree_transform_into_multiplicity_free_in<'a, R>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
         dst_space: &'a DynamicFusionMapSpace,
@@ -217,9 +222,12 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
         let resolved = self.stage_into_in::<MultiplicityFreeAdmissionMode, R, OperationError>(
-            engine, logical, adjoint_of, src_len, operation, dst_space,
+            engine, source, src_len, operation, dst_space,
         )?;
-        Ok(StagedTreeTransform { logical, resolved })
+        Ok(StagedTreeTransform {
+            logical: source.logical(),
+            resolved,
+        })
     }
 
     /// The owned multiplicity-free `operation` of a direct source in one
@@ -256,8 +264,7 @@ where
     fn tree_transform_owned_in<M, R>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'_, R>,
         src_data: &[D],
         operation: &TreeTransformOperation,
         alpha: D,
@@ -265,10 +272,9 @@ where
     where
         M: PlanningAlgebra<R, Scalar = C>,
     {
-        let resolved =
-            self.stage_resolve::<M, R>(engine, logical, adjoint_of, src_data.len(), operation)?;
+        let resolved = self.stage_resolve::<M, R>(engine, source, src_data.len(), operation)?;
         let data = self.replay_owned(engine, &resolved, src_data, alpha)?;
-        let destination = M::commit_transform(logical, resolved.stage, resolved.preview)?;
+        let destination = M::commit_transform(source.logical(), resolved.stage, resolved.preview)?;
         Ok((destination, data))
     }
 
@@ -278,8 +284,7 @@ where
     fn stage_into_in<'a, M, R, E>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
         dst_space: &'a DynamicFusionMapSpace,
@@ -288,13 +293,11 @@ where
         M: PlanningAlgebra<R, Scalar = C>,
         E: From<M::Error> + From<OperationError>,
     {
-        let staged = M::stage_transform(logical, adjoint_of, src_len, operation)?;
+        let staged = M::stage_transform(source, src_len, operation)?;
         M::match_and_resolve(
             staged,
             dst_space,
-            |staged, dst| {
-                self.resolve_staged::<M, R>(engine, logical, adjoint_of, operation, staged, dst)
-            },
+            |staged, dst| self.resolve_staged::<M, R>(engine, source, operation, staged, dst),
             |resolved| &resolved.stage,
         )?
         .ok_or_else(|| {
@@ -327,7 +330,8 @@ where
             .space()
             .required_len()
             .map_err(OperationError::from)?;
-        let resolved = self.stage_resolve::<M, R>(engine, logical, None, src_len, operation)?;
+        let resolved =
+            self.stage_resolve::<M, R>(engine, FusionSource::Direct(logical), src_len, operation)?;
         let outcome = match read(&resolved.structure, &resolved.preview) {
             Some(value) => StructureOutcome::Read(value),
             None => {
@@ -349,16 +353,15 @@ where
     fn stage_resolve<'a, M, R>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
     ) -> Result<ResolvedTransform<'a, M::TransformStage, C>, M::Error>
     where
         M: PlanningAlgebra<R, Scalar = C>,
     {
-        let staged = M::stage_transform(logical, adjoint_of, src_len, operation)?;
-        self.resolve_staged::<M, R>(engine, logical, adjoint_of, operation, staged, None)
+        let staged = M::stage_transform(source, src_len, operation)?;
+        self.resolve_staged::<M, R>(engine, source, operation, staged, None)
     }
 
     /// Resolves the structure of a staged transform with the staging's
@@ -366,8 +369,7 @@ where
     fn resolve_staged<'a, M, R>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         operation: &TreeTransformOperation,
         staged: StagedTransform<M::TransformStage, M::SourceProof<'a>>,
         dst: Option<&'a Arc<BlockStructure>>,
@@ -381,9 +383,9 @@ where
             mut stage,
             proof,
         } = staged;
-        let (source, src_structure) = match adjoint_of {
-            None => {
-                let structure = logical.space().structure();
+        let (structure_source, src_structure) = match source {
+            FusionSource::Direct(space) => {
+                let structure = space.space().structure();
                 (
                     TreeStructureSource::Stored {
                         structure,
@@ -392,21 +394,21 @@ where
                     structure,
                 )
             }
-            Some(parent) => (
+            FusionSource::Adjoint(adjoint) => (
                 TreeStructureSource::StorageMapped {
-                    logical: logical.space().structure(),
-                    operand: FusionOperand::adjoint(parent.space()),
+                    logical: adjoint.logical().space().structure(),
+                    operand: adjoint.operand(),
                 },
-                parent.space().structure(),
+                adjoint.parent().space().structure(),
             ),
         };
         let structure = M::tree_structure_with(
             engine,
             M::transform_cache(self.planning(), &mut stage),
-            logical.provider(),
+            source.logical().provider(),
             operation,
             dst.unwrap_or(&preview),
-            source,
+            structure_source,
             Some(&proof),
         )?;
         Ok(ResolvedTransform {
@@ -614,9 +616,8 @@ where
 {
     #[cfg(test)]
     /// The owned checked Generic permute, braid, transpose or repartition
-    /// `alpha · operation(logical)`, into a fresh payload. `adjoint_of` is
-    /// `None` for a direct source stored as `logical`, or the parent whose
-    /// storage `src_data` is when `logical` is that parent's lazy adjoint.
+    /// `alpha · operation(source)`, into a fresh payload; `src_data` is the
+    /// storage of `source` (a lazy adjoint's is its parent's).
     ///
     /// Provider queries and replay compilation finish against an uninterned
     /// destination preview; the destination structure, composed coefficients
@@ -626,8 +627,7 @@ where
     pub(crate) fn tree_transform_owned_checked_generic_in<R>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'_, R>,
         src_data: &[D],
         operation: &TreeTransformOperation,
         alpha: D,
@@ -636,7 +636,7 @@ where
         R: CheckedGenericRigidSymbols<Scalar = f64>,
     {
         self.tree_transform_owned_in::<CheckedGenericAdmissionMode, R>(
-            engine, logical, adjoint_of, src_data, operation, alpha,
+            engine, source, src_data, operation, alpha,
         )
     }
 
@@ -652,8 +652,7 @@ where
     pub fn stage_tree_transform_checked_generic_in<'a, R>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
     ) -> Result<
@@ -663,10 +662,12 @@ where
     where
         R: CheckedGenericRigidSymbols<Scalar = f64>,
     {
-        let resolved = self.stage_resolve::<CheckedGenericAdmissionMode, R>(
-            engine, logical, adjoint_of, src_len, operation,
-        )?;
-        Ok(StagedTreeTransform { logical, resolved })
+        let resolved = self
+            .stage_resolve::<CheckedGenericAdmissionMode, R>(engine, source, src_len, operation)?;
+        Ok(StagedTreeTransform {
+            logical: source.logical(),
+            resolved,
+        })
     }
 
     /// The checked Generic twin of
@@ -679,8 +680,7 @@ where
     pub fn stage_tree_transform_into_checked_generic_in<'a, R, E>(
         &mut self,
         engine: &mut dyn Engine,
-        logical: &'a BoundDynamicFusionMapSpace<R>,
-        adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
+        source: FusionSource<'a, R>,
         src_len: usize,
         operation: &TreeTransformOperation,
         dst_space: &'a DynamicFusionMapSpace,
@@ -690,9 +690,12 @@ where
         E: From<CheckedGenericPlanError<R::Error>> + From<OperationError>,
     {
         let resolved = self.stage_into_in::<CheckedGenericAdmissionMode, R, E>(
-            engine, logical, adjoint_of, src_len, operation, dst_space,
+            engine, source, src_len, operation, dst_space,
         )?;
-        Ok(StagedTreeTransform { logical, resolved })
+        Ok(StagedTreeTransform {
+            logical: source.logical(),
+            resolved,
+        })
     }
 
     /// The checked Generic twin of

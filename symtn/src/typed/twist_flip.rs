@@ -117,12 +117,12 @@ where
                 legs,
             );
             // Why not call `adjoint()`: the original view already owns the
-            // exact admitted logical space, and re-deriving it would query
-            // the provider after all fallible twist values had been staged.
+            // exact admitted space pair, and re-deriving it would query the
+            // provider after all fallible twist values had been staged.
             return Ok(self
                 .parent_of(view)
                 .twist_owned(engine, &axes, !inverse)?
-                .lazy_adjoint_on(&view.logical_space)?);
+                .lazy_adjoint_on(&view.adjoint)?);
         }
         self.twist_owned(engine, legs, inverse)
     }
@@ -317,7 +317,6 @@ where
             .into());
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
-            let logical_space = self.flip_destination(legs)?.0;
             let parent = Self {
                 runtime: self.runtime.clone(),
                 repr: TypedTensorRepr::Owned(Arc::clone(&view.parent)),
@@ -327,7 +326,13 @@ where
                 view.parent.space.space().nin(),
                 legs,
             );
-            let flipped_parent = parent.flip_owned(&axes, !inverse)?;
+            let (space, occurrences) = parent.flip_destination(&axes)?;
+            // The flipped logical space is the adjoint of the flipped parent
+            // space (one canonical layout of one HomSpace), so it is derived
+            // from the parent rather than flipped separately, before the
+            // pivotal values are staged.
+            let adjoint = <R::Mode as TypedAdjointSpace<R>>::lazy_adjoint(&space)?;
+            let flipped_parent = parent.flip_onto(space, &occurrences, !inverse)?;
             let TypedTensorRepr::Owned(parent) = &flipped_parent.repr else {
                 return Err(internal_layout_error("a parent flip stays owned").into());
             };
@@ -335,7 +340,7 @@ where
                 runtime: self.runtime.clone(),
                 repr: TypedTensorRepr::Adjoint(Arc::new(TypedAdjointView::new(
                     Arc::clone(parent),
-                    logical_space,
+                    adjoint,
                 ))),
             });
         }
@@ -345,14 +350,24 @@ where
     /// The flip of an owned tensor: one scaled copy of its dense payload on
     /// the toggled space.
     fn flip_owned(&self, legs: &[usize], inverse: bool) -> Result<Self, FacadeError<R>> {
-        let nout = self.codomain_rank();
         let (space, occurrences) = self.flip_destination(legs)?;
+        self.flip_onto(space, &occurrences, inverse)
+    }
+
+    /// [`Self::flip_owned`] onto its already derived destination.
+    fn flip_onto(
+        &self,
+        space: BoundDynamicFusionMapSpace<R>,
+        occurrences: &[(usize, bool)],
+        inverse: bool,
+    ) -> Result<Self, FacadeError<R>> {
+        let nout = self.codomain_rank();
         let data = {
             let values = <R::Mode as TypedTensorFlipDispatch<R, D>>::pivotal_values(
                 self.provider(),
                 space.space().structure(),
                 nout,
-                &occurrences,
+                occurrences,
             )?;
             let mut data = self
                 .owned_body()
@@ -362,7 +377,7 @@ where
                 .to_vec();
             scale_blocks_impl(space.space(), &mut data, &|key| match key {
                 BlockKey::FusionTree(key) => {
-                    flip_block_factor(&values, key, nout, &occurrences, inverse)
+                    flip_block_factor(&values, key, nout, occurrences, inverse)
                 }
                 _ => {
                     <<R::Mode as TypedTensorFlipDispatch<R, D>>::Coeff as CategoricalScalar>::one()

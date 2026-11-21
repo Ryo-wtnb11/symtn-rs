@@ -1298,8 +1298,7 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
                 crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
                     .tree_transform_owned_checked_generic_in(
                         engine,
-                        &source,
-                        None,
+                        crate::FusionSource::Direct(&source),
                         &source_data,
                         &forward,
                         1.0,
@@ -1311,8 +1310,7 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
                 crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
                     .tree_transform_owned_checked_generic_in(
                         engine,
-                        &moved,
-                        None,
+                        crate::FusionSource::Direct(&moved),
                         &moved_data,
                         &backward,
                         1.0,
@@ -1363,7 +1361,13 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
     let operation = TreeTransformOperation::permute([0, 2, 3], [1, 4]);
     let mut transform = || {
         crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
-            .tree_transform_owned_checked_generic_in(engine, &source, None, &data, &operation, 1.0)
+            .tree_transform_owned_checked_generic_in(
+                engine,
+                crate::FusionSource::Direct(&source),
+                &data,
+                &operation,
+                1.0,
+            )
             .unwrap()
     };
     drop(transform());

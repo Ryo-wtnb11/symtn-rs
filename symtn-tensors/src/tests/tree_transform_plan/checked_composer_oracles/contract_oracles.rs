@@ -585,8 +585,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
         >::default()
         .tree_transform_owned_checked_generic_in(
             engine,
-            &lhs,
-            None,
+            crate::FusionSource::Direct(&lhs),
             &lhs_data,
             &TreeTransformOperation::permute(lhs_open.iter().copied(), lhs_axes.iter().copied()),
             one,
@@ -600,8 +599,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
         >::default()
         .tree_transform_owned_checked_generic_in(
             engine,
-            &rhs,
-            None,
+            crate::FusionSource::Direct(&rhs),
             &rhs_data,
             &TreeTransformOperation::permute(rhs_axes.iter().copied(), rhs_open.iter().copied()),
             one,
@@ -622,8 +620,7 @@ fn checked_contraction_with_dual_legs_matches_reference_step_composition() {
         >::default()
         .tree_transform_owned_checked_generic_in(
             engine,
-            &core,
-            None,
+            crate::FusionSource::Direct(&core),
             &core_data,
             &TreeTransformOperation::permute(codomain.iter().copied(), domain.iter().copied()),
             one,

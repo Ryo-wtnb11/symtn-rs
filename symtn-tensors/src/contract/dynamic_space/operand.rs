@@ -8,7 +8,9 @@ use symtn_core::{
 };
 
 use super::metadata::{dispatch_prepare, LayoutKeyBuilder};
-use super::DynamicFusionMapSpace;
+use super::{BoundDynamicFusionMapSpace, DynamicFusionMapSpace};
+use crate::adjoint::AdjointBlockMap;
+use crate::mode::CoefficientAlgebra;
 use crate::tree_transform::OrientedBasisOrder;
 use crate::{OperationError, TreeTransformOperation};
 
@@ -22,12 +24,113 @@ use crate::{OperationError, TreeTransformOperation};
 ///
 /// The parent space defines physical storage; orientation derives the logical
 /// HomSpace and user-axis view. Why not retain a logical adjoint space: it is
-/// duplicate authority that can drift from the parent representation.
+/// duplicate authority that can drift from the parent representation. A
+/// lazy adjoint's logical layout lives in [`LazyAdjointSpace`], never next
+/// to a `FusionOperand`.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug)]
 pub struct FusionOperand<'a> {
     storage_space: &'a DynamicFusionMapSpace,
     orientation: FusionTreePairOrientation,
+}
+
+/// The space pair of a lazy adjoint: a parent space and its adjoint space,
+/// related by construction.
+///
+/// Why not a separately passed logical space: the relation would have to be
+/// re-proved per call (O(blocks) key lookups). Why not re-derive the logical
+/// space per operation, as TensorKit's `space(::AdjointTensorMap)` does: the
+/// canonical adjoint block layout costs O(blocks) to build, so the view keeps
+/// it, derived once.
+#[doc(hidden)]
+pub struct LazyAdjointSpace<R> {
+    parent: BoundDynamicFusionMapSpace<R>,
+    logical: BoundDynamicFusionMapSpace<R>,
+}
+
+// Why manual: a derive would bound `R: Clone`.
+impl<R> Clone for LazyAdjointSpace<R> {
+    fn clone(&self) -> Self {
+        Self {
+            parent: self.parent.clone(),
+            logical: self.logical.clone(),
+        }
+    }
+}
+
+impl<R> LazyAdjointSpace<R> {
+    /// The only constructor: derives the logical space from `parent` in mode
+    /// `M`, under `parent`'s provider.
+    pub fn new<M: CoefficientAlgebra<R>>(
+        parent: BoundDynamicFusionMapSpace<R>,
+    ) -> Result<Self, M::Error> {
+        let logical = M::adjoint_space(&parent)?;
+        debug_assert!(Arc::ptr_eq(parent.provider_arc(), logical.provider_arc()));
+        parent.space().share_adjoint_homspace(logical.space());
+        Ok(Self { parent, logical })
+    }
+
+    /// The parent space whose storage the lazy adjoint reads.
+    pub fn parent(&self) -> &BoundDynamicFusionMapSpace<R> {
+        &self.parent
+    }
+
+    /// The adjoint space of [`Self::parent`].
+    pub fn logical(&self) -> &BoundDynamicFusionMapSpace<R> {
+        &self.logical
+    }
+
+    /// The parent read storage-conjugate.
+    pub fn operand(&self) -> FusionOperand<'_> {
+        FusionOperand::adjoint(self.parent.space())
+    }
+
+    /// The map from each logical block to the parent block it adjoints.
+    pub fn block_map(&self) -> AdjointBlockMap<'_> {
+        AdjointBlockMap::new(self.parent.space(), self.logical.space())
+    }
+}
+
+/// A transform or contraction source: an owned space read as stored, or a
+/// lazy adjoint read through its parent's storage.
+#[doc(hidden)]
+pub enum FusionSource<'a, R> {
+    Direct(&'a BoundDynamicFusionMapSpace<R>),
+    Adjoint(&'a LazyAdjointSpace<R>),
+}
+
+// Why manual: the derives would bound `R: Clone`/`R: Copy`.
+impl<R> Clone for FusionSource<'_, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<R> Copy for FusionSource<'_, R> {}
+
+impl<'a, R> FusionSource<'a, R> {
+    /// The space the operation reads: the stored space, or the adjoint.
+    pub fn logical(self) -> &'a BoundDynamicFusionMapSpace<R> {
+        match self {
+            Self::Direct(space) => space,
+            Self::Adjoint(adjoint) => adjoint.logical(),
+        }
+    }
+
+    /// The space the payload is stored in: the stored space, or the parent.
+    pub fn storage(self) -> &'a BoundDynamicFusionMapSpace<R> {
+        match self {
+            Self::Direct(space) => space,
+            Self::Adjoint(adjoint) => adjoint.parent(),
+        }
+    }
+
+    /// The storage operand, derived from the source.
+    pub fn operand(self) -> FusionOperand<'a> {
+        match self {
+            Self::Direct(space) => FusionOperand::direct(space.space()),
+            Self::Adjoint(adjoint) => adjoint.operand(),
+        }
+    }
 }
 
 pub(crate) struct FusionOperandLayout<'a> {

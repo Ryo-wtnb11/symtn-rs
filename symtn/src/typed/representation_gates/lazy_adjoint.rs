@@ -125,12 +125,16 @@ fn generic_lazy_adjoint_keeps_parent_storage_and_refuses_a_dense_borrow() {
         source.logical_space().clone(),
         NonCloneHost(source.dense_data().unwrap().to_vec()),
     ));
-    let logical_space = symtn_tensors::adjoint_bound_space_dyn(&parent.space).unwrap();
+    let adjoint =
+        symtn_tensors::LazyAdjointSpace::new::<symtn_core::MultiplicityFreeAdmissionMode>(
+            parent.space.clone(),
+        )
+        .unwrap();
     let lazy = TensorMap {
         runtime: source.runtime.clone(),
         repr: TypedTensorRepr::Adjoint(Arc::new(TypedAdjointView::new(
             Arc::clone(&parent),
-            logical_space,
+            adjoint,
         ))),
     };
 
@@ -165,7 +169,7 @@ where
     assert!(Arc::ptr_eq(&view.parent, owned(source)));
     assert!(Arc::ptr_eq(
         view.parent.space.provider_arc(),
-        view.logical_space.provider_arc()
+        view.logical_space().provider_arc()
     ));
     assert!(std::ptr::eq(adjoint.provider(), source.provider()));
 
@@ -1959,7 +1963,10 @@ fn lazy_adjoint_constructor_rejects_a_compact_diagonal_parent() {
     .unwrap();
     let _ = TypedAdjointView::new(
         Arc::clone(owned(&diagonal)),
-        diagonal.logical_space().clone(),
+        symtn_tensors::LazyAdjointSpace::new::<symtn_core::MultiplicityFreeAdmissionMode>(
+            diagonal.logical_space().clone(),
+        )
+        .unwrap(),
     );
 }
 

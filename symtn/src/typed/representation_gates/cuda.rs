@@ -1187,8 +1187,8 @@ where
         panic!("dense adjoint is lazy");
     };
     let parent_space = view.parent.space.space();
-    let logical = view.logical_space.space();
-    let map = symtn_tensors::AdjointBlockMap::new(parent_space, logical);
+    let logical = view.logical_space().space();
+    let map = view.adjoint.block_map();
     let lowering = super::super::cuda_transfer::cuda_adjoint_lowering(&map, D::IS_COMPLEX).unwrap();
     // The elementwise kernels read every dtype through the copies (#1874).
     let regions = super::super::cuda_transfer::cuda_adjoint_lowering(&map, false).unwrap();

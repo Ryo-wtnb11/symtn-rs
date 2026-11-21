@@ -577,7 +577,7 @@ where
                 probe::hit(probe::Event::AdjointMaterialization);
                 adjoint = symtn_tensors::materialize_adjoint_data_dyn(
                     view.parent.space.space(),
-                    view.logical_space.space(),
+                    view.logical_space().space(),
                     view.parent_data(),
                 )?;
                 std::borrow::Cow::Borrowed(adjoint.as_slice())

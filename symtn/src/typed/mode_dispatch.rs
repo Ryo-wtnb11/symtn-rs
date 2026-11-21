@@ -478,8 +478,7 @@ where
             .tree_context_mut()
             .stage_tree_transform_checked_generic_in(
                 engine,
-                &body.space,
-                None,
+                symtn_tensors::FusionSource::Direct(&body.space),
                 src_len,
                 &operation,
             )?;
@@ -507,10 +506,6 @@ where
     ) -> Result<(), Self::FacadeError> {
         let mut lease = crate::runtime::ContextLease::new();
         let operation = operation()?;
-        let adjoint_of = match &source.repr {
-            TypedTensorRepr::Owned(_) => None,
-            TypedTensorRepr::Adjoint(view) => Some(&view.parent.space),
-        };
         let destination_space = destination.logical_space().space().clone();
         let staged = lease
             .context()
@@ -518,8 +513,7 @@ where
             .tree_context_mut()
             .stage_tree_transform_into_checked_generic_in::<R, Self::FacadeError>(
                 engine,
-                source.logical_space(),
-                adjoint_of,
+                source.fusion_source(),
                 transform_source_len(source.storage_body())?,
                 &operation,
                 &destination_space,
@@ -821,18 +815,10 @@ where
         let output_axes = spec.output_axes();
         let mut lease = crate::runtime::ContextLease::checkout(engine);
         lease.context().generic_lane::<D>()?;
-        let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
+        let (lhs_source, rhs_source) = (lhs.fusion_source(), rhs.fusion_source());
         let mut staged = symtn_tensors::StagedContract::checked_generic(
-            (
-                lhs.logical_space(),
-                lhs_operand,
-                transform_source_len(lhs.storage_body())?,
-            ),
-            (
-                rhs.logical_space(),
-                rhs_operand,
-                transform_source_len(rhs.storage_body())?,
-            ),
+            (lhs_source, transform_source_len(lhs.storage_body())?),
+            (rhs_source, transform_source_len(rhs.storage_body())?),
             contract_request(spec, &output_axes, planar),
         )?;
         staged.require_destination(destination.logical_space().space())?;
@@ -848,7 +834,7 @@ where
                 Some(lease),
                 &resolution,
                 (staged.destination(), staged.destination_len()),
-                (lhs_operand, rhs_operand),
+                (lhs_source.operand(), rhs_source.operand()),
             ),
             lhs,
             rhs,
@@ -889,18 +875,10 @@ where
 {
     // The kernel resolves the generic lane under this lease, once.
     let lease = crate::runtime::ContextLease::checkout(engine);
-    let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
+    let (lhs_source, rhs_source) = (lhs.fusion_source(), rhs.fusion_source());
     let mut staged = symtn_tensors::StagedContract::checked_generic(
-        (
-            lhs.logical_space(),
-            lhs_operand,
-            transform_source_len(lhs.storage_body())?,
-        ),
-        (
-            rhs.logical_space(),
-            rhs_operand,
-            transform_source_len(rhs.storage_body())?,
-        ),
+        (lhs_source, transform_source_len(lhs.storage_body())?),
+        (rhs_source, transform_source_len(rhs.storage_body())?),
         request,
     )?;
     let resolution = match staged.try_core()? {
@@ -914,7 +892,7 @@ where
             Some(lease),
             &resolution,
             (staged.destination(), staged.destination_len()),
-            (lhs_operand, rhs_operand),
+            (lhs_source.operand(), rhs_source.operand()),
         ),
         lhs,
         rhs,
