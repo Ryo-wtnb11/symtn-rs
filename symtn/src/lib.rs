@@ -134,12 +134,13 @@ mod test_numerics {
 /// only their reason is matched.
 #[cfg(test)]
 mod test_errors {
-    use crate::typed::{Error, OperationError};
+    use crate::typed::{Error, OperationError, PayloadRepresentation};
 
     pub(crate) trait ErrorKind {
         fn is_invalid_argument(&self, reason: &str) -> bool;
         fn is_internal(&self, reason: &str) -> bool;
         fn is_destination_shared(&self) -> bool;
+        fn is_unsupported_destination(&self, representation: PayloadRepresentation) -> bool;
         /// `Error::Operation` whose payload `accept` takes.
         fn fails_in_operation(&self, accept: impl Fn(&OperationError) -> bool) -> bool;
     }
@@ -155,6 +156,10 @@ mod test_errors {
 
         fn is_destination_shared(&self) -> bool {
             matches!(self, Err(Error::DestinationShared))
+        }
+
+        fn is_unsupported_destination(&self, representation: PayloadRepresentation) -> bool {
+            matches!(self, Err(Error::UnsupportedDestination { representation: found }) if *found == representation)
         }
 
         fn fails_in_operation(&self, accept: impl Fn(&OperationError) -> bool) -> bool {

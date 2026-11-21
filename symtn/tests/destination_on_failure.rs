@@ -17,7 +17,8 @@ use num_complex::Complex64;
 use symtn::sector::ZNIrrep;
 use symtn::sector::{U1FusionRule, U1Irrep, ZNFusionRule};
 use symtn::typed::{
-    ContractSpec, Duality, Error, GradedSpace, Runtime, SectorSpectrum, Side, TensorMap,
+    ContractSpec, Duality, Error, GradedSpace, PayloadRepresentation, Runtime, SectorSpectrum,
+    Side, TensorMap,
 };
 
 /// A fresh tensor on `like`'s legs filled with distinct sentinels,
@@ -272,7 +273,7 @@ macro_rules! u1_suite {
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} alias"),
             fresh($ops, &host_t),
-            Error::InvalidArgument(_),
+            Error::DestinationShared,
             |d: &mut _| {
                 let source = d.clone();
                 source.permute_into($ops, &[0, 1], &[2, 3], d, 1.0, 0.5)
@@ -453,7 +454,7 @@ macro_rules! u1_suite {
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} alias"),
             fresh($ops, &host_t),
-            Error::InvalidArgument(_),
+            Error::DestinationShared,
             |d: &mut _| {
                 let source = d.clone();
                 source.trace_pairs_into($ops, &[], d, 1.0, 0.5)
@@ -510,7 +511,7 @@ macro_rules! u1_suite {
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} alias"),
             fresh($ops, &contracted),
-            Error::InvalidArgument(_),
+            Error::DestinationShared,
             |d: &mut _| {
                 let lhs = d.clone();
                 lhs.contract_into($engine, &rhs, &spec, d, 1.0, 0.5)
@@ -544,7 +545,7 @@ macro_rules! u1_suite {
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} alias"),
             fresh($ops, &host_t),
-            Error::InvalidArgument(_),
+            Error::DestinationShared,
             |d: &mut _| {
                 let source = d.clone();
                 source.axpby_into($ops, d, 1.0, 0.5)
@@ -746,42 +747,54 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         diag_snap,
         "permute_into compact dst",
         compact(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        },
         |d: &mut _| t.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
     );
     rejects!(
         diag_snap,
         "braid_into compact dst",
         compact(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        },
         |d: &mut _| t.braid_into(engine, &[0], &[1], &[0, 1], d, 1.0, 0.5)
     );
     rejects!(
         diag_snap,
         "transpose_into compact dst",
         compact(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        },
         |d: &mut _| t.transpose_into(engine, &[0], &[1], d, 1.0, 0.5)
     );
     rejects!(
         diag_snap,
         "repartition_into compact dst",
         compact(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        },
         |d: &mut _| t.repartition_into(engine, d, 1.0, 0.5)
     );
     rejects!(
         diag_snap,
         "trace_pairs_into compact dst",
         compact(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        },
         |d: &mut _| t.trace_pairs_into(engine, &[], d, 1.0, 0.5)
     );
     rejects!(
         diag_snap,
         "axpby_into compact dst",
         compact(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        },
         |d: &mut _| t.axpby_into(engine, d, 1.0, 0.5)
     );
     let unit = ContractSpec {
@@ -794,7 +807,9 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         diag_snap,
         "contract_into compact dst",
         compact(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        },
         |d: &mut _| t.contract_into(engine, &t, &unit, d, 1.0, 0.5)
     );
 
@@ -805,35 +820,45 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         lazy_snap,
         "permute_into lazy dst",
         parent.adjoint(engine).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| t.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
     );
     rejects!(
         lazy_snap,
         "repartition_into lazy dst",
         parent.adjoint(engine).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| t.repartition_into(engine, d, 1.0, 0.5)
     );
     rejects!(
         lazy_snap,
         "trace_pairs_into lazy dst",
         parent.adjoint(engine).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| t.trace_pairs_into(engine, &[], d, 1.0, 0.5)
     );
     rejects!(
         lazy_snap,
         "axpby_into lazy dst",
         parent.adjoint(engine).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| t.axpby_into(engine, d, 1.0, 0.5)
     );
     rejects!(
         lazy_snap,
         "contract_into lazy dst",
         parent.adjoint(engine).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| t.contract_into(engine, &t, &unit, d, 1.0, 0.5)
     );
 
@@ -874,7 +899,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         host_snap,
         "permute_into lazy source aliasing its parent",
         sentinel!(&rt, t),
-        Error::InvalidArgument(_),
+        Error::DestinationShared,
         |d: &mut TensorMap<_, f64>| {
             let source = d.adjoint(engine).unwrap();
             source.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
@@ -1007,7 +1032,9 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         compact_snap,
         "checked permute_into compact destination",
         compact,
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::UnsupportedDestination {
+            representation: PayloadRepresentation::CompactDiagonal
+        }),
         |d: &mut _| into(engine, d)
     );
     rejects!(
@@ -1020,14 +1047,16 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         },
         "checked permute_into lazy destination",
         permuted.adjoint(engine).unwrap(),
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        }),
         |d: &mut _| into(engine, d)
     );
     rejects!(
         host_snap,
         "checked permute_into alias",
         t.clone(),
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let source = d.clone();
             source.permute_into(engine, &[0, 1], &[2], d, 1.0, 0.5)
@@ -1146,14 +1175,16 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         },
         "checked contract_into lazy destination",
         contracted.adjoint(engine).unwrap(),
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        }),
         |d: &mut _| into(engine, d)
     );
     rejects!(
         host_snap,
         "checked contract_into alias",
         fresh(&rt),
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lhs = d.clone();
             lhs.contract_into(engine, &r, &spec, d, 1.0, 0.5)
@@ -1163,7 +1194,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         host_snap,
         "checked contract_into alias of a lazy operand's parent",
         fresh(&rt),
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lazy = d.adjoint(engine).unwrap();
             t.contract_into(engine, &lazy, &spec, d, 1.0, 0.5)
@@ -1313,14 +1344,16 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         },
         "checked trace_pairs_into lazy destination",
         traced.adjoint(engine).unwrap(),
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        }),
         |d: &mut _| into(engine, d)
     );
     rejects!(
         host_snap,
         "checked trace_pairs_into alias of a lazy source's parent",
         sentinel!(&rt, t),
-        GenericTensorError::Facade(Error::InvalidArgument(_)),
+        GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lazy = d.adjoint(engine).unwrap();
             lazy.trace_pairs_into(engine, &[(0, 1)], d, 1.0, 0.5)
@@ -1564,28 +1597,36 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         |dst: &_| lazy_snap(cuda, dst),
         "device permute_into lazy dst",
         parent.adjoint(cuda).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| device_square.permute_into(cuda, &[0], &[1], d, 1.0, 0.5)
     );
     rejects!(
         |dst: &_| lazy_snap(cuda, dst),
         "device trace_pairs_into lazy dst",
         parent.adjoint(cuda).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| device_square.trace_pairs_into(cuda, &[], d, 1.0, 0.5)
     );
     rejects!(
         |dst: &_| lazy_snap(cuda, dst),
         "device axpby_into lazy dst",
         parent.adjoint(cuda).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| device_square.axpby_into(cuda, d, 1.0, 0.5)
     );
     rejects!(
         |dst: &_| lazy_snap(cuda, dst),
         "device contract_into lazy dst",
         parent.adjoint(cuda).unwrap(),
-        Error::InvalidArgument(_),
+        Error::UnsupportedDestination {
+            representation: PayloadRepresentation::LazyAdjoint
+        },
         |d: &mut _| device_square.contract_into(cuda, &device_square, &unit, d, 1.0, 0.5)
     );
 }

@@ -7,8 +7,7 @@ use symtn::sector::LieIrrep;
 
 use symtn::typed::Error;
 use symtn::typed::{
-    BatchMemberRepresentation, GradedSpace, SectorSpectrum, SignatureField, StackedTensorMap,
-    TensorMap,
+    GradedSpace, PayloadRepresentation, SectorSpectrum, SignatureField, StackedTensorMap, TensorMap,
 };
 
 use crate::stacked_fixtures as fixtures;
@@ -160,8 +159,8 @@ fn lazy_adjoint_and_compact_diagonal_members_are_rejected() {
     )
     .unwrap();
     for (tensor, representation) in [
-        (&lazy, BatchMemberRepresentation::LazyAdjoint),
-        (&diagonal, BatchMemberRepresentation::CompactDiagonal),
+        (&lazy, PayloadRepresentation::LazyAdjoint),
+        (&diagonal, PayloadRepresentation::CompactDiagonal),
     ] {
         assert_eq!(
             StackedTensorMap::pack(&[&square, tensor]).err(),

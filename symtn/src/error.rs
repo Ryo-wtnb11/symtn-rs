@@ -6,7 +6,7 @@ use symtn_core::{CoreError, FusionAlgebraError};
 use symtn_matrixalgebra::TruncationError;
 use symtn_tensors::OperationError;
 
-use crate::typed::{BatchMemberRepresentation, SignatureField};
+use crate::typed::{PayloadRepresentation, SignatureField};
 
 /// Error produced by the user-layer [`crate::typed::TensorMap`] /
 /// [`crate::typed::GradedSpace`] / [`crate::typed::Runtime`] API.
@@ -52,10 +52,17 @@ pub enum Error {
     /// invariant; please report it.
     Internal(&'static str),
     /// A destination passed to an `*_into` operation shares its storage with
-    /// another handle (a shallow `Clone`). Writing it would change that clone
+    /// another handle: a shallow `Clone`, or an input of the same call (a
+    /// lazy adjoint's parent included). Writing it would change that handle
     /// too, and replacing it would silently allocate, so the operation does
     /// neither; drop the other handles or pass a tensor of its own.
     DestinationShared,
+    /// A destination passed to an `*_into` operation is not an owned dense
+    /// buffer, so the operation cannot overwrite it in place.
+    UnsupportedDestination {
+        /// The destination's payload representation.
+        representation: PayloadRepresentation,
+    },
     /// A batch operand does not match one structure signature: `member` is
     /// the first differing member of a pack, or `None` when a whole stack
     /// differs from a prepared handle. `field` is the first differing
@@ -71,7 +78,7 @@ pub enum Error {
         /// The rejected member.
         member: usize,
         /// Its payload representation.
-        representation: BatchMemberRepresentation,
+        representation: PayloadRepresentation,
     },
     /// A member index is not below the stack's member count.
     BatchMemberOutOfRange {
@@ -124,6 +131,10 @@ impl fmt::Display for Error {
             Self::DestinationShared => write!(
                 f,
                 "the destination shares its storage with another tensor handle"
+            ),
+            Self::UnsupportedDestination { representation } => write!(
+                f,
+                "the destination is a {representation:?} payload; *_into needs an owned dense destination"
             ),
             Self::BatchSignatureMismatch {
                 member: Some(member),

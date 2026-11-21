@@ -96,9 +96,9 @@ where
     /// # Errors
     ///
     /// [`Error::RuntimeMismatch`], [`Error::RuleMismatch`], then
-    /// [`Error::InvalidArgument`] for a destination that is not owned dense
-    /// host storage, or one that aliases the source (a lazy adjoint's
-    /// parent included); then the operation's own errors, as for [`Self::permute`];
+    /// [`Error::UnsupportedDestination`] for a lazy-adjoint or compact
+    /// diagonal destination, and [`Error::DestinationShared`] for one that
+    /// aliases the source (a lazy adjoint's parent included); then the operation's own errors, as for [`Self::permute`];
     /// `SpaceMismatch` for a destination whose space or block layout does not
     /// match the result, and [`Error::DestinationShared`] when `destination` shares its
     /// storage with a clone. Checked Generic reports these in
@@ -420,7 +420,7 @@ where
             return Err(Error::RuleMismatch.into());
         }
         // Why the storage body: a lazy-adjoint source aliases its parent.
-        destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
+        destination_precheck(destination, &self.storage_body().data)?;
         <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_into(
             engine,
             self,

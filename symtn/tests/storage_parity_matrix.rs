@@ -50,8 +50,8 @@ use std::sync::Arc;
 use num_complex::Complex64;
 use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1Irrep};
 use symtn::typed::{
-    ContractSpec, Direction, Eigh, Error, GradedSpace, HermitianTol, OperationError, Qr, Runtime,
-    SectorSpectrum, Svd, TensorMap,
+    ContractSpec, Direction, Eigh, Error, GradedSpace, HermitianTol, OperationError,
+    PayloadRepresentation, Qr, Runtime, SectorSpectrum, Svd, TensorMap,
 };
 
 use crate::legs::{su2_leg_2_3_1, u1_leg_2_3_1};
@@ -1209,7 +1209,7 @@ macro_rules! transform_rows {
                 if message == "braid levels must list one level per source axis (expected 3, got 1)"
         ));
         let mut alias = a.clone();
-        assert!(matches!(a.permute_into($engine, PERMUTE.0, PERMUTE.1, &mut alias, alpha, beta), Err(Error::InvalidArgument(m)) if m.contains("must not alias an input")));
+        assert!(matches!(a.permute_into($engine, PERMUTE.0, PERMUTE.1, &mut alias, alpha, beta), Err(Error::DestinationShared)));
         let mut mismatched = b.clone().materialize($engine).unwrap();
         assert!(matches!(
             a.permute_into($engine, PERMUTE.0, PERMUTE.1, &mut mismatched, alpha, beta),
@@ -1429,7 +1429,7 @@ fn transform_cuda_rows_match_host() {
         let mut alias = a_dev.clone();
         assert!(matches!(
             a_dev.permute_into(cuda, PERMUTE.0, PERMUTE.1, &mut alias, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination storage must not alias an input"
+            Err(Error::DestinationShared)
         ));
         let mut lazy_destination = b_dev
             .permute(cuda, PERMUTE.0, PERMUTE.1)
@@ -1437,8 +1437,17 @@ fn transform_cuda_rows_match_host() {
             .adjoint(cuda)
             .unwrap();
         assert!(matches!(
-            a_dev.permute_into(cuda, PERMUTE.0, PERMUTE.1, &mut lazy_destination, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination must use ordinary dense CUDA storage"
+            a_dev.permute_into(
+                cuda,
+                PERMUTE.0,
+                PERMUTE.1,
+                &mut lazy_destination,
+                alpha,
+                beta
+            ),
+            Err(Error::UnsupportedDestination {
+                representation: PayloadRepresentation::LazyAdjoint
+            })
         ));
         let mut mismatched = b_dev.clone();
         assert!(matches!(
@@ -1788,12 +1797,12 @@ macro_rules! contract_rows {
         let mut alias = b.clone();
         assert!(matches!(
             x.contract_into($engine, &b, &CANONICAL, &mut alias, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination storage must not alias an input"
+            Err(Error::DestinationShared)
         ));
         let mut lazy = x.compose($engine, &a).unwrap().adjoint($engine).unwrap();
         assert!(matches!(
             x.contract_into($engine, &b, &CANONICAL, &mut lazy, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination must use ordinary dense host storage"
+            Err(Error::UnsupportedDestination { representation: PayloadRepresentation::LazyAdjoint })
         ));
         let mut mismatched = a.scale($engine, one).unwrap();
         assert!(matches!(
@@ -2002,12 +2011,14 @@ fn contract_cuda_rows_match_host() {
         let mut alias = b_dev.clone();
         assert!(matches!(
             x.contract_into(cuda, &b_dev, &CANONICAL, &mut alias, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination storage must not alias an input"
+            Err(Error::DestinationShared)
         ));
         let mut lazy = x.compose(cuda, &a_dev).unwrap().adjoint(cuda).unwrap();
         assert!(matches!(
             x.contract_into(cuda, &b_dev, &CANONICAL, &mut lazy, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination must use ordinary dense CUDA storage"
+            Err(Error::UnsupportedDestination {
+                representation: PayloadRepresentation::LazyAdjoint
+            })
         ));
         let mut mismatched = a_dev.clone().to_host(cuda).unwrap().to_cuda(cuda).unwrap();
         assert!(matches!(
@@ -2183,13 +2194,13 @@ macro_rules! trace_rows {
         let mut alias = a.clone();
         assert!(matches!(
             a.trace_pairs_into($engine, &[(0, 2)], &mut alias, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination storage must not alias an input"
+            Err(Error::DestinationShared)
         ));
         // Doubly invalid: a lazy adjoint, of the wrong space.
         let mut lazy = b.adjoint($engine).unwrap();
         assert!(matches!(
             a.trace_pairs_into($engine, &[(0, 2)], &mut lazy, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination must use ordinary dense host storage"
+            Err(Error::UnsupportedDestination { representation: PayloadRepresentation::LazyAdjoint })
         ));
         let mut mismatched = b.scale($engine, one).unwrap();
         assert!(matches!(
@@ -2369,12 +2380,14 @@ fn trace_cuda_rows_match_host() {
         let mut alias = a_dev.clone();
         assert!(matches!(
             a_dev.trace_pairs_into(cuda, &[(0, 2)], &mut alias, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination storage must not alias an input"
+            Err(Error::DestinationShared)
         ));
         let mut lazy = b_dev.adjoint(cuda).unwrap();
         assert!(matches!(
             a_dev.trace_pairs_into(cuda, &[(0, 2)], &mut lazy, alpha, beta),
-            Err(Error::InvalidArgument(message)) if message == "destination must use ordinary dense CUDA storage"
+            Err(Error::UnsupportedDestination {
+                representation: PayloadRepresentation::LazyAdjoint
+            })
         ));
         let mut mismatched = b_dev.clone().to_host(cuda).unwrap().to_cuda(cuda).unwrap();
         assert!(matches!(

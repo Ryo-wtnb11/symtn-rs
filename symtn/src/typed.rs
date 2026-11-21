@@ -352,9 +352,9 @@ mod batched;
 #[doc(hidden)]
 pub use batched::StackExec;
 pub use batched::{
-    BatchError, BatchMemberRepresentation, ComposePlan, ContractPlan, ContractWorkspace,
-    EighFullPlan, EighFullWorkspace, EighStackOutput, MemberFault, SignatureField,
-    StackedTensorMap, StructureSignature,
+    BatchError, ComposePlan, ContractPlan, ContractWorkspace, EighFullPlan, EighFullWorkspace,
+    EighStackOutput, MemberFault, PayloadRepresentation, SignatureField, StackedTensorMap,
+    StructureSignature,
 };
 
 mod serialization;

@@ -293,7 +293,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &alias);
     assert!(source
         .permute_into(engine, &[0, 1], &[2], &mut alias, 1.0, 0.0)
-        .is_invalid_argument("must not alias an input"));
+        .is_destination_shared());
     assert_unchanged(engine, &alias, &before);
 
     let mut bad_len = expected.zeros_like(engine).unwrap();
@@ -319,7 +319,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &lazy_destination);
     assert!(source
         .permute_into(engine, &[1], &[2, 0], &mut lazy_destination, 1.0, 0.0)
-        .is_invalid_argument("ordinary dense host storage"));
+        .is_unsupported_destination(PayloadRepresentation::LazyAdjoint));
     assert_eq!(f64_bits(engine, &lazy_destination), before);
 
     let lazy_source = source.adjoint(engine).unwrap();
@@ -345,7 +345,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         .to_vec();
     assert!(square
         .permute_into(engine, &[0], &[1], &mut compact_destination, 1.0, 0.0)
-        .is_invalid_argument("ordinary dense host storage"));
+        .is_unsupported_destination(PayloadRepresentation::CompactDiagonal));
     assert_eq!(
         compact_destination
             .materialize(engine)
@@ -894,7 +894,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &lhs_alias);
     assert!(lhs
         .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut lhs_alias, 1.0, 0.0)
-        .is_invalid_argument("must not alias an input"));
+        .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &lhs_alias), before);
 
     let mut rhs_alias = rhs
@@ -905,7 +905,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &rhs_alias);
     assert!(lhs
         .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut rhs_alias, 1.0, 0.0)
-        .is_invalid_argument("must not alias an input"));
+        .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &rhs_alias), before);
 
     let mut shared_body = destination(engine);
@@ -949,7 +949,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             1.0,
             0.0
         )
-        .is_invalid_argument("ordinary dense host storage"));
+        .is_unsupported_destination(PayloadRepresentation::LazyAdjoint));
     let TypedTensorRepr::Adjoint(after) = &lazy_destination.repr else {
         unreachable!()
     };
@@ -967,7 +967,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             1.0,
             0.0
         )
-        .is_invalid_argument("ordinary dense host storage"));
+        .is_unsupported_destination(PayloadRepresentation::CompactDiagonal));
     assert!(Arc::ptr_eq(&owned(&compact_destination).data, &payload));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 

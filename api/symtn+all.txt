@@ -250,19 +250,6 @@ pub fn symtn::typed::BatchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> co
 impl core::fmt::Display for symtn::typed::BatchError
 pub fn symtn::typed::BatchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for symtn::typed::BatchError
-#[non_exhaustive] pub enum symtn::typed::BatchMemberRepresentation
-pub symtn::typed::BatchMemberRepresentation::CompactDiagonal
-pub symtn::typed::BatchMemberRepresentation::LazyAdjoint
-impl core::clone::Clone for symtn::typed::BatchMemberRepresentation
-pub fn symtn::typed::BatchMemberRepresentation::clone(&self) -> symtn::typed::BatchMemberRepresentation
-impl core::clone::TrivialClone for symtn::typed::BatchMemberRepresentation
-impl core::cmp::Eq for symtn::typed::BatchMemberRepresentation
-impl core::cmp::PartialEq for symtn::typed::BatchMemberRepresentation
-pub fn symtn::typed::BatchMemberRepresentation::eq(&self, &symtn::typed::BatchMemberRepresentation) -> bool
-impl core::fmt::Debug for symtn::typed::BatchMemberRepresentation
-pub fn symtn::typed::BatchMemberRepresentation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for symtn::typed::BatchMemberRepresentation
-impl core::marker::StructuralPartialEq for symtn::typed::BatchMemberRepresentation
 pub enum symtn::typed::BondOutput<D>
 pub symtn::typed::BondOutput::Dense(alloc::vec::Vec<D>)
 pub symtn::typed::BondOutput::Spectrum(alloc::vec::Vec<symtn_matrixalgebra::factorize::scalar::SectorSpectrum<D>>)
@@ -382,7 +369,9 @@ pub symtn::typed::Error::Unsupported::alternative: symtn::typed::Alternative
 pub symtn::typed::Error::Unsupported::operation: &'static str
 pub symtn::typed::Error::UnsupportedBatchMember
 pub symtn::typed::Error::UnsupportedBatchMember::member: usize
-pub symtn::typed::Error::UnsupportedBatchMember::representation: symtn::typed::BatchMemberRepresentation
+pub symtn::typed::Error::UnsupportedBatchMember::representation: symtn::typed::PayloadRepresentation
+pub symtn::typed::Error::UnsupportedDestination
+pub symtn::typed::Error::UnsupportedDestination::representation: symtn::typed::PayloadRepresentation
 pub symtn::typed::Error::UnsupportedOnDevice(alloc::string::String)
 impl core::clone::Clone for symtn::typed::Error
 pub fn symtn::typed::Error::clone(&self) -> symtn::typed::Error
@@ -447,6 +436,19 @@ impl core::fmt::Debug for symtn::typed::MemberFault
 pub fn symtn::typed::MemberFault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for symtn::typed::MemberFault
 impl core::marker::StructuralPartialEq for symtn::typed::MemberFault
+#[non_exhaustive] pub enum symtn::typed::PayloadRepresentation
+pub symtn::typed::PayloadRepresentation::CompactDiagonal
+pub symtn::typed::PayloadRepresentation::LazyAdjoint
+impl core::clone::Clone for symtn::typed::PayloadRepresentation
+pub fn symtn::typed::PayloadRepresentation::clone(&self) -> symtn::typed::PayloadRepresentation
+impl core::clone::TrivialClone for symtn::typed::PayloadRepresentation
+impl core::cmp::Eq for symtn::typed::PayloadRepresentation
+impl core::cmp::PartialEq for symtn::typed::PayloadRepresentation
+pub fn symtn::typed::PayloadRepresentation::eq(&self, &symtn::typed::PayloadRepresentation) -> bool
+impl core::fmt::Debug for symtn::typed::PayloadRepresentation
+pub fn symtn::typed::PayloadRepresentation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn::typed::PayloadRepresentation
+impl core::marker::StructuralPartialEq for symtn::typed::PayloadRepresentation
 pub enum symtn::typed::PersistedScalar
 pub symtn::typed::PersistedScalar::Complex32
 pub symtn::typed::PersistedScalar::Complex64
@@ -1161,17 +1163,14 @@ pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::fusion_channels(&R
 pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::nsymbol(&R, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn::typed::FacadeError<R>>
 pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::vacuum(&R) -> symtn_sectors::SectorId
 pub trait symtn::typed::TypedStorage<R, D>: symtn_core::storage::TensorStorage<D> + symtn::typed::storage::sealed::Sealed + core::marker::Sized + 'static
-pub const symtn::typed::TypedStorage::NOUN: &'static str
 pub fn symtn::typed::TypedStorage::as_host(symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&symtn::typed::TensorMap<R, D>>
 pub fn symtn::typed::TypedStorage::as_host_mut(symtn::typed::storage::sealed::ExecToken, &mut symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&mut symtn::typed::TensorMap<R, D>>
 pub fn symtn::typed::TypedStorage::from_host(symtn::typed::storage::sealed::ExecToken, symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
 impl<R, D: 'static> symtn::typed::TypedStorage<R, D> for alloc::vec::Vec<D>
-pub const alloc::vec::Vec<D>::NOUN: &'static str
 pub fn alloc::vec::Vec<D>::as_host(symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&symtn::typed::TensorMap<R, D>>
 pub fn alloc::vec::Vec<D>::as_host_mut(symtn::typed::storage::sealed::ExecToken, &mut symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&mut symtn::typed::TensorMap<R, D>>
 pub fn alloc::vec::Vec<D>::from_host(symtn::typed::storage::sealed::ExecToken, symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
 impl<R, D> symtn::typed::TypedStorage<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
-pub const symtn_operations::cuda::CudaStorage<D>::NOUN: &'static str
 pub fn symtn_operations::cuda::CudaStorage<D>::as_host(symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&symtn::typed::TensorMap<R, D>>
 pub fn symtn_operations::cuda::CudaStorage<D>::as_host_mut(symtn::typed::storage::sealed::ExecToken, &mut symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&mut symtn::typed::TensorMap<R, D>>
 pub fn symtn_operations::cuda::CudaStorage<D>::from_host(symtn::typed::storage::sealed::ExecToken, symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
