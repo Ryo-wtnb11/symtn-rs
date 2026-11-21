@@ -170,8 +170,9 @@ fn checked_generic_trace_preflight_gates_non_symmetric_braiding_first() {
             matches!(
                 error,
                 CheckedGenericPlanError::Operation(
-                    OperationError::UnsupportedTensorContractScope {
-                        message: crate::admission::FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING
+                    OperationError::UnsupportedContractionBraiding {
+                        operation: crate::BraidingOp::Trace,
+                        style: symtn_core::BraidingStyleKind::Anyonic,
                     }
                 )
             ),
@@ -1200,8 +1201,9 @@ fn tensortrace_fusion_rejects_nonsymmetric_braiding_like_tensorkit_tensortrace()
 
     assert_eq!(
         err,
-        OperationError::UnsupportedTensorContractScope {
-            message: "fusion tensortrace requires symmetric braiding"
+        OperationError::UnsupportedContractionBraiding {
+            operation: crate::BraidingOp::Trace,
+            style: symtn_core::BraidingStyleKind::Anyonic,
         }
     );
 }

@@ -382,7 +382,7 @@ fn ordinary_contract_still_rejects_anyonic_rules() {
     let (a, b) = (case.filled("a2", 2, 2), case.filled("b2", 2, 2));
     assert!(matches!(
         a.contract(engine, &b, &G2).unwrap_err(),
-        Error::Operation(op) if matches!(*op, OperationError::UnsupportedTensorContractScope { .. })
+        Error::Operation(op) if matches!(*op, OperationError::UnsupportedContractionBraiding { operation: symtn::typed::BraidingOp::Contraction, .. })
     ));
 }
 

@@ -1122,11 +1122,17 @@ fn probe_composition(row: usize, column: usize) -> f64 {
         .sum()
 }
 
-fn is_unsupported_contract_scope(error: &symtn::typed::Error) -> bool {
+fn is_trace_braiding_refusal(error: &symtn::typed::Error) -> bool {
     matches!(
         error,
         symtn::typed::Error::Operation(operation)
-            if matches!(**operation, symtn::typed::OperationError::UnsupportedTensorContractScope { .. })
+            if matches!(
+                **operation,
+                symtn::typed::OperationError::UnsupportedContractionBraiding {
+                    operation: symtn::typed::BraidingOp::Trace,
+                    ..
+                }
+            )
     )
 }
 
@@ -1136,9 +1142,10 @@ fn is_non_symmetric_contraction(error: &symtn::typed::Error) -> bool {
         symtn::typed::Error::Operation(operation)
             if matches!(
                 **operation,
-                symtn::typed::OperationError::UnsupportedTensorContractScope {
-                    message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-                }
+                symtn::typed::OperationError::UnsupportedContractionBraiding {
+                    operation: symtn::typed::BraidingOp::Contraction,
+                    style,
+                } if !style.is_symmetric()
             )
     )
 }
@@ -1267,7 +1274,7 @@ fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
     let compact_error = compact.trace_pairs(engine, &[(0, 1)]).unwrap_err();
     let dense_error = dense.trace_pairs(engine, &[(0, 1)]).unwrap_err();
     assert!(
-        is_unsupported_contract_scope(&compact_error),
+        is_trace_braiding_refusal(&compact_error),
         "{compact_error:?}"
     );
     assert_eq!(compact_error, dense_error);

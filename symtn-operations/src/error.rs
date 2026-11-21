@@ -5,6 +5,21 @@ use symtn_dense::DenseError;
 
 use crate::TreeTransformOperation;
 
+/// The operations whose admission depends on the braiding style.
+///
+/// Composition (TensorKit `mul!`) crosses no strands and is admitted for
+/// every style in every mode, so it has no entry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BraidingOp {
+    /// General-axis contraction (TensorKit `blas_contract!`).
+    Contraction,
+    /// Planar contraction (TensorKit `planarcontract!`).
+    PlanarContraction,
+    /// Fusion trace (TensorKit `trace_permute!`).
+    Trace,
+}
+
+#[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OperationError {
     Core(CoreError),
@@ -108,10 +123,19 @@ pub enum OperationError {
     UnsupportedTensorContractScope {
         message: &'static str,
     },
+    /// A contraction, planar contraction or trace refused by the rule's
+    /// braiding style at admission (TensorKit `SectorMismatch` in
+    /// `blas_contract!` and `trace_permute!`). Ordinary contraction and trace
+    /// need a symmetric braiding; the checked-Generic engine admits ordinary
+    /// and planar contraction for Bosonic braiding only.
+    UnsupportedContractionBraiding {
+        operation: BraidingOp,
+        style: BraidingStyleKind,
+    },
     /// A hom-space relation the operation requires does not hold (TensorKit
     /// `SpaceMismatch`): an endomorphism or an isomorphism, matching
     /// codomains, or an output or factor space that disagrees with its
-    /// source. A misuse, unlike [`Self::UnsupportedTensorContractScope`].
+    /// source. A misuse, unlike [`Self::UnsupportedContractionBraiding`].
     SpaceMismatch {
         message: &'static str,
     },
@@ -252,6 +276,23 @@ impl fmt::Display for OperationError {
             }
             Self::UnsupportedTensorContractScope { message } => {
                 write!(f, "unsupported tensor contraction scope: {message}")
+            }
+            Self::UnsupportedContractionBraiding { operation, style } => {
+                let reason = match (operation, style.is_symmetric()) {
+                    (BraidingOp::Contraction, false) => {
+                        "ordinary contraction requires symmetric (bosonic or fermionic) braiding; \
+                         use compose for the composition of morphisms, \
+                         or planar_contract for a planar contraction"
+                    }
+                    (BraidingOp::Contraction, true) => {
+                        "checked Generic contraction requires Bosonic braiding"
+                    }
+                    (BraidingOp::PlanarContraction, _) => {
+                        "checked Generic planar contraction requires Bosonic braiding"
+                    }
+                    (BraidingOp::Trace, _) => "fusion tensortrace requires symmetric braiding",
+                };
+                write!(f, "unsupported tensor contraction scope: {reason}")
             }
             Self::SpaceMismatch { message } => write!(f, "space mismatch: {message}"),
             Self::UnsupportedDeviceTreeTransform { message } => {

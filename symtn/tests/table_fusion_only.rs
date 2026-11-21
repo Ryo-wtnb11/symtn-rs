@@ -273,7 +273,7 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
         matches!(
             &error,
             Error::Operation(operation)
-                if matches!(**operation, OperationError::UnsupportedTensorContractScope { .. })
+                if matches!(**operation, OperationError::UnsupportedContractionBraiding { operation: symtn::typed::BraidingOp::Contraction, .. })
         ),
         "{error:?}"
     );

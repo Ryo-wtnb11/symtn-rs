@@ -236,8 +236,8 @@ symmetric braiding; `Anyonic` and
 them, as TensorKit `blas_contract!` does, while `compose` admits every style.
 The checked Generic engine has no supertrace twist and no planar route, so it
 admits ordinary and planar contraction for `Bosonic` braiding only; every
-other style is refused with `UnsupportedTensorContractScope`, whatever the
-operands' storage form.
+other style is refused with `UnsupportedContractionBraiding`, which carries
+the operation and the style, whatever the operands' storage form.
 
 `fusion_channels` order is part of the convention. Keep it stable; table
 rules use table object order.

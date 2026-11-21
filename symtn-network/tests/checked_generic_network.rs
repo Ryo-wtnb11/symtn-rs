@@ -1053,8 +1053,9 @@ fn checked_generic_fermionic_network_is_refused_before_any_step() {
                 GenericTensorError::Facade(symtn::typed::Error::Operation(operation))
                     if matches!(
                         **operation,
-                        symtn::typed::OperationError::UnsupportedTensorContractScope {
-                            message: symtn::typed::CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING
+                        symtn::typed::OperationError::UnsupportedContractionBraiding {
+                            operation: symtn::typed::BraidingOp::Contraction,
+                            style: BraidingStyleKind::Fermionic,
                         }
                     )
             ),

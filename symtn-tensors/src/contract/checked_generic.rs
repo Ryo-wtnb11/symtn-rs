@@ -10,9 +10,9 @@ use symtn_core::{
 use symtn_operations::OutputAxisOrder;
 use symtn_operations::TensorContractSpec;
 
-use crate::admission::{BraidingOp, CHECKED_PLANAR_CONTRACTION_UNSUPPORTED};
 use crate::mode::{ContractRequest, ContractSide, ContractStaging, StagedContraction};
 use crate::tree_transform::{CheckedGenericPlanError, CheckedPendingCoefficients};
+use crate::BraidingOp;
 use crate::{
     ConjugateValue, DenseRecouplingScalar, DenseTreeTransformOperations, OperationError,
     RecouplingCoefficientAction, ZeroBytes,
@@ -340,7 +340,7 @@ where
             // contraction is the ordinary one, which the facade runs.
             ContractRequest::Planar { .. } => {
                 return Err(OperationError::UnsupportedTensorContractScope {
-                    message: CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
+                    message: "checked Generic planar contraction requires Bosonic braiding",
                 }
                 .into())
             }
@@ -1802,27 +1802,18 @@ mod tests {
     }
 
     /// What: general checked contraction with a non-Bosonic provider
-    /// returns the typed `Unsupported` (the checked-Bosonic reason for a
-    /// Fermionic rule, the non-symmetric reason otherwise) after the pair
+    /// returns the typed braiding refusal carrying the provider's style
+    /// after the pair
     /// admission and one braiding read, before any structural query;
     /// canonical composition crosses no legs and stays admitted.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_requires_bosonic_braiding_and_compose_does_not() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        for (braiding, expected) in [
-            (
-                BraidingStyleKind::Fermionic,
-                "checked Generic contraction requires Bosonic braiding",
-            ),
-            (
-                BraidingStyleKind::Anyonic,
-                crate::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
-            ),
-            (
-                BraidingStyleKind::NoBraiding,
-                crate::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
-            ),
+        for braiding in [
+            BraidingStyleKind::Fermionic,
+            BraidingStyleKind::Anyonic,
+            BraidingStyleKind::NoBraiding,
         ] {
             let (left, lhs, right, rhs) = bound_pair(1, 1);
             left.braiding.set(braiding);
@@ -1841,8 +1832,11 @@ mod tests {
                 matches!(
                     error,
                     CheckedGenericPlanError::Operation(
-                        OperationError::UnsupportedTensorContractScope { message }
-                    ) if message == expected
+                        OperationError::UnsupportedContractionBraiding {
+                            operation: BraidingOp::Contraction,
+                            style,
+                        }
+                    ) if style == braiding
                 ),
                 "{braiding:?}: {error:?}"
             );

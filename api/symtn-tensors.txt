@@ -1,4 +1,5 @@
 pub mod symtn_tensors
+pub use symtn_tensors::BraidingOp
 pub use symtn_tensors::ConjugateValue
 pub use symtn_tensors::ContractDestinationInit
 pub use symtn_tensors::DenseBlockScalar
@@ -29,20 +30,6 @@ pub use symtn_tensors::ZeroBytes
 pub use symtn_tensors::host_pool
 pub use symtn_tensors::try_cat_owned_raw
 pub use symtn_tensors::zeroed_payload
-pub enum symtn_tensors::BraidingOp
-pub symtn_tensors::BraidingOp::Contraction
-pub symtn_tensors::BraidingOp::PlanarContraction
-pub symtn_tensors::BraidingOp::Trace
-impl core::clone::Clone for symtn_tensors::BraidingOp
-pub fn symtn_tensors::BraidingOp::clone(&self) -> symtn_tensors::BraidingOp
-impl core::clone::TrivialClone for symtn_tensors::BraidingOp
-impl core::cmp::Eq for symtn_tensors::BraidingOp
-impl core::cmp::PartialEq for symtn_tensors::BraidingOp
-pub fn symtn_tensors::BraidingOp::eq(&self, &symtn_tensors::BraidingOp) -> bool
-impl core::fmt::Debug for symtn_tensors::BraidingOp
-pub fn symtn_tensors::BraidingOp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for symtn_tensors::BraidingOp
-impl core::marker::StructuralPartialEq for symtn_tensors::BraidingOp
 pub enum symtn_tensors::CheckedGenericPlanError<E>
 pub symtn_tensors::CheckedGenericPlanError::Core(symtn_core::error::CoreError)
 pub symtn_tensors::CheckedGenericPlanError::Operation(symtn_operations::error::OperationError)
@@ -383,15 +370,12 @@ impl core::fmt::Debug for symtn_tensors::ValidatedDynamicFusionLayout
 pub fn symtn_tensors::ValidatedDynamicFusionLayout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::hash::Hash for symtn_tensors::ValidatedDynamicFusionLayout
 pub fn symtn_tensors::ValidatedDynamicFusionLayout::hash<H: core::hash::Hasher>(&self, &mut H)
-pub const symtn_tensors::CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING: &str
-pub const symtn_tensors::CHECKED_PLANAR_CONTRACTION_UNSUPPORTED: &str
-pub const symtn_tensors::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED: &str
 pub trait symtn_tensors::BraidingAdmission: symtn_tensors::admission::sealed::Sealed
-pub fn symtn_tensors::BraidingAdmission::admits(symtn_tensors::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
+pub fn symtn_tensors::BraidingAdmission::admits(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
 impl symtn_tensors::BraidingAdmission for symtn_sectors::algebra::CheckedGenericAdmissionMode
-pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::admits(symtn_tensors::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::admits(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
 impl symtn_tensors::BraidingAdmission for symtn_sectors::algebra::MultiplicityFreeAdmissionMode
-pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::admits(symtn_tensors::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::admits(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
 pub trait symtn_tensors::CoefficientAlgebra<R>: symtn_tensors::mode::sealed::Sealed
 pub type symtn_tensors::CoefficientAlgebra::Coeff
 pub type symtn_tensors::CoefficientAlgebra::Error: core::convert::From<symtn_operations::error::OperationError>
@@ -440,7 +424,7 @@ pub type R::Key = symtn_sectors::rule_identity::RuleIdentity
 pub fn R::tree_transform_rule_cache_key(&self) -> Self::Key
 pub fn symtn_tensors::adjoint_bound_dyn<R, D>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &[D]) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, D: symtn_tensors::adjoint::AdjointScalar
 pub fn symtn_tensors::adjoint_bound_space_dyn<R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
-pub fn symtn_tensors::admit_braiding<M: symtn_tensors::BraidingAdmission>(symtn_tensors::BraidingOp, symtn_sectors::BraidingStyleKind) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::admit_braiding<M: symtn_tensors::BraidingAdmission>(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> core::result::Result<(), symtn_operations::error::OperationError>
 pub fn symtn_tensors::admit_checked_generic_pair<'a, P>(&'a symtn_tensors::BoundDynamicFusionMapSpace<P>, &symtn_tensors::BoundDynamicFusionMapSpace<P>) -> core::result::Result<&'a P, symtn_core::error::CoreError> where P: symtn_sectors::algebra::CheckedGenericFusion
 pub fn symtn_tensors::admit_exact_tree_pair_layout<T>(&symtn_sectors::rule_identity::RuleIdentity, &symtn_operations::transform_key::TreeTransformOperation, &symtn_core::block_structure::structure::BlockStructure, &symtn_core::block_structure::structure::BlockStructure, (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3]), (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3])) -> bool where T: 'static + core::marker::Send + core::marker::Sync
 pub fn symtn_tensors::build_all_codomain_tree_transform_group_plan<R>(&R, symtn_operations::transform_key::TreeTransformOperation, &symtn_core::block_structure::structure::BlockStructure) -> core::result::Result<symtn_operations::transform_plan::TreeTransformGroupPlan<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeFusionSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + num_traits::identities::Zero

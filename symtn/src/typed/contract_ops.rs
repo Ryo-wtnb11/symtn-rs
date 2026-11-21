@@ -315,7 +315,7 @@ where
     /// - [`Error::RuntimeMismatch`] when the operands belong to different
     ///   runtimes.
     /// - [`Error::Operation`] with
-    ///   [`crate::typed::OperationError::UnsupportedTensorContractScope`] for
+    ///   [`crate::typed::OperationError::UnsupportedContractionBraiding`] for
     ///   non-symmetric (anyonic or `NoBraiding`) providers, whatever the axes,
     ///   and for a checked Generic Fermionic provider (in
     ///   [`GenericTensorError::Facade`]), before any other check on `other`
@@ -452,7 +452,7 @@ where
     /// # Errors
     ///
     /// [`Error::RuntimeMismatch`]; then
-    /// [`crate::typed::OperationError::UnsupportedTensorContractScope`] for
+    /// [`crate::typed::OperationError::UnsupportedContractionBraiding`] for
     /// non-symmetric (anyonic or `NoBraiding`) and checked Generic
     /// Fermionic providers, as for [`Self::contract`]; [`Error::RuleMismatch`];
     /// [`Error::UnsupportedDestination`] for a lazy-adjoint or compact
@@ -662,7 +662,7 @@ where
     ///   is not a rotation of the open boundary. All are reported before any
     ///   provider work.
     /// - Then, for a non-Bosonic checked Generic provider,
-    ///   [`crate::typed::OperationError::UnsupportedTensorContractScope`] in
+    ///   [`crate::typed::OperationError::UnsupportedContractionBraiding`] in
     ///   [`GenericTensorError::Facade`]. Placement, planarity and this
     ///   braiding admission all read `other` without resolving a borrowed
     ///   adjoint view.

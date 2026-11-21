@@ -108,8 +108,6 @@ pub mod symtn::typed
 pub use symtn::typed::BlockKey
 pub use symtn::typed::BlockKeyKind
 pub use symtn::typed::BraidingOp
-pub use symtn::typed::CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING
-pub use symtn::typed::CHECKED_PLANAR_CONTRACTION_UNSUPPORTED
 pub use symtn::typed::CheckedFusionSpaceError
 pub use symtn::typed::CheckedGenericPlanError
 pub use symtn::typed::CheckedGenericStructureError
@@ -129,7 +127,6 @@ pub use symtn::typed::HermitianTol
 pub use symtn::typed::LeftPolar
 pub use symtn::typed::Lq
 pub use symtn::typed::MultiplicityIndex
-pub use symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
 pub use symtn::typed::OpaqueBlockKey
 pub use symtn::typed::OperationError
 pub use symtn::typed::Pool

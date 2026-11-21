@@ -70,7 +70,7 @@ pub use checked_block_layout::CheckedBlockLayout;
 pub use cuda_transform::{
     CudaTreeTransformDestination, CudaTreeTransformExecutor, DEFAULT_COEFFICIENT_BUDGET_BYTES,
 };
-pub use error::OperationError;
+pub use error::{BraidingOp, OperationError};
 pub use fusion_replay::{
     fusion_scale_block_layouts_excluding, ContractDestinationInit, FusionBlockContractGroupPlan,
     FusionBlockContractPlan, FusionBlockContractWorkspace, FusionBlockMatrixGroup,

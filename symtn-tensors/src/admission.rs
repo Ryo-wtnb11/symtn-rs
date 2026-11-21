@@ -11,55 +11,14 @@ use symtn_core::{
     FusionStyleKind, MultiplicityFreeAdmissionMode, RuleIdentity,
 };
 
-use crate::{BoundDynamicFusionMapSpace, OperationError};
-
-/// The refusal of ordinary contraction over a non-symmetric braiding, in
-/// every mode.
-#[doc(hidden)]
-pub const NON_SYMMETRIC_CONTRACTION_UNSUPPORTED: &str =
-    "ordinary contraction requires symmetric (bosonic or fermionic) braiding; \
-     use compose for the composition of morphisms, or planar_contract for a planar contraction";
-
-/// The refusal of checked-Generic ordinary contraction over a symmetric but
-/// non-Bosonic (Fermionic) braiding: the checked engine has no contraction
-/// twist.
-#[doc(hidden)]
-pub const CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING: &str =
-    "checked Generic contraction requires Bosonic braiding";
-
-/// The refusal of a checked-Generic planar contraction: the checked engine
-/// has no planar route, so only a Bosonic planar contraction, which the
-/// facade runs as the ordinary one, is admitted.
-#[doc(hidden)]
-pub const CHECKED_PLANAR_CONTRACTION_UNSUPPORTED: &str =
-    "checked Generic planar contraction requires Bosonic braiding";
-
-/// The refusal of a fusion trace over a non-symmetric braiding.
-#[doc(hidden)]
-pub const FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING: &str =
-    "fusion tensortrace requires symmetric braiding";
+use crate::{BoundDynamicFusionMapSpace, BraidingOp, OperationError};
 
 /// The checked engine's internal fail-closed refusal (twist and core-alpha
 /// invariants after admission).
 pub(crate) const CHECKED_CONTRACTION_REQUIRES_BOSONIC: OperationError =
     OperationError::UnsupportedTensorContractScope {
-        message: CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
+        message: "checked Generic contraction requires Bosonic braiding",
     };
-
-/// The operations whose admission depends on the braiding style.
-///
-/// Composition (TensorKit `mul!`) crosses no strands and is admitted for
-/// every style in every mode, so it has no entry.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum BraidingOp {
-    /// General-axis contraction (TensorKit `blas_contract!`).
-    Contraction,
-    /// Planar contraction (TensorKit `planarcontract!`).
-    PlanarContraction,
-    /// Fusion trace (TensorKit `trace_permute!`).
-    Trace,
-}
 
 mod sealed {
     pub trait Sealed {}
@@ -101,7 +60,8 @@ impl BraidingAdmission for CheckedGenericAdmissionMode {
 
 /// The one braiding admission of contraction and trace: the outcome depends
 /// only on the mode `M`, `op` and `style`, never on storage form, and a
-/// refusal is `UnsupportedTensorContractScope` with the operation's message.
+/// refusal is [`OperationError::UnsupportedContractionBraiding`] carrying
+/// both.
 #[doc(hidden)]
 pub fn admit_braiding<M: BraidingAdmission>(
     op: BraidingOp,
@@ -110,13 +70,9 @@ pub fn admit_braiding<M: BraidingAdmission>(
     if M::admits(op, style) {
         return Ok(());
     }
-    Err(OperationError::UnsupportedTensorContractScope {
-        message: match (op, style.is_symmetric()) {
-            (BraidingOp::Contraction, false) => NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
-            (BraidingOp::Contraction, true) => CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
-            (BraidingOp::PlanarContraction, _) => CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
-            (BraidingOp::Trace, _) => FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING,
-        },
+    Err(OperationError::UnsupportedContractionBraiding {
+        operation: op,
+        style,
     })
 }
 
@@ -172,40 +128,39 @@ mod tests {
     fn braiding_admission_table() {
         use BraidingOp::{Contraction, PlanarContraction, Trace};
         use BraidingStyleKind::{Anyonic, Bosonic, Fermionic, NoBraiding};
-        const NS: &str = NON_SYMMETRIC_CONTRACTION_UNSUPPORTED;
-        const CB: &str = CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING;
-        const CP: &str = CHECKED_PLANAR_CONTRACTION_UNSUPPORTED;
-        const TR: &str = FUSION_TENSORTRACE_REQUIRES_SYMMETRIC_BRAIDING;
-        // (op, [B, F, A, N]); `None` is admitted.
-        let mf: [(BraidingOp, [Option<&str>; 4]); 3] = [
-            (Contraction, [None, None, Some(NS), Some(NS)]),
-            (PlanarContraction, [None; 4]),
-            (Trace, [None, None, Some(TR), Some(TR)]),
+        // (op, [B, F, A, N]): whether the style is admitted.
+        let mf: [(BraidingOp, [bool; 4]); 3] = [
+            (Contraction, [true, true, false, false]),
+            (PlanarContraction, [true; 4]),
+            (Trace, [true, true, false, false]),
         ];
-        let checked: [(BraidingOp, [Option<&str>; 4]); 3] = [
-            (Contraction, [None, Some(CB), Some(NS), Some(NS)]),
-            (PlanarContraction, [None, Some(CP), Some(CP), Some(CP)]),
-            (Trace, [None, None, Some(TR), Some(TR)]),
+        let checked: [(BraidingOp, [bool; 4]); 3] = [
+            (Contraction, [true, false, false, false]),
+            (PlanarContraction, [true, false, false, false]),
+            (Trace, [true, true, false, false]),
         ];
         let styles = [Bosonic, Fermionic, Anyonic, NoBraiding];
-        let expect = |message: Option<&'static str>| match message {
-            None => Ok(()),
-            Some(message) => Err(OperationError::UnsupportedTensorContractScope { message }),
+        let expect = |operation, style, admitted: bool| {
+            if admitted {
+                Ok(())
+            } else {
+                Err(OperationError::UnsupportedContractionBraiding { operation, style })
+            }
         };
         for (op, row) in mf {
-            for (style, message) in styles.into_iter().zip(row) {
+            for (style, admitted) in styles.into_iter().zip(row) {
                 assert_eq!(
                     admit_braiding::<MultiplicityFreeAdmissionMode>(op, style),
-                    expect(message),
+                    expect(op, style, admitted),
                     "MF {op:?} {style:?}"
                 );
             }
         }
         for (op, row) in checked {
-            for (style, message) in styles.into_iter().zip(row) {
+            for (style, admitted) in styles.into_iter().zip(row) {
                 assert_eq!(
                     admit_braiding::<CheckedGenericAdmissionMode>(op, style),
-                    expect(message),
+                    expect(op, style, admitted),
                     "checked {op:?} {style:?}"
                 );
             }

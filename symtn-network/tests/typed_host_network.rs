@@ -542,9 +542,10 @@ fn assert_host_network_contraction_rejects_non_symmetric<const ANYONIC: bool>(
             Error::Operation(operation)
                 if matches!(
                     **operation,
-                    symtn::typed::OperationError::UnsupportedTensorContractScope {
-                        message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-                    }
+                    symtn::typed::OperationError::UnsupportedContractionBraiding {
+                        operation: symtn::typed::BraidingOp::Contraction,
+                        style,
+                    } if !style.is_symmetric()
                 )
         ),
         "{error:?}"
