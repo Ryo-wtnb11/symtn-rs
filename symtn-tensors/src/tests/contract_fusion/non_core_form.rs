@@ -62,11 +62,9 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     let lowered_rhs_open_axes = complement_axes(4, &lowered_rhs_axes);
     // The plan builder and the eager entry take one operand form: a set flag
     // names the operand's lazy adjoint, whose legs the axes index.
-    let lazy_axes = TensorContractSpec::with_default_output_order_and_conjugation(
+    let lazy_axes = TensorContractSpec::with_default_output_order(
         lowered_lhs_axes.as_slice(),
         lowered_rhs_axes.as_slice(),
-        lhs_conjugate,
-        rhs_conjugate,
     );
     let effective_lhs_hom = if lhs_conjugate {
         lhs_adjoint_hom
@@ -199,6 +197,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         &lhs_core,
         &rhs_core,
         TensorContractSpec::with_default_output_order(&[1, 2, 3], &[0, 1, 2]),
+        (false, false),
         alpha,
         beta,
     )
@@ -259,6 +258,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         &lhs,
         &rhs,
         lazy_axes,
+        (lhs_conjugate, rhs_conjugate),
         alpha,
         beta,
     )
@@ -287,6 +287,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         &lhs,
         &rhs,
         lazy_axes,
+        (lhs_conjugate, rhs_conjugate),
         alpha,
         beta,
     )
@@ -451,6 +452,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
         &lhs_core,
         &rhs_core,
         plan.core_axes().as_spec(),
+        (false, false),
         alpha,
         Complex64::new(0.0, 0.0),
     )
@@ -465,7 +467,18 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
     )
     .unwrap();
 
-    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(
+        engine,
+        &rule,
+        &mut dst,
+        &lhs,
+        &rhs,
+        axes,
+        (false, false),
+        alpha,
+        beta,
+    )
+    .unwrap();
 
     for (&actual, &expected) in dst.data().iter().zip(expected_dst.data()) {
         assert!(
@@ -489,6 +502,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -511,6 +525,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -587,7 +602,18 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
     let beta = Complex64::new(-1.0, 0.5);
     let axes = TensorContractSpec::new(&[2], &[0], OutputAxisOrder::from_axes(&[0, 2, 1, 3]));
 
-    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(
+        engine,
+        &rule,
+        &mut dst,
+        &lhs,
+        &rhs,
+        axes,
+        (false, false),
+        alpha,
+        beta,
+    )
+    .unwrap();
 
     let expected = [
         Complex64::new(-29.12579386826373, -0.7876587736527441),
@@ -621,6 +647,7 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
             &rebuilt_lhs,
             &rebuilt_rhs,
             axes,
+            (false, false),
             alpha,
             beta,
         )
@@ -687,6 +714,7 @@ fn tensorcontract_fusion_product_no_twist_identity_rhs_is_borrowed() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         2.0,
         3.0,
     )

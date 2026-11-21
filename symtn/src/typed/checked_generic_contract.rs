@@ -609,10 +609,7 @@ fn contract_owned_multiplicity_free<'a, R, D, S>(
     engine: &mut dyn Engine,
     lhs: &'a TensorMap<R, D, S>,
     rhs: &'a TensorMap<R, D, S>,
-    request: impl FnOnce(
-        symtn_tensors::FusionOperand<'a>,
-        symtn_tensors::FusionOperand<'a>,
-    ) -> symtn_tensors::ContractRequest<'a>,
+    request: symtn_tensors::ContractRequest<'a>,
 ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>
 where
     R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
@@ -632,7 +629,7 @@ where
             rhs_operand,
             transform_source_len(rhs.storage_body())?,
         ),
-        request(lhs_operand, rhs_operand),
+        request,
     )?;
     // Why the lease waits for a core miss: the canonical core resolves from
     // the operands alone, and the device kernel must not hold a context
@@ -681,9 +678,12 @@ where
     let output_axes = spec.output_axes();
     #[cfg(test)]
     super::probe::hit(super::probe::Event::ContractSeamCall);
-    contract_owned_multiplicity_free(engine, lhs, rhs, |lhs, rhs| {
-        contract_request(lhs, rhs, spec, &output_axes, planar)
-    })
+    contract_owned_multiplicity_free(
+        engine,
+        lhs,
+        rhs,
+        contract_request(spec, &output_axes, planar),
+    )
 }
 
 /// [`contract_multiplicity_free`] written into an existing destination: one
@@ -729,7 +729,7 @@ where
             rhs_operand,
             transform_source_len(rhs.storage_body())?,
         ),
-        contract_request(lhs_operand, rhs_operand, spec, &output_axes, planar),
+        contract_request(spec, &output_axes, planar),
     )?;
     staged.require_destination(destination.logical_space().space())?;
     let destination = destination_storage_mut(destination)?;
@@ -797,9 +797,7 @@ where
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        contract_owned_multiplicity_free(engine, lhs, rhs, |_, _| {
-            symtn_tensors::ContractRequest::Compose
-        })
+        contract_owned_multiplicity_free(engine, lhs, rhs, symtn_tensors::ContractRequest::Compose)
     }
 }
 

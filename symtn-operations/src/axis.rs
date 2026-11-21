@@ -29,15 +29,15 @@ impl<'a> OutputAxisOrder<'a> {
 /// TensorKit / TensorOperations.jl correspondence:
 /// `pA = (open axes of lhs, contracted axes of lhs)`,
 /// `pB = (contracted axes of rhs, open axes of rhs)`,
-/// `pAB = output axis order` (here [`OutputAxisOrder`]), plus the
-/// `conjA` / `conjB` conjugation flags (`lhs_conjugate` / `rhs_conjugate`).
+/// `pAB = output axis order` (here [`OutputAxisOrder`]). Operand conjugation
+/// (`conjA` / `conjB`) is not part of the spec: it is a property of the
+/// operand, as TensorKit's `tensorcontract!` turns it into a lazy adjoint at
+/// the entry.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TensorContractSpec<'a> {
     lhs_contracting_axes: &'a [usize],
     rhs_contracting_axes: &'a [usize],
     output_permutation: OutputAxisOrder<'a>,
-    lhs_conjugate: bool,
-    rhs_conjugate: bool,
 }
 
 impl<'a> TensorContractSpec<'a> {
@@ -46,28 +46,10 @@ impl<'a> TensorContractSpec<'a> {
         rhs_contracting_axes: &'a [usize],
         output_permutation: OutputAxisOrder<'a>,
     ) -> Self {
-        Self::new_with_conjugation(
-            lhs_contracting_axes,
-            rhs_contracting_axes,
-            output_permutation,
-            false,
-            false,
-        )
-    }
-
-    pub fn new_with_conjugation(
-        lhs_contracting_axes: &'a [usize],
-        rhs_contracting_axes: &'a [usize],
-        output_permutation: OutputAxisOrder<'a>,
-        lhs_conjugate: bool,
-        rhs_conjugate: bool,
-    ) -> Self {
         Self {
             lhs_contracting_axes,
             rhs_contracting_axes,
             output_permutation,
-            lhs_conjugate,
-            rhs_conjugate,
         }
     }
 
@@ -81,21 +63,6 @@ impl<'a> TensorContractSpec<'a> {
             lhs_contracting_axes,
             rhs_contracting_axes,
             OutputAxisOrder::identity(),
-        )
-    }
-
-    pub fn with_default_output_order_and_conjugation(
-        lhs_contracting_axes: &'a [usize],
-        rhs_contracting_axes: &'a [usize],
-        lhs_conjugate: bool,
-        rhs_conjugate: bool,
-    ) -> Self {
-        Self::new_with_conjugation(
-            lhs_contracting_axes,
-            rhs_contracting_axes,
-            OutputAxisOrder::identity(),
-            lhs_conjugate,
-            rhs_conjugate,
         )
     }
 
@@ -113,16 +80,6 @@ impl<'a> TensorContractSpec<'a> {
     pub fn output_permutation(&self) -> OutputAxisOrder<'a> {
         self.output_permutation
     }
-
-    #[inline]
-    pub fn lhs_conjugate(&self) -> bool {
-        self.lhs_conjugate
-    }
-
-    #[inline]
-    pub fn rhs_conjugate(&self) -> bool {
-        self.rhs_conjugate
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -130,8 +87,6 @@ pub struct TensorContractSpecOwned {
     lhs_contracting_axes: AxisVec,
     rhs_contracting_axes: AxisVec,
     output_axes: AxisVec,
-    lhs_conjugate: bool,
-    rhs_conjugate: bool,
 }
 
 impl TensorContractSpecOwned {
@@ -140,28 +95,10 @@ impl TensorContractSpecOwned {
         rhs_contracting_axes: Vec<usize>,
         output_axes: Vec<usize>,
     ) -> Self {
-        Self::new_with_conjugation(
-            lhs_contracting_axes,
-            rhs_contracting_axes,
-            output_axes,
-            false,
-            false,
-        )
-    }
-
-    pub fn new_with_conjugation(
-        lhs_contracting_axes: Vec<usize>,
-        rhs_contracting_axes: Vec<usize>,
-        output_axes: Vec<usize>,
-        lhs_conjugate: bool,
-        rhs_conjugate: bool,
-    ) -> Self {
         Self::from_axis_vecs(
             AxisVec::from_vec(lhs_contracting_axes),
             AxisVec::from_vec(rhs_contracting_axes),
             AxisVec::from_vec(output_axes),
-            lhs_conjugate,
-            rhs_conjugate,
         )
     }
 
@@ -170,26 +107,20 @@ impl TensorContractSpecOwned {
         lhs_contracting_axes: AxisVec,
         rhs_contracting_axes: AxisVec,
         output_axes: AxisVec,
-        lhs_conjugate: bool,
-        rhs_conjugate: bool,
     ) -> Self {
         Self {
             lhs_contracting_axes,
             rhs_contracting_axes,
             output_axes,
-            lhs_conjugate,
-            rhs_conjugate,
         }
     }
 
     #[inline]
     pub fn as_spec(&self) -> TensorContractSpec<'_> {
-        TensorContractSpec::new_with_conjugation(
+        TensorContractSpec::new(
             self.lhs_contracting_axes.as_slice(),
             self.rhs_contracting_axes.as_slice(),
             OutputAxisOrder::from_axes(self.output_axes.as_slice()),
-            self.lhs_conjugate,
-            self.rhs_conjugate,
         )
     }
 
@@ -206,16 +137,6 @@ impl TensorContractSpecOwned {
     #[inline]
     pub fn output_axes(&self) -> &[usize] {
         self.output_axes.as_slice()
-    }
-
-    #[inline]
-    pub fn lhs_conjugate(&self) -> bool {
-        self.lhs_conjugate
-    }
-
-    #[inline]
-    pub fn rhs_conjugate(&self) -> bool {
-        self.rhs_conjugate
     }
 }
 
@@ -404,44 +325,26 @@ mod tests {
             AxisVec::from_vec(lhs.clone()),
             AxisVec::from_vec(rhs.clone()),
             AxisVec::from_vec(out.clone()),
-            false,
-            false,
         );
         assert_eq!(via_new, via_axis_vecs);
         assert_eq!(via_new.lhs_contracting_axes(), lhs.as_slice());
         assert_eq!(via_new.rhs_contracting_axes(), rhs.as_slice());
         assert_eq!(via_new.output_axes(), out.as_slice());
-        assert!(!via_new.lhs_conjugate());
-        assert!(!via_new.rhs_conjugate());
-
-        let conjugated = TensorContractSpecOwned::new_with_conjugation(lhs, rhs, out, true, false);
-        assert!(conjugated.lhs_conjugate());
-        assert!(!conjugated.rhs_conjugate());
-        assert_eq!(
-            conjugated.output_axes(),
-            via_axis_vecs.output_axes(),
-            "conjugation flags leave the axes unchanged"
-        );
     }
 
     #[test]
     fn from_axis_vecs_empty_axes() {
-        let spec = TensorContractSpecOwned::from_axis_vecs(
-            AxisVec::new(),
-            AxisVec::new(),
-            AxisVec::new(),
-            false,
-            false,
-        );
+        let spec =
+            TensorContractSpecOwned::from_axis_vecs(AxisVec::new(), AxisVec::new(), AxisVec::new());
         assert!(spec.lhs_contracting_axes().is_empty());
         assert!(spec.rhs_contracting_axes().is_empty());
         assert!(spec.output_axes().is_empty());
     }
 
     #[test]
-    fn from_axis_vecs_spilled_rank_with_conjugation() {
-        // rank > 8 forces the SmallVec to spill; conjugation flags and
-        // as_spec() must still reflect the stored axes faithfully.
+    fn from_axis_vecs_spilled_rank() {
+        // rank > 8 forces the SmallVec to spill; as_spec() must still reflect
+        // the stored axes faithfully.
         let lhs: Vec<usize> = (0..12).collect();
         let rhs: Vec<usize> = (0..10).collect();
         let out: Vec<usize> = (0..12).chain(0..10).collect();
@@ -449,14 +352,10 @@ mod tests {
             AxisVec::from_vec(lhs.clone()),
             AxisVec::from_vec(rhs.clone()),
             AxisVec::from_vec(out.clone()),
-            true,
-            true,
         );
         assert_eq!(spec.lhs_contracting_axes(), lhs.as_slice());
         assert_eq!(spec.rhs_contracting_axes(), rhs.as_slice());
         assert_eq!(spec.output_axes(), out.as_slice());
-        assert!(spec.lhs_conjugate());
-        assert!(spec.rhs_conjugate());
 
         let as_spec = spec.as_spec();
         assert_eq!(as_spec.lhs_contracting_axes(), lhs.as_slice());
@@ -465,7 +364,5 @@ mod tests {
             as_spec.output_permutation(),
             OutputAxisOrder::from_axes(&out)
         );
-        assert!(as_spec.lhs_conjugate());
-        assert!(as_spec.rhs_conjugate());
     }
 }

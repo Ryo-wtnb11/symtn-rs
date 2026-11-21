@@ -368,8 +368,8 @@ where
     BT: TreeTransformBackend<D, C>,
     BC: TensorContractBackend<D, C>,
 {
-    /// Test entry over unbound spaces: a conjugation flag in `axes` selects
-    /// that operand's lazy adjoint, whose legs the axes then index.
+    /// Test entry over unbound spaces: a [`FusionOperand::adjoint`] operand
+    /// is its storage space's lazy adjoint, whose legs the axes then index.
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tensorcontract_fusion_dyn_into_raw<R>(
@@ -378,9 +378,9 @@ where
         rule: &R,
         dst_space: &DynamicFusionMapSpace,
         dst_data: &mut [D],
-        lhs_space: &DynamicFusionMapSpace,
+        lhs: FusionOperand<'_>,
         lhs_data: &[D],
-        rhs_space: &DynamicFusionMapSpace,
+        rhs: FusionOperand<'_>,
         rhs_data: &[D],
         axes: TensorContractSpec<'_>,
         alpha: D,
@@ -400,8 +400,8 @@ where
                 authority: encoded_layout_primer::<R>,
             },
             dst_data,
-            (lazy_operand(lhs_space, axes.lhs_conjugate()), lhs_data),
-            (lazy_operand(rhs_space, axes.rhs_conjugate()), rhs_data),
+            (lhs, lhs_data),
+            (rhs, rhs_data),
             PlannedContraction::Contract((
                 axes.lhs_contracting_axes(),
                 axes.rhs_contracting_axes(),
@@ -422,8 +422,8 @@ where
         engine: &mut dyn Engine,
         rule: &R,
         dst_space: &DynamicFusionMapSpace,
-        lhs_space: &DynamicFusionMapSpace,
-        rhs_space: &DynamicFusionMapSpace,
+        lhs: FusionOperand<'_>,
+        rhs: FusionOperand<'_>,
         axes: TensorContractSpec<'_>,
     ) -> Result<StorageContractResolution<C>, OperationError>
     where
@@ -438,8 +438,8 @@ where
                 space: dst_space,
                 authority: encoded_layout_primer::<R>,
             },
-            lazy_operand(lhs_space, axes.lhs_conjugate()),
-            lazy_operand(rhs_space, axes.rhs_conjugate()),
+            lhs,
+            rhs,
             (
                 axes.lhs_contracting_axes(),
                 axes.rhs_contracting_axes(),
@@ -448,10 +448,8 @@ where
         )
     }
 
-    /// Test seam over [`Self::tensorcontract_planned_into`] taking a
-    /// [`TensorContractSpec`] whose conjugation flags must match the
-    /// operands: logical spaces are the categorical authority, storage
-    /// operands and slices the physical one.
+    /// Test seam over [`Self::tensorcontract_planned_into`] taking its axes
+    /// as one [`TensorContractSpec`].
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tensorcontract_prelowered_into<R>(
@@ -471,14 +469,6 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        // The planner rejects operand flags that disagree with `axes`.
-        if axes.lhs_conjugate() != lhs.storage_conjugate()
-            || axes.rhs_conjugate() != rhs.storage_conjugate()
-        {
-            return Err(OperationError::InvalidArgument {
-                message: "prelowered operand flags must match the contraction request",
-            });
-        }
         let output_axes = spec_output_axes(axes, dst_space.space().rank());
         self.tensorcontract_planned_into(
             engine,
@@ -811,8 +801,8 @@ where
     /// canonical contraction whose twist varies within one coupled sector
     /// reaches here (the core declines it); a uniform one never does.
     ///
-    /// Validates the request itself (provider against the spaces, operand
-    /// flags against `axes`), so it is sound to call without the first half.
+    /// Validates the request itself (provider against the spaces), so it is
+    /// sound to call without the first half.
     ///
     /// **Braiding precondition** as for [`StagedContract::multiplicity_free`].
     #[doc(hidden)]
@@ -1042,18 +1032,6 @@ where
     }
 }
 
-/// The raw test entries' operand: a set flag of the lazy-adjoint operand
-/// form names the space's lazy adjoint, whose legs the axes then index, as in
-/// [`TensorContractFusionExecutionContext::tensorcontract_prelowered_into`].
-#[cfg(test)]
-fn lazy_operand(space: &DynamicFusionMapSpace, adjoint: bool) -> FusionOperand<'_> {
-    if adjoint {
-        FusionOperand::adjoint(space)
-    } else {
-        FusionOperand::direct(space)
-    }
-}
-
 /// What [`TensorContractFusionExecutionContext::tensorcontract_planned_raw_into`]
 /// plans: a contraction over `(lhs, rhs, output)` axes, or a composition.
 #[derive(Clone, Copy)]
@@ -1264,13 +1242,8 @@ where
     else {
         return plan_compose_in::<St::M, R>(target, lhs, rhs).map(CoreRoute::Hit);
     };
-    let axes = TensorContractSpec::new_with_conjugation(
-        lhs_axes,
-        rhs_axes,
-        OutputAxisOrder::from_axes(&output_axes),
-        lhs.storage_conjugate(),
-        rhs.storage_conjugate(),
-    );
+    let axes =
+        TensorContractSpec::new(lhs_axes, rhs_axes, OutputAxisOrder::from_axes(&output_axes));
     try_compile_core_route::<St::M, R>(target, lhs, rhs, axes, ContractKind::Contract)
 }
 
@@ -1410,14 +1383,12 @@ where
     }
 }
 
-/// The request checks both halves of the contraction route run: the provider
-/// against the three spaces, and the operand conjugation flags against the
-/// request.
+/// The request check that both halves of the contraction route run: the
+/// provider against the three spaces.
 fn validate_raw_contract_request<M, R>(
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
     rhs: FusionOperand<'_>,
-    axes: TensorContractSpec<'_>,
 ) -> Result<(), M::Error>
 where
     M: PlanningAlgebra<R>,
@@ -1428,16 +1399,7 @@ where
         target.space,
         lhs.storage_space(),
         rhs.storage_space(),
-    )?;
-    if axes.lhs_conjugate() != lhs.storage_conjugate()
-        || axes.rhs_conjugate() != rhs.storage_conjugate()
-    {
-        return Err(OperationError::InvalidArgument {
-            message: "prelowered operand flags must match the contraction request",
-        }
-        .into());
-    }
-    Ok(())
+    )
 }
 
 /// First half of the contraction route: validation and the canonical core
@@ -1537,12 +1499,10 @@ where
     let (left, right) = (lhs.oriented_homspace(), rhs.oriented_homspace());
     let lhs_axes: Vec<usize> = (left.nout()..left.rank()).collect();
     let rhs_axes: Vec<usize> = (0..right.nout()).collect();
-    let axes = TensorContractSpec::new_with_conjugation(
+    let axes = TensorContractSpec::new(
         &lhs_axes,
         &rhs_axes,
         symtn_operations::OutputAxisOrder::identity(),
-        lhs.storage_conjugate(),
-        rhs.storage_conjugate(),
     );
     try_compile_core_route::<M, R>(target, lhs, rhs, axes, ContractKind::Compose)
 }
@@ -1592,12 +1552,10 @@ where
         M::storage_layout_is_canonical(target.rule, target.space),
         Ok(true)
     ));
-    let axes = TensorContractSpec::new_with_conjugation(
+    let axes = TensorContractSpec::new(
         lhs_axes,
         rhs_axes,
         symtn_operations::OutputAxisOrder::from_axes(output_axes),
-        lhs.storage_conjugate(),
-        rhs.storage_conjugate(),
     );
     let core = try_compile_core_route::<M, R>(target, lhs, rhs, axes, ContractKind::Contract)?;
     match core {
@@ -1660,12 +1618,10 @@ where
             return Ok(copy);
         }
     }
-    let axes = TensorContractSpec::new_with_conjugation(
+    let axes = TensorContractSpec::new(
         lhs_axes,
         rhs_axes,
         symtn_operations::OutputAxisOrder::from_axes(output_axes),
-        lhs.storage_conjugate(),
-        rhs.storage_conjugate(),
     );
     compile_dynamic_tree_in::<M, R>(engine, cache, target, lhs, rhs, axes, None)
 }
@@ -1719,13 +1675,7 @@ where
         temporary_target,
         first,
         second,
-        TensorContractSpec::new_with_conjugation(
-            first_axes,
-            second_axes,
-            identity,
-            first.storage_conjugate(),
-            second.storage_conjugate(),
-        ),
+        TensorContractSpec::new(first_axes, second_axes, identity),
         ContractKind::Contract,
     )?;
     let CoreRoute::Hit(core) = core else {
@@ -1788,15 +1738,15 @@ where
 {
     // Re-run here, not only in the first half: this entry is callable on
     // its own, and the artifact compilers assume a validated request.
-    validate_raw_contract_request::<M, R>(target, lhs, rhs, axes)?;
+    validate_raw_contract_request::<M, R>(target, lhs, rhs)?;
     let artifact = if !lhs.storage_conjugate() && !rhs.storage_conjugate() {
         let (lhs_space, rhs_space) = (lhs.storage_space(), rhs.storage_space());
         compile_stored_dynamic_tree::<M, R>(
             engine,
             cache,
             target,
-            (lhs_space, lhs_space.structure()),
-            (rhs_space, rhs_space.structure()),
+            (lhs, lhs_space, lhs_space.structure()),
+            (rhs, rhs_space, rhs_space.structure()),
             axes,
             plan,
         )?
@@ -1808,17 +1758,25 @@ where
     )))
 }
 
-/// The `DynamicTree` artifact over two sources given as the logical space the
-/// plan is selected on and the storage structure replay reads: a direct
-/// operand's own space and structure, or (checked Generic) a lazy adjoint's
-/// logical space over its parent's storage. `plan` fixes the plan instead of
-/// selecting one for `axes`.
+/// The `DynamicTree` artifact over two sources given as the operand, the
+/// logical space the artifact is compiled on and the storage structure replay
+/// reads: a direct operand's own space and structure, or (checked Generic) a
+/// lazy adjoint's logical space over its parent's storage. `plan` fixes the
+/// plan instead of selecting one for `axes`.
 pub(crate) fn compile_stored_dynamic_tree<M, R>(
     engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
-    (lhs_space, lhs_structure): (&DynamicFusionMapSpace, &Arc<BlockStructure>),
-    (rhs_space, rhs_structure): (&DynamicFusionMapSpace, &Arc<BlockStructure>),
+    (lhs, lhs_space, lhs_structure): (
+        FusionOperand<'_>,
+        &DynamicFusionMapSpace,
+        &Arc<BlockStructure>,
+    ),
+    (rhs, rhs_space, rhs_structure): (
+        FusionOperand<'_>,
+        &DynamicFusionMapSpace,
+        &Arc<BlockStructure>,
+    ),
     axes: TensorContractSpec<'_>,
     plan: Option<&FusionContractPlan>,
 ) -> Result<super::dynamic::DynamicTreeExecutionArtifact<M::Scalar>, M::Error>
@@ -1835,8 +1793,7 @@ where
     let plan = match plan {
         Some(plan) => plan,
         None => {
-            selected =
-                M::dynamic_tree_plan(rule, authority, dst_space, lhs_space, rhs_space, axes)?;
+            selected = M::dynamic_tree_plan(rule, authority, dst_space, lhs, rhs, axes)?;
             &selected
         }
     };
@@ -1915,7 +1872,7 @@ where
     M: PlanningAlgebra<R>,
     M::Scalar: DenseBlockScalar,
 {
-    validate_raw_contract_request::<M, R>(target, lhs, rhs, axes)?;
+    validate_raw_contract_request::<M, R>(target, lhs, rhs)?;
     // A twist that is not uniform within one coupled-sector matrix has no
     // per-job alpha; the DynamicTree artifact applies it per block instead.
     let mut requested_zero_copy = false;
@@ -1973,7 +1930,7 @@ where
     DRhs: symtn_core::TensorStorage<D>,
 {
     let target = PlanTarget::bound(dst_space);
-    validate_raw_contract_request::<MultiplicityFreeAdmissionMode, R>(target, lhs, rhs, axes)?;
+    validate_raw_contract_request::<MultiplicityFreeAdmissionMode, R>(target, lhs, rhs)?;
     let plan = try_compile_oriented_storage_contract_plan::<MultiplicityFreeAdmissionMode, R>(
         target,
         lhs,

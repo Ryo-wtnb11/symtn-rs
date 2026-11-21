@@ -387,14 +387,9 @@ where
         let rhs_data: Vec<D> = cycle(&FINITE, rhs.space().required_len().unwrap());
         let dst_len = dst.space().required_len().unwrap();
         let initial: Vec<D> = cycle(&DESTINATION, dst_len);
-        // A set flag names `A`'s lazy adjoint, whose legs the axes index.
+        // With `conjugate` the lhs is `A`'s lazy adjoint, whose legs the axes index.
         let lhs_axes = [dst_axis];
-        let axes = TensorContractSpec::with_default_output_order_and_conjugation(
-            &lhs_axes,
-            &[0],
-            conjugate,
-            false,
-        );
+        let axes = TensorContractSpec::with_default_output_order(&lhs_axes, &[0]);
         let mut context = TensorContractFusionExecutionContext::<D, R::Key>::default();
         let mut contract = |dst_data: &mut [D], lhs_data: &[D], alpha: f64, beta: f64| {
             context

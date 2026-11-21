@@ -406,13 +406,8 @@ pub(crate) fn try_zero_copy_contract_candidates<'a, T, E>(
                 continue;
             }
             *candidate_seen = true;
-            let core_axes = TensorContractSpec::new_with_conjugation(
-                core_lhs_axes,
-                core_rhs_axes,
-                OutputAxisOrder::identity(),
-                core_lhs.storage_conjugate(),
-                core_rhs.storage_conjugate(),
-            );
+            let core_axes =
+                TensorContractSpec::new(core_lhs_axes, core_rhs_axes, OutputAxisOrder::identity());
             if let Some(route) = compile(core_lhs, core_rhs, core_axes, orientation)? {
                 return Ok(Some(route));
             }

@@ -57,9 +57,9 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
         &rule,
         &mut dst,
         &lhs,
-        &rhs,
-        // TensorKit 1-based pA=((2,), (1,)), pB=((1,), (2,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false),
+        &rhs, // TensorKit 1-based pA=((2,), (1,)), pB=((1,), (2,)).
+        TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (true, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -136,9 +136,9 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
         &rule,
         &mut dst,
         &lhs,
-        &rhs,
-        // TensorKit 1-based pA=((2,), (1,)), pB=((1,), (2,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false),
+        &rhs, // TensorKit 1-based pA=((2,), (1,)), pB=((1,), (2,)).
+        TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (true, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -216,7 +216,8 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], false, true),
+        TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -293,9 +294,9 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
         &rule,
         &mut dst,
         &lhs,
-        &rhs,
-        // TensorKit 1-based pA=((1,), (2,)), pB=((2,), (1,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], false, true),
+        &rhs, // TensorKit 1-based pA=((1,), (2,)), pB=((2,), (1,)).
+        TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -374,7 +375,8 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, true),
+        TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (true, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -452,9 +454,9 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
         &rule,
         &mut dst,
         &lhs,
-        &rhs,
-        // TensorKit 1-based pA=((2,), (1,)), pB=((2,), (1,)).
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, true),
+        &rhs, // TensorKit 1-based pA=((2,), (1,)), pB=((2,), (1,)).
+        TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (true, true),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -517,13 +519,8 @@ fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::new_with_conjugation(
-            &[],
-            &[],
-            OutputAxisOrder::identity(),
-            true,
-            false,
-        ),
+        TensorContractSpec::new(&[], &[], OutputAxisOrder::identity()),
+        (true, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -540,13 +537,8 @@ fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::new_with_conjugation(
-            &[],
-            &[],
-            OutputAxisOrder::identity(),
-            true,
-            false,
-        ),
+        TensorContractSpec::new(&[], &[], OutputAxisOrder::identity()),
+        (true, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -633,15 +625,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
 
     let lhs_operand = crate::FusionOperand::adjoint(lhs_bound.space());
     let rhs_operand = crate::FusionOperand::direct(rhs_bound.space());
-    let axes = || {
-        TensorContractSpec::new_with_conjugation(
-            &[1],
-            &[0],
-            crate::OutputAxisOrder::identity(),
-            true,
-            false,
-        )
-    };
+    let axes = || TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity());
     for pass in 0..2 {
         let mut ctx = crate::TensorContractFusionExecutionContext::<Complex64, _>::default();
         let fusion_operand_projection_prepares_rec = probe::record();
@@ -710,21 +694,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     // The reverse plan takes the same lazy-adjoint form as the eager calls
     // above: the contracted leg is the domain leg 1 of `a'`.
     let candidate = crate::contract::contracted_axis_order_candidates(&[1], &[0]).remove(0);
-    let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-        provider.as_ref(),
-        &dst_space,
-        &lhs_typed.fusion_space().unwrap().as_ref().clone(),
-        &rhs_typed.fusion_space().unwrap().as_ref().clone(),
-        TensorContractSpec::new_with_conjugation(
-            &[1],
-            &[0],
-            OutputAxisOrder::identity(),
-            true,
-            false,
-        ),
-        &candidate,
-        crate::contract::FusionContractOrientation::RhsLhs,
-    )
+    let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(provider.as_ref(), &dst_space, crate::FusionOperand::adjoint(&lhs_typed.fusion_space().unwrap().as_ref().clone()), crate::FusionOperand::direct(&rhs_typed.fusion_space().unwrap().as_ref().clone()), TensorContractSpec::new(&[1], &[0], OutputAxisOrder::identity()), &candidate, crate::contract::FusionContractOrientation::RhsLhs)
     .unwrap();
     let mut reverse_dst = TestTensor::<Complex64>::from_vec_with_fusion_space(
         vec![Complex64::zero(); oracle.len()],

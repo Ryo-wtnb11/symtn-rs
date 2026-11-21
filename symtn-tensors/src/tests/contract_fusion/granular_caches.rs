@@ -49,7 +49,18 @@ fn tensorcontract_fusion_granular_caches_handle_output_axes() {
         let mut actual =
             TestTensor::<f64>::from_vec_with_fusion_space(initial_dst.clone(), dst_space).unwrap();
 
-        fusion_contract_into(engine, &rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
+        fusion_contract_into(
+            engine,
+            &rule,
+            &mut expected,
+            &lhs,
+            &rhs,
+            axes,
+            (false, false),
+            alpha,
+            beta,
+        )
+        .unwrap();
         context_contract_into(
             engine,
             &mut context,
@@ -58,6 +69,7 @@ fn tensorcontract_fusion_granular_caches_handle_output_axes() {
             &lhs,
             &rhs,
             axes,
+            (false, false),
             alpha,
             beta,
         )
@@ -121,11 +133,9 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
         let (lowered_lhs_axes, lowered_rhs_axes) =
             su2_contracted_logical_axes(lhs_conjugate, rhs_conjugate);
         // A set flag names the lazy-adjoint operand, whose legs the axes index.
-        let axes = TensorContractSpec::with_default_output_order_and_conjugation(
+        let axes = TensorContractSpec::with_default_output_order(
             lowered_lhs_axes.as_slice(),
             lowered_rhs_axes.as_slice(),
-            lhs_conjugate,
-            rhs_conjugate,
         );
         let dst_hom = FusionTreeHomSpace::tensorcontract_homspace(
             &rule,
@@ -155,7 +165,18 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
             TestTensor::<Complex64>::from_vec_with_fusion_space(initial_dst.clone(), dst_space)
                 .unwrap();
 
-        fusion_contract_into(engine, &rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
+        fusion_contract_into(
+            engine,
+            &rule,
+            &mut expected,
+            &lhs,
+            &rhs,
+            axes,
+            (lhs_conjugate, rhs_conjugate),
+            alpha,
+            beta,
+        )
+        .unwrap();
         context_contract_into(
             engine,
             &mut context,
@@ -164,6 +185,7 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
             &lhs,
             &rhs,
             axes,
+            (lhs_conjugate, rhs_conjugate),
             alpha,
             beta,
         )

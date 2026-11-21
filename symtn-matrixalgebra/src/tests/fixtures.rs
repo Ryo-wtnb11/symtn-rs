@@ -418,10 +418,6 @@ where
     let dst_space = bind(&provider, dst.fusion_space())?;
     let lhs_space = bind(&provider, lhs.fusion_space())?;
     let rhs_space = bind(&provider, rhs.fusion_space())?;
-    assert!(
-        !axes.lhs_conjugate() && !axes.rhs_conjugate(),
-        "fixture operands are direct"
-    );
     let output_axes: Vec<usize> = match axes.output_permutation() {
         OutputAxisOrder::Axes(output) => output.to_vec(),
         OutputAxisOrder::Identity => (0..dst_space.space().rank()).collect(),

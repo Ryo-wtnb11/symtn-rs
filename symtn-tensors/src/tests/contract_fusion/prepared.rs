@@ -37,6 +37,7 @@ fn prepared_tensorcontract_fusion_route_replays_like_the_eager_entry() {
             &lhs,
             &rhs,
             axes,
+            (false, false),
             2.0,
             3.0,
         )

@@ -78,6 +78,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
             &lhs,
             &rhs,
             axes,
+            (false, false),
             1.0,
             0.0,
         )
@@ -97,6 +98,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
                 &lhs,
                 &rhs,
                 axes,
+                (false, false),
                 1.0,
                 0.0,
             )
@@ -199,6 +201,7 @@ fn tensorcontract_fusion_parallel_replay_keeps_fermion_twist_reference() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         1.0,
         0.0,
     )

@@ -132,6 +132,7 @@ fn tensorcontract_fusion_into_absorbs_source_tree_transform_terms() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[0], &[1]),
+        (false, false),
         3.0,
         11.0,
     )
@@ -194,7 +195,18 @@ fn tensorcontract_fusion_output_recoupling_uses_su2_coefficients() {
         assert!((spec.coefficient() - coefficient).abs() < 1.0e-12);
     }
 
-    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, 2.0, 3.0).unwrap();
+    fusion_contract_into(
+        engine,
+        &rule,
+        &mut dst,
+        &lhs,
+        &rhs,
+        axes,
+        (false, false),
+        2.0,
+        3.0,
+    )
+    .unwrap();
 
     assert!((dst.data()[source_at] - 53.0).abs() < 1.0e-12);
     assert!((dst.data()[recoupled_at] - 92.602_540_378_443_86).abs() < 1.0e-12);
@@ -290,7 +302,18 @@ fn tensorcontract_fusion_su2_keeps_contracted_tree_basis_with_degeneracy() {
         }
     }
 
-    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(
+        engine,
+        &rule,
+        &mut dst,
+        &lhs,
+        &rhs,
+        axes,
+        (false, false),
+        alpha,
+        beta,
+    )
+    .unwrap();
 
     for (&actual, expected) in dst.data().iter().zip(expected) {
         assert!(
@@ -493,6 +516,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -504,6 +528,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs_core,
         &rhs_core,
         TensorContractSpec::with_default_output_order(&[1, 2, 3], &[0, 1, 2]),
+        (false, false),
         alpha,
         beta,
     )
@@ -538,6 +563,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -592,6 +618,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -620,6 +647,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
             &lhs,
             &rhs,
             axes,
+            (false, false),
             alpha,
             beta,
         )
@@ -658,6 +686,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -678,6 +707,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -701,6 +731,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -727,6 +758,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )

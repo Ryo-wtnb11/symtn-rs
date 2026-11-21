@@ -374,12 +374,10 @@ fn an_identity_side_is_free_in_selection_over_canonical_layouts() {
             2,
         )
         .unwrap();
-        let axes = symtn_operations::TensorContractSpec::new_with_conjugation(
+        let axes = symtn_operations::TensorContractSpec::new(
             &lhs_axes,
             &rhs_axes,
             symtn_operations::OutputAxisOrder::identity(),
-            adjoint,
-            false,
         );
         let lhs = if adjoint {
             crate::FusionOperand::adjoint(canonical.space())

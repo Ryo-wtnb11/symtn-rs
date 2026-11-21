@@ -17,8 +17,6 @@ pub(crate) use plan::{
 
 #[cfg(test)]
 pub(crate) use block_specs::contracted_fusion_tree_basis_matches;
-#[cfg(any(test, debug_assertions))]
-pub(crate) use block_specs::reject_fusion_contract_conjugation;
 pub use block_specs::tensorcontract_fusion_block_specs;
 pub(crate) use block_specs::{
     external_axis_is_dual, rhs_contract_twist_factor, rhs_contract_twist_factor_oriented,

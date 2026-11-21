@@ -58,6 +58,7 @@ fn tensorcontract_fusion_block_replay_scales_inactive_dst_blocks_once() {
         &lhs,
         &rhs,
         axes,
+        (false, false),
         alpha,
         beta,
     )
@@ -142,8 +143,7 @@ fn self_dual_conjugate_source_scales_inactive_block_like_eager_adjoint_oracle() 
     let rhs = TestTensor::<Complex64>::from_vec_with_fusion_space(rhs_data, rhs_space).unwrap();
     let mut actual =
         TestTensor::<Complex64>::from_vec_with_fusion_space(initial, dst_space).unwrap();
-    let conjugate_axes =
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false);
+    let axes = TensorContractSpec::with_default_output_order(&[1], &[0]);
     let mut context = TensorContractFusionExecutionContext::<Complex64, RuleIdentity>::default();
     for _ in 0..2 {
         actual
@@ -156,7 +156,8 @@ fn self_dual_conjugate_source_scales_inactive_block_like_eager_adjoint_oracle() 
             &mut actual,
             &lhs,
             &rhs,
-            conjugate_axes,
+            axes,
+            (true, false),
             alpha,
             beta,
         )
@@ -217,6 +218,7 @@ fn assert_fusion_block_scatter_beta_dtype<T>(
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         alpha,
         beta,
     )

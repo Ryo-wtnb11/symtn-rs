@@ -21,6 +21,7 @@ fn tensorcontract_structure_replay_applies_alpha_and_beta() {
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
     )
     .unwrap();
     let mut backend = DenseTreeTransformOperations::default();
@@ -55,6 +56,7 @@ fn tensorcontract_default_host_api_applies_alpha_and_beta() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         2.0,
         3.0,
     )
@@ -77,6 +79,7 @@ fn tensorcontract_structure_precomputes_core_dense_descriptor() {
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
     )
     .unwrap();
 
@@ -109,6 +112,7 @@ fn tensorcontract_dense_route_uses_tensorkit_forward_tie_order() {
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[2, 0], &[1, 3]),
+        (false, false),
     )
     .unwrap();
 
@@ -163,6 +167,7 @@ fn tensorcontract_dense_route_sorted_by_rhs_matches_independent_oracle() {
         lhs.structure(),
         rhs.structure(),
         axes,
+        (false, false),
     )
     .unwrap();
     assert_eq!(
@@ -173,7 +178,7 @@ fn tensorcontract_dense_route_sorted_by_rhs_matches_independent_oracle() {
     assert_eq!(lhs_route_axes, &[2, 0]);
     assert_eq!(rhs_route_axes, &[1, 3]);
 
-    dense_contract_into(&mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    dense_contract_into(&mut dst, &lhs, &rhs, axes, (false, false), alpha, beta).unwrap();
     let expected = rank4_contract_oracle(
         &lhs_data,
         &lhs_shape,
@@ -236,6 +241,7 @@ fn tensorcontract_dense_route_reverse_ba_matches_independent_oracle() {
         lhs.structure(),
         rhs.structure(),
         axes,
+        (false, false),
     )
     .unwrap();
     assert_eq!(
@@ -246,7 +252,7 @@ fn tensorcontract_dense_route_reverse_ba_matches_independent_oracle() {
     assert_eq!(lhs_route_axes, &[1, 2]);
     assert_eq!(rhs_route_axes, &[0, 2]);
 
-    dense_contract_into(&mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    dense_contract_into(&mut dst, &lhs, &rhs, axes, (false, false), alpha, beta).unwrap();
     let expected = rank3_by_rank4_contract_oracle(
         &lhs_data,
         &lhs_shape,
@@ -492,6 +498,7 @@ fn tensorcontract_structure_honors_output_permutation_with_workspace_scatter() {
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::new(&[1], &[1], OutputAxisOrder::from_axes(&[1, 0])),
+        (false, false),
     )
     .unwrap();
     let mut backend =
@@ -549,13 +556,8 @@ fn tensorcontract_with_conjugation_matches_dense_reference_with_output_permutati
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::new_with_conjugation(
-            &[1],
-            &[0],
-            OutputAxisOrder::from_axes(&[1, 0]),
-            true,
-            false,
-        ),
+        TensorContractSpec::new(&[1], &[0], OutputAxisOrder::from_axes(&[1, 0])),
+        (true, false),
         Complex64::new(1.0, 0.0),
         Complex64::new(0.0, 0.0),
     )
@@ -575,13 +577,8 @@ fn tensorcontract_with_conjugation_matches_dense_reference_with_output_permutati
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::new_with_conjugation(
-            &[1],
-            &[0],
-            OutputAxisOrder::from_axes(&[1, 0]),
-            false,
-            true,
-        ),
+        TensorContractSpec::new(&[1], &[0], OutputAxisOrder::from_axes(&[1, 0])),
+        (false, true),
         Complex64::new(1.0, 0.0),
         Complex64::new(0.0, 0.0),
     )
@@ -613,6 +610,7 @@ fn tensorcontract_workspace_reuse_overwrites_dense_route_output() {
         lhs_a.structure(),
         rhs_a.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
     )
     .unwrap();
     let mut backend = DenseTreeTransformOperations::default();
@@ -659,7 +657,8 @@ fn tensorcontract_workspace_reuse_clears_conjugating_route_output() {
         dst.structure(),
         lhs_a.structure(),
         rhs_a.structure(),
-        TensorContractSpec::with_default_output_order_and_conjugation(&[1], &[0], true, false),
+        TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (true, false),
     )
     .unwrap();
     let mut backend = DenseTreeTransformOperations::default();
@@ -724,6 +723,7 @@ fn tensorcontract_with_no_contracted_axes_is_the_outer_product() {
         &lhs,
         &rhs,
         TensorContractSpec::new(&[], &[], OutputAxisOrder::identity()),
+        (false, false),
         2.0,
         3.0,
     )
@@ -753,13 +753,8 @@ fn tensorcontract_outer_product_conjugates_lhs() {
         &mut dst,
         &lhs,
         &rhs,
-        TensorContractSpec::new_with_conjugation(
-            &[],
-            &[],
-            OutputAxisOrder::identity(),
-            true,
-            false,
-        ),
+        TensorContractSpec::new(&[], &[], OutputAxisOrder::identity()),
+        (true, false),
         Complex64::new(1.0, 0.0),
         Complex64::new(0.0, 0.0),
     )
@@ -808,6 +803,7 @@ fn tensorcontract_structure_rejects_invalid_axes_at_compile_time() {
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1, 1], &[0, 1]),
+        (false, false),
     )
     .unwrap_err();
     assert_eq!(
@@ -824,6 +820,7 @@ fn tensorcontract_structure_rejects_invalid_axes_at_compile_time() {
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0, 1]),
+        (false, false),
     )
     .unwrap_err();
     assert_eq!(
@@ -846,6 +843,7 @@ fn tensorcontract_structure_rejects_dimension_and_output_mismatch_at_compile_tim
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[1]),
+        (false, false),
     )
     .unwrap_err();
     assert_eq!(
@@ -865,6 +863,7 @@ fn tensorcontract_structure_rejects_dimension_and_output_mismatch_at_compile_tim
         lhs.structure(),
         valid_rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
     )
     .unwrap_err();
     assert_eq!(
@@ -889,6 +888,7 @@ fn tensorcontract_structure_rejects_incompatible_replay_structure_before_dense_e
         compile_lhs.structure(),
         compile_rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
     )
     .unwrap();
 
@@ -926,6 +926,7 @@ fn tensorcontract_structure_rejects_multiblock_until_block_sparse_enumeration_ex
         &multiblock,
         &dense,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
     )
     .unwrap_err();
 
@@ -979,6 +980,7 @@ fn tensorcontract_structure_replays_explicit_block_terms_and_applies_beta_once()
         lhs.structure(),
         rhs.structure(),
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         &[
             TensorContractBlockSpec::with_coefficient(0, 0, 0, 0.5),
             TensorContractBlockSpec::with_coefficient(0, 1, 1, 2.0),
@@ -1046,6 +1048,7 @@ fn prepared_structure_scales_inactive_destination_once_for_each_beta() {
         &lhs_structure,
         &rhs_structure,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         &contract_specs_two_blocks(),
     )
     .unwrap();
@@ -1088,6 +1091,7 @@ fn inactive_scaling_waits_for_complete_raw_replay_validation() {
         &lhs_structure,
         &rhs_structure,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         &contract_specs_two_blocks(),
     )
     .unwrap();
@@ -1131,6 +1135,7 @@ fn complex_structure_scales_inactive_destination_without_norm_projection() {
         &lhs_structure,
         &rhs_structure,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         &contract_specs_two_blocks(),
     )
     .unwrap();
@@ -1196,6 +1201,7 @@ fn contract_alias_fixture(
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         terms,
     )
 }
@@ -1282,6 +1288,7 @@ fn tensorcontract_structure_accepts_interleaved_disjoint_destinations() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         &[TensorContractBlockSpec::new(0, 0, 0)],
     )
     .unwrap();
@@ -1318,6 +1325,7 @@ fn tensorcontract_structure_rejects_invalid_explicit_block_term_at_compile_time(
         &dense,
         &dense,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
+        (false, false),
         &[TensorContractBlockSpec::new(0, 1, 0)],
     )
     .unwrap_err();

@@ -53,15 +53,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
             crate::contract::FusionContractOrientation::LhsRhs,
             crate::contract::FusionContractOrientation::RhsLhs,
         ] {
-            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-                &rule,
-                &dst_dyn,
-                &lhs_dyn,
-                &rhs_dyn,
-                TensorContractSpec::new(&[3, 2], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])),
-                candidate,
-                orientation,
-            )
+            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(&rule, &dst_dyn, crate::FusionOperand::direct(&lhs_dyn), crate::FusionOperand::direct(&rhs_dyn), TensorContractSpec::new(&[3, 2], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])), candidate, orientation)
             .unwrap();
             let mut dst =
                 TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], space.clone())
@@ -122,6 +114,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
         &lhs,
         &rhs_permuted,
         TensorContractSpec::with_default_output_order(&[2, 3], &[0, 1]),
+        (false, false),
         1.0,
         0.0,
     )
@@ -134,6 +127,7 @@ fn forced_axis_order_candidates_have_identical_u1_result() {
         &lhs,
         &rhs,
         TensorContractSpec::new(&[3, 2], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])),
+        (false, false),
         1.0,
         0.0,
     )
@@ -246,15 +240,7 @@ fn forced_orientations_match_asymmetric_u1_reduced_block_oracle() {
             crate::contract::FusionContractOrientation::LhsRhs,
             crate::contract::FusionContractOrientation::RhsLhs,
         ] {
-            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-                &rule,
-                &dst_dyn,
-                &lhs_dyn,
-                &rhs_dyn,
-                axes,
-                candidate,
-                orientation,
-            )
+            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(&rule, &dst_dyn, crate::FusionOperand::direct(&lhs_dyn), crate::FusionOperand::direct(&rhs_dyn), axes, candidate, orientation)
             .unwrap();
             let mut dst =
                 TestTensor::<f64>::from_vec_with_fusion_space(initial.clone(), dst_space.clone())
@@ -314,6 +300,7 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
         &lhs,
         &rhs,
         axes,
+        (false, false),
         1.0,
         0.0,
     )
@@ -335,6 +322,7 @@ fn paired_axis_selector_scores_once_and_publishes_only_winner_replay() {
         &lhs,
         &rhs,
         axes,
+        (false, false),
         1.0,
         0.0,
     )
@@ -458,15 +446,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
     let rhs_dynamic = rhs.fusion_space().unwrap().as_ref().clone();
     let dst_dynamic = dst_space.clone();
     let reverse_plan =
-        crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-            &rule,
-            &dst_dynamic,
-            &lhs_dynamic,
-            &rhs_dynamic,
-            axes(),
-            &crate::contract::contracted_axis_order_candidates(&[1, 0], &[2, 3])[1],
-            crate::contract::FusionContractOrientation::RhsLhs,
-        )
+        crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(&rule, &dst_dynamic, crate::FusionOperand::direct(&lhs_dynamic), crate::FusionOperand::direct(&rhs_dynamic), axes(), &crate::contract::contracted_axis_order_candidates(&[1, 0], &[2, 3])[1], crate::contract::FusionContractOrientation::RhsLhs)
         .unwrap();
     // What: the reverse-orientation plan, executed step by step, matches the
     // reduced-block oracle.
@@ -497,6 +477,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
         &lhs,
         &rhs,
         axes(),
+        (false, false),
         alpha,
         beta,
     )
@@ -566,6 +547,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
                 &lhs,
                 &rhs,
                 axes(),
+                (false, false),
                 alpha,
                 beta,
             )
@@ -623,6 +605,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
                     &lhs,
                     &rhs,
                     axes(),
+                    (false, false),
                     alpha,
                     beta,
                 )
@@ -639,6 +622,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
                     &lhs,
                     &rhs,
                     axes(),
+                    (false, false),
                     alpha,
                     beta,
                 )?;
@@ -688,6 +672,7 @@ fn paired_axis_selector_rejects_invalid_axes_before_scoring_or_mutation() {
         &lhs,
         &rhs,
         axes,
+        (false, false),
         1.0,
         0.0,
     )
@@ -744,15 +729,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
             crate::contract::FusionContractOrientation::LhsRhs,
             crate::contract::FusionContractOrientation::RhsLhs,
         ] {
-            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-                &rule,
-                &dst_dyn,
-                &lhs_dyn,
-                &rhs_dyn,
-                TensorContractSpec::new(&[3, 2], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])),
-                candidate,
-                orientation,
-            )
+            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(&rule, &dst_dyn, crate::FusionOperand::direct(&lhs_dyn), crate::FusionOperand::direct(&rhs_dyn), TensorContractSpec::new(&[3, 2], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])), candidate, orientation)
             .unwrap();
             let mut dst = TestTensor::<Complex64>::from_vec_with_fusion_space(
                 vec![Complex64::zero(); len],
@@ -832,6 +809,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
         &lhs,
         &rhs_permuted,
         TensorContractSpec::with_default_output_order(&[2, 3], &[0, 1]),
+        (false, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -846,6 +824,7 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
         &lhs,
         &rhs,
         TensorContractSpec::new(&[3, 2], &[0, 1], OutputAxisOrder::from_axes(&[0, 1, 2, 3])),
+        (false, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -912,15 +891,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
             crate::contract::FusionContractOrientation::LhsRhs,
             crate::contract::FusionContractOrientation::RhsLhs,
         ] {
-            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-                &rule,
-                &dst_dyn,
-                &lhs_dyn,
-                &rhs_dyn,
-                TensorContractSpec::with_default_output_order(&[3, 2], &[0, 1]),
-                candidate,
-                orientation,
-            )
+            let plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(&rule, &dst_dyn, crate::FusionOperand::direct(&lhs_dyn), crate::FusionOperand::direct(&rhs_dyn), TensorContractSpec::with_default_output_order(&[3, 2], &[0, 1]), candidate, orientation)
             .unwrap();
             let mut dst = TestTensor::<Complex64>::from_vec_with_fusion_space(
                 vec![Complex64::zero(); dst_len],
@@ -1031,6 +1002,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
         &lhs_permuted,
         &rhs,
         TensorContractSpec::with_default_output_order(&[2, 3], &[0, 1]),
+        (false, false),
         Complex64::one(),
         Complex64::zero(),
     )
@@ -1047,6 +1019,7 @@ fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
         &lhs,
         &rhs,
         TensorContractSpec::with_default_output_order(&[3, 2], &[0, 1]),
+        (false, false),
         Complex64::one(),
         Complex64::zero(),
     )

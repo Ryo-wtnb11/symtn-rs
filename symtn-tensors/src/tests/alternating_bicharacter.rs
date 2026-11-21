@@ -215,6 +215,7 @@ fn alternating_bicharacter_contract_into_swapped_output_applies_source_order_r_s
             &[0],
             symtn_operations::OutputAxisOrder::Axes(&[1, 0, 2]),
         ),
+        (false, false),
         Complex64::one(),
         Complex64::zero(),
     )

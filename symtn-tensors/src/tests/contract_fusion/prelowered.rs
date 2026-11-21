@@ -45,15 +45,8 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
     .unwrap();
     let canonical_operand = crate::FusionOperand::adjoint(&canonical);
     let rhs_operand = crate::FusionOperand::direct(&rhs);
-    let prelowered_axes = || {
-        TensorContractSpec::new_with_conjugation(
-            &[1],
-            &[0],
-            crate::OutputAxisOrder::identity(),
-            true,
-            false,
-        )
-    };
+    let prelowered_axes =
+        || TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity());
     let ordinary_axes = || TensorContractSpec::with_default_output_order(&[1], &[0]);
 
     // What: A^T * B in column-major order, computed independently of every
@@ -93,21 +86,7 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
     // The plan takes the same lazy-adjoint form as `prelowered_axes`: the
     // contracted leg is the domain leg 1 of `A'`.
     let candidate = crate::contract::contracted_axis_order_candidates(&[1], &[0]).remove(0);
-    let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-        provider.as_ref(),
-        swapped_dst_bound.space(),
-        &canonical,
-        &rhs,
-        TensorContractSpec::new_with_conjugation(
-            &[1],
-            &[0],
-            crate::OutputAxisOrder::from_axes(&[1, 0]),
-            true,
-            false,
-        ),
-        &candidate,
-        crate::contract::FusionContractOrientation::RhsLhs,
-    )
+    let reverse_plan = crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(provider.as_ref(), swapped_dst_bound.space(), crate::FusionOperand::adjoint(&canonical), crate::FusionOperand::direct(&rhs), TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::from_axes(&[1, 0])), &candidate, crate::contract::FusionContractOrientation::RhsLhs)
     .unwrap();
     let mut artifact_output = vec![0.0; swapped_dst_bound.space().required_len().unwrap()];
     crate::contract::execute_prelowered_dynamic_tree_execution_artifact_for_test(
@@ -263,13 +242,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
             &lhs_data,
             crate::FusionOperand::direct(rhs_bound.space()),
             &rhs_data,
-            TensorContractSpec::new_with_conjugation(
-                &[1],
-                &[0],
-                crate::OutputAxisOrder::identity(),
-                true,
-                false,
-            ),
+            TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity()),
             Complex64::new(1.0, 0.0),
             crate::ContractDestinationInit::Axpby(Complex64::new(0.0, 0.0)),
         )
@@ -289,13 +262,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
             &lhs_data,
             crate::FusionOperand::direct(rhs_bound.space()),
             &rhs_data,
-            TensorContractSpec::new_with_conjugation(
-                &[1],
-                &[0],
-                crate::OutputAxisOrder::identity(),
-                true,
-                false,
-            ),
+            TensorContractSpec::new(&[1], &[0], crate::OutputAxisOrder::identity()),
             Complex64::new(1.0, 0.0),
             crate::ContractDestinationInit::Axpby(Complex64::new(0.0, 0.0)),
         )
@@ -493,13 +460,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
     symtn_core::clear_structure_caches();
     let lazy_lhs = crate::adjoint_bound_space_dyn(&lowered_lhs).unwrap();
     assert_eq!(eager_lhs.space(), lazy_lhs.space());
-    let lazy_axes = TensorContractSpec::new_with_conjugation(
-        &[1],
-        &[1],
-        OutputAxisOrder::from_axes(&[2, 0, 3, 1]),
-        true,
-        false,
-    );
+    let lazy_axes = TensorContractSpec::new(&[1], &[1], OutputAxisOrder::from_axes(&[2, 0, 3, 1]));
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
     let encoded_lazy_dst = BoundDynamicFusionMapSpace::contracted_multiplicity_free_ordered(

@@ -820,8 +820,8 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
     let plan = super::fusion::prepare_tensorcontract_fusion_plan_dyn_raw_canonical(
         destination.provider(),
         destination.space(),
-        case.lhs.space(),
-        case.rhs.space(),
+        crate::FusionOperand::direct(case.lhs.space()),
+        crate::FusionOperand::direct(case.rhs.space()),
         case.axes(),
     )
     .unwrap();
@@ -997,15 +997,7 @@ where
     let rule = case.lhs.provider();
     let dst = case.dst();
     let plan =
-        crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(
-            rule,
-            dst.space(),
-            case.lhs.space(),
-            case.rhs.space(),
-            case.axes(),
-            candidate,
-            orientation,
-        )
+        crate::contract::prepare_tensorcontract_fusion_plan_dyn_raw_with_axis_order_and_orientation(rule, dst.space(), crate::FusionOperand::direct(case.lhs.space()), crate::FusionOperand::direct(case.rhs.space()), case.axes(), candidate, orientation)
         .unwrap();
     let mut tree_context: TreeTransformExecutionContext<D, RuleIdentity, f64, _> =
         TreeTransformExecutionContext::new(DenseTreeTransformOperations::default_executor());
@@ -1507,8 +1499,8 @@ where
     let facts = crate::contract::fusion::prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
         rule,
         dst.space(),
-        case.lhs.space(),
-        case.rhs.space(),
+        crate::FusionOperand::direct(case.lhs.space()),
+        crate::FusionOperand::direct(case.rhs.space()),
         case.axes(),
     )
     .unwrap();
@@ -1850,13 +1842,7 @@ fn canonical_axes_keep_the_direct_core_route_and_others_compile_one_dynamic_tree
             &lazy_dst,
             FusionOperand::adjoint(lhs.space()),
             FusionOperand::direct(rhs3.space()),
-            TensorContractSpec::new_with_conjugation(
-                &[1],
-                &[0],
-                OutputAxisOrder::from_axes(&output),
-                true,
-                false,
-            ),
+            TensorContractSpec::new(&[1], &[0], OutputAxisOrder::from_axes(&output)),
         )
         .unwrap();
     assert!(lazy.is_dynamic_tree());
@@ -1886,7 +1872,6 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
             vec![2, 3],
             vec![0, 1],
             vec![2, 0, 1],
-            (true, false),
         ),
         (
             lhs.clone(),
@@ -1896,12 +1881,9 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
             vec![1, 2],
             vec![0, 1],
             vec![1, 0],
-            (false, true),
         ),
     ];
-    for (lhs_logical, lhs_operand, rhs_logical, rhs_operand, lhs_axes, rhs_axes, output, conj) in
-        cases
-    {
+    for (lhs_logical, lhs_operand, rhs_logical, rhs_operand, lhs_axes, rhs_axes, output) in cases {
         let dst = BoundDynamicFusionMapSpace::contracted_multiplicity_free_ordered(
             &lhs_logical,
             &rhs_logical,
@@ -1910,13 +1892,8 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
             OutputAxisOrder::from_axes(&output),
         )
         .unwrap();
-        let axes = TensorContractSpec::new_with_conjugation(
-            &lhs_axes,
-            &rhs_axes,
-            OutputAxisOrder::from_axes(&output),
-            conj.0,
-            conj.1,
-        );
+        let axes =
+            TensorContractSpec::new(&lhs_axes, &rhs_axes, OutputAxisOrder::from_axes(&output));
         let lhs_data = vec![0.5; lhs_operand.storage_space().required_len().unwrap()];
         let rhs_data = vec![0.25; rhs_operand.storage_space().required_len().unwrap()];
         let mut out = vec![0.0; dst.space().required_len().unwrap()];
@@ -2585,13 +2562,7 @@ where
             &lhs_data,
             rhs,
             &rhs_data,
-            TensorContractSpec::new_with_conjugation(
-                lhs_axes,
-                rhs_axes,
-                OutputAxisOrder::from_axes(output),
-                lhs.storage_conjugate(),
-                rhs.storage_conjugate(),
-            ),
+            TensorContractSpec::new(lhs_axes, rhs_axes, OutputAxisOrder::from_axes(output)),
             1.0,
             crate::ContractDestinationInit::Axpby(0.0),
         )
