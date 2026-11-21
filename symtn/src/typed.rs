@@ -258,7 +258,7 @@ pub use symtn_tensors::cuda::CudaStorage;
 #[cfg(feature = "cuda")]
 use symtn_tensors::cuda::CudaStorageGemm;
 pub use symtn_tensors::CheckedGenericPlanError;
-pub use symtn_tensors::OperationError;
+pub use symtn_tensors::{BraidingOp, OperationError};
 
 /// Error returned by physical-basis expansion and projection.
 pub type PhysicalDenseError<E> = symtn_tensors::PhysicalConversionError<E>;
@@ -423,10 +423,7 @@ mod checked_generic_contract;
 mod mode_dispatch;
 use checked_generic_contract::write_identity_blocks_generic;
 #[doc(hidden)]
-pub use symtn_tensors::{
-    admit_braiding, BraidingOp, CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
-    CHECKED_PLANAR_CONTRACTION_UNSUPPORTED, NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
-};
+pub use symtn_tensors::admit_braiding;
 mod space;
 use space::{
     require_restriction_set, require_selected_leg_of, restricted_space, restriction_runs,

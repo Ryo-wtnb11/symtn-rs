@@ -340,7 +340,7 @@ impl<C> TensorTraceFusionStructure<C> {
         // leaves its built groups unpublished.
         let epoch = symtn_core::core_reset_epoch();
         crate::admission::admit_braiding::<MultiplicityFreeAdmissionMode>(
-            crate::admission::BraidingOp::Trace,
+            crate::BraidingOp::Trace,
             rule.braiding_style(),
         )?;
         let axis_plan =
@@ -1041,6 +1041,9 @@ pub struct TracePreflight {
     trace_pairs_match: bool,
 }
 
+/// A traced pair whose legs are not mutually dual.
+const TRACE_PAIRS_NOT_DUAL: &str = "a traced pair joins legs that are not mutually dual";
+
 impl TracePreflight {
     #[inline]
     pub(crate) fn selected_homspace(&self) -> &FusionTreeHomSpace {
@@ -1052,16 +1055,16 @@ impl TracePreflight {
         self.selected_homspace
     }
 
-    /// `StructureMismatch { "trace axes" }` when a traced pair joins legs
-    /// that are not mutually dual (TensorKit
-    /// `space(tsrc, q₁) == dual(space(tsrc, q₂))`).
+    /// [`OperationError::SpaceMismatch`] when a traced pair joins legs that
+    /// are not mutually dual (TensorKit `trace_permute!`'s `SpaceMismatch`
+    /// for `space(tsrc, q₁) != dual(space(tsrc, q₂))`).
     #[inline]
     pub(crate) fn require_dual_pairs(&self) -> Result<(), OperationError> {
         if self.trace_pairs_match {
             Ok(())
         } else {
-            Err(OperationError::StructureMismatch {
-                tensor: "trace axes",
+            Err(OperationError::SpaceMismatch {
+                message: TRACE_PAIRS_NOT_DUAL,
             })
         }
     }
@@ -1912,8 +1915,8 @@ where
     }
     if let Some(trace_pairs_match) = checked_trace_pairs_match {
         if !trace_pairs_match {
-            return Err(OperationError::StructureMismatch {
-                tensor: "trace axes",
+            return Err(OperationError::SpaceMismatch {
+                message: TRACE_PAIRS_NOT_DUAL,
             });
         }
         return Ok(());
@@ -1926,8 +1929,8 @@ where
         let lhs = outward_axis_leg(rule, src, lhs_axis)?;
         let rhs = outward_axis_leg(rule, src, rhs_axis)?;
         if lhs != dual_sector_leg(rule, &rhs) {
-            return Err(OperationError::StructureMismatch {
-                tensor: "trace axes",
+            return Err(OperationError::SpaceMismatch {
+                message: TRACE_PAIRS_NOT_DUAL,
             });
         }
     }

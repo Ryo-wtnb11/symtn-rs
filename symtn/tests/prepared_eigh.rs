@@ -441,12 +441,16 @@ fn a_non_finite_eigenvalue_rejects_its_members() {
 }
 
 #[test]
-fn other_signatures_and_non_endomorphisms_are_typed_errors() {
+fn other_splits_signatures_and_non_endomorphisms_are_typed_errors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let inputs = hermitian_members(&runtime, &[&v], 2, 1);
     let stack = StackedTensorMap::pack(&inputs).unwrap();
+    assert!(matches!(
+        EighFullPlan::new(engine, &stack, &[1], &[0], HermitianTol::DEFAULT),
+        Err(Error::InvalidArgument(_))
+    ));
     let plan = EighFullPlan::new(engine, &stack, &[0], &[1], HermitianTol::DEFAULT).unwrap();
     let mut ws = plan.workspace().unwrap();
     let other = StackedTensorMap::pack(&hermitian_members(&runtime, &[&w], 2, 1)).unwrap();

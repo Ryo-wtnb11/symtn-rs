@@ -37,11 +37,7 @@ pub use adjoint::{
     adjoint_bound_dyn, adjoint_bound_space_dyn, materialize_adjoint_data_dyn, AdjointBlockMap,
 };
 #[doc(hidden)]
-pub use admission::{
-    admit_braiding, admit_checked_generic_pair, BraidingAdmission, BraidingOp,
-    CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING, CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
-    NON_SYMMETRIC_CONTRACTION_UNSUPPORTED,
-};
+pub use admission::{admit_braiding, admit_checked_generic_pair, BraidingAdmission};
 pub use bound_tensor::BoundDynamicTensorRef;
 #[cfg(test)]
 pub(crate) use contract::tensorcontract_fusion_dyn_prelowered_direct_on_storage;
@@ -91,7 +87,6 @@ pub use symtn_operations::cuda;
 #[doc(hidden)]
 pub use symtn_operations::host_pool;
 pub use symtn_operations::ContractDestinationInit;
-pub use symtn_operations::OperationError;
 pub use symtn_operations::ReportsPlacement;
 pub(crate) use symtn_operations::StridedHostKernelAdapter;
 pub(crate) use symtn_operations::TreeTransformReplayProfile;
@@ -102,6 +97,7 @@ pub(crate) use symtn_operations::{host_scratch, strided};
 pub use symtn_operations::{try_cat_owned_raw, OwnedCatCopy, OwnedCatSide};
 #[doc(hidden)]
 pub use symtn_operations::{zeroed_payload, ZeroBytes};
+pub use symtn_operations::{BraidingOp, OperationError};
 pub use symtn_operations::{ConjugateValue, RealStructuralCoefficient, TreeTransformScalar};
 pub use symtn_operations::{
     DenseBlockScalar, DenseRecouplingScalar, RecouplingCoefficientAction, WideScalar,

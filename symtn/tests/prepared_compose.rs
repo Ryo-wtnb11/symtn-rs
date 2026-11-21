@@ -526,9 +526,10 @@ fn non_symmetric_composition<const ANYONIC: bool>() {
                 ContractPlan::new(engine, &lhs, &rhs, &spec),
                 Err(Error::Operation(error)) if matches!(
                     *error,
-                    symtn::typed::OperationError::UnsupportedTensorContractScope {
-                        message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-                    }
+                    symtn::typed::OperationError::UnsupportedContractionBraiding {
+                        operation: symtn::typed::BraidingOp::Contraction,
+                        style,
+                    } if !style.is_symmetric()
                 )
             ),
             "{label}"

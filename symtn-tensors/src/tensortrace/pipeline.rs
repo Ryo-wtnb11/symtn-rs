@@ -67,7 +67,7 @@ where
     // TensorKit `trace_permute!` gates the braiding first: a trace is defined
     // only for symmetric braiding.
     crate::admission::admit_braiding::<M>(
-        crate::admission::BraidingOp::Trace,
+        crate::BraidingOp::Trace,
         M::braiding_style(src.provider()),
     )
     .map_err(M::operation)?;

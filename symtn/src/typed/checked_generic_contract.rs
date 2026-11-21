@@ -407,12 +407,12 @@ where
     ///
     /// # Errors
     ///
-    /// In TensorKit `trace_permute!`'s order: `UnsupportedTensorContractScope`
+    /// In TensorKit `trace_permute!`'s order:
+    /// `UnsupportedContractionBraiding { operation: BraidingOp::Trace, .. }`
     /// for a non-symmetric braiding (even with an empty `pairs`), then
     /// [`Error::Operation`] with `InvalidAxisSet { tensor: "trace pairs" }`
-    /// for an out-of-range or repeated axis, then
-    /// `StructureMismatch { "trace axes" }` for legs that are not mutually
-    /// dual, in both admission modes. Trace execution failures return their
+    /// for an out-of-range or repeated axis, then `SpaceMismatch` for legs
+    /// that are not mutually dual, in both admission modes. Trace execution failures return their
     /// corresponding [`Error`] variant. If required pivotal data is unavailable, the original
     /// provider error is available as the source. On CUDA storage,
     /// [`Error::PlacementMismatch`] last. A failed trace returns no output
@@ -511,7 +511,7 @@ where
     /// # Errors
     ///
     /// [`Error::RuntimeMismatch`], [`Error::RuleMismatch`];
-    /// [`crate::typed::OperationError::UnsupportedTensorContractScope`] for a
+    /// [`crate::typed::OperationError::UnsupportedContractionBraiding`] for a
     /// non-symmetric braiding, even with an empty `pairs`; the pair-list errors
     /// of [`Self::trace_pairs`]; [`Error::UnsupportedDestination`] for a
     /// lazy-adjoint or compact diagonal destination, and

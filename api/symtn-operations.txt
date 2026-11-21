@@ -611,6 +611,20 @@ pub fn symtn_operations::TreeTransformStructure<T>::eq(&self, &Self) -> bool
 impl<T: core::fmt::Debug> core::fmt::Debug for symtn_operations::TreeTransformStructure<T>
 pub fn symtn_operations::TreeTransformStructure<T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn symtn_operations::transform_structure::validate_destination_layouts_injective(&symtn_core::block_structure::structure::BlockStructure, &'static str) -> core::result::Result<(), symtn_operations::OperationError>
+pub enum symtn_operations::BraidingOp
+pub symtn_operations::BraidingOp::Contraction
+pub symtn_operations::BraidingOp::PlanarContraction
+pub symtn_operations::BraidingOp::Trace
+impl core::clone::Clone for symtn_operations::BraidingOp
+pub fn symtn_operations::BraidingOp::clone(&self) -> symtn_operations::BraidingOp
+impl core::clone::TrivialClone for symtn_operations::BraidingOp
+impl core::cmp::Eq for symtn_operations::BraidingOp
+impl core::cmp::PartialEq for symtn_operations::BraidingOp
+pub fn symtn_operations::BraidingOp::eq(&self, &symtn_operations::BraidingOp) -> bool
+impl core::fmt::Debug for symtn_operations::BraidingOp
+pub fn symtn_operations::BraidingOp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_operations::BraidingOp
+impl core::marker::StructuralPartialEq for symtn_operations::BraidingOp
 pub enum symtn_operations::ContractDestinationInit<D>
 pub symtn_operations::ContractDestinationInit::Axpby(D)
 pub symtn_operations::ContractDestinationInit::Zeroed
@@ -624,7 +638,7 @@ impl<D: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn_operat
 impl<D: core::fmt::Debug> core::fmt::Debug for symtn_operations::fusion_replay::ContractDestinationInit<D>
 pub fn symtn_operations::fusion_replay::ContractDestinationInit<D>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<D: core::marker::Copy> core::marker::Copy for symtn_operations::fusion_replay::ContractDestinationInit<D>
-pub enum symtn_operations::OperationError
+#[non_exhaustive] pub enum symtn_operations::OperationError
 pub symtn_operations::OperationError::BlockCountMismatch
 pub symtn_operations::OperationError::BlockCountMismatch::dst: usize
 pub symtn_operations::OperationError::BlockCountMismatch::src: usize
@@ -695,6 +709,9 @@ pub symtn_operations::OperationError::TraceAxisCountMismatch::rhs: usize
 pub symtn_operations::OperationError::UnsupportedBraidingStyle
 pub symtn_operations::OperationError::UnsupportedBraidingStyle::operation: alloc::boxed::Box<symtn_operations::TreeTransformOperation>
 pub symtn_operations::OperationError::UnsupportedBraidingStyle::style: symtn_sectors::BraidingStyleKind
+pub symtn_operations::OperationError::UnsupportedContractionBraiding
+pub symtn_operations::OperationError::UnsupportedContractionBraiding::operation: symtn_operations::BraidingOp
+pub symtn_operations::OperationError::UnsupportedContractionBraiding::style: symtn_sectors::BraidingStyleKind
 pub symtn_operations::OperationError::UnsupportedDeviceTreeTransform
 pub symtn_operations::OperationError::UnsupportedDeviceTreeTransform::message: &'static str
 pub symtn_operations::OperationError::UnsupportedFusionStyle

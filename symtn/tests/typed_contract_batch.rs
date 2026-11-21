@@ -1309,5 +1309,5 @@ fn reject_braiding<const ANYONIC: bool>(runtime: &Runtime) -> bool {
         codomain: &[0],
         domain: &[1],
     };
-    matches!(ContractPlan::new(engine, &stack, &stack, &spec), Err(Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::UnsupportedTensorContractScope { message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED }))
+    matches!(ContractPlan::new(engine, &stack, &stack, &spec), Err(Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::UnsupportedContractionBraiding { operation: symtn::typed::BraidingOp::Contraction, style, } if !style.is_symmetric()))
 }

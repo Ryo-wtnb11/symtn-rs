@@ -457,7 +457,7 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
     assert!(matches!(
         error,
         symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::UnsupportedTensorContractScope { .. })
+            if matches!(*operation, symtn::typed::OperationError::UnsupportedContractionBraiding { operation: symtn::typed::BraidingOp::Contraction, .. })
     ));
     assert_eq!(crate::typed_facade::completed_transformers(), before);
 

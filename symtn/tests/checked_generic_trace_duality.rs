@@ -37,9 +37,8 @@ fn checked_generic_trace_rejects_legs_that_are_not_mutually_dual() {
         assert!(
             matches!(
                 cause::<OperationError>(&error),
-                Some(OperationError::StructureMismatch {
-                    tensor: "trace axes"
-                })
+                Some(OperationError::SpaceMismatch { message })
+                    if message.contains("mutually dual")
             ),
             "{what}: {error:?}"
         );

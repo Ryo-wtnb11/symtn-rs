@@ -184,10 +184,10 @@ where
     ///
     /// # Errors
     ///
-    /// The eager structural errors (not an endomorphism, a non-square
-    /// coupled-sector block), or `UnsupportedTensorContractScope` for a
-    /// layout without packed coupled-sector regions or leg roles other than
-    /// the current split.
+    /// [`Error::InvalidArgument`] for leg roles other than the current split;
+    /// the eager structural errors (not an endomorphism, a non-square
+    /// coupled-sector block); or `UnsupportedTensorContractScope` for a
+    /// layout without packed coupled-sector regions.
     pub fn new(
         cx: &mut (impl ExecContext + ?Sized),
         source: &StackedTensorMap<R, D, S>,
@@ -212,11 +212,11 @@ where
         if !rows.iter().copied().eq(0..nout)
             || !cols.iter().copied().eq(nout..source.space.space().rank())
         {
-            return Err(OperationError::UnsupportedTensorContractScope {
-                message: "a prepared eigh supports only the members' current split; \
-                          permute the members before pack",
-            }
-            .into());
+            return Err(Error::InvalidArgument(
+                "a prepared eigh supports only the members' current split; \
+                 permute the members before pack"
+                    .to_owned(),
+            ));
         }
         let space = source.space.space();
         symtn_matrixalgebra::seam::EndomorphismFamily::EighFull
