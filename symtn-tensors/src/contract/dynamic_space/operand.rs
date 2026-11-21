@@ -66,6 +66,7 @@ impl<R> LazyAdjointSpace<R> {
     ) -> Result<Self, M::Error> {
         let logical = M::adjoint_space(&parent)?;
         debug_assert!(Arc::ptr_eq(parent.provider_arc(), logical.provider_arc()));
+        parent.space().share_adjoint_homspace(logical.space());
         Ok(Self { parent, logical })
     }
 

@@ -74,10 +74,11 @@ pub use context::{
 };
 #[cfg(test)]
 pub(crate) use dynamic_space::{
-    checked_layout_primer, checked_metadata_dispatcher, MetadataOutput, MetadataRequest,
+    checked_layout_primer, checked_metadata_dispatcher, dispatch_prepare, MetadataOutput,
+    MetadataRequest,
 };
 pub(crate) use dynamic_space::{
-    dispatch_prepare, tree_transform_operation_axes, FusionOperandLayout, LayoutKeyBuilder,
+    tree_transform_operation_axes, FusionOperandLayout, LayoutKeyBuilder,
 };
 pub use dynamic_space::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, FusionSource,

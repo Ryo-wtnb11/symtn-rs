@@ -26,10 +26,10 @@ mod operand;
 pub use bound::PreparedCheckedGenericRoot;
 use metadata::LayoutBuildCapability;
 #[cfg(test)]
-pub(crate) use metadata::{checked_layout_primer, checked_metadata_dispatcher};
+pub(crate) use metadata::{checked_layout_primer, checked_metadata_dispatcher, dispatch_prepare};
 pub(crate) use metadata::{
-    dispatch_final, dispatch_prepare, encoded_layout_primer, LayoutKeyBuilder, MetadataOutput,
-    MetadataRequest, PreparedLayoutKeys,
+    dispatch_final, encoded_layout_primer, LayoutKeyBuilder, MetadataOutput, MetadataRequest,
+    PreparedLayoutKeys,
 };
 pub(crate) use operand::FusionOperandLayout;
 pub use operand::{FusionOperand, FusionSource, LazyAdjointSpace};
@@ -900,6 +900,18 @@ impl DynamicFusionMapSpace {
                 self.homspace.codomain().clone(),
             ))
         })
+    }
+
+    /// Fills the adjoint memo with `adjoint`'s HomSpace, an adjoint already
+    /// derived from this space. Why: a lazy adjoint's parent is a clone of
+    /// its body's space, and an empty memo clones empty; seeding it from the
+    /// derived logical space keeps one HomSpace per pair, built once.
+    pub(crate) fn share_adjoint_homspace(&self, adjoint: &Self) {
+        debug_assert!(
+            adjoint.homspace.codomain() == self.homspace.domain()
+                && adjoint.homspace.domain() == self.homspace.codomain()
+        );
+        let _ = self.adjoint.set(Arc::clone(&adjoint.homspace));
     }
 
     /// Number of codomain legs.

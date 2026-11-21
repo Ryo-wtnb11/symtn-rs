@@ -24,7 +24,7 @@ where
                 body.materialized_dense_data(),
             ),
             TypedTensorRepr::Adjoint(view) => (
-                symtn_tensors::FusionOperand::adjoint(view.parent.space.space()),
+                view.adjoint.operand(),
                 std::borrow::Cow::Borrowed(view.parent_data()),
             ),
         }

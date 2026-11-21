@@ -19,12 +19,10 @@ use symtn_core::{
 
 #[cfg(test)]
 use crate::contract::{
-    checked_layout_primer, checked_metadata_dispatcher, encoded_layout_primer, MetadataOutput,
-    MetadataRequest,
+    checked_layout_primer, checked_metadata_dispatcher, dispatch_prepare, encoded_layout_primer,
+    MetadataOutput, MetadataRequest,
 };
-use crate::contract::{
-    dispatch_prepare, BoundDynamicFusionMapSpace, DynamicFusionMapSpace, LayoutKeyBuilder,
-};
+use crate::contract::{BoundDynamicFusionMapSpace, DynamicFusionMapSpace, LayoutKeyBuilder};
 use crate::{CheckedGenericPlanError, ConjugateValue, FusionOperand, OperationError};
 use symtn_operations::overwrite_owned_blocks;
 
@@ -69,6 +67,7 @@ where
     adjoint_space_dyn_with_primer(rule, space, encoded_layout_primer::<R>)
 }
 
+#[cfg(test)]
 fn adjoint_space_dyn_with_primer<R>(
     rule: &R,
     space: &DynamicFusionMapSpace,
@@ -81,6 +80,7 @@ where
     build_adjoint_space_dyn_with_primer(rule, space, primer)
 }
 
+#[cfg(test)]
 fn build_adjoint_space_dyn_with_primer<R>(
     rule: &R,
     space: &DynamicFusionMapSpace,
@@ -436,17 +436,30 @@ where
     Ok((output, data))
 }
 
-/// Lazy-adjoint metadata retaining the exact provider allocation of the
-/// checked source space.
+/// Lazy-adjoint metadata retaining the exact provider allocation and layout
+/// capability of the source space.
+///
+/// Why the final-HomSpace derivation (as every other bound output layout):
+/// a warm complete layout answers from its cache without the sector-layout
+/// preparation, and the bound source already carries its provider's
+/// admission, so no rule re-validation is needed.
 pub fn adjoint_bound_space_dyn<R>(
     space: &BoundDynamicFusionMapSpace<R>,
 ) -> Result<BoundDynamicFusionMapSpace<R>, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
 {
-    let output =
-        adjoint_space_dyn_with_primer(space.provider(), space.space(), space.layout_primer())?;
-    BoundDynamicFusionMapSpace::from_derived_like(space, output)
+    let homspace = space.space().homspace();
+    debug_assert!(validate_adjoint_source_structure(
+        space.provider(),
+        homspace,
+        space.space().structure()
+    )
+    .is_ok());
+    space.derive_from_final_homspace(FusionTreeHomSpace::new(
+        homspace.domain().clone(),
+        homspace.codomain().clone(),
+    ))
 }
 
 #[cfg(test)]

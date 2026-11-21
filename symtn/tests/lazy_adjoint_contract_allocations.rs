@@ -90,6 +90,16 @@ macro_rules! assert_warm_lazy_adjoint {
             contract_conj_calls
         );
         assert_eq!(allocations(|| compose_conj($engine)).0, compose_conj_calls);
+        // What: a fresh view of the warmed body plans like the reused view;
+        // the view owns no per-view planning memo.
+        let fresh = a.adjoint($engine).unwrap();
+        assert_eq!(
+            allocations(|| black_box(&fresh)
+                .contract($engine, &matrix, &one_leg)
+                .unwrap())
+            .0,
+            contract_conj_calls
+        );
 
         // What: warm calls reuse every Runtime-owned transform plan.
         assert_eq!(completed_transformers().misses(), misses);
