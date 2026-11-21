@@ -878,14 +878,16 @@ mod cuda {
     #[test]
     #[ignore = "requires a CUDA device"]
     fn checked_generic_su3_device_block_views_address_the_host_block_entries() {
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let cuda = &mut crate::common::cuda_engine();
         let rt = Runtime::builder().build().unwrap();
         let [octet, _, _] = super::su3::legs();
         let t = label_case::<_, f64>("SU(3) f64", &rt, &[&octet, &octet], &[&octet]);
-        device_case("SU(3) f64", &t);
-        device_case("SU(3) f64 adjoint", &t.adjoint().unwrap());
+        device_case(cuda, "SU(3) f64", &t);
+        device_case(cuda, "SU(3) f64 adjoint", &t.adjoint(engine).unwrap());
         let t = label_case::<_, Complex64>("SU(3) c64", &rt, &[&octet, &octet], &[&octet]);
-        device_case("SU(3) c64", &t);
-        device_case("SU(3) c64 adjoint", &t.adjoint().unwrap());
+        device_case(cuda, "SU(3) c64", &t);
+        device_case(cuda, "SU(3) c64 adjoint", &t.adjoint(engine).unwrap());
     }
 }
 
