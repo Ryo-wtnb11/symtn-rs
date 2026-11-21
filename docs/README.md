@@ -54,7 +54,7 @@ first. Cold-cache tests establish their preconditions through public clear/reset
 APIs. Runtime-local caches and thread-local CUDA transfer counters do not require
 serialization. Tests requiring set-once process state keep separate targets:
 `intermediate_allocations`. Run a member with a module filter, for example
-`cargo test -p symtn --no-default-features --features krylov,blas-openblas --test serial krylov_vector::`.
+`cargo test -p symtn --no-default-features --features krylov,cpu-faer --test serial krylov_vector::`.
 
 Coverage and macOS nightly also serialize the `symtn-tensors` lib binary: its
 [cache-test support](../symtn-tensors/src/test_support.rs) explains why unrelated

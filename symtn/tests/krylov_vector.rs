@@ -12,7 +12,7 @@
 //!   eigenvalues;
 //! - an allocation upper bound for a warm `eigsolve`.
 //!
-//! Run with `--features krylov,blas-openblas` (or another LAPACK provider).
+//! Run with `--features krylov`.
 #![cfg(feature = "krylov")]
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};

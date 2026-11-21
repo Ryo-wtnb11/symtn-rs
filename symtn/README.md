@@ -43,9 +43,7 @@ The `krylov` feature makes Host `TensorMap` a vector of the
 `eigsolve`, `exponentiate` and `linsolve` run directly on tensors, on the
 caller's execution context (`dyn ExecContext`, krylov's vector context), with closures as linear maps (`svdsolve` takes a user type implementing
 `AdjointMap`); the [krylov correspondence](../docs/krylov.md)
-records the TensorKit and QSpace counterparts. krylov needs a LAPACK provider
-in the final binary: enable a `blas-*` feature or link one yourself (the
-default `cpu-faer` links none).
+records the TensorKit and QSpace counterparts.
 
 ## Primitive examples
 
