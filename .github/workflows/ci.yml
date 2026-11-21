@@ -394,6 +394,14 @@ jobs:
           key: backend-cuda
       - run: cargo check --locked --workspace --all-targets --no-default-features --features cuda,cpu-faer
         working-directory: symtn
+      # symtn-dense alone without `cpu-faer`: the serial factorization route
+      # (`factorize_batch_serial`) compiles only in these builds.
+      - name: check symtn-dense without cpu-faer
+        if: ${{ !cancelled() }}
+        working-directory: symtn
+        run: |
+          cargo check --locked -p symtn-dense --no-default-features --features tenferro
+          cargo check --locked -p symtn-dense --no-default-features --features cuda
       - name: Run GPU-free CUDA library tests
         working-directory: symtn
         run: |

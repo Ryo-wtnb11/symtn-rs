@@ -1507,13 +1507,13 @@ fn factorize_batch_serial(
         |exec: &mut dyn Engine, input: DenseRead<'_>| -> Result<Vec<DenseTensor>, DenseError> {
             let input = TensorRead::from_view(tenferro_view(input)?);
             let tensors = match op {
-                DenseFactorization::Svd => input.svd_read(exec).map(|(u, s, vt)| vec![u, s, vt]),
+                DenseFactorization::Svd => input.svd(exec).map(|svd| vec![svd.u, svd.s, svd.vh]),
                 // LQ reaches this only with its staged adjoint (below); full
                 // QR never reaches it (see `entry`).
                 DenseFactorization::Qr
                 | DenseFactorization::Lq
                 | DenseFactorization::QrFull
-                | DenseFactorization::QrNull => input.qr_read(exec).map(|(q, r)| vec![q, r]),
+                | DenseFactorization::QrNull => input.qr(exec).map(|qr| vec![qr.q, qr.r]),
                 DenseFactorization::SvdFull => {
                     unreachable!("full SVD never reaches the serial entries (see `entry`)")
                 }
@@ -1523,10 +1523,12 @@ fn factorize_batch_serial(
                 | DenseFactorization::Inv => {
                     unreachable!("`factorize_batch` refuses the destination-only ops")
                 }
-                DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
-                DenseFactorization::EighVals => input.eigvalsh_read(exec).map(|w| vec![w]),
-                DenseFactorization::SvdVals => input.svdvals_read(exec).map(|s| vec![s]),
-                DenseFactorization::Eig => input.eig_read(exec).map(|(w, v)| vec![w, v]),
+                DenseFactorization::Eigh => {
+                    input.eigh(exec).map(|eigh| vec![eigh.values, eigh.vectors])
+                }
+                DenseFactorization::EighVals => input.eigvalsh(exec).map(|w| vec![w]),
+                DenseFactorization::SvdVals => input.svdvals(exec).map(|s| vec![s]),
+                DenseFactorization::Eig => input.eig(exec).map(|eig| vec![eig.values, eig.vectors]),
                 // The per-matrix `eig_vals` route: a contiguity pre-pass, then
                 // the owned values call.
                 DenseFactorization::EigVals => exec

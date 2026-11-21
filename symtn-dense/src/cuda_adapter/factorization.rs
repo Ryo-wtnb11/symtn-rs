@@ -525,8 +525,10 @@ pub fn cuda_eigh_region<D: CudaScalar>(
 /// view. Tenferro's `Auto` driver solves a single matrix with `syevd`, exactly
 /// as [`cuda_eigh_region`] does, and a batch of more than one matrix with one
 /// `XsyevBatched` launch when cuSOLVER is 11.7.1 or newer; with an older
-/// library it launches one `syevd` per matrix inside this one backend call,
-/// and offers no public way to require or detect which. The batched routine
+/// library it launches one `syevd` per matrix inside this one backend call.
+/// This entry keeps the `Auto` routing; Tenferro exposes the capability as
+/// `tenferro_linalg::cuda_batched_eigh_available()` and the strict route as
+/// `EighBatchPolicy::RequireBatched`, neither used here. The batched routine
 /// may differ from the per-matrix one in the last ULPs.
 ///
 /// Returns the eigenvalues as one `[n, members]` spectrum (ascending per
