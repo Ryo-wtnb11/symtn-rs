@@ -161,7 +161,7 @@ where
     assert!(matches!(
         ordinary,
         symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::UnsupportedTensorContractScope { .. })
+            if matches!(*operation, symtn::typed::OperationError::UnsupportedContractionBraiding { operation: symtn::typed::BraidingOp::Contraction, .. })
     ));
     let dual_basis: [TensorMap<_, Complex64>; 2] = channels.map(|channel| {
         TensorMap::from_subblock_fn(

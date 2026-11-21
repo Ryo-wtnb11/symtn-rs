@@ -294,9 +294,10 @@ fn non_symmetric_braiding_is_unsupported_for_every_split() {
                 symtn::typed::Error::Operation(operation)
                     if matches!(
                         **operation,
-                        symtn::typed::OperationError::UnsupportedTensorContractScope {
-                            message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-                        }
+                        symtn::typed::OperationError::UnsupportedContractionBraiding {
+                            operation: symtn::typed::BraidingOp::Contraction,
+                            style,
+                        } if !style.is_symmetric()
                     )
             ),
             "{codomain:?} <- {domain:?}: {error:?}"

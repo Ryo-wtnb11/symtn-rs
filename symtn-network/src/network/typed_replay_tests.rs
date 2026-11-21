@@ -1278,9 +1278,10 @@ fn device_operand_admission_decides_each_class_from_metadata() {
         match device_operand_admission(true, braiding, dense) {
             Err(Error::Operation(error)) => assert!(matches!(
                 error.as_ref(),
-                OperationError::UnsupportedTensorContractScope {
-                    message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-                }
+                OperationError::UnsupportedContractionBraiding {
+                    operation: symtn::typed::BraidingOp::Contraction,
+                    style,
+                } if !style.is_symmetric()
             )),
             other => panic!("{braiding:?} contraction must be unsupported, got {other:?}"),
         }

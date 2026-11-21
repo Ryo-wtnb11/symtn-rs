@@ -1227,24 +1227,12 @@ fn checked_generic_contraction_braiding_matrix() {
         codomain: &[0],
         domain: &[1],
     };
-    const PLANAR: &str = "checked Generic planar contraction requires Bosonic braiding";
+    use symtn::typed::BraidingOp::{Contraction, PlanarContraction};
     for (tag, braiding, ordinary) in [
         (22, BraidingStyleKind::Bosonic, None),
-        (
-            23,
-            BraidingStyleKind::Fermionic,
-            Some("checked Generic contraction requires Bosonic braiding"),
-        ),
-        (
-            21,
-            BraidingStyleKind::Anyonic,
-            Some(symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED),
-        ),
-        (
-            20,
-            BraidingStyleKind::NoBraiding,
-            Some(symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED),
-        ),
+        (23, BraidingStyleKind::Fermionic, Some(Contraction)),
+        (21, BraidingStyleKind::Anyonic, Some(Contraction)),
+        (20, BraidingStyleKind::NoBraiding, Some(Contraction)),
     ] {
         let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, 1.0));
         let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
@@ -1260,7 +1248,7 @@ fn checked_generic_contraction_braiding_matrix() {
         let oracle = [19.0, 43.0, 22.0, 50.0];
         let mut destinations = [matrix(-3.0), matrix(-3.0)];
         let before = destinations[0].dense_data().unwrap().to_vec();
-        let planar = ordinary.map(|_| PLANAR);
+        let planar = ordinary.map(|_| PlanarContraction);
         let [ordinary_dst, planar_dst] = &mut destinations;
         let cells = [
             (
@@ -1291,12 +1279,12 @@ fn checked_generic_contraction_braiding_matrix() {
         for (entry, expected, result) in cells {
             match (expected, result) {
                 (None, Ok(data)) => assert_eq!(data, oracle, "{braiding:?} {entry}"),
-                (Some(message), Err(GenericTensorError::Facade(Error::Operation(operation)))) => {
+                (Some(op), Err(GenericTensorError::Facade(Error::Operation(operation)))) => {
                     assert!(
                         matches!(
                             *operation,
-                            OperationError::UnsupportedTensorContractScope { message: actual }
-                                if actual == message
+                            OperationError::UnsupportedContractionBraiding { operation, style }
+                                if operation == op && style == braiding
                         ),
                         "{braiding:?} {entry}: {operation:?}"
                     )
@@ -1427,9 +1415,10 @@ fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
                 assert!(
                     matches!(
                         cause::<OperationError>(&error),
-                        Some(OperationError::UnsupportedTensorContractScope {
-                            message: "fusion tensortrace requires symmetric braiding"
-                        })
+                        Some(OperationError::UnsupportedContractionBraiding {
+                            operation: symtn::typed::BraidingOp::Trace,
+                            style,
+                        }) if *style == braiding
                     ),
                     "{braiding:?} {pairs:?}: {error:?}"
                 );

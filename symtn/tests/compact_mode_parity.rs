@@ -911,27 +911,27 @@ where
             .err()
             .unwrap();
         assert!(
-            is_checked_refusal(
-                &error,
-                symtn::typed::CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING
-            ),
+            is_checked_refusal(&error, symtn::typed::BraidingOp::Contraction),
             "{what}: {error:?}"
         );
     }
 }
 
-/// Whether `error` is exactly the facade braiding refusal with `message`.
+/// Whether `error` is exactly the facade refusal of `expected` over the
+/// fixture's Fermionic braiding.
 fn is_checked_refusal(
     error: &symtn::typed::GenericTensorError<InvalidSector>,
-    message: &str,
+    expected: symtn::typed::BraidingOp,
 ) -> bool {
     matches!(
         error,
         symtn::typed::GenericTensorError::Facade(symtn::typed::Error::Operation(operation))
             if matches!(
                 **operation,
-                symtn::typed::OperationError::UnsupportedTensorContractScope { message: actual }
-                    if actual == message
+                symtn::typed::OperationError::UnsupportedContractionBraiding {
+                    operation: actual,
+                    style: BraidingStyleKind::Fermionic,
+                } if actual == expected
             )
     )
 }
@@ -1309,9 +1309,7 @@ fn checked_contraction_refuses_a_cold_borrowed_adjoint_before_resolving_it() {
     // of a dense `a: W ⊗ W ← W` on cold caches, whose resolution needs a
     // fallible provider query, still gets the entry's typed refusal, and no
     // query is made.
-    use symtn::typed::{
-        CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING, CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
-    };
+    use symtn::typed::BraidingOp::{Contraction, PlanarContraction};
     let fixture = bond_fixture(
         &z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0)),
         parity,
@@ -1333,22 +1331,22 @@ fn checked_contraction_refuses_a_cold_borrowed_adjoint_before_resolving_it() {
     let cells = [
         (
             "contract",
-            CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
+            Contraction,
             d.contract(engine, view(), &one_leg).map(drop),
         ),
         (
             "contract_into",
-            CHECKED_CONTRACTION_REQUIRES_BOSONIC_BRAIDING,
+            Contraction,
             d.contract_into(engine, view(), &one_leg, ordinary_dst, 1.0, 0.0),
         ),
         (
             "planar_contract",
-            CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
+            PlanarContraction,
             d.planar_contract(engine, view(), &one_leg).map(drop),
         ),
         (
             "planar_contract_into",
-            CHECKED_PLANAR_CONTRACTION_UNSUPPORTED,
+            PlanarContraction,
             d.planar_contract_into(engine, view(), &one_leg, planar_dst, 1.0, 0.0),
         ),
     ];
@@ -1356,9 +1354,9 @@ fn checked_contraction_refuses_a_cold_borrowed_adjoint_before_resolving_it() {
     // The control: resolving the same view does query, and fails.
     assert!(fixture.a.adjoint(engine).is_err());
     provider.fail_queries.store(false, Ordering::Relaxed);
-    for (entry, message, result) in cells {
+    for (entry, operation, result) in cells {
         let error = result.err().unwrap();
-        assert!(is_checked_refusal(&error, message), "{entry}: {error:?}");
+        assert!(is_checked_refusal(&error, operation), "{entry}: {error:?}");
     }
 }
 

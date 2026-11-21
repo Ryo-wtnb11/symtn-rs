@@ -2537,9 +2537,10 @@ fn assert_cuda_network_contraction_rejects_non_symmetric<const ANYONIC: bool>() 
             symtn::typed::Error::Operation(operation)
                 if matches!(
                     **operation,
-                    symtn::typed::OperationError::UnsupportedTensorContractScope {
-                        message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
-                    }
+                    symtn::typed::OperationError::UnsupportedContractionBraiding {
+                        operation: symtn::typed::BraidingOp::Contraction,
+                        style,
+                    } if !style.is_symmetric()
                 )
         ),
         "{device_error:?}"

@@ -28,9 +28,9 @@ fn class(error: impl std::error::Error + 'static) -> &'static str {
             tensor: "trace pairs",
             ..
         }) => "pair list",
-        Some(OperationError::StructureMismatch {
-            tensor: "trace axes",
-        }) => "non-dual pair",
+        Some(OperationError::SpaceMismatch { message }) if message.contains("mutually dual") => {
+            "non-dual pair"
+        }
         Some(OperationError::SpaceMismatch { .. }) => "destination space",
         _ => panic!("unclassified trace error: {error:?}"),
     }
