@@ -1878,13 +1878,10 @@ fn dynamic_tree_multi_transform_stays_unsupported() {
         .unwrap()
         .to_cuda(cuda)
         .unwrap();
-    assert!(
-        matches!(ContractPlan::new(engine, &left, &right, &case.spec()),
-        Err(Error::Operation(error)) if matches!(*error,
-            symtn::typed::OperationError::UnsupportedTensorContractScope {
-                message: "CUDA member transform requires unconjugated nonzero Single tasks"
-            }))
-    );
+    assert!(matches!(
+        ContractPlan::new(engine, &left, &right, &case.spec()),
+        Err(Error::UnsupportedOnDevice(_))
+    ));
 }
 
 #[test]

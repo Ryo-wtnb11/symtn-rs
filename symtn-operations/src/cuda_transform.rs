@@ -161,6 +161,9 @@ fn unsigned_zero_layout(
     ))
 }
 
+const MEMBER_REPLAY_UNSUPPORTED: &str =
+    "CUDA member replay requires unconjugated nonzero Single moves";
+
 /// The validated B-appended views of a nonzero-Single CopyC output transform.
 /// No tensor payload or backend handle is retained here.
 #[doc(hidden)]
@@ -180,6 +183,10 @@ impl CudaSingleMemberRegions {
     /// scaled by θ_b from `destination_scales` (strictly increasing offsets),
     /// the fermionic source twist folded as in
     /// [`CudaTreeTransformExecutor::replay_with_destination_scales`].
+    ///
+    /// Returns [`OperationError::UnsupportedDeviceTreeTransform`] for a
+    /// conjugated task, a recoupling (Multi) block or a zero-coefficient move;
+    /// the host executor replays them.
     pub fn admit_scaled(
         structure: &TreeTransformStructure<f64>,
         destination_scales: &[(usize, f64)],
@@ -202,15 +209,15 @@ impl CudaSingleMemberRegions {
                 TreeTransformBlock::Multi { .. } => true,
             })
         {
-            return Err(OperationError::UnsupportedTensorContractScope {
-                message: "CUDA member transform requires unconjugated nonzero Single tasks",
+            return Err(OperationError::UnsupportedDeviceTreeTransform {
+                message: MEMBER_REPLAY_UNSUPPORTED,
             });
         }
         let device = compile_device_plan(task)?;
         for entry in &device.moves {
             if scaled_coefficient(task, entry, destination_scales)? == 0.0 {
-                return Err(OperationError::UnsupportedTensorContractScope {
-                    message: "CUDA member transform requires unconjugated nonzero Single tasks",
+                return Err(OperationError::UnsupportedDeviceTreeTransform {
+                    message: MEMBER_REPLAY_UNSUPPORTED,
                 });
             }
         }

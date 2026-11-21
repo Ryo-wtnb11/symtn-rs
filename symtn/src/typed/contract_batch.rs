@@ -113,6 +113,11 @@ where
     /// Fixes an ordinary contraction without reading operand payloads.
     /// CUDA admits exact-sign direct Core/SwappedCore, nonzero Single CopyC,
     /// and transformed-tree routes whose transforms are nonzero Single moves.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnsupportedOnDevice`] on CUDA stacks whose transforms need a
+    /// recoupling or zero-coefficient move; the Host plan replays them.
     pub fn new(
         cx: &mut (impl ExecContext + ?Sized),
         lhs: &StackedTensorMap<R, D, S>,
@@ -546,8 +551,9 @@ where
     /// operands of different Runtimes or placements;
     /// [`Error::InvalidArgument`] for stacks of different member counts; the
     /// eager composition's structural errors for spaces that do not compose;
-    /// and `UnsupportedTensorContractScope` for a plan that is not fully
-    /// direct.
+    /// `UnsupportedTensorContractScope` for a plan that is not fully direct;
+    /// and [`Error::UnsupportedOnDevice`] on CUDA stacks whose transforms need
+    /// a recoupling or zero-coefficient move, which the Host plan replays.
     pub fn new(
         cx: &mut (impl ExecContext + ?Sized),
         lhs: &StackedTensorMap<R, D, S>,
@@ -1280,9 +1286,7 @@ mod fermionic_unit_tests {
         assert!(dynamic);
         assert!(matches!(
             admitted,
-            Err(OperationError::UnsupportedTensorContractScope {
-                message: "CUDA member transform requires unconjugated nonzero Single tasks"
-            })
+            Err(OperationError::UnsupportedDeviceTreeTransform { .. })
         ));
     }
 
