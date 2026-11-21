@@ -55,8 +55,6 @@ where
 
 use super::backend::TensorContractBackend;
 use super::dynamic_space::DynamicFusionMapSpace;
-// Used by the debug-build core geometry assertion and the test-only compile.
-#[cfg(any(test, debug_assertions))]
 use super::structure::TensorContractAxisPlan;
 
 mod compile;
