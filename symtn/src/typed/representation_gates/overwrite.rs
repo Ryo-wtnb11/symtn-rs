@@ -312,7 +312,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     };
     assert!(source
         .permute_into(engine, &[1], &[2, 0], &mut bad_len, 1.0, 0.0)
-        .is_invalid_argument("does not match required length"));
+        .is_internal("does not match required length"));
     assert_unchanged(engine, &bad_len, &before);
 
     let mut lazy_destination = expected.adjoint(engine).unwrap();
@@ -878,7 +878,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
         let rejection =
             bad_lhs.contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0);
         if malformed == "destination" {
-            assert!(rejection.is_invalid_argument("does not match required length"));
+            assert!(rejection.is_internal("does not match required length"));
         } else {
             assert!(rejection
                 .fails_in_operation(|e| matches!(e, OperationError::ElementCountMismatch { .. })));

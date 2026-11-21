@@ -125,7 +125,7 @@ fn typed_cuda_owned_length_validation_names_the_payload_length() {
     assert!(DeviceTensor::validate_cuda_owned_len(7, 7).is_ok());
     assert!(matches!(
         DeviceTensor::validate_cuda_owned_len(7, 6),
-        Err(Error::InvalidArgument(message)) if message.contains("payload length")
+        Err(Error::Internal(what)) if what.contains("payload length")
     ));
 }
 
@@ -291,7 +291,7 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     let recording = probe::record();
     assert!(matches!(
         malformed_length.scale(cuda, 2.0),
-        Err(Error::InvalidArgument(message)) if message.contains("payload length")
+        Err(Error::Internal(what)) if what.contains("payload length")
     ));
     assert_eq!(arithmetic(&recording), (0, 0));
 

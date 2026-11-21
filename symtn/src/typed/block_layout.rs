@@ -638,7 +638,7 @@ mod cat_plan_tests {
             .unwrap_err();
         assert!(matches!(
             error,
-            Error::InvalidArgument(message) if message.contains("declined by the fast-path prover")
+            Error::Internal(what) if what.contains("declined by the fast-path prover")
         ));
     }
 }

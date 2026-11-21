@@ -371,6 +371,7 @@ pub symtn::typed::Error::BatchSignatureMismatch::member: core::option::Option<us
 pub symtn::typed::Error::Core(alloc::boxed::Box<symtn_core::error::CoreError>)
 pub symtn::typed::Error::DestinationShared
 pub symtn::typed::Error::FusionAlgebra(alloc::boxed::Box<symtn_sectors::algebra::FusionAlgebraError>)
+pub symtn::typed::Error::Internal(&'static str)
 pub symtn::typed::Error::InvalidArgument(alloc::string::String)
 pub symtn::typed::Error::Operation(alloc::boxed::Box<symtn_operations::error::OperationError>)
 pub symtn::typed::Error::PlacementMismatch

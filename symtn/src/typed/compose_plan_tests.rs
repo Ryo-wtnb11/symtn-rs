@@ -152,11 +152,10 @@ fn corrupted_stack_errors_are_typed() {
     ]
     .map(Result::err);
     assert!(short_dst.storage.iter().all(|&value| value == 1.0));
-    let payload =
-        Error::InvalidArgument("stacked payload length differs from its structure".into());
+    let payload = Error::Internal("stacked payload length differs from its structure");
     // `ComposePlan` runs `ContractPlan`'s per-call checks (stricter
     // than TensorKit): a payload whose length differs from its structure is
-    // an `InvalidArgument` before any work. The consistent corruption reaches
+    // an `Internal` error before any work. The consistent corruption reaches
     // the route executor, which reports the operand's length (two members of
     // 31) against the plan's (two of 32).
     assert_eq!(
@@ -170,8 +169,8 @@ fn corrupted_stack_errors_are_typed() {
             ))),
             Some(payload.clone()),
             Some(payload),
-            Some(Error::InvalidArgument(
-                "destination payload length differs from its structure".into()
+            Some(Error::Internal(
+                "destination payload length differs from its structure"
             )),
         ]
     );

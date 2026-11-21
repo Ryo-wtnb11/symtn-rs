@@ -604,7 +604,7 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     let recording = probe::record();
     assert!(matches!(
         malformed.qr_compact(cuda, &codomain_axes(&malformed), &domain_axes(&malformed)),
-        Err(Error::InvalidArgument(message)) if message.contains("payload length")
+        Err(Error::Internal(what)) if what.contains("payload length")
     ));
     assert_eq!(qr_counts(&recording), (0, 0, 0, 0, 0, 0, 0));
 

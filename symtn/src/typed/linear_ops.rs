@@ -553,8 +553,8 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
             TypedTensorRepr::Owned(body) => match body.data.as_ref() {
                 TypedData::Dense(source) => {
                     if source.len() != destination_data.len() {
-                        return Err(Error::InvalidArgument(
-                            "tensors have different dense payload lengths".to_string(),
+                        return Err(internal_layout_error(
+                            "tensors have different dense payload lengths",
                         ));
                     }
                     for (value, &source) in destination_data.iter_mut().zip(source) {
@@ -756,11 +756,10 @@ where
     let TypedData::Dense(data) = body.data.as_ref() else {
         return Err(internal_layout_error("dense destination checked above"));
     };
-    let actual = data.len();
-    if actual != required {
-        return Err(Error::InvalidArgument(format!(
-            "destination storage length {actual} does not match required length {required}"
-        )));
+    if data.len() != required {
+        return Err(internal_layout_error(
+            "destination storage length does not match required length",
+        ));
     }
     if Arc::strong_count(body) != 1 || Arc::strong_count(&body.data) != 1 {
         return Err(Error::DestinationShared);

@@ -12,8 +12,9 @@ use crate::typed::{BatchMemberRepresentation, SignatureField};
 /// [`crate::typed::GradedSpace`] / [`crate::typed::Runtime`] API.
 ///
 /// Lower-layer errors ([`CoreError`], [`OperationError`]) are passed through
-/// unchanged; the remaining variants report user-level misuse (mixing rules
-/// or mixing runtimes).
+/// unchanged; [`Error::Internal`] reports a bug in symtn itself; the
+/// remaining variants report user-level misuse (mixing rules or mixing
+/// runtimes).
 ///
 /// A wrapping variant's `Display` names only its own layer; the wrapped error
 /// is reached through [`std::error::Error::source`], so a chain printer shows
@@ -46,6 +47,10 @@ pub enum Error {
     UnsupportedOnDevice(String),
     /// Invalid user input (axes, sectors, spaces); the message says what.
     InvalidArgument(String),
+    /// A broken internal invariant of symtn: a bug in this library, not a
+    /// misuse, and no input change avoids it. The payload names the
+    /// invariant; please report it.
+    Internal(&'static str),
     /// A destination passed to an `*_into` operation shares its storage with
     /// another handle (a shallow `Clone`). Writing it would change that clone
     /// too, and replacing it would silently allocate, so the operation does
@@ -113,6 +118,9 @@ impl fmt::Display for Error {
                 write!(f, "unsupported on device: {message}")
             }
             Self::InvalidArgument(message) => write!(f, "invalid argument: {message}"),
+            Self::Internal(what) => {
+                write!(f, "internal invariant violated ({what}); please report this")
+            }
             Self::DestinationShared => write!(
                 f,
                 "the destination shares its storage with another tensor handle"

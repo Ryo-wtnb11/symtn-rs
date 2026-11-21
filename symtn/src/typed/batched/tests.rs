@@ -25,7 +25,7 @@ fn spectra_publication_failure_does_not_publish_factors() {
 
     assert!(matches!(
         plan.execute(engine, &stack, &mut workspace),
-        Err(super::BatchError::Operation(crate::typed::Error::InvalidArgument(reason)))
+        Err(super::BatchError::Operation(crate::typed::Error::Internal(reason)))
             if reason.contains("coupled sector has no route")
     ));
     assert!(workspace.take_output().is_none());
