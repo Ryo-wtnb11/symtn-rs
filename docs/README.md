@@ -36,7 +36,7 @@ checks category A/B forwarding and query costs with `testing` disabled.
 The full default-provider macOS suite runs on main nightly at
 15:17 UTC and by manual dispatch in [macOS nightly](../.github/workflows/nightly.yml);
 its runtime checks detect platform regressions later than the push/PR gates.
-The scoped Accelerate backend job stays in CI. Ordinary mixed check/test jobs
+Ordinary mixed check/test jobs
 use zero dev/test debug information before restoring their per-job caches;
 debug assertions and overflow checks stay enabled. Coverage keeps its own
 profile, disables target-artifact caching to avoid disk exhaustion, and retains

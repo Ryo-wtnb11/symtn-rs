@@ -24,10 +24,6 @@ symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"]
 [features]
 default = ["cpu-faer"]
 cpu-faer = ["symtn-tensors/cpu-faer"]
-cpu-blas = ["symtn-tensors/cpu-blas"]
-blas-accelerate = ["symtn-tensors/blas-accelerate"]
-blas-openblas = ["symtn-tensors/blas-openblas"]
-blas-mkl = ["symtn-tensors/blas-mkl"]
 # Test-only: admits `LieGroupFusionRule` so checked-Generic SU(3) fixtures run here.
 cgc-gen = ["symtn-tensors/cgc-gen"]
 

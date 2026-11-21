@@ -1,9 +1,5 @@
 use super::*;
 
-/// The BLAS provider keeps its op-bearing run partition; the native provider
-/// sends every batch that is not one strided run to the block kernel.
-const BLAS: bool = cfg!(feature = "cpu-blas-core");
-
 #[test]
 fn op_bearing_batch_reuses_executor_across_shapes_offsets_and_alpha_beta() {
     let engine = &mut CpuEngine::serial();
@@ -107,12 +103,7 @@ fn op_bearing_singleton_with_overflowing_extents_is_a_typed_error() {
                 DenseScalar::F64(0.0),
             )
             .unwrap_err();
-        let expected = if BLAS {
-            DenseError::StrideOverflow { value: 2 }
-        } else {
-            DenseError::ElementCountOverflow
-        };
-        assert_eq!(error, expected, "cols={cols}");
+        assert_eq!(error, DenseError::ElementCountOverflow, "cols={cols}");
         assert_eq!(output, [7.0], "cols={cols}");
     }
     assert!(!engine.is_broken());
@@ -354,8 +345,8 @@ fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
             DenseScalar::F64(-0.5),
         )
         .unwrap();
-    // Native: one block-kernel submission; BLAS: run partition.
-    assert_eq!(executor.seam_dispatches(), if BLAS { 3 } else { 1 });
+    // One block-kernel submission.
+    assert_eq!(executor.seam_dispatches(), 1);
     let sums = [
         lhs[0] * rhs[0],
         lhs[1] * rhs[1],
@@ -385,10 +376,7 @@ fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
             DenseScalar::F64(-0.5),
         )
         .unwrap();
-    assert_eq!(
-        executor.seam_dispatches(),
-        if BLAS { jobs.len() } else { 1 }
-    );
+    assert_eq!(executor.seam_dispatches(), 1);
     for (actual, sum) in singleton_output[..6].iter().zip(sums) {
         assert_eq!(*actual, 2.0 * sum - 0.5);
     }
@@ -414,7 +402,7 @@ fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
             DenseScalar::F64(0.0),
         )
         .unwrap();
-    assert_eq!(executor.seam_dispatches(), if BLAS { 2 } else { 1 });
+    assert_eq!(executor.seam_dispatches(), 1);
     assert_eq!(split_output, [4.0, 9.0, 25.0, 49.0]);
 }
 #[test]
@@ -443,7 +431,7 @@ fn op_bearing_malformed_runs_fall_back_without_skipping_late_errors() {
                 DenseScalar::F64(0.0),
             )
             .unwrap();
-        assert_eq!(executor.seam_dispatches(), if BLAS { 4 } else { 1 });
+        assert_eq!(executor.seam_dispatches(), 1);
         assert_eq!(output, [4.0, 9.0, 25.0, 49.0]);
     }
 
@@ -465,7 +453,7 @@ fn op_bearing_malformed_runs_fall_back_without_skipping_late_errors() {
             DenseScalar::F64(0.0),
         )
         .unwrap();
-    assert_eq!(executor.seam_dispatches(), if BLAS { 4 } else { 1 });
+    assert_eq!(executor.seam_dispatches(), 1);
     assert_eq!(nonaffine_output, [4.0, 9.0, 35.0, 49.0]);
 
     let lhs = [2.0, 3.0, 5.0];
@@ -487,20 +475,13 @@ fn op_bearing_malformed_runs_fall_back_without_skipping_late_errors() {
                 DenseScalar::F64(0.0),
             )
             .unwrap_err();
-        if BLAS {
-            // The serial remainder writes every job below the failing one.
-            assert_eq!(error, DenseError::OutOfBounds);
-            assert_eq!(executor.seam_dispatches(), 3);
-            assert_eq!(output, [14.0, 33.0, 65.0, -1.0]);
-        } else {
-            // The block kernel bounds every job before the first write.
-            assert!(
-                matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("job 3 lhs")),
-                "{error:?}"
-            );
-            assert_eq!(executor.seam_dispatches(), 1);
-            assert_eq!(output, [-1.0; 4]);
-        }
+        // The block kernel bounds every job before the first write.
+        assert!(
+            matches!(&error, DenseError::Backend { op: "grouped_gemm", message, .. } if message.contains("job 3 lhs")),
+            "{error:?}"
+        );
+        assert_eq!(executor.seam_dispatches(), 1);
+        assert_eq!(output, [-1.0; 4]);
     }
 }
 #[test]
@@ -547,7 +528,7 @@ fn op_bearing_empty_zero_and_backend_failure_keep_serial_boundaries() {
             DenseScalar::F64(0.0),
         )
         .unwrap();
-    assert_eq!(executor.seam_dispatches(), if BLAS { 2 } else { 1 });
+    assert_eq!(executor.seam_dispatches(), 1);
     assert_eq!(output, [3.0]);
 
     let jobs = [

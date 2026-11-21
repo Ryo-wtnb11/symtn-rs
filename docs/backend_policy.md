@@ -14,10 +14,9 @@ Operators describe spaces, axes, conjugation and output order; backend adapters
 choose dense kernels. Do not put raw BLAS calls or threshold-selected numerical
 kernels in operator code.
 
-The CPU provider is a compile-time choice: faer by default, BLAS/LAPACK
-when `cpu-blas` or a `blas-*` feature is enabled (OpenBLAS, MKL or
-Accelerate as the linked implementation). It is not a runtime or
-per-operation switch; see [`symtn/Cargo.toml`](../symtn/Cargo.toml).
+The CPU provider is Tenferro's faer-backed stack (`cpu-faer`); Tenferro
+links no vendor BLAS/LAPACK provider. It is not a runtime or per-operation
+switch; see [`symtn/Cargo.toml`](../symtn/Cargo.toml).
 With feature `cuda`, a device operation runs on the caller's `CudaEngine`
 (`CudaEngine::open(CudaDeviceId::from_ordinal(n))`), passed like any other
 engine; a `Runtime` is not tied to a device.
@@ -41,7 +40,7 @@ the plan's own retained bytes as tcontract reports them, plus its key and
 the entry overhead; with a budget of zero,
 or for an entry the budget rejects, every call prepares its plans as before
 with the same results. For initialized destinations this holds for the faer
-provider and the four payload scalars only; BLAS and CUDA builds prepare as
+provider and the four payload scalars only; CUDA builds prepare as
 before, and single-job or affine batches use Tenferro's binary-plan cache,
 outside this cache.
 
@@ -54,18 +53,7 @@ provider a grouped fresh batch runs the same lanes, geometry-plan cache and
 executor staging as an initialized one, through tcontract's fresh entry.
 That entry still zero-fills each output block on its lane before the product
 (tcontract's faer strategy initializes a fresh destination itself), so the
-fill moves from one serial pass into the lanes rather than disappearing. On a
-BLAS provider under `Auto` or `Sequential` with nonzero `alpha`, a grouped
-fresh batch is zero-filled and makes its initialized call: the same grouped
-plan and whole-group vendor/native decision, the same per-job engine cache
-slots, and one extra store over the destination. When its jobs lie in
-several destination segments, an identity batch makes one initialized call
-per segment (so the vendor/native decision is per segment) and an op-bearing
-batch runs each job as the initialized serial route does. A forced
-`Outer`/`Inner`/`Split` policy, or `alpha == 0`, runs a grouped fresh BLAS
-batch on the native lanes instead (cpueinsum's grouped native alternative
-has no fresh form); those calls use the geometry-plan cache and the
-executor's staging above, which a BLAS executor then also keeps.
+fill moves from one serial pass into the lanes rather than disappearing.
 
 An owned eager Host contraction (`contract`, `planar_contract`, `compose`,
 in both modes) allocates its output without zeroing it when the route's core
@@ -252,7 +240,7 @@ null basis: into the lane scratch), factored in place by tlinalg's compact
 Householder kernel, and its reflectors applied straight onto `I_m` (onto
 `[0; I_{m-n}]`, so only the final `m x (m - n)` basis is written):
 `O(m n^2 + m^2 n)` against the `O(m^2 (n + m))` economy QR of `[X | I]`
-that every other executor, and the BLAS provider, still runs through its
+that every other executor still runs through its
 own `qr_into` (as does the full SVD's `[U1 | I]` completion on an
 executor without a native full SVD). Full LQ and the `right_null` basis are the same full QR and null
 basis batches on each block's transpose `X^T`, read in place (a strided
@@ -344,8 +332,8 @@ then reads in place in its reconstruction GEMMs: a destination needs the
 whole transient zero-initialized first, a serial pass the owned outputs do
 not pay and that a caller which never scatters or publishes the factors
 does not recover (TensorKit's `pinv` also solves each block into its own
-temporaries). Every other executor, and the BLAS provider,
-reach `factorize_batch_into` through its default: the owned
+temporaries). Every other executor
+reaches `factorize_batch_into` through its default: the owned
 `factorize_batch` with each delivered output copied into its destination
 (for LQ, each block's adjoint written into one scratch sized for the
 largest block and factored with QR; for full SVD, the per-matrix route
@@ -358,16 +346,11 @@ the eigenvalue check and one `dot_general_into` per block, and the inverse
 one `solve_into` per block against one identity per scalar sized for the
 largest block, and `solve_batch_into` one `solve_into` per system in order,
 stopping at the first error.
-The other dense problems, and every
-BLAS factorization, still run block after block on the whole engine.
+The other dense problems still run block after block on the whole engine.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`
-are in `tenferro_cpu`), or force lanes with `Outer` or `Split`. A BLAS provider under `Auto` instead runs the batch's
-vendor GEMMs one after another on the calling thread; any threads the vendor
-library starts are outside the engine's lanes. Forcing `Inner` (or another
-lane strategy) on a BLAS provider runs those GEMMs on the native kernels, not
-the vendor library. A backend-free Host region (plan compile, strided
+are in `tenferro_cpu`), or force lanes with `Outer` or `Split`. A backend-free Host region (plan compile, strided
 moves) takes the engine's placement token; a serial engine never forks.
 An entry whose arithmetic needs no token (vector arithmetic, the
 physical-basis conversions, the up-front engine check of an owned
@@ -436,7 +419,7 @@ Strided's copy estimate of the whole batch destination pays for it, under
 a forced policy its batch decision): at one every member moves on the
 caller's token, above it the members split into at most that many
 contiguous ranges, each moving its members as one move per role. An executor that cannot honor a forced
-batch policy (the BLAS provider and every custom executor) refuses a
+batch policy (every custom executor) refuses a
 tree-transform replay, owned overwrite or member batch under a forced
 `Inner`, `Outer` or `Split` policy with a typed `Unsupported` before any
 coefficient preparation, write or executor call; `Auto` and `Sequential` run. Accumulating updates
@@ -451,7 +434,6 @@ configuration (provider, build, engine width, batch policy and work model,
 inputs), whether a block placement is searched or taken from the cache. No promise is made across widths or providers: a provider GEMM may
 reduce in another order at another width (faer's matrix-vector route splits
 the contraction over its threads), so results agree within rounding.
-BLAS-internal threads remain separate.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
 An eager operation builds its execution scratch (tree-transform pack

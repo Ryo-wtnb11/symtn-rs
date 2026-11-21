@@ -81,14 +81,8 @@ fn warm_execute_allocates_per_member_only_the_dense_solver_outputs() {
     // `tenferro-cpu-basic pooled_uninit_output`). Measured: the plan's
     // member replay takes one fresh checkout per sector, which the repeated
     // standalone sequence of `solver_calls` gets back from the pool. Engine
-    // scratch, not a symtn temporary. The BLAS eigh (`linalg::blas::eigh`)
-    // has no such checkout, so its slope is exactly the solver's. Tenferro
-    // dispatches to faer whenever `cpu-faer` is compiled in.
-    let faer_checkouts = if cfg!(feature = "cpu-faer") {
-        orders.len() as u64
-    } else {
-        0
-    };
+    // scratch, not a symtn temporary.
+    let faer_checkouts = orders.len() as u64;
     assert_eq!(
         large - small,
         8 * (solver + faer_checkouts),

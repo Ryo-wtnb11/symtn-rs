@@ -138,11 +138,10 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
     let (small_blocks, small_calls) = warm(3);
     let (large_blocks, large_calls) = warm(4);
     assert!(large_blocks > 3 * small_blocks);
-    // Why raw equality holds for a BLAS provider too: each distinct GEMM
-    // descriptor keeps its plan in its own engine cache slot, so the warm-up
-    // calls build every block's plan and the measured call rebuilds none. A
-    // vendor plan rebuild allocates, so a plan miss fails this test just as a
-    // per-block symtn temporary does.
+    // Each distinct GEMM descriptor keeps its plan in its own engine cache
+    // slot, so the warm-up calls build every block's plan and the measured
+    // call rebuilds none; a plan miss fails this test just as a per-block
+    // symtn temporary does.
     assert_eq!(large_calls, small_calls);
 }
 

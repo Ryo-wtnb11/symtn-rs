@@ -2,11 +2,7 @@ use num_complex::{Complex32, Complex64};
 
 use core::mem::MaybeUninit;
 
-#[cfg(feature = "cpu-blas-core")]
-use crate::executor::strided_batch_runs_into;
 use crate::executor::{batch_offset, strided_batch_run_len};
-#[cfg(feature = "cpu-blas-core")]
-use crate::fresh::{check_fresh_segments, place_fresh_jobs};
 use crate::fresh::{
     dispatch_fresh, split_single_fresh_segment, zero_piece, FreshParts, FreshScalar, FRESH_OP,
 };
@@ -17,11 +13,10 @@ use crate::{
 };
 
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
-#[cfg(not(feature = "provider-inject"))]
-use tenferro_linalg::{LinalgBackend, TensorLinalgExt, TensorReadLinalgExt};
+use tenferro_linalg::{LinalgBackend, LinalgOps};
 use tenferro_tensor::{
-    DotGeneralConfig, Engine, SessionCachedDot, TensorRead, TensorView, TensorViewMut, TensorWrite,
-    TypedTensorView, TypedTensorViewMut,
+    Dest, DotGeneralConfig, Engine, SessionCachedDot, TensorRead, TensorView, TensorViewMut,
+    TensorWrite, TypedTensorView, TypedTensorViewMut,
 };
 
 #[derive(Clone, Copy, Hash)]
@@ -64,34 +59,10 @@ fn descriptor_slot<T: 'static>(
     (hasher.finish() % capacity as u64) as usize
 }
 
-#[cfg(feature = "cpu-blas-core")]
-fn run_partition_covers(jobs: &[DenseGemmBatchJob], runs: &[usize]) -> bool {
-    let mut start = 0usize;
-    for &run_len in runs {
-        if run_len == 0 {
-            return false;
-        }
-        let Some(end) = start.checked_add(run_len) else {
-            return false;
-        };
-        if end > jobs.len() {
-            return false;
-        }
-        start = end;
-    }
-    start == jobs.len()
-}
-
 #[derive(Debug)]
 pub struct DefaultDenseExecutor {
     matmul_config: DotGeneralConfig,
     strided_batch_matmul_config: DotGeneralConfig,
-    // Reused job list of the BLAS grouped route: scratch, not a plan cache.
-    #[cfg(feature = "cpu-blas-core")]
-    grouped_jobs: Vec<cpueinsum::GroupedGemmJob>,
-    // The BLAS fresh route's job-to-segment staging.
-    #[cfg(feature = "cpu-blas-core")]
-    fresh_layout: FreshLayout,
     // The native block kernel's staging, reused across this executor's
     // calls: a prepared workspace's executor replays without allocating.
     gemm_scratch: crate::block_kernel::gemm::GemmScratch,
@@ -102,9 +73,6 @@ pub struct DefaultDenseExecutor {
     // Test-only: jobs of the last batch routed where the grouped entry was.
     #[cfg(test)]
     grouped_route_jobs: usize,
-    // Test-only: the BLAS grouped plan's last observed route.
-    #[cfg(all(test, feature = "cpu-blas-core"))]
-    grouped_route: Option<cpueinsum_blas::GroupedRoute>,
 }
 
 impl DefaultDenseExecutor {
@@ -124,36 +92,21 @@ impl DefaultDenseExecutor {
                 lhs_batch_dims: [2].into_iter().collect(),
                 rhs_batch_dims: [2].into_iter().collect(),
             },
-            #[cfg(feature = "cpu-blas-core")]
-            grouped_jobs: Vec::new(),
-            #[cfg(feature = "cpu-blas-core")]
-            fresh_layout: FreshLayout::default(),
             gemm_scratch: Default::default(),
             #[cfg(test)]
             seam_dispatches: 0,
             #[cfg(test)]
             grouped_route_jobs: 0,
-            #[cfg(all(test, feature = "cpu-blas-core"))]
-            grouped_route: None,
         }
     }
 
     /// Bytes of reusable call scratch this executor keeps between calls (the
-    /// block GEMM kernel's staging, or a BLAS build's grouped job list), a
-    /// conservative charge of their capacities. It holds no plan: GEMM plans
+    /// block GEMM kernel's staging), a conservative charge of its capacities. It holds no plan: GEMM plans
     /// live in the process-global geometry-plan cache. Unstable plumbing for
     /// symtn's prepared workspaces' `retained_bytes`.
     #[doc(hidden)]
     pub fn retained_bytes(&self) -> usize {
-        #[cfg(not(feature = "cpu-blas-core"))]
-        return self.gemm_scratch.retained_bytes();
-        #[cfg(feature = "cpu-blas-core")]
-        return self
-            .grouped_jobs
-            .capacity()
-            .saturating_mul(std::mem::size_of::<cpueinsum::GroupedGemmJob>())
-            .saturating_add(self.fresh_layout.retained_bytes())
-            .saturating_add(self.gemm_scratch.retained_bytes());
+        self.gemm_scratch.retained_bytes()
     }
 
     #[cfg(test)]
@@ -169,11 +122,6 @@ impl DefaultDenseExecutor {
     #[cfg(test)]
     pub(crate) fn staged_grouped_jobs(&self) -> usize {
         self.grouped_route_jobs
-    }
-
-    #[cfg(all(test, feature = "cpu-blas-core"))]
-    pub(crate) fn grouped_route(&self) -> Option<cpueinsum_blas::GroupedRoute> {
-        self.grouped_route
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -372,8 +320,7 @@ impl DefaultDenseExecutor {
                 "alpha/beta dtype differs from the operands".to_string(),
             ));
         };
-        #[cfg(not(feature = "cpu-blas-core"))]
-        return crate::block_kernel::gemm::gemm_batch_into(
+        crate::block_kernel::gemm::gemm_batch_into(
             cpu,
             &mut self.gemm_scratch,
             output,
@@ -383,303 +330,7 @@ impl DefaultDenseExecutor {
             ops,
             alpha,
             beta,
-        );
-        // Only identity batches reach here: the BLAS op-bearing route stays
-        // on its own partition.
-        #[cfg(feature = "cpu-blas-core")]
-        {
-            debug_assert!(identity);
-            let route = grouped_gemm_into(
-                cpu,
-                &mut self.grouped_jobs,
-                output,
-                lhs,
-                rhs,
-                jobs,
-                alpha,
-                beta,
-            )?;
-            #[cfg(test)]
-            {
-                self.grouped_route = Some(route);
-            }
-            let _ = route;
-            Ok(())
-        }
-    }
-
-    #[cfg(feature = "cpu-blas-core")]
-    #[allow(clippy::too_many_arguments)]
-    fn matmul_batch_axpby_ops_typed<T, W, R>(
-        &mut self,
-        cpu: &mut CpuEngine,
-        output: &mut DenseViewMut<'_, T>,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        jobs: &[DenseGemmBatchJob],
-        runs: &[usize],
-        lhs_op: MatrixOp,
-        rhs_op: MatrixOp,
-        alpha: DenseScalar,
-        beta: DenseScalar,
-        wrap_write: W,
-        wrap_read: R,
-    ) -> Result<(), DenseError>
-    where
-        T: 'static,
-        W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x> + Copy,
-        R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x> + Copy,
-    {
-        // A valid covering partition with one entry per job contains only
-        // singletons; malformed equal-count partitions need the same fallback.
-        if runs.len() == jobs.len() {
-            return self.matmul_batch_axpby_ops_serial_typed(
-                cpu, output, lhs, rhs, jobs, 0, lhs_op, rhs_op, alpha, beta, wrap_write, wrap_read,
-            );
-        }
-        if !run_partition_covers(jobs, runs) {
-            return self.matmul_batch_axpby_ops_serial_typed(
-                cpu, output, lhs, rhs, jobs, 0, lhs_op, rhs_op, alpha, beta, wrap_write, wrap_read,
-            );
-        }
-
-        self.matmul_batch_axpby_ops_partition_typed(
-            cpu, output, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta, wrap_write, wrap_read,
         )
-    }
-
-    /// Issues a covering partition in job order: each batchable run as one
-    /// strided call, and each maximal stretch of adjacent non-batchable runs
-    /// as one serial call (one engine lock) instead of one call per run. Plan-cache
-    /// slots are absolute job indices on both routes, so every GEMM keeps the
-    /// slot, kernel and order it had with one serial call per run.
-    #[cfg(feature = "cpu-blas-core")]
-    #[allow(clippy::too_many_arguments)]
-    fn matmul_batch_axpby_ops_partition_typed<T, W, R>(
-        &mut self,
-        cpu: &mut CpuEngine,
-        output: &mut DenseViewMut<'_, T>,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        jobs: &[DenseGemmBatchJob],
-        runs: &[usize],
-        lhs_op: MatrixOp,
-        rhs_op: MatrixOp,
-        alpha: DenseScalar,
-        beta: DenseScalar,
-        wrap_write: W,
-        wrap_read: R,
-    ) -> Result<(), DenseError>
-    where
-        T: 'static,
-        W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x> + Copy,
-        R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x> + Copy,
-    {
-        let mut start = 0usize;
-        let mut serial_start = 0usize;
-        for &run_len in runs {
-            let end = start + run_len;
-            let run = &jobs[start..end];
-            let can_batch = run_len >= 2
-                && run[0].rows != 0
-                && run[0].contracted != 0
-                && run[0].cols != 0
-                && strided_batch_run_len(run, 0) == run_len;
-            let layout = can_batch
-                .then(|| self.strided_batch_run_layout(run, lhs_op, rhs_op))
-                .and_then(Result::ok)
-                .filter(|layout| {
-                    self.strided_batch_run_layout_admitted(
-                        (output.data(), output.offset()),
-                        lhs,
-                        rhs,
-                        layout,
-                    )
-                });
-            if let Some(layout) = layout {
-                self.matmul_batch_axpby_ops_serial_typed(
-                    cpu,
-                    output,
-                    lhs,
-                    rhs,
-                    &jobs[serial_start..start],
-                    serial_start,
-                    lhs_op,
-                    rhs_op,
-                    alpha,
-                    beta,
-                    wrap_write,
-                    wrap_read,
-                )?;
-                self.matmul_strided_batch_run_layout_typed(
-                    cpu,
-                    output,
-                    lhs,
-                    rhs,
-                    layout,
-                    start,
-                    lhs_op,
-                    rhs_op,
-                    alpha,
-                    beta,
-                    "matmul_batch_axpby_with_ops_into",
-                    wrap_write,
-                    wrap_read,
-                )?;
-                serial_start = end;
-            }
-            start = end;
-        }
-        self.matmul_batch_axpby_ops_serial_typed(
-            cpu,
-            output,
-            lhs,
-            rhs,
-            &jobs[serial_start..],
-            serial_start,
-            lhs_op,
-            rhs_op,
-            alpha,
-            beta,
-            wrap_write,
-            wrap_read,
-        )
-    }
-
-    #[cfg(feature = "cpu-blas-core")]
-    #[allow(clippy::too_many_arguments)]
-    fn matmul_batch_axpby_ops_serial_typed<T, W, R>(
-        &mut self,
-        cpu: &mut CpuEngine,
-        output: &mut DenseViewMut<'_, T>,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        jobs: &[DenseGemmBatchJob],
-        cache_start: usize,
-        lhs_op: MatrixOp,
-        rhs_op: MatrixOp,
-        alpha: DenseScalar,
-        beta: DenseScalar,
-        wrap_write: W,
-        wrap_read: R,
-    ) -> Result<(), DenseError>
-    where
-        T: 'static,
-        W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x>,
-        R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x>,
-    {
-        if jobs.is_empty() {
-            return Ok(());
-        }
-        let output_base = output.offset();
-        // Each job keeps its own plan-cache slot, order, alpha/beta and
-        // conjugation flags.
-        let Self {
-            matmul_config,
-            #[cfg(test)]
-            seam_dispatches,
-            ..
-        } = self;
-        Self::run_batch_jobs(
-            cpu,
-            matmul_config,
-            #[cfg(test)]
-            seam_dispatches,
-            output,
-            output_base,
-            lhs,
-            rhs,
-            jobs,
-            cache_start,
-            lhs_op,
-            rhs_op,
-            alpha,
-            beta,
-            wrap_write,
-            wrap_read,
-        )
-    }
-
-    #[cfg(feature = "cpu-blas-core")]
-    /// The numerical body of [`Self::matmul_batch_axpby_ops_serial_typed`].
-    #[allow(clippy::too_many_arguments)]
-    fn run_batch_jobs<T, W, R>(
-        cpu: &mut CpuEngine,
-        matmul_config: &DotGeneralConfig,
-        #[cfg(test)] seam_dispatches: &mut usize,
-        output: &mut DenseViewMut<'_, T>,
-        output_base: usize,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        jobs: &[DenseGemmBatchJob],
-        cache_start: usize,
-        lhs_op: MatrixOp,
-        rhs_op: MatrixOp,
-        alpha: DenseScalar,
-        beta: DenseScalar,
-        wrap_write: W,
-        wrap_read: R,
-    ) -> Result<(), DenseError>
-    where
-        T: 'static,
-        W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x>,
-        R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x>,
-    {
-        for (relative_slot, job) in jobs.iter().enumerate() {
-            let lhs_shape = [job.rows, job.contracted];
-            let lhs_strides = match lhs_op {
-                MatrixOp::Identity => [1, job.rows],
-                MatrixOp::Transpose | MatrixOp::Adjoint => [job.contracted, 1],
-            };
-            let rhs_shape = [job.contracted, job.cols];
-            let rhs_strides = match rhs_op {
-                MatrixOp::Identity => [1, job.contracted],
-                MatrixOp::Transpose | MatrixOp::Adjoint => [job.cols, 1],
-            };
-            let output_shape = [job.rows, job.cols];
-            let output_strides = [1, job.rows];
-            let lhs_view = DenseView::new(
-                lhs.data(),
-                &lhs_shape,
-                &lhs_strides,
-                batch_offset(lhs.offset(), job.lhs_offset)?,
-            )?;
-            let rhs_view = DenseView::new(
-                rhs.data(),
-                &rhs_shape,
-                &rhs_strides,
-                batch_offset(rhs.offset(), job.rhs_offset)?,
-            )?;
-            let output_view = DenseViewMut::new(
-                output.data_mut(),
-                &output_shape,
-                &output_strides,
-                batch_offset(output_base, job.dst_offset)?,
-            )?;
-            let lhs = TensorRead::from_view(tenferro_view(wrap_read(lhs_view))?);
-            let rhs = TensorRead::from_view(tenferro_view(wrap_read(rhs_view))?);
-            let output = TensorWrite::from_view(tenferro_view_mut(wrap_write(output_view))?);
-            let accumulation = tenferro_tensor::DotGeneralAccumulation {
-                lhs_conj: lhs_op == MatrixOp::Adjoint,
-                rhs_conj: rhs_op == MatrixOp::Adjoint,
-                alpha: tenferro_scalar(alpha),
-                beta: tenferro_scalar(beta),
-            };
-            #[cfg(test)]
-            {
-                *seam_dispatches += 1;
-            }
-            cpu.dot_general_read_into_accum_cached(
-                Some(cache_start + relative_slot),
-                lhs,
-                rhs,
-                matmul_config,
-                accumulation,
-                output,
-            )
-            .map_err(|err| tenferro_error("matmul_batch_axpby_with_ops_into", err))?;
-        }
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -888,84 +539,6 @@ impl DefaultDenseExecutor {
     }
 }
 
-/// The BLAS fresh route's reusable staging: each job's containing segment,
-/// the jobs of each segment in job order (`bucket[bucket_ends[s - 1]..
-/// bucket_ends[s]]`), and one call's rebased jobs and run partition.
-#[cfg(feature = "cpu-blas-core")]
-#[derive(Debug, Default)]
-struct FreshLayout {
-    staged: Vec<DenseGemmBatchJob>,
-    runs: Vec<usize>,
-    segment_of: Vec<usize>,
-    bucket_ends: Vec<usize>,
-    bucket: Vec<usize>,
-}
-
-#[cfg(feature = "cpu-blas-core")]
-impl FreshLayout {
-    /// Assigns every nonempty job its segment in one forward walk over
-    /// `order` (the nonempty jobs in destination order, as
-    /// [`check_fresh_segments`] left it after accepting the placement), then
-    /// buckets the jobs by segment, keeping job order: O(J + S). An empty job
-    /// gets no segment (`usize::MAX`).
-    fn assign<T>(
-        &mut self,
-        segments: &[(usize, &mut [T])],
-        jobs: &[DenseGemmBatchJob],
-        order: &[usize],
-    ) {
-        self.segment_of.clear();
-        self.segment_of.resize(jobs.len(), usize::MAX);
-        let mut segment = 0;
-        for &j in order {
-            while segments[segment].0 + segments[segment].1.len() <= jobs[j].dst_offset {
-                segment += 1;
-            }
-            self.segment_of[j] = segment;
-        }
-        // Counting sort by segment, stable in job index: `bucket_ends`
-        // holds each bucket's start, and is advanced to its end by the fill.
-        self.bucket_ends.clear();
-        self.bucket_ends.resize(segments.len(), 0);
-        for &segment in self.segment_of.iter().filter(|&&s| s != usize::MAX) {
-            self.bucket_ends[segment] += 1;
-        }
-        let mut total = 0;
-        for start in &mut self.bucket_ends {
-            let count = *start;
-            *start = total;
-            total += count;
-        }
-        self.bucket.clear();
-        self.bucket.resize(total, 0);
-        for (j, &segment) in self.segment_of.iter().enumerate() {
-            if segment != usize::MAX {
-                self.bucket[self.bucket_ends[segment]] = j;
-                self.bucket_ends[segment] += 1;
-            }
-        }
-    }
-
-    fn retained_bytes(&self) -> usize {
-        use std::mem::size_of;
-        [
-            self.staged
-                .capacity()
-                .saturating_mul(size_of::<DenseGemmBatchJob>()),
-            self.runs.capacity().saturating_mul(size_of::<usize>()),
-            self.segment_of
-                .capacity()
-                .saturating_mul(size_of::<usize>()),
-            self.bucket_ends
-                .capacity()
-                .saturating_mul(size_of::<usize>()),
-            self.bucket.capacity().saturating_mul(size_of::<usize>()),
-        ]
-        .into_iter()
-        .fold(0, usize::saturating_add)
-    }
-}
-
 impl Default for DefaultDenseExecutor {
     fn default() -> Self {
         Self::new()
@@ -974,21 +547,14 @@ impl Default for DefaultDenseExecutor {
 
 impl DenseExecutor for DefaultDenseExecutor {
     fn supports_svd_full(&self) -> bool {
-        #[cfg(all(
-            any(feature = "cpu-faer", feature = "cpu-blas-core"),
-            not(feature = "provider-inject")
-        ))]
+        #[cfg(feature = "cpu-faer")]
         {
-            // Both compiled CPU providers factorize the full matrices
-            // natively (the faer provider's `SvdFull` batch on the lanes,
-            // BLAS through this entry), so neither reaches the `[U1 | I]`
-            // QR completion.
+            // The faer provider factorizes the full matrices natively (its
+            // `SvdFull` batch on the lanes), so it never reaches the
+            // `[U1 | I]` QR completion.
             true
         }
-        #[cfg(any(
-            not(any(feature = "cpu-faer", feature = "cpu-blas-core")),
-            feature = "provider-inject"
-        ))]
+        #[cfg(not(feature = "cpu-faer"))]
         {
             false
         }
@@ -1001,95 +567,80 @@ impl DenseExecutor for DefaultDenseExecutor {
         rows: usize,
         cols: usize,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input, rows, cols);
-            Err(DenseError::Unsupported {
+        if !self.supports_svd_full() {
+            return Err(DenseError::Unsupported {
                 op: "svd_full_owned",
                 message: "executor does not implement owned full-matrices SVD".to_string(),
-            })
+            });
         }
-        #[cfg(not(feature = "provider-inject"))]
+        let expected = rows
+            .checked_mul(cols)
+            .ok_or(DenseError::ElementCountOverflow)?;
+        let actual = match &input {
+            DenseOwned::F32(data) => data.len(),
+            DenseOwned::F64(data) => data.len(),
+            DenseOwned::C32(data) => data.len(),
+            DenseOwned::C64(data) => data.len(),
+        };
+        if actual != expected {
+            return Err(DenseError::ShapeMismatch {
+                op: "svd_full_owned",
+                expected: vec![expected],
+                actual: vec![actual],
+            });
+        }
+        if rows == 0 || cols == 0 {
+            return Err(DenseError::Unsupported {
+                op: "svd_full_owned",
+                message: "zero-extent full-matrices SVD is unsupported".to_string(),
+            });
+        }
+        let input = match input {
+            DenseOwned::F32(data) => {
+                tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
+            }
+            DenseOwned::F64(data) => {
+                tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
+            }
+            DenseOwned::C32(data) => {
+                tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
+            }
+            DenseOwned::C64(data) => {
+                tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
+            }
+        }
+        .map_err(|err| tenferro_error("svd_full_owned", err))?;
+        #[cfg(all(test, feature = "cpu-faer"))]
         {
-            if !self.supports_svd_full() {
-                return Err(DenseError::Unsupported {
-                    op: "svd_full_owned",
-                    message: "executor does not implement owned full-matrices SVD".to_string(),
-                });
+            fn slice_ptr<T: tenferro_tensor::TensorScalar>(
+                input: &tenferro_tensor::Tensor,
+            ) -> Option<usize> {
+                input
+                    .as_typed::<T>()
+                    .map(|tensor| tensor.as_slice().unwrap().as_ptr() as usize)
             }
-            let expected = rows
-                .checked_mul(cols)
-                .ok_or(DenseError::ElementCountOverflow)?;
-            let actual = match &input {
-                DenseOwned::F32(data) => data.len(),
-                DenseOwned::F64(data) => data.len(),
-                DenseOwned::C32(data) => data.len(),
-                DenseOwned::C64(data) => data.len(),
-            };
-            if actual != expected {
-                return Err(DenseError::ShapeMismatch {
-                    op: "svd_full_owned",
-                    expected: vec![expected],
-                    actual: vec![actual],
-                });
-            }
-            if rows == 0 || cols == 0 {
-                return Err(DenseError::Unsupported {
-                    op: "svd_full_owned",
-                    message: "zero-extent full-matrices SVD is unsupported".to_string(),
-                });
-            }
-            let input = match input {
-                DenseOwned::F32(data) => {
-                    tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
-                }
-                DenseOwned::F64(data) => {
-                    tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
-                }
-                DenseOwned::C32(data) => {
-                    tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
-                }
-                DenseOwned::C64(data) => {
-                    tenferro_tensor::Tensor::from_vec_col_major(vec![rows, cols], data)
-                }
-            }
-            .map_err(|err| tenferro_error("svd_full_owned", err))?;
-            #[cfg(all(
-                test,
-                any(feature = "cpu-faer", feature = "cpu-blas-core"),
-                not(feature = "provider-inject")
-            ))]
-            {
-                fn slice_ptr<T: tenferro_tensor::TensorScalar>(
-                    input: &tenferro_tensor::Tensor,
-                ) -> Option<usize> {
-                    input
-                        .as_typed::<T>()
-                        .map(|tensor| tensor.as_slice().unwrap().as_ptr() as usize)
-                }
-                let pointer = slice_ptr::<f32>(&input)
-                    .or_else(|| slice_ptr::<f64>(&input))
-                    .or_else(|| slice_ptr::<num_complex::Complex32>(&input))
-                    .or_else(|| slice_ptr::<num_complex::Complex64>(&input))
-                    .expect("DenseOwned only contains supported full-SVD dtypes");
-                crate::probe::owned_full_svd_input(pointer);
-            }
-            let outputs = host_cpu(engine, "svd_full_owned", |cpu| {
-                LinalgBackend::svd_full(cpu, &input)
-                    .map_err(|err| tenferro_error("svd_full_owned", err))
-            })?;
-            if outputs.len() != 3 {
-                return Err(crate::executor::arity_mismatch(
-                    "svd_full_owned",
-                    3,
-                    outputs.len(),
-                ));
-            }
-            outputs
-                .into_iter()
-                .map(DenseTensor::from_tenferro)
-                .collect()
+            let pointer = slice_ptr::<f32>(&input)
+                .or_else(|| slice_ptr::<f64>(&input))
+                .or_else(|| slice_ptr::<num_complex::Complex32>(&input))
+                .or_else(|| slice_ptr::<num_complex::Complex64>(&input))
+                .expect("DenseOwned only contains supported full-SVD dtypes");
+            crate::probe::owned_full_svd_input(pointer);
         }
+        let outputs = host_cpu(engine, "svd_full_owned", |cpu| {
+            LinalgBackend::svd_full(cpu, &input)
+                .map_err(|err| tenferro_error("svd_full_owned", err))
+        })?;
+        if outputs.len() != 3 {
+            return Err(crate::executor::arity_mismatch(
+                "svd_full_owned",
+                3,
+                outputs.len(),
+            ));
+        }
+        outputs
+            .into_iter()
+            .map(DenseTensor::from_tenferro)
+            .collect()
     }
 
     fn svd(
@@ -1097,25 +648,17 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         input: DenseRead<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input);
-            Err(linalg_unavailable("svd"))
-        }
-        #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            with_cpu_linalg(engine, "svd_read", |exec| {
-                TensorRead::from_view(input).svd_read(exec)
-            })
-            .map_err(|err| tenferro_error("svd_read", err))
-            .and_then(|(u, s, vt)| {
-                vec![u, s, vt]
-                    .into_iter()
-                    .map(DenseTensor::from_tenferro)
-                    .collect()
-            })
-        }
+        let input = tenferro_view(input)?;
+        with_cpu_linalg(engine, "svd_read", |exec| {
+            TensorRead::from_view(input).svd(exec)
+        })
+        .map_err(|err| tenferro_error("svd_read", err))
+        .and_then(|svd| {
+            vec![svd.u, svd.s, svd.vh]
+                .into_iter()
+                .map(DenseTensor::from_tenferro)
+                .collect()
+        })
     }
 
     fn qr(
@@ -1123,25 +666,17 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         input: DenseRead<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input);
-            Err(linalg_unavailable("qr"))
-        }
-        #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            with_cpu_linalg(engine, "qr_read", |exec| {
-                TensorRead::from_view(input).qr_read(exec)
-            })
-            .map_err(|err| tenferro_error("qr_read", err))
-            .and_then(|(q, r)| {
-                vec![q, r]
-                    .into_iter()
-                    .map(DenseTensor::from_tenferro)
-                    .collect()
-            })
-        }
+        let input = tenferro_view(input)?;
+        with_cpu_linalg(engine, "qr_read", |exec| {
+            TensorRead::from_view(input).qr(exec)
+        })
+        .map_err(|err| tenferro_error("qr_read", err))
+        .and_then(|qr| {
+            vec![qr.q, qr.r]
+                .into_iter()
+                .map(DenseTensor::from_tenferro)
+                .collect()
+        })
     }
 
     fn eig(
@@ -1149,12 +684,6 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         input: DenseRead<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input);
-            Err(linalg_unavailable("eig"))
-        }
-        #[cfg(not(feature = "provider-inject"))]
         eig_read(engine, input)
     }
 
@@ -1163,31 +692,22 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         input: DenseRead<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input);
-            Err(linalg_unavailable("eigh"))
-        }
-        #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            with_cpu_linalg(engine, "eigh_read", |exec| {
-                TensorRead::from_view(input).eigh_read(exec)
-            })
-            .map_err(|err| tenferro_error("eigh_read", err))
-            .and_then(|(values, vectors)| {
-                vec![values, vectors]
-                    .into_iter()
-                    .map(DenseTensor::from_tenferro)
-                    .collect()
-            })
-        }
+        let input = tenferro_view(input)?;
+        with_cpu_linalg(engine, "eigh_read", |exec| {
+            TensorRead::from_view(input).eigh(exec)
+        })
+        .map_err(|err| tenferro_error("eigh_read", err))
+        .and_then(|eigh| {
+            vec![eigh.values, eigh.vectors]
+                .into_iter()
+                .map(DenseTensor::from_tenferro)
+                .collect()
+        })
     }
 
     // The native provider's factorizations run the blocks on the lane driver
-    // (`block_kernel::factor`); every other provider runs them one after
-    // another (`factorize_batch_serial`).
-    #[cfg(not(feature = "provider-inject"))]
+    // (`block_kernel::factor`); a build without `cpu-faer` runs them one
+    // after another (`factorize_batch_serial`).
     fn factorize_batch(
         &mut self,
         engine: &mut dyn Engine,
@@ -1199,15 +719,15 @@ impl DenseExecutor for DefaultDenseExecutor {
         if inputs.is_empty() {
             return Ok(());
         }
-        #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+        #[cfg(feature = "cpu-faer")]
         return crate::block_kernel::factor::factorize(engine, op, inputs, sink);
-        #[cfg(not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))))]
+        #[cfg(not(feature = "cpu-faer"))]
         {
             if matches!(
                 op,
                 crate::DenseFactorization::QrFull | crate::DenseFactorization::QrNull
             ) {
-                // BLAS keeps the executor default's `[X I]` augmentation
+                // Without `cpu-faer`: the executor default's `[X I]` augmentation
                 // through this executor's own `qr_into`, one input after
                 // another.
                 let null = op == crate::DenseFactorization::QrNull;
@@ -1218,7 +738,7 @@ impl DenseExecutor for DefaultDenseExecutor {
                 return Ok(());
             }
             if op == crate::DenseFactorization::SvdFull {
-                // BLAS keeps the executor default's per-matrix
+                // Without `cpu-faer`: the executor default's per-matrix
                 // `svd_full_owned`, one input after another.
                 for (index, &input) in inputs.iter().enumerate() {
                     let outcome = crate::executor::full_svd_by_entries(self, engine, input);
@@ -1230,13 +750,10 @@ impl DenseExecutor for DefaultDenseExecutor {
         }
     }
 
-    // The BLAS provider keeps the trait default's routes (the owned
+    // Without `cpu-faer`, the trait default's routes (the owned
     // `factorize_batch`, and the polar and exponential composites of
     // per-matrix calls).
-    #[cfg(not(any(
-        feature = "provider-inject",
-        all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
-    )))]
+    #[cfg(not(feature = "cpu-faer"))]
     fn factorize_batch_into(
         &mut self,
         engine: &mut dyn Engine,
@@ -1255,11 +772,7 @@ impl DenseExecutor for DefaultDenseExecutor {
 
     // The native provider writes each block's factors into its destination
     // on the lanes.
-    #[cfg(all(
-        feature = "cpu-faer",
-        not(feature = "cpu-blas-core"),
-        not(feature = "provider-inject")
-    ))]
+    #[cfg(feature = "cpu-faer")]
     fn factorize_batch_into(
         &mut self,
         engine: &mut dyn Engine,
@@ -1281,11 +794,7 @@ impl DenseExecutor for DefaultDenseExecutor {
 
     // The native provider solves the valid compact rank-two systems on the
     // lanes.
-    #[cfg(all(
-        feature = "cpu-faer",
-        not(feature = "cpu-blas-core"),
-        not(feature = "provider-inject")
-    ))]
+    #[cfg(feature = "cpu-faer")]
     fn solve_batch_into(
         &mut self,
         engine: &mut dyn Engine,
@@ -1304,39 +813,31 @@ impl DenseExecutor for DefaultDenseExecutor {
         b: DenseRead<'_>,
         x: DenseWrite<'_>,
     ) -> Result<(), DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, a, b, x);
-            Err(linalg_unavailable("solve_into"))
+        if x.dtype() != b.dtype() {
+            return Err(DenseError::DTypeMismatch {
+                op: "solve_into",
+                expected: b.dtype(),
+                actual: x.dtype(),
+            });
         }
-        #[cfg(not(feature = "provider-inject"))]
-        {
-            if x.dtype() != b.dtype() {
-                return Err(DenseError::DTypeMismatch {
-                    op: "solve_into",
-                    expected: b.dtype(),
-                    actual: x.dtype(),
-                });
-            }
-            if x.shape() != b.shape() {
-                return Err(DenseError::ShapeMismatch {
-                    op: "solve_into",
-                    expected: b.shape().to_vec(),
-                    actual: x.shape().to_vec(),
-                });
-            }
-            let a = tenferro_view(a)?;
-            let b = tenferro_view(b)?;
-            let x = tenferro_view_mut(x)?;
-            with_cpu_linalg(engine, "solve_into", |exec| {
-                TensorRead::from_view(a).solve_read_into(
-                    TensorRead::from_view(b),
-                    TensorWrite::from_view(x),
-                    exec,
-                )
-            })
-            .map_err(tenferro_solve_error)
+        if x.shape() != b.shape() {
+            return Err(DenseError::ShapeMismatch {
+                op: "solve_into",
+                expected: b.shape().to_vec(),
+                actual: x.shape().to_vec(),
+            });
         }
+        let a = tenferro_view(a)?;
+        let b = tenferro_view(b)?;
+        let x = tenferro_view_mut(x)?;
+        with_cpu_linalg(engine, "solve_into", |exec| {
+            TensorRead::from_view(a).solve_into(
+                &TensorRead::from_view(b),
+                exec,
+                Dest::overwrite(TensorWrite::from_view(x)),
+            )
+        })
+        .map_err(tenferro_solve_error)
     }
 
     // SVD and EIGH values-only calls use Tenferro's documented borrowed
@@ -1346,20 +847,12 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         input: DenseRead<'_>,
     ) -> Result<DenseTensor, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input);
-            Err(linalg_unavailable("svd_vals"))
-        }
-        #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            with_cpu_linalg(engine, "svd_values", |exec| {
-                TensorRead::from_view(input).svdvals_read(exec)
-            })
-            .map_err(|err| tenferro_error("svd_values", err))
-            .and_then(DenseTensor::from_tenferro)
-        }
+        let input = tenferro_view(input)?;
+        with_cpu_linalg(engine, "svd_values", |exec| {
+            TensorRead::from_view(input).svdvals(exec)
+        })
+        .map_err(|err| tenferro_error("svd_values", err))
+        .and_then(DenseTensor::from_tenferro)
     }
 
     fn eigh_vals(
@@ -1367,20 +860,12 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         input: DenseRead<'_>,
     ) -> Result<DenseTensor, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input);
-            Err(linalg_unavailable("eigh_vals"))
-        }
-        #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            with_cpu_linalg(engine, "eigh_values", |exec| {
-                TensorRead::from_view(input).eigvalsh_read(exec)
-            })
-            .map_err(|err| tenferro_error("eigh_values", err))
-            .and_then(DenseTensor::from_tenferro)
-        }
+        let input = tenferro_view(input)?;
+        with_cpu_linalg(engine, "eigh_values", |exec| {
+            TensorRead::from_view(input).eigvalsh(exec)
+        })
+        .map_err(|err| tenferro_error("eigh_values", err))
+        .and_then(DenseTensor::from_tenferro)
     }
 
     fn eig_vals(
@@ -1388,22 +873,14 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         input: DenseRead<'_>,
     ) -> Result<DenseTensor, DenseError> {
-        #[cfg(feature = "provider-inject")]
-        {
-            let _ = (engine, input);
-            Err(linalg_unavailable("eig_vals"))
-        }
-        #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            // One engine lock for the contiguity pre-pass and the values call.
-            with_cpu_linalg(engine, "eig_values", |exec| {
-                let owned = exec.to_contiguous_read(TensorRead::from_view(input))?;
-                owned.eigvals(exec)
-            })
-            .map_err(|err| tenferro_error("eig_values", err))
-            .and_then(DenseTensor::from_tenferro)
-        }
+        let input = tenferro_view(input)?;
+        // One engine lock for the contiguity pre-pass and the values call.
+        with_cpu_linalg(engine, "eig_values", |exec| {
+            let owned = exec.to_contiguous_read(TensorRead::from_view(input))?;
+            owned.eigvals(exec)
+        })
+        .map_err(|err| tenferro_error("eig_values", err))
+        .and_then(DenseTensor::from_tenferro)
     }
 
     fn dot_general_into(
@@ -1528,8 +1005,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
             return self.matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta);
         }
-        #[cfg(not(feature = "cpu-blas-core"))]
-        return self.matmul_batch_axpby_dispatch(
+        self.matmul_batch_axpby_dispatch(
             engine,
             output,
             lhs,
@@ -1539,13 +1015,7 @@ impl DenseExecutor for DefaultDenseExecutor {
             [lhs_op, rhs_op],
             alpha,
             beta,
-        );
-        #[cfg(feature = "cpu-blas-core")]
-        {
-            self.matmul_batch_axpby_ops_blas(
-                engine, output, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta,
-            )
-        }
+        )
     }
 
     fn matmul_batch_fresh<'a>(
@@ -1565,10 +1035,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         })
     }
 
-    // Why the native provider only: its grouped GEMMs are placed by the
-    // engine's batch decision, while the BLAS provider runs its vendor GEMMs
-    // under the library's own process-global threads.
-    #[cfg(not(feature = "cpu-blas-core"))]
+    // The grouped GEMMs are placed by the engine's batch decision.
     fn honors_forced_batch_policy(&self) -> bool {
         true
     }
@@ -1585,14 +1052,8 @@ impl DefaultDenseExecutor {
     ///   strided entry has no uninitialized form);
     /// - an affine run with gaps between its outputs goes grouped: separate
     ///   pieces cannot form the one rank-3 destination view;
-    /// - everything else goes grouped. The native provider runs the block
-    ///   kernel's lanes with tcontract's fresh entry. The BLAS provider under
-    ///   an `Auto` or `Sequential` policy with `alpha != 0` zero-fills the
-    ///   destination and makes its initialized call
-    ///   ([`Self::matmul_batch_fresh_zeroed_typed`]); a forced
-    ///   `Outer`/`Inner`/`Split` policy, or `alpha == 0`, runs the native
-    ///   lanes instead of cpueinsum's grouped native alternative, which has
-    ///   no fresh form.
+    /// - everything else goes grouped: the block kernel's lanes with
+    ///   tcontract's fresh entry.
     ///
     /// On every route `alpha == 0` gives zero outputs whatever the operands
     /// hold.
@@ -1704,21 +1165,6 @@ impl DefaultDenseExecutor {
                 return Ok(());
             }
         }
-        #[cfg(feature = "cpu-blas-core")]
-        {
-            // Why `exec()` only when broken: it is this route's refusal point,
-            // ahead of the `zeroed` callback below; a healthy engine needs no
-            // token to read its policy.
-            if cpu.is_broken() {
-                cpu.exec().map_err(|err| tenferro_error(FRESH_OP, err))?;
-            }
-            let vendor_loop = cpueinsum::VendorLoopRoute::resolve(cpu.batch_policy().strategy)
-                == cpueinsum::VendorLoopRoute::Loop;
-            if vendor_loop && typed_alpha != T::default() {
-                return self
-                    .matmul_batch_fresh_zeroed_typed(cpu, parts, lhs, rhs, jobs, ops, alpha);
-            }
-        }
         #[cfg(test)]
         {
             self.grouped_route_jobs = jobs.len();
@@ -1736,174 +1182,6 @@ impl DefaultDenseExecutor {
         )
     }
 
-    /// The BLAS provider's grouped fresh batch under its vendor-loop policy:
-    /// zero-fill every segment through the carrier, then make the call the
-    /// initialized batch makes, so the vendor/native decision, the cached
-    /// per-job engine plans and the decomposition stay the initialized
-    /// route's. The cost is one extra store of the segments before the GEMMs.
-    ///
-    /// The initialized call needs one destination view. When the jobs span
-    /// several segments, an identity batch makes one initialized call per
-    /// segment (cpueinsum's whole-group vendor/native decision is then taken
-    /// per segment), and an op-bearing batch runs each job as the
-    /// initialized serial route runs it, with its own engine cache slot
-    /// (strided runs of the partition are not formed across pieces).
-    #[cfg(feature = "cpu-blas-core")]
-    #[allow(clippy::too_many_arguments)]
-    fn matmul_batch_fresh_zeroed_typed<'a, T: GroupedScalar + FreshScalar>(
-        &mut self,
-        cpu: &mut CpuEngine,
-        parts: FreshParts<'_, 'a, T>,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        jobs: &[DenseGemmBatchJob],
-        ops: [MatrixOp; 2],
-        alpha: DenseScalar,
-    ) -> Result<(), DenseError> {
-        let beta = T::scalar(T::default());
-        check_fresh_segments(parts.segments, jobs, &mut self.gemm_scratch.order)?;
-        let mut zeroed: Vec<(usize, &'a mut [T])> = self.gemm_scratch.take_slots();
-        for (start, memory) in parts.segments.iter_mut() {
-            zeroed.push((*start, zero_piece(parts.zeroed, std::mem::take(memory))?));
-        }
-        let mut layout = std::mem::take(&mut self.fresh_layout);
-        layout.assign(&zeroed, jobs, &self.gemm_scratch.order);
-        let result = self.run_zeroed_segments(
-            cpu,
-            &mut zeroed,
-            &mut layout,
-            lhs,
-            rhs,
-            jobs,
-            ops,
-            alpha,
-            beta,
-        );
-        self.fresh_layout = layout;
-        if result.is_ok() {
-            let mut finished = self.gemm_scratch.take_fresh_slots::<T>();
-            finished.extend(jobs.iter().map(|_| (0, &mut [][..], &mut [][..])));
-            place_fresh_jobs(&mut zeroed, jobs, &self.gemm_scratch.order, |j, piece| {
-                finished[j].2 = piece
-            });
-            for (j, (_, _, output)) in finished.iter_mut().enumerate() {
-                (parts.written)(j, std::mem::take(output));
-            }
-            self.gemm_scratch.keep_fresh_slots(finished);
-        }
-        self.gemm_scratch.keep_slots(zeroed);
-        result
-    }
-
-    /// [`Self::matmul_batch_fresh_zeroed_typed`]'s initialized calls over
-    /// the zero-filled segments.
-    #[cfg(feature = "cpu-blas-core")]
-    #[allow(clippy::too_many_arguments)]
-    fn run_zeroed_segments<T: GroupedScalar + FreshScalar>(
-        &mut self,
-        cpu: &mut CpuEngine,
-        zeroed: &mut [(usize, &mut [T])],
-        layout: &mut FreshLayout,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        jobs: &[DenseGemmBatchJob],
-        ops: [MatrixOp; 2],
-        alpha: DenseScalar,
-        beta: DenseScalar,
-    ) -> Result<(), DenseError> {
-        // An empty job writes nothing; offset 0 keeps its view in bounds.
-        let rebase = |job: &DenseGemmBatchJob, start: usize| DenseGemmBatchJob {
-            dst_offset: if job.rows * job.cols == 0 {
-                0
-            } else {
-                job.dst_offset - start
-            },
-            ..*job
-        };
-        let FreshLayout {
-            staged,
-            runs,
-            segment_of,
-            bucket_ends,
-            bucket,
-        } = layout;
-        if let [(start, output)] = zeroed {
-            // Every job, in job order, so each keeps its index (and engine
-            // cache slot) of the initialized call.
-            staged.clear();
-            staged.extend(jobs.iter().map(|job| rebase(job, *start)));
-            strided_batch_runs_into(staged, runs);
-            let (shape, strides) = ([output.len()], [1]);
-            return self.matmul_batch_initialized_typed(
-                cpu,
-                &mut DenseViewMut::new(output, &shape, &strides, 0)?,
-                lhs,
-                rhs,
-                staged,
-                runs,
-                ops,
-                alpha,
-                beta,
-            );
-        }
-        if ops == [MatrixOp::Identity; 2] {
-            let mut first = 0;
-            for ((start, output), &end) in zeroed.iter_mut().zip(bucket_ends.iter()) {
-                staged.clear();
-                staged.extend(bucket[first..end].iter().map(|&j| rebase(&jobs[j], *start)));
-                first = end;
-                if staged.is_empty() {
-                    continue;
-                }
-                strided_batch_runs_into(staged, runs);
-                let (shape, strides) = ([output.len()], [1]);
-                self.matmul_batch_initialized_typed(
-                    cpu,
-                    &mut DenseViewMut::new(output, &shape, &strides, 0)?,
-                    lhs,
-                    rhs,
-                    staged,
-                    runs,
-                    ops,
-                    alpha,
-                    beta,
-                )?;
-            }
-            return Ok(());
-        }
-        for (index, job) in jobs.iter().enumerate() {
-            let Some((start, output)) = zeroed.get_mut(segment_of[index]) else {
-                continue;
-            };
-            let (shape, strides) = ([output.len()], [1]);
-            let Self {
-                matmul_config,
-                #[cfg(test)]
-                seam_dispatches,
-                ..
-            } = self;
-            Self::run_batch_jobs(
-                cpu,
-                matmul_config,
-                #[cfg(test)]
-                seam_dispatches,
-                &mut DenseViewMut::new(output, &shape, &strides, 0)?,
-                0,
-                lhs,
-                rhs,
-                &[rebase(job, *start)],
-                index,
-                ops[0],
-                ops[1],
-                alpha,
-                beta,
-                T::write,
-                T::read,
-            )?;
-        }
-        Ok(())
-    }
-
     /// The initialized batch route of [`Self::matmul_batch_axpby_with_ops_into`]
     /// for typed operands.
     #[allow(clippy::too_many_arguments)]
@@ -1919,23 +1197,6 @@ impl DefaultDenseExecutor {
         alpha: DenseScalar,
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
-        #[cfg(feature = "cpu-blas-core")]
-        if ops != [MatrixOp::Identity; 2] {
-            return self.matmul_batch_axpby_ops_typed(
-                cpu,
-                output,
-                lhs,
-                rhs,
-                jobs,
-                runs,
-                ops[0],
-                ops[1],
-                alpha,
-                beta,
-                T::write,
-                T::read,
-            );
-        }
         self.matmul_batch_axpby_route_typed(
             cpu,
             output,
@@ -1952,110 +1213,11 @@ impl DefaultDenseExecutor {
     }
 }
 
-impl DefaultDenseExecutor {
-    /// The BLAS provider's op-bearing batch: strided runs plus a per-job
-    /// serial remainder, unchanged by the native block kernel.
-    #[cfg(feature = "cpu-blas-core")]
-    #[allow(clippy::too_many_arguments, clippy::redundant_closure)]
-    fn matmul_batch_axpby_ops_blas(
-        &mut self,
-        engine: &mut dyn Engine,
-        output: DenseWrite<'_>,
-        lhs: DenseRead<'_>,
-        rhs: DenseRead<'_>,
-        jobs: &[DenseGemmBatchJob],
-        runs: &[usize],
-        lhs_op: MatrixOp,
-        rhs_op: MatrixOp,
-        alpha: DenseScalar,
-        beta: DenseScalar,
-    ) -> Result<(), DenseError> {
-        let (out_dtype, lhs_dtype, rhs_dtype) = (output.dtype(), lhs.dtype(), rhs.dtype());
-        host_cpu(engine, "matmul_batch_axpby_with_ops_into", |cpu| {
-            match (output, lhs, rhs) {
-                (DenseWrite::F32(mut out), DenseRead::F32(lhs), DenseRead::F32(rhs)) => self
-                    .matmul_batch_axpby_ops_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        lhs_op,
-                        rhs_op,
-                        alpha,
-                        beta,
-                        // Constructor functions capture one concrete lifetime; closures
-                        // remain generic over each temporary view borrowed below.
-                        |view| DenseWrite::F32(view),
-                        |view| DenseRead::F32(view),
-                    ),
-                (DenseWrite::F64(mut out), DenseRead::F64(lhs), DenseRead::F64(rhs)) => self
-                    .matmul_batch_axpby_ops_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        lhs_op,
-                        rhs_op,
-                        alpha,
-                        beta,
-                        |view| DenseWrite::F64(view),
-                        |view| DenseRead::F64(view),
-                    ),
-                (DenseWrite::C32(mut out), DenseRead::C32(lhs), DenseRead::C32(rhs)) => self
-                    .matmul_batch_axpby_ops_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        lhs_op,
-                        rhs_op,
-                        alpha,
-                        beta,
-                        |view| DenseWrite::C32(view),
-                        |view| DenseRead::C32(view),
-                    ),
-                (DenseWrite::C64(mut out), DenseRead::C64(lhs), DenseRead::C64(rhs)) => self
-                    .matmul_batch_axpby_ops_typed(
-                        cpu,
-                        &mut out,
-                        lhs,
-                        rhs,
-                        jobs,
-                        runs,
-                        lhs_op,
-                        rhs_op,
-                        alpha,
-                        beta,
-                        |view| DenseWrite::C64(view),
-                        |view| DenseRead::C64(view),
-                    ),
-                _ => Err(crate::executor::batch_operand_error(
-                    "matmul_batch_axpby_with_ops_into",
-                    out_dtype,
-                    lhs_dtype,
-                    rhs_dtype,
-                )),
-            }
-        })
-    }
-}
+impl DefaultDenseExecutor {}
 
 /// The four GEMM dtypes of the grouped route, with their [`DenseScalar`]
 /// projection (a mismatched coefficient dtype is refused before any write).
-#[cfg(not(feature = "cpu-blas-core"))]
 trait GroupedScalar: tcontract::api::Scalar + Default {
-    fn from_dense(value: DenseScalar) -> Option<Self>;
-}
-
-/// As above; a BLAS build's grouped plan also needs the vendor scalar.
-#[cfg(feature = "cpu-blas-core")]
-trait GroupedScalar: cpueinsum_blas::BlasScalar {
     fn from_dense(value: DenseScalar) -> Option<Self>;
 }
 
@@ -2102,8 +1264,7 @@ fn grouped_span(shape: &[usize], strides: &[usize], role: &str) -> Result<usize,
 /// Checks every job's lhs/rhs/output range in job-index order, so the first
 /// out-of-range job reported is the lowest-indexed one (`GroupedPlan` checks
 /// in its sorted output order instead). Output overlap is left to the
-/// caller (the block kernel, or the BLAS grouped plan's constructor), which
-/// rejects it before any write.
+/// caller (the block kernel), which rejects it before any write.
 pub(crate) fn grouped_validate<T>(
     output: &DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
@@ -2155,53 +1316,6 @@ fn grouped_validate_jobs(lens: [usize; 3], jobs: &[DenseGemmBatchJob]) -> Result
         }
     }
     Ok(())
-}
-
-/// The grouped route of every BLAS batch: one `cpueinsum_blas::GroupedPlan`
-/// over the batch, run on the caller engine's execution bundle with its own
-/// batch policy. Under the `Auto`/`Sequential` batch policy it runs one
-/// vendor GEMM per job in order on the calling thread, and a forced
-/// `Outer`/`Inner`/`Split` policy runs its prepared native alternative.
-/// Every bound and the output overlap are checked before the first write;
-/// jobs keep their caller index, and each output range is written by exactly
-/// one job, so lane order cannot change a result.
-#[cfg(feature = "cpu-blas-core")]
-#[allow(clippy::too_many_arguments)]
-fn grouped_gemm_into<T: GroupedScalar>(
-    cpu: &mut CpuEngine,
-    grouped_jobs: &mut Vec<cpueinsum::GroupedGemmJob>,
-    output: &mut DenseViewMut<'_, T>,
-    lhs: DenseView<'_, T>,
-    rhs: DenseView<'_, T>,
-    jobs: &[DenseGemmBatchJob],
-    alpha: T,
-    beta: T,
-) -> Result<cpueinsum_blas::GroupedRoute, DenseError> {
-    let [lhs_len, rhs_len, out_len] = grouped_validate(output, lhs, rhs, jobs)?;
-    let lhs = &lhs.data()[lhs.offset()..lhs.offset() + lhs_len];
-    let rhs = &rhs.data()[rhs.offset()..rhs.offset() + rhs_len];
-    let offset = output.offset();
-    let out = &mut output.data_mut()[offset..offset + out_len];
-    grouped_jobs.clear();
-    grouped_jobs.extend(jobs.iter().map(|job| {
-        cpueinsum::GroupedGemmJob::new(
-            job.lhs_offset,
-            job.rhs_offset,
-            job.dst_offset,
-            job.rows,
-            job.contracted,
-            job.cols,
-        )
-    }));
-    let plan = cpueinsum_blas::GroupedPlan::<T>::new(grouped_jobs, &Default::default())
-        .map_err(|err| grouped_error(err.to_string()))?;
-    // Vendor packing scratch, reused across the plan's jobs.
-    let mut work = vec![T::default(); plan.work_len()];
-    let mut exec = cpu
-        .exec()
-        .map_err(|err| tenferro_error("grouped_gemm", err))?;
-    plan.execute_into_accum(&mut exec, alpha, lhs, rhs, beta, out, &mut work)
-        .map_err(|err| grouped_error(err.to_string()))
 }
 
 fn tenferro_scalar(value: DenseScalar) -> tenferro_tensor::ContractionScalar {
@@ -2295,7 +1409,6 @@ pub(crate) fn tenferro_error(op: &'static str, err: tenferro_tensor::Error) -> D
     }
 }
 
-#[cfg(not(feature = "provider-inject"))]
 pub(crate) fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
     if err.kind() == tenferro_tensor::ErrorKind::NumericalFailure {
         DenseError::NumericalFailure {
@@ -2337,28 +1450,19 @@ fn host_cpu<R>(
     })
 }
 
-#[cfg(feature = "provider-inject")]
-fn linalg_unavailable(op: &'static str) -> DenseError {
-    DenseError::Unsupported {
-        op,
-        message: "provider-inject does not route factorizations or solves; they are unsupported in this configuration".to_string(),
-    }
-}
-
 /// tenferro's general eigendecomposition of one input on the whole engine:
 /// the per-matrix [`DenseExecutor::eig`] entry.
-#[cfg(not(feature = "provider-inject"))]
 pub(crate) fn eig_read(
     engine: &mut dyn Engine,
     input: DenseRead<'_>,
 ) -> Result<Vec<DenseTensor>, DenseError> {
     let input = tenferro_view(input)?;
     with_cpu_linalg(engine, "eig_read", |exec| {
-        TensorRead::from_view(input).eig_read(exec)
+        TensorRead::from_view(input).eig(exec)
     })
     .map_err(|err| tenferro_error("eig_read", err))
-    .and_then(|(values, vectors)| {
-        vec![values, vectors]
+    .and_then(|eig| {
+        vec![eig.values, eig.vectors]
             .into_iter()
             .map(DenseTensor::from_tenferro)
             .collect()
@@ -2368,10 +1472,7 @@ pub(crate) fn eig_read(
 /// A batch of per-matrix factorizations under one engine lock: the
 /// per-matrix calls the per-call entries make, in the same order, each
 /// input's outcome delivered to `sink` before the next input is solved.
-#[cfg(not(any(
-    feature = "provider-inject",
-    all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
-)))]
+#[cfg(not(feature = "cpu-faer"))]
 fn factorize_batch_serial(
     engine: &mut dyn Engine,
     op: crate::DenseFactorization,

@@ -82,8 +82,8 @@ impl FactorOp {
             // factors would still be the conjugates of that QR's own
             // factors, one more pass over `m (m + n)` elements against this
             // materialization's `m n`; compact LQ reads the parent without a
-            // copy only on the native provider (the default and BLAS
-            // executors stage the same adjoint), and on every executor its
+            // copy only on the native provider (the default executor
+            // stages the same adjoint), and on every executor its
             // factors would still need adjointing into QR's.
             Self::QrCompact | Self::QrFull => AdjointRule::Materialize,
             // Why not read the parent: an admitted near-Hermitian input

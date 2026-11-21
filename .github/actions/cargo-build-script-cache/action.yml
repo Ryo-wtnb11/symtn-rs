@@ -5,12 +5,11 @@ description: >
   drops the matching .fingerprint files and native/codegen build-script outputs.
   Without the fingerprint cargo cannot verify a cached rlib and recompiles it
   from scratch, so every warm run rebuilt the gemm-*/pulp/faer SIMD-codegen
-  stack and openblas-src's 6.5-min C library despite a full cache hit. These two
+  stack despite a full cache hit. These two
   dirs are tiny next to deps/, so restoring them reunites cargo with the rlibs
   rust-cache already cached. cargo's fingerprint check gates reuse but does not
   see the host CPU. Native libraries built here must therefore not depend on
-  the build host's instruction set: openblas-src is built with
-  OPENBLAS_DYNAMIC_ARCH (ci.yml), so a restore on another runner type stays
+  the build host's instruction set, so a restore on another runner type stays
   valid.
 inputs:
   key:

@@ -97,11 +97,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          for features in "" cpu-blas provider-inject "cuda,cpu-faer"; do
+          for features in "" "cuda,cpu-faer"; do
             args=(--locked -p symtn-dense -e normal --target all --prefix none --format '{p}')
             [ -n "$features" ] && args+=(--no-default-features --features "$features")
             dups=$(cargo tree "${args[@]}" | awk '{print $1, $2}' | sort -u \
-              | awk '$1 ~ /^(tcontract|tcontract-exec|tlinalg|strided-view|threadteam|t4a-faer|cpueinsum|cpueinsum-blas)$/ {print $1}' \
+              | awk '$1 ~ /^(tcontract|tcontract-exec|tlinalg|strided-view|threadteam|t4a-faer)$/ {print $1}' \
               | uniq -d)
             if [ -n "$dups" ]; then
               echo "features [$features]: more than one version of: $dups"
@@ -110,81 +110,9 @@ jobs:
           done
         working-directory: symtn
 
-  backend-contract-linux:
-    name: backend contract (linux)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: symtn
-      - name: Record source revisions
-        run: |
-          git -C symtn log -1 --format='symtn %H'
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: symtn
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: backend-linux
-      - uses: ./symtn/.github/actions/cargo-build-script-cache
-        with:
-          key: backend-linux
-      # Former `fail-fast: false` matrix rows: `!cancelled()` keeps every
-      # feature's signal in one run.
-      - name: check cpu-blas-core
-        if: ${{ !cancelled() }}
-        run: cargo check --locked --workspace --all-targets --no-default-features --features "cpu-blas"
-        working-directory: symtn
-      - name: check mkl
-        if: ${{ !cancelled() }}
-        run: cargo check --locked --workspace --all-targets --no-default-features --features "blas-mkl"
-        working-directory: symtn
-      - name: check provider-inject
-        if: ${{ !cancelled() }}
-        run: cargo check --locked --workspace --all-targets --no-default-features --features "provider-inject"
-        working-directory: symtn
-
-  backend-contract-accelerate:
-    name: backend contract (accelerate)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: symtn
-      - name: Record source revisions
-        run: |
-          git -C symtn log -1 --format='symtn %H'
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install Accelerate build toolchain
-        run: brew install gcc
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: symtn
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: backend-accelerate
-      - uses: ./symtn/.github/actions/cargo-build-script-cache
-        with:
-          key: backend-accelerate
-      - run: cargo check --locked --workspace --all-targets --no-default-features --features "blas-accelerate"
-        working-directory: symtn
-      # The compile-only checks never execute the direct full-SVD path a BLAS
-      # provider takes (#1163). `accelerate` carries the runtime gate because
-      # its vendor is the system framework, so linking a test binary needs no
-      # setup its runner lacks; `cpu-blas` selects no vendor at all. Scoped to
-      # the two crates that own the path; symtn runs in its own step below.
-      - name: Run the BLAS full-SVD suites
-        working-directory: symtn
-        run: |
-          cargo test --locked -p symtn-dense -p symtn-matrixalgebra --no-default-features --features blas-accelerate --tests
-          cargo test --locked -p symtn-dense -p symtn-matrixalgebra --no-default-features --features blas-accelerate --doc
-      # The facade integration tests under the system BLAS/LAPACK (#2107).
-      - name: Run the symtn tests under Accelerate
-        working-directory: symtn
-        run: cargo test --locked -p symtn --tests --no-default-features --features blas-accelerate
-
   # opt-path (wraps opt-einsum-path) and cotengra-python (shells out to an
-  # installed Python `cotengra`) have real code but, unlike the backend rows
-  # above, no matrix coverage anywhere in CI (#153). Both need a host
+  # installed Python `cotengra`) have real code but no matrix coverage
+  # anywhere in CI (#153). Both need a host
   # execution backend to run anything, so cpu-faer rides along. Unlike
   # backend-contract this runs the actual test suite, not just `cargo
   # check`: the point is to start exercising optimizer_fallback.rs /

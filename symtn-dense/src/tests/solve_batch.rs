@@ -126,11 +126,7 @@ fn default_solves_in_index_order_and_stops_at_the_first_error() {
     }
 }
 
-#[cfg(all(
-    feature = "cpu-faer",
-    not(feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#[cfg(feature = "cpu-faer")]
 mod native {
     use super::*;
     use crate::tests::block_svd::{engine, numerics, PanicsAt};

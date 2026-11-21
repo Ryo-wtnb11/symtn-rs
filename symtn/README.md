@@ -23,10 +23,8 @@ For index notation and network planning, add `symtn-network` and run its
 [contract example](../symtn-network/examples/contract.rs). Mathematical conventions
 are in [tensor-map mathematics](src/mathematics.md).
 
-The default host provider is Tenferro's resolved compiled default: BLAS when
-its CPU build enables `cpu-blas`, otherwise `cpu-faer`; see the
-[backend policy](../docs/backend_policy.md) and [`Cargo.toml`](Cargo.toml) for
-alternatives. `cuda` adds the typed CUDA surface. `LieGroupFusionRule` uses
+The host provider is Tenferro's faer-backed CPU stack (`cpu-faer`); see the
+[backend policy](../docs/backend_policy.md). `cuda` adds the typed CUDA surface. `LieGroupFusionRule` uses
 fusion-symbols categories of every simple type, A–G, their products, tori and U(n) with checked
 Generic Host execution; without `cgc-gen` it serves A1/B1/C1/D2 factors and
 tori, and other groups return `LieError::Unsupported { requires: "lie-generated" }`.

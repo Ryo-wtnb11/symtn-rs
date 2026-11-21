@@ -159,8 +159,8 @@ pub fn cuda_svd_region<D: CudaScalar>(
     ensure_cuda_device(ctx.device, "cuda_svd", &[("src", src.device)])?;
     let view = src.region_view::<D>(rows, cols, rows, offset)?;
     record(|stats| stats.solver_calls += 1);
-    let (u, s, vt) = TensorRead::from_view(view)
-        .svd_read(&mut *ctx.backend)
+    let tenferro_linalg::Svd { u, s, vh: vt } = TensorRead::from_view(view)
+        .svd(&mut *ctx.backend)
         .map_err(|err| cuda_error("cuda_svd", err))?;
     let vt = CudaDenseStorage::from_tensor::<D>("cuda_svd", vt, ctx.device)?;
     let s = CudaSpectrum {
@@ -470,8 +470,8 @@ pub fn cuda_qr_region<D: CudaScalar>(
     let view = src.region_view::<D>(rows, cols, rows, offset)?;
     let options = QrOptions::default().gauge(QrGauge::PositiveDiagonal);
     record(|stats| stats.solver_calls += 1);
-    let (q, r) = TensorRead::from_view(view)
-        .qr_with_options_read(options, &mut *ctx.backend)
+    let tenferro_linalg::Qr { q, r } = TensorRead::from_view(view)
+        .qr_with(&options, &mut *ctx.backend)
         .map_err(|err| cuda_error("cuda_qr", err))?;
     let r = CudaDenseStorage::from_tensor::<D>("cuda_qr", r, ctx.device)?;
     let q = CudaDenseStorage::from_tensor::<D>("cuda_qr", q, ctx.device)?;
@@ -509,8 +509,8 @@ pub fn cuda_eigh_region<D: CudaScalar>(
     ensure_cuda_device(ctx.device, "cuda_eigh", &[("src", src.device)])?;
     let view = src.region_view::<D>(n, n, n, offset)?;
     record(|stats| stats.solver_calls += 1);
-    let (values, vectors) = TensorRead::from_view(view)
-        .eigh_read(&mut *ctx.backend)
+    let tenferro_linalg::Eigh { values, vectors } = TensorRead::from_view(view)
+        .eigh(&mut *ctx.backend)
         .map_err(|err| cuda_error("cuda_eigh", err))?;
     let vectors = CudaDenseStorage::from_tensor::<D>("cuda_eigh", vectors, ctx.device)?;
     let values = CudaSpectrum {
@@ -555,8 +555,8 @@ pub fn cuda_eigh_region_batched<D: CudaScalar>(
         region.offset_isize()?,
     )?;
     record(|stats| stats.solver_calls += 1);
-    let (values, vectors) = TensorRead::from_view(view)
-        .eigh_read(&mut *ctx.backend)
+    let tenferro_linalg::Eigh { values, vectors } = TensorRead::from_view(view)
+        .eigh(&mut *ctx.backend)
         .map_err(|err| {
             // The solver's own status (cuSOLVER `info > 0`) is a numerical
             // failure of some member; everything else is the call's.

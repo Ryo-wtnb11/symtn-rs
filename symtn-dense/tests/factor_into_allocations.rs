@@ -7,11 +7,7 @@
 //! Scope: one serial engine (one lane), so every allocation is on the
 //! measured thread.
 
-#![cfg(all(
-    feature = "cpu-faer",
-    not(feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#![cfg(feature = "cpu-faer")]
 
 use num_complex::{Complex32, Complex64};
 use symtn_dense::{

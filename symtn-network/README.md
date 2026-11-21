@@ -14,7 +14,7 @@ The default host backend is `cpu-faer`; enable at least one host backend.
 cotengra for path search. `cuda` still requires a host backend, while
 `cgc-gen` forwards fusion-symbols' `lie-generated`, which `LieGroupFusionRule`
 needs beyond A1/B1/C1/D2 factors; see `Cargo.toml` for the
-other provider and BLAS flags.
+other flags.
 
 Run the [contraction example](examples/contract.rs) with:
 

@@ -147,16 +147,6 @@ fn row(codomain: &[usize], reach: i32) -> Row {
 }
 
 #[test]
-#[cfg_attr(
-    any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ),
-    ignore = "the warm-zero and no-plan-build contracts are the native grouped GEMM kernel's; a BLAS provider allocates its own per-call scratch, so warm prepared replays allocate"
-)]
 fn core_and_copy_c_route_allocations_follow_their_contracts() {
     let _serial = crate::counting_alloc::serial();
     for (name, codomain) in [("core", [0, 1]), ("copyC", [1, 0])] {

@@ -15,16 +15,7 @@
 //! Its own test binary with one test, so the shared counting allocator's
 //! process-wide measurement sees only that test.
 
-#![cfg(all(
-    feature = "cpu-faer",
-    not(any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ))
-))]
+#![cfg(feature = "cpu-faer")]
 
 use std::sync::Arc;
 
