@@ -197,6 +197,9 @@ impl From<OperationError> for Error {
     fn from(err: OperationError) -> Self {
         match err {
             OperationError::FusionAlgebra(cause) => Self::FusionAlgebra(cause),
+            OperationError::UnsupportedDeviceTreeTransform { message } => {
+                Self::UnsupportedOnDevice(message.to_owned())
+            }
             other => Self::Operation(Box::new(other)),
         }
     }

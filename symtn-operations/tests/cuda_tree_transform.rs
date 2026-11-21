@@ -78,7 +78,7 @@ fn single_member_admission_accepts_nonzero_and_rejects_zero() {
     .unwrap();
     assert!(matches!(
         CudaSingleMemberRegions::admit(&zero),
-        Err(OperationError::UnsupportedTensorContractScope { .. })
+        Err(OperationError::UnsupportedDeviceTreeTransform { .. })
     ));
 
     let tiny = TreeTransformStructure::compile_structures(
