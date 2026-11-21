@@ -11,11 +11,7 @@
 //! `the_warm_allocation_fixture_runs_on_four_lanes`, which can read the
 //! placement.
 
-#![cfg(all(
-    feature = "cpu-faer",
-    not(feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#![cfg(feature = "cpu-faer")]
 
 use symtn_dense::{
     strided_batch_runs, CpuEngine, DefaultDenseExecutor, DenseExecutor, DenseGemmBatchJob,

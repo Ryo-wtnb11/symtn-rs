@@ -298,16 +298,6 @@ where
 /// Purpose: a warmed B = 1 workspace builds no geometry GEMM plan again and
 /// allocates nothing.
 #[test]
-#[cfg_attr(
-    any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ),
-    ignore = "the geometry-plan cache belongs to the native grouped GEMM kernel; a BLAS provider runs grouped jobs through its own dot and prepares no plan"
-)]
 fn warmed_member1_workspace_builds_no_grouped_core_plan() {
     let _serial = counting_alloc::serial();
     check("compose U1 f64", &compose::<_, f64>(u1_legs()));

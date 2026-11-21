@@ -269,7 +269,7 @@ fn input_data<T: Elem>(shape: &[usize], hermitian: bool, seed: usize) -> Vec<T> 
         .collect()
 }
 
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "cpu-faer")]
 mod native {
     use super::*;
     use crate::tests::block_svd::{engine, policies};
@@ -2180,7 +2180,7 @@ fn exp_composite_tags_a_nonfinite_eigenvalue_as_an_output_failure() {
 /// eigenvalue overflows (`[[M, M], [M, M]]`, `M = f64::MAX / sqrt(2)`, so
 /// `2 M = inf`) is that input's `Output` failure from symtn's eigenvalue
 /// check, not a provider error, and the input after it still succeeds.
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn native_exp_tags_an_overflowing_eigenvalue_as_an_output_failure() {
     let engine = &mut CpuEngine::serial();

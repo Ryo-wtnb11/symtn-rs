@@ -38,8 +38,6 @@ Not snapshotted:
 - `publish = false` packages (`tests/production-contract`).
 - `symtn-macros`: a proc-macro crate, for which rustdoc emits no JSON. Its
   `contract!` macro is re-exported by `symtn-network` and appears there.
-- BLAS-provider features (`cpu-blas`, `blas-*`, `provider-inject`): they select
-  a backend implementation of the same surface.
 - `symtn/ledger-roots`: it only switches on a dependency's ledger and adds no
   symtn item.
 

@@ -8,7 +8,6 @@
 //! eigenvalues and cluster projectors, reconstruction, unitarity and the
 //! `gaugefix!` rule. A batch fails as a whole and names every failing member.
 
-use crate::backend;
 use crate::su2::{su2_irrep, su2_rule};
 
 use crate::numerics;
@@ -124,9 +123,8 @@ where
             terms,
         );
         // The plan's spectra come from the factorization with vectors, eager
-        // `eigh_vals` from the values-only driver call; a LAPACK provider may
-        // round those two routines differently, so the sectors match exactly
-        // and the values to the numerics rule.
+        // `eigh_vals` from the values-only driver call; the sectors match
+        // exactly and the values to the numerics rule.
         let eager_spectra = input
             .eigh_vals(
                 engine,
@@ -149,9 +147,9 @@ where
                 terms,
             );
         }
-        // On faer the values-only and full drivers agree bitwise.
+        // The values-only and full drivers agree bitwise.
         assert!(
-            !backend::faer_is_default_backend() || output.spectra[member] == eager_spectra,
+            output.spectra[member] == eager_spectra,
             "{what}: spectra bitwise"
         );
         check_member(&what, input, &d, &v, (&eager_d, &eager_v), f64::EPSILON);

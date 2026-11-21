@@ -35,26 +35,15 @@ mod cuda_hermitian;
 mod cuda_region;
 #[cfg(feature = "tenferro")]
 mod block_kernel {
-    // The BLAS provider keeps its own grouped scheduler for initialized
-    // outputs; it runs fresh outputs here when a forced lane policy rules out
-    // its serial vendor loop.
-    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) mod gemm;
     // The one lane driver, cost function and block-op trait every native
     // kernel runs through.
-    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) mod driver;
-    // The native provider's block factorizations; BLAS keeps its serial
-    // per-block vendor calls.
-    #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+    // The native provider's block factorizations.
+    #[cfg(feature = "cpu-faer")]
     pub(crate) mod factor;
-    // The native provider's batch of linear solves; BLAS keeps the
-    // per-matrix loop.
-    #[cfg(all(
-        feature = "cpu-faer",
-        not(feature = "cpu-blas-core"),
-        not(feature = "provider-inject")
-    ))]
+    // The native provider's batch of linear solves.
+    #[cfg(feature = "cpu-faer")]
     pub(crate) mod solve;
 }
 // The value symtn keeps in the caller's CPU engine between calls.

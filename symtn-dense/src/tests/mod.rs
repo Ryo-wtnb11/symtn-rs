@@ -3,23 +3,20 @@
 use super::*;
 use num_complex::{Complex32, Complex64};
 
-#[cfg(all(feature = "tenferro", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "tenferro")]
 mod block_gemm;
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "cpu-faer")]
 mod block_qr;
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "cpu-faer")]
 mod block_svd;
 #[allow(unsafe_code)]
 #[path = "../../../tests/support/counting_alloc.rs"]
 pub(crate) mod counting_alloc;
 mod dot;
 mod executor;
-#[cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
+#[cfg(feature = "tenferro")]
 mod factor_into;
-#[cfg(all(
-    any(feature = "cpu-faer", feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#[cfg(feature = "cpu-faer")]
 mod factor_properties;
 mod fresh;
 #[cfg(feature = "tenferro")]
@@ -28,7 +25,6 @@ mod lanes;
 mod numerics;
 #[cfg(feature = "tenferro")]
 mod placement;
-#[cfg(not(feature = "provider-inject"))]
 mod solve_batch;
 mod tensor;
 mod view;
@@ -356,10 +352,7 @@ fn diag_c64_from_real(values: &[f64]) -> Vec<Complex64> {
     }
     out
 }
-#[cfg(all(
-    not(feature = "provider-inject"),
-    any(feature = "cpu-faer", feature = "cpu-blas-core")
-))]
+#[cfg(feature = "cpu-faer")]
 fn assert_values_only_for_compiled_cpu_provider() {
     let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();

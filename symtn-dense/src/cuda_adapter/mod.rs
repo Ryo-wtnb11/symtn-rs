@@ -13,7 +13,7 @@ use std::cell::Cell;
 use num_complex::{Complex32, Complex64};
 use tenferro_gpu::cuda::raw::with_cuda_engine;
 use tenferro_gpu::cuda::{download_tensor, upload_tensor, CudaRuntime};
-use tenferro_linalg::{QrGauge, QrOptions, TensorReadLinalgExt};
+use tenferro_linalg::{LinalgOps, QrGauge, QrOptions};
 use tenferro_tensor::{
     AllocationDomainId, CompareDir, ContractionScalar, DotGeneralAccumulation, DotGeneralConfig,
     Engine, Tensor, TensorRead, TensorScalar as TenferroScalar, TensorView, TensorViewMut,

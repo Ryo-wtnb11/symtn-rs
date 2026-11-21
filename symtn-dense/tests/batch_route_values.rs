@@ -4,7 +4,7 @@
 //! `factorize_batch` returns the per-matrix factors, and a mixed run
 //! partition lands bitwise what one call per run lands (on the same engine).
 
-#![cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
+#![cfg(feature = "tenferro")]
 
 use num_complex::Complex64;
 use symtn_dense::{
@@ -187,16 +187,10 @@ fn op_bearing_serial_batch_error_keeps_executor_usable() {
             )
             .unwrap_err()
     };
-    // The BLAS serial route writes the good job, then builds the bad job's
-    // view and reports it out of bounds; the native block kernel bounds
-    // every job first, where the bad offset overflows, and writes nothing.
-    let (expected, written) = if cfg!(feature = "cpu-blas-core") {
-        (DenseError::OutOfBounds, [5.0, 11.0, 11.0, 25.0])
-    } else {
-        (DenseError::OffsetOverflow { value: usize::MAX }, [0.0; 4])
-    };
-    assert_eq!(error, expected);
-    assert_eq!(output, written);
+    // The block kernel bounds every job first, where the bad offset
+    // overflows, and writes nothing.
+    assert_eq!(error, DenseError::OffsetOverflow { value: usize::MAX });
+    assert_eq!(output, [0.0; 4]);
 
     // The executor still works after the failed batch.
     let mut again = [0.0f64; 4];

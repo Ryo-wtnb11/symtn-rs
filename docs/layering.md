@@ -89,9 +89,8 @@ factorizations, provider resources and backend scheduling.
 Tenferro owns dense tensors, regular batched GEMM, factorizations, CPU/GPU
 providers, thread control and provider workspace. Irregular batches (one GEMM
 per block, each with its own shape) are outside the tenferro core: they belong
-to the kernel layer beneath it, `cpueinsum::GroupedPlan`. The BLAS provider
-already submits its grouped jobs there. The native provider still runs its own
-grouped loop over tcontract plans (`symtn-dense/src/block_kernel/gemm.rs`)
+to the kernel layer beneath it, `cpueinsum::GroupedPlan`. symtn still runs its
+own grouped loop over tcontract plans (`symtn-dense/src/block_kernel/gemm.rs`)
 until that layer covers per-operand transposition and work-weighted lane
 placement. Strided owns strided movement
 kernels.
@@ -116,7 +115,7 @@ contract (symtn)
   -> admit spaces and legs (symtn / symtn-core)
   -> contraction route (symtn-tensors)
   -> operand/output tree transforms (symtn-operations)
-  -> grouped block GEMM (symtn-dense -> tcontract, or cpueinsum for BLAS)
+  -> grouped block GEMM (symtn-dense -> tcontract)
 
 svd / qr / eigh / eig (symtn)
   -> admit leg roles and source

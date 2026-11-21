@@ -30,8 +30,8 @@ esac
 # emits no JSON; its `contract!` macro is re-exported by `symtn-network` and appears there.
 # Format: <crate> <file-suffix> <features ("-" for the default set)>.
 # The second row of a crate adds every additive feature that widens its public
-# surface (default features stay on); BLAS-provider selections and
-# `symtn/ledger-roots` (a dependency switch with no symtn item) are excluded.
+# surface (default features stay on); `symtn/ledger-roots` (a dependency
+# switch with no symtn item) is excluded.
 COMBOS=(
     "symtn-sectors default -"
     "symtn-sectors all cgc-gen,testing"

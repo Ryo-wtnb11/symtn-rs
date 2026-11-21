@@ -3400,14 +3400,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("TENFERRO_AUTHORITY").unwrap_or_else(|_| "unknown".into())
     );
     println!(
-        "# features=cpu-faer:{} blas-provider:{} cuda:{} engine_threads={threads}",
+        "# features=cpu-faer:{} cuda:{} engine_threads={threads}",
         cfg!(feature = "cpu-faer"),
-        cfg!(any(
-            feature = "cpu-blas",
-            feature = "blas-accelerate",
-            feature = "blas-openblas",
-            feature = "blas-mkl"
-        )),
         cfg!(feature = "cuda"),
     );
     println!("# degeneracy={degeneracy}");

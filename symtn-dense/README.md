@@ -5,6 +5,5 @@ Expert dense-backend boundary. Symmetric layers use `DenseExecutor`,
 without depending on a concrete kernel provider. Ordinary applications choose
 their backend through `symtn::typed::RuntimeBuilder` instead.
 
-`tenferro` supplies the default CPU executor; `cuda` exports CUDA context,
-storage, and kernels. CPU BLAS selection is supplied by the relevant tenferro
-feature.
+`tenferro` supplies the default CPU executor (faer-backed); `cuda` exports
+CUDA context, storage, and kernels.
