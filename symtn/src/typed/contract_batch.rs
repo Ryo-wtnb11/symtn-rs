@@ -267,8 +267,8 @@ where
             (rhs.member_len, rhs.storage.len()),
         ] {
             if actual != self.total_len(len, lhs.members)? {
-                return Err(Error::InvalidArgument(
-                    "stacked payload length differs from its structure".into(),
+                return Err(internal_layout_error(
+                    "stacked payload length differs from its structure",
                 ));
             }
         }
@@ -292,8 +292,8 @@ where
             ));
         }
         if dst.storage.len() != self.total_len(self.member_len, members)? {
-            return Err(Error::InvalidArgument(
-                "destination payload length differs from its structure".into(),
+            return Err(internal_layout_error(
+                "destination payload length differs from its structure",
             ));
         }
         Ok(())

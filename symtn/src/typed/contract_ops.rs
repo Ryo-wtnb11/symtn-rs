@@ -459,8 +459,7 @@ where
     /// storage of its placement or aliases an operand (a lazy adjoint's
     /// parent included); then the contraction's own errors, as for
     /// [`Self::contract`]; `SpaceMismatch` for a destination of the wrong
-    /// space or layout; [`Error::InvalidArgument`] for one of the wrong
-    /// length; [`Error::DestinationShared`] when `destination` shares its
+    /// space or layout; [`Error::DestinationShared`] when `destination` shares its
     /// storage with a clone; on CUDA storage, [`Error::PlacementMismatch`]
     /// last. Runtime-context leasing counts as validation.
     /// Checked Generic reports these in [`GenericTensorError::Facade`] and
@@ -760,7 +759,7 @@ where
     /// its braiding refusal of a non-Bosonic checked Generic provider. Every
     /// check up to and including that braiding admission reads a borrowed
     /// adjoint view unresolved. Then the remaining errors of
-    /// [`Self::contract_into`] (`SpaceMismatch`, length,
+    /// [`Self::contract_into`] (`SpaceMismatch`,
     /// [`Error::DestinationShared`]), which run after the view is resolved.
     ///
     /// # Failure

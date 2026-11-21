@@ -18,12 +18,10 @@ use symtn_tensors::{
 use crate::error::Error;
 use crate::typed::ScalarOps;
 
-/// Converts an internal coupled-layout invariant violation into the stable
-/// crate error used by both the typed facade and the execution core.
-pub(crate) fn internal_layout_error(what: &str) -> Error {
-    Error::InvalidArgument(format!(
-        "internal coupled-layout invariant violated ({what}); please report this"
-    ))
+/// Reports a broken internal invariant (a symtn bug, not a misuse) as
+/// [`Error::Internal`].
+pub(crate) fn internal_layout_error(what: &'static str) -> Error {
+    Error::Internal(what)
 }
 
 /// Error from fallible checked-Generic tensor-product execution.

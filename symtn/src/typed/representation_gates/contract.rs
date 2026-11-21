@@ -14,8 +14,7 @@ fn coupled_region_inner_rejects_malformed_scalar_range() {
         |_| Ok::<_, Error>(1.0),
     )
     .unwrap_err();
-    assert!(matches!(error, Error::InvalidArgument(message) if
-        message.contains("internal coupled-layout invariant violated")));
+    assert!(matches!(error, Error::Internal(_)));
 }
 
 #[test]
@@ -29,8 +28,8 @@ fn coupled_region_inner_keeps_empty_and_non_fusion_boundaries() {
     let trivial = BlockStructure::trivial(&[2, 2]).unwrap();
     let error = coupled_region_inner(&trivial, 1, &[1.0; 4], &[1.0; 4], |_| Ok::<_, Error>(1.0))
         .unwrap_err();
-    assert!(matches!(error, Error::InvalidArgument(message) if
-        message.contains("non-packed coupled-sector layout")));
+    assert!(matches!(error, Error::Internal(what) if
+        what.contains("non-packed coupled-sector layout")));
 }
 
 #[test]

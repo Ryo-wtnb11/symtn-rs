@@ -1169,17 +1169,17 @@ fn compact_absorb_handles_strided_prefixes_and_interleaved_sectors() {
 
     let duplicate = [spectrum[1].clone(), spectrum[1].clone()];
     assert!(
-        matches!(absorb_compact_source(&destination, &mut values, &source, &duplicate), Err(Error::InvalidArgument(message)) if message.contains("duplicate spectrum sectors"))
+        matches!(absorb_compact_source(&destination, &mut values, &source, &duplicate), Err(Error::Internal(what)) if what.contains("duplicate spectrum sectors"))
     );
     assert!(
-        matches!(absorb_compact_source(&destination, &mut values, &source, &[]), Err(Error::InvalidArgument(message)) if message.contains("spectrum sector is absent"))
+        matches!(absorb_compact_source(&destination, &mut values, &source, &[]), Err(Error::Internal(what)) if what.contains("spectrum sector is absent"))
     );
     let wrong_shape = [symtn_matrixalgebra::SectorSpectrum {
         sector: SectorId::new(1),
         values: vec![7.0],
     }];
     assert!(
-        matches!(absorb_compact_source(&destination, &mut values, &source, &wrong_shape), Err(Error::InvalidArgument(message)) if message.contains("spectrum shape disagrees"))
+        matches!(absorb_compact_source(&destination, &mut values, &source, &wrong_shape), Err(Error::Internal(what)) if what.contains("spectrum shape disagrees"))
     );
 }
 

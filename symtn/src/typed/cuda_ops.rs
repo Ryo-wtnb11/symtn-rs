@@ -368,9 +368,14 @@ where
                     })?
                 };
                 if values.iter().any(|value| !value.is_finite()) {
-                    return Err(internal_layout_error(
-                        "CUDA EIGH returned a non-finite eigenvalue",
-                    ));
+                    return Err(
+                        OperationError::Dense(symtn_dense::DenseError::NumericalFailure {
+                            backend: symtn_dense::DenseBackend::Cuda,
+                            op: symtn_matrixalgebra::seam::EIGH_EIGENVALUE_CHECK,
+                            message: "eigenvalues must be finite".to_string(),
+                        })
+                        .into(),
+                    );
                 }
                 let mut order = vec![0; n];
                 let reorder = symtn_matrixalgebra::seam::ascending_eigh_order(&values, &mut order);

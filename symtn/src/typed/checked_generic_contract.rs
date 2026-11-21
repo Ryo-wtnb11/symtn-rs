@@ -520,8 +520,7 @@ where
     /// (checked Generic: provider and preflight errors), `SpaceMismatch` for
     /// a destination whose HomSpace is not the result's, the duality error of
     /// [`Self::trace_pairs`], and `SpaceMismatch` for a destination whose
-    /// layout is not the result's; then [`Error::InvalidArgument`] for the
-    /// wrong length and [`Error::DestinationShared`]; on CUDA storage,
+    /// layout is not the result's; then [`Error::DestinationShared`]; on CUDA storage,
     /// [`Error::PlacementMismatch`] last.
     ///
     /// # Failure

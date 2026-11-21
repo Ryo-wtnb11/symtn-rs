@@ -443,25 +443,35 @@ fn non_finite_entries_and_eigenvalues_reject_their_members() {
     let mut inputs = single_leg(&runtime, &leg, 5, |_, _, _| 1.0);
     inputs[0] = inputs[0].scale(engine, huge).unwrap();
     inputs[3] = inputs[3].scale(engine, huge).unwrap();
-    let eager: Vec<bool> = inputs
+    let eager: Vec<Option<bool>> = inputs
         .iter()
         .map(|input| {
-            input
-                .to_cuda(cuda)
-                .unwrap()
-                .eigh_full(
-                    cuda,
-                    &codomain_axes(input),
-                    &domain_axes(input),
-                    HermitianTol::DEFAULT,
-                )
-                .is_err()
+            match input.to_cuda(cuda).unwrap().eigh_full(
+                cuda,
+                &codomain_axes(input),
+                &domain_axes(input),
+                HermitianTol::DEFAULT,
+            ) {
+                Ok(_) => None,
+                Err(error) => Some(matches!(
+                    error,
+                    symtn::typed::Error::Operation(operation) if matches!(
+                        *operation,
+                        symtn::typed::OperationError::Dense(
+                            symtn_dense::DenseError::NumericalFailure {
+                                op: symtn_dense::EIGH_EIGENVALUE_CHECK,
+                                ..
+                            }
+                        )
+                    )
+                )),
+            }
         })
         .collect();
     assert_eq!(
         eager,
-        [true, false, false, true, false],
-        "eager rejects the overflow"
+        [Some(true), None, None, Some(true), None],
+        "eager reports the overflow as Host's numerical failure"
     );
     let stack = StackedTensorMap::pack(&inputs)
         .unwrap()

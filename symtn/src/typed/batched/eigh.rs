@@ -376,7 +376,7 @@ impl<R: SectorCodec, D, S> EighFullPlan<R, D, S> {
             .output
             .output
             .as_ref()
-            .ok_or_else(|| Error::InvalidArgument("eigh output is missing".into()))?;
+            .ok_or_else(|| internal_layout_error("eigh output is missing"))?;
         Ok(EighStackOutput {
             d,
             v,
