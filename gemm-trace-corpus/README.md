@@ -5,12 +5,14 @@ calculation, for tensor4all/cpueinsum-benchmark#18.
 
 ## Files
 
-The digest below is for the capture host (Apple M4 Max, arm64, 4 threads). The threaded SVD can truncate differently on other hardware, so regenerate the corpus and its digest on the host that runs the timing campaign instead of reusing this one.
+Each digest is for its capture host and engine width. The threaded SVD can truncate differently on other hardware, and the per-call grouping follows the engine width, so regenerate the corpus and its digest on the host that runs the timing campaign instead of reusing another host's file.
 
 | file | content | sha256 |
 |---|---|---|
 | `itebd-heff-b705d809-t4.jsonl.gz` | **main corpus**: iTEBD + H_eff on iTEBD-converged bonds | `3f48a98a7208dc6a3bf6482f567b4e64571333e50724b6f7a209d36336114ed9` |
 | `itebd-heff-c96fb0c9-t4-x86_64.jsonl.gz` | same workload on Intel Xeon Platinum 9242 (x86_64, 4 threads), lg node CPUcluster020 | `56c8830be1b823a202c6d9a1e24583858963eac1a99e71e313739a47edea7d1e` |
+| `itebd-heff-c853d94f-t16.jsonl.gz` | same workload, Apple M4 Max (arm64), **full width: 16 threads** | `96c0ff8cbf49e83709b023c47dc741e049d2702d9882e48e0b6fffd609bd8bba` |
+| `itebd-heff-c853d94f-t96-x86_64.jsonl.gz` | same workload, Intel Xeon Platinum 9242 (x86_64), **full width: 96 threads**, exclusive lg node CPUcluster010 | `57ef0a59821386ef74087a3aa65b6f977e5ae2aa7056484f6790b3644ccceceb` |
 | `summarize.py` | per-workload summary table below | - |
 
 ## Provenance
@@ -85,7 +87,7 @@ cd ../wt-gemm-trace
 cargo build --release -p symtn-network --features gemm-trace --example gemm_trace_capture
 ./target/release/examples/gemm_trace_capture itebd-heff-b705d809-t4.jsonl \
     b705d809973f3d73118f399d368c35af143078e0 a2825c6cdc16ad5bbc2bef9109edb8d3435de763 4
-gzip -9 itebd-heff-b705d809-t4.jsonl
+gzip -9n itebd-heff-b705d809-t4.jsonl   # -n: no name or time stamp, so a rerun gives the same .gz bytes
 python3 summarize.py itebd-heff-b705d809-t4.jsonl.gz
 ```
 
@@ -130,3 +132,21 @@ strongly rectangular: H_eff n reaches 4.1e5 against m, k <= 1348.
 ## Cross-host comparison (arm64 vs x86_64)
 
 Bond dimensions and the per-job multiset of (m, n, k, lda, ldb, ldc) are identical on both hosts in every (model, chi, scalar, step) group, and total work matches. 47 of 54 groups are identical call by call. The other 7 are all SU(2) chi = 256 (heff.L_theta, heff.W1, heff.W2 in f64 and c64, and itebd.theta): arm64 issues single-job calls, while x86_64 groups 3-4 jobs into one call (for example runs [1,1,2]), so call counts differ (L_theta 15 vs 7, W1 23 vs 7, W2 25 vs 7, itebd.theta 40 vs 20). The likely cause is symtn's lane placement (`symtn-dense/src/lanes/placement.rs`, `allocate`), which groups jobs according to the host's modeled widths; this has not been confirmed. Each capture is repeatable on its host: an x86_64 rerun was byte-identical. Jobs therefore compare across hosts, but per-call grouping does not, so capture on every host that runs the campaign.
+
+## Full-width captures and reproduction (2026-11-22)
+
+The two full-width files were captured from branch commit `c853d94f5c53d301f0839ca44e8ece95fa1d838f` (capture code identical to `b705d809`; the commits since add only corpus files and this README), same base, `cpu-faer`, rustc 1.100.0, release build, with `gzip -9n`. The last argument of the capture command is the engine width: 16 on the M4 Max (12 P + 4 E cores), 96 on the Xeon node (2 sockets x 48 cores, no SMT, 4 NUMA nodes, governor `performance`, no foreign process above 20% CPU).
+
+| file | engine width | records | calls | distinct-record jobs | jobs by multiplicity | single-job calls |
+|---|---|---|---|---|---|---|
+| `itebd-heff-b705d809-t4.jsonl.gz` | 4 | 231 (133 F64, 98 C64) | 404 | 524 | 824 | 270 |
+| `itebd-heff-c853d94f-t16.jsonl.gz` | 16 | 218 (126 F64, 92 C64) | 376 | 524 | 824 | 278 |
+| `itebd-heff-c96fb0c9-t4-x86_64.jsonl.gz` | 4 | 176 (103 F64, 73 C64) | 300 | 524 | 824 | 128 |
+| `itebd-heff-c853d94f-t96-x86_64.jsonl.gz` | 96 | 225 (133 F64, 92 C64) | 404 | 524 | 824 | 310 |
+
+- **Repeatable.** Each full-width capture was taken twice on its host; both runs gave byte-identical `.gz` files.
+- **4-thread files reproduced.** A 4-thread rerun on each host, from `c853d94f`, gave call records (every line after the provenance line) identical to the committed 4-thread file: on the M4 Max, and on the x86_64 side on an exclusive node (CPUcluster010, `place=excl`) instead of the shared CPUcluster020 the committed file came from. The committed 4-thread files therefore stand unchanged.
+- **Same jobs, different grouping.** The per-job (m, n, k, lda, ldb, ldc) multiset per (model, chi, scalar, step) group is identical in all four files. What changes with the width is how the jobs are grouped into calls:
+  - arm64, 4 vs 16 threads: 47 of 54 groups are identical call by call. The 7 others are SU(2) chi = 935: `heff.W1` and `heff.W2` go from 9 calls to 3 (f64 and c64), `itebd.theta` from 20 to 16, and `heff.L_theta` keeps 6 calls with different job lists.
+  - x86_64, 4 vs 96 threads: 40 of 54 groups are identical. SU(2) chi = 256 goes back to the arm64 grouping (`heff.L_theta` 7 to 15 calls, `heff.W1` 7 to 23, `heff.W2` 7 to 25, `itebd.theta` 20 to 40), and SU(2) chi = 935 changes as on arm64, except that `itebd.theta` goes from 20 to 44 calls.
+- **Use.** Following the decision on cpueinsum-benchmark#18, the campaign replays the 4-thread capture at widths 1, 4 and 8 and the full-width capture at full width, each on its own host. A row's export metadata names the capture it replayed.
