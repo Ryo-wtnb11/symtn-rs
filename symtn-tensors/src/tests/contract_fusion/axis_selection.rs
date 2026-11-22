@@ -504,7 +504,7 @@ fn reverse_winner_is_independent_of_first_cached_consumer() {
         Arc::clone(&provider),
     )
     .unwrap();
-    let unsupported = OperationError::UnsupportedTensorContractScope {
+    let unsupported = OperationError::Internal {
         message: "storage-direct contraction supports only canonical fully-direct oriented \
                   operands",
     };

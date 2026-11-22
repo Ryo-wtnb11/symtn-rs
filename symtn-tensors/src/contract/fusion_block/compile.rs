@@ -46,7 +46,7 @@ where
             alpha_by_coupled
                 .binary_search_by_key(&coupled, |&(sector, _)| sector)
                 .map(|index| alpha_by_coupled[index].1)
-                .map_err(|_| OperationError::UnsupportedTensorContractScope {
+                .map_err(|_| OperationError::Internal {
                     message:
                         "canonical storage plan is missing a verified coupled-sector coefficient",
                 })
@@ -284,7 +284,7 @@ where
         alpha: D,
     ) -> Result<(), OperationError> {
         if lhs_op != MatrixOp::Identity || rhs_op != MatrixOp::Identity {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "host storage GEMM does not implement transformed operands",
             });
         }

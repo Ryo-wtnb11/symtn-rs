@@ -80,7 +80,7 @@ fn tensorcontract_fusion_block_specs_rejects_source_tree_transform_terms() {
 
     assert_eq!(
             err,
-            OperationError::UnsupportedTensorContractScope {
+            OperationError::Internal {
                 message: "fusion contraction requiring source tree-pair transforms is not implemented; pre-transform operands explicitly",
             }
         );
@@ -474,7 +474,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
     .unwrap_err();
     assert_eq!(
             err,
-            OperationError::UnsupportedTensorContractScope {
+            OperationError::Internal {
                 message: "fusion contraction requiring source tree-pair transforms is not implemented; pre-transform operands explicitly",
             }
         );

@@ -206,7 +206,7 @@ impl<D: CudaScalar> StorageGemm<D, CudaStorage<D>, CudaStorage<D>, CudaStorage<D
         alpha: D,
     ) -> Result<(), OperationError> {
         if !(cuda_operand_is_supported(lhs_op) && cuda_operand_is_supported(rhs_op)) {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "CUDA storage GEMM supports only identity and adjoint operands",
             });
         }
@@ -246,7 +246,7 @@ impl<D: CudaScalar> StorageGemm<D, CudaStorage<D>, CudaStorage<D>, CudaStorage<D
         beta: D,
     ) -> Result<(), OperationError> {
         if !(cuda_operand_is_supported(lhs_op) && cuda_operand_is_supported(rhs_op)) {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "CUDA storage GEMM supports only identity and adjoint operands",
             });
         }
@@ -343,7 +343,7 @@ impl<D: CudaScalar>
         alpha: D,
     ) -> Result<(), OperationError> {
         if lhs_op != MatrixOp::Identity || rhs_op != MatrixOp::Identity {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "stacked CUDA GEMM requires identity operand orientations",
             });
         }

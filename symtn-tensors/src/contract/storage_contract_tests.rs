@@ -1744,7 +1744,7 @@ fn a_canonical_nonuniform_twist_leaves_the_device_core_route_for_dynamic_tree() 
     assert!(
         matches!(
             error,
-            crate::OperationError::UnsupportedTensorContractScope { message }
+            crate::OperationError::Internal { message }
                 if message.contains("canonical fully-direct")
         ),
         "{error:?}"

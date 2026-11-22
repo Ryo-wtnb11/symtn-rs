@@ -31,7 +31,7 @@ where
         output_space.space().structure(),
         output_space.space().nout(),
     )?
-    .ok_or(OperationError::UnsupportedTensorContractScope {
+    .ok_or(OperationError::Internal {
         message: "inverse derived output requires canonical coupled-sector storage",
     })?;
     let output_len = output_space.space().required_len()?;
@@ -289,7 +289,7 @@ where
         output_space.space().structure(),
         output_space.space().nout(),
     )?
-    .ok_or(OperationError::UnsupportedTensorContractScope {
+    .ok_or(OperationError::Internal {
         message: "pinv requires coupled-sector output storage",
     })?;
     let output_len = output_space.space().required_len()?;
@@ -468,7 +468,7 @@ where
     }
 
     let divisor_regions = checked_sector_regions(divisor_space.structure(), divisor_space.nout())?
-        .ok_or(OperationError::UnsupportedTensorContractScope {
+        .ok_or(OperationError::Internal {
             message: "solve requires canonical coupled-sector divisor storage",
         })?;
     for region in divisor_regions.iter() {
@@ -480,7 +480,7 @@ where
         }
     }
     let rhs_regions = checked_sector_regions(rhs_space.structure(), rhs_space.nout())?.ok_or(
-        OperationError::UnsupportedTensorContractScope {
+        OperationError::Internal {
             message: "solve requires canonical coupled-sector right-hand-side storage",
         },
     )?;
@@ -488,7 +488,7 @@ where
         output_space.space().structure(),
         output_space.space().nout(),
     )?
-    .ok_or(OperationError::UnsupportedTensorContractScope {
+    .ok_or(OperationError::Internal {
         message: "solve derived output requires canonical coupled-sector storage",
     })?;
     let output_len = output_space.space().required_len()?;
@@ -744,7 +744,7 @@ fn square_sector_routes<'a, R, D: FactorScalar>(
         output_space.space().structure(),
         output_space.space().nout(),
     )?
-    .ok_or(OperationError::UnsupportedTensorContractScope {
+    .ok_or(OperationError::Internal {
         message: "matrix function output requires canonical coupled-sector storage",
     })?;
     let output_len = output_space.space().required_len()?;

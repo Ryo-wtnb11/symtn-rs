@@ -492,8 +492,7 @@ where
 /// # Supported scope
 ///
 /// Identity orientation only: an adjoint operand must be materialized before
-/// it is packed. A composition whose plan is not the canonical fully-direct
-/// one is rejected by [`Self::new`] with `UnsupportedTensorContractScope`.
+/// it is packed.
 ///
 /// [`Self::workspace`] creates the B-dependent state. On CUDA each workspace
 /// also keeps the zero and `1` templates of its fills, bound to the engine
@@ -551,7 +550,6 @@ where
     /// operands of different Runtimes or placements;
     /// [`Error::InvalidArgument`] for stacks of different member counts; the
     /// eager composition's structural errors for spaces that do not compose;
-    /// `UnsupportedTensorContractScope` for a plan that is not fully direct;
     /// and [`Error::UnsupportedOnDevice`] on CUDA stacks whose transforms need
     /// a recoupling or zero-coefficient move, which the Host plan replays.
     pub fn new(
@@ -1349,7 +1347,7 @@ mod fermionic_unit_tests {
                         &StackedStorageView::new::<f64>(&rhs, rhs_len, members, rhs_len).unwrap(),
                         true,
                     ),
-                    Err(OperationError::UnsupportedTensorContractScope { .. })
+                    Err(OperationError::Internal { .. })
                 ));
                 assert!(dst.iter().all(|value| value.is_nan()));
                 assert_eq!(count.calls, 0);

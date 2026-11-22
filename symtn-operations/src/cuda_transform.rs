@@ -150,7 +150,7 @@ fn unsigned_zero_layout(
     block: &FusionStridedBlockLayout,
 ) -> Result<(impl Iterator<Item = usize> + '_, usize), OperationError> {
     if block.offset < 0 || block.strides.iter().any(|&stride| stride < 0) {
-        return Err(OperationError::UnsupportedTensorContractScope {
+        return Err(OperationError::Internal {
             message: "device contraction cannot zero a negatively strided destination block",
         });
     }
@@ -1593,15 +1593,15 @@ mod zero_region_tests {
         for layouts in [vec![layout(&[2], &[-1], 4)], vec![layout(&[2], &[1], -1)]] {
             assert!(matches!(
                 CudaMemberZeroRegions::prepare(&layouts, 8, 2),
-                Err(OperationError::UnsupportedTensorContractScope { .. })
+                Err(OperationError::Internal { .. })
             ));
             assert!(matches!(
                 CudaMemberZeroRegions::fill_single(&mut Vec::new(), &layouts),
-                Err(OperationError::UnsupportedTensorContractScope { .. })
+                Err(OperationError::Internal { .. })
             ));
             assert!(matches!(
                 CudaMemberZeroRegions::admit(&layouts),
-                Err(OperationError::UnsupportedTensorContractScope { message })
+                Err(OperationError::Internal { message })
                     if message == "device contraction cannot zero a negatively strided destination block"
             ));
         }

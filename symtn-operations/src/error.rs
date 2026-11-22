@@ -87,6 +87,11 @@ pub enum OperationError {
         expected: usize,
         actual: usize,
     },
+    /// An operand, destination or provider authority does not match the
+    /// structure its plan was compiled for: the precondition every lower
+    /// plan and executor entry checks. The facade derives every operand from
+    /// validated spaces and checks destinations first, so no facade input
+    /// reaches it; the facade reports it as its internal-invariant error.
     StructureMismatch {
         tensor: &'static str,
     },
@@ -120,7 +125,14 @@ pub enum OperationError {
         operation: Box<TreeTransformOperation>,
         message: &'static str,
     },
-    UnsupportedTensorContractScope {
+    /// A broken internal invariant (TensorKit's `@assert`): an invariant the
+    /// facade and its admitted execution paths establish before calling this
+    /// layer, so through the facade it is a bug in symtn, and no input change
+    /// avoids it. A direct call to a lower-layer entry that bypasses those
+    /// invariants (for example an operand outside the entry's documented
+    /// preconditions) can receive it. The message names the invariant. The
+    /// facade reports it as its own internal-invariant error.
+    Internal {
         message: &'static str,
     },
     /// A contraction, planar contraction or trace refused by the rule's
@@ -274,8 +286,8 @@ impl fmt::Display for OperationError {
                     "unsupported tree transform scope for operation {operation:?}: {message}"
                 )
             }
-            Self::UnsupportedTensorContractScope { message } => {
-                write!(f, "unsupported tensor contraction scope: {message}")
+            Self::Internal { message } => {
+                write!(f, "internal invariant violated: {message}")
             }
             Self::UnsupportedContractionBraiding { operation, style } => {
                 let reason = match (operation, style.is_symmetric()) {

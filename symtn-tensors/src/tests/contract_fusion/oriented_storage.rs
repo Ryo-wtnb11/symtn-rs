@@ -103,7 +103,7 @@ fn fermionic_storage_contract_rejects_nonuniform_twist_before_gemm() {
     .unwrap_err();
     assert!(matches!(
         error,
-        OperationError::UnsupportedTensorContractScope {
+        OperationError::Internal {
             message: "storage-direct contraction supports only canonical fully-direct oriented \
                       operands"
         }

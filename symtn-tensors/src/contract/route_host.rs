@@ -167,7 +167,7 @@ type StageDestination<'d, S, D, C> = RouteDestination<
     C,
 >;
 
-const EAGER_IS_ONE_MEMBER: OperationError = OperationError::UnsupportedTensorContractScope {
+const EAGER_IS_ONE_MEMBER: OperationError = OperationError::Internal {
     message: "eager Host contraction replays exactly one member",
 };
 
@@ -747,15 +747,13 @@ where
             ContractDestinationInit::Axpby(beta) => beta.is_zero(),
         };
         if alpha != D::one() || !overwrite {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "member contraction overwrites its destination with unit alpha",
             });
         }
-        let slot = core
-            .as_deref_mut()
-            .ok_or(OperationError::UnsupportedTensorContractScope {
-                message: "member contraction needs a caller-owned core slot",
-            })?;
+        let slot = core.as_deref_mut().ok_or(OperationError::Internal {
+            message: "member contraction needs a caller-owned core slot",
+        })?;
         let dst_len = member_len::<D>(dst_structure, members)?;
         for (source, core, data) in [
             (&route.lhs_source, lhs_core, lhs_data),

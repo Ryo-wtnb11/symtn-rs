@@ -932,7 +932,7 @@ fn tensorcontract_structure_rejects_multiblock_until_block_sparse_enumeration_ex
 
     assert_eq!(
         err,
-        OperationError::UnsupportedTensorContractScope {
+        OperationError::Internal {
             message: "block-sparse contraction enumeration is not implemented yet",
         }
     );
