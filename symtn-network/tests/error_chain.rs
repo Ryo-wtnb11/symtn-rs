@@ -33,6 +33,7 @@ fn symmetric_slice_errors_print_the_tensor_cause_once() {
             &[
                 "symmetric slice execution failed",
                 "tensor operation failed",
+                "invalid tensor structure",
                 ROOT,
             ],
         ),
@@ -42,6 +43,7 @@ fn symmetric_slice_errors_print_the_tensor_cause_once() {
                 "symmetric slice binding failed",
                 "typed network lowering failed",
                 "tensor operation failed",
+                "invalid tensor structure",
                 ROOT,
             ],
         ),
