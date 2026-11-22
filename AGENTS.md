@@ -38,7 +38,14 @@ Reviewers treat a stale document as a finding.
 
 Pin performance evidence to a revision, provider, build, thread count,
 workload, and raw result; report regressions and inconclusive measurements
-too.
+too. On a multi-node host, also record the NUMA conditions: the pool's pin
+strategy, any `numactl` policy, and `numa_balancing`.
+
+A buffer that lane or team workers compute into is first written by the
+workers that compute it, not allocated and filled by the caller thread before
+the parallel section: Linux homes a page on the node that touches it first.
+Do not set a process-wide memory policy from library code; the pool's creator
+chooses placement.
 
 ## Tests
 
