@@ -557,14 +557,10 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
                             "tensors have different dense payload lengths",
                         ));
                     }
-                    for (value, &source) in destination_data.iter_mut().zip(source) {
-                        *value = scale_value(*value, beta) + scale_value(source, alpha);
-                    }
+                    symtn_operations::axpby_slice(destination_data, source, alpha, beta);
                 }
                 TypedData::Diagonal(spectrum) => {
-                    for value in destination_data.iter_mut() {
-                        *value = scale_value(*value, beta);
-                    }
+                    symtn_operations::scale_slice(destination_data, beta);
                     add_spectrum_into(
                         x.logical_space().space(),
                         destination_data,
@@ -661,25 +657,11 @@ where
         let data = body
             .and_then(|body| Arc::get_mut(&mut body.data))
             .ok_or(Error::DestinationShared)?;
-        if factor.is_zero() {
-            let zero = D::zero() * factor;
-            match data {
-                TypedData::Dense(data) => data.fill(zero),
-                TypedData::Diagonal(spectrum) => {
-                    spectrum
-                        .iter_mut()
-                        .for_each(|entry| entry.values.fill(zero));
-                }
-            }
-        } else {
-            let scale = |value: &mut D| *value = factor * *value;
-            match data {
-                TypedData::Dense(data) => data.iter_mut().for_each(scale),
-                TypedData::Diagonal(spectrum) => spectrum
-                    .iter_mut()
-                    .flat_map(|entry| entry.values.iter_mut())
-                    .for_each(scale),
-            }
+        match data {
+            TypedData::Dense(data) => symtn_operations::scale_slice(data, factor),
+            TypedData::Diagonal(spectrum) => spectrum
+                .iter_mut()
+                .for_each(|entry| symtn_operations::scale_slice(&mut entry.values, factor)),
         }
         Ok(())
     }

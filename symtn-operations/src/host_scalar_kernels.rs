@@ -886,9 +886,7 @@ where
         let dst = dst_data
             .get_mut(dst_start..dst_end)
             .ok_or_else(|| OperationError::OffsetOverflow { value: dst_end })?;
-        for dst_value in dst.iter_mut() {
-            *dst_value = scale_value(*dst_value, beta);
-        }
+        crate::scalar::scale_slice(dst, beta);
         return Ok(());
     }
 

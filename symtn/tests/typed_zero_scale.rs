@@ -136,21 +136,27 @@ macro_rules! check_dense {
                 .map(|v| (nan_folded_bits(v.parts().0), nan_folded_bits(v.parts().1)))
                 .collect()
         };
-        let (a, b) = (real::<$d>(2.0), real::<$d>(-1.5));
-        let base: Vec<$d> = x
-            .dense_data()
-            .unwrap()
-            .iter()
-            .zip(y.dense_data().unwrap())
-            .map(|(&u, &v)| u * a + v * b)
-            .collect();
-        assert_eq!(
-            bits(x.axpby($engine, a, &y, b).unwrap().dense_data().unwrap()),
-            bits(&base)
-        );
-        let mut assigned = x.materialize($engine).unwrap();
-        y.axpby_into($engine, &mut assigned, b, a).unwrap();
-        assert_eq!(bits(assigned.dense_data().unwrap()), bits(&base));
+        // A destination factor of exactly one still multiplies, as TensorKit's
+        // numeric `β = 1` (BLAS `axpby`) does: `(1+0i) * (inf+1i)` has a NaN
+        // real part.
+        for a in [2.0, 1.0] {
+            let (a, b) = (real::<$d>(a), real::<$d>(-1.5));
+            let base: Vec<$d> = x
+                .dense_data()
+                .unwrap()
+                .iter()
+                .zip(y.dense_data().unwrap())
+                .map(|(&u, &v)| u * a + v * b)
+                .collect();
+            assert_eq!(
+                bits(x.axpby($engine, a, &y, b).unwrap().dense_data().unwrap()),
+                bits(&base)
+            );
+            let mut assigned = x.materialize($engine).unwrap();
+            y.axpby_into($engine, &mut assigned, b, a).unwrap();
+            assert_eq!(bits(assigned.dense_data().unwrap()), bits(&base));
+        }
+        let a = real::<$d>(2.0);
         let base: Vec<$d> = x.dense_data().unwrap().iter().map(|&u| u * a).collect();
         assert_eq!(
             bits(x.scale($engine, a).unwrap().dense_data().unwrap()),
