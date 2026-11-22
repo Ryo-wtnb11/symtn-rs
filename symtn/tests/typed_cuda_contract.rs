@@ -569,12 +569,12 @@ fn overwrite_rejections_match_the_host_in_order_and_leave_the_destination_untouc
         "{:?}",
         errors[0]
     );
-    assert!(
-        errors[1].to_string().contains("shares its storage"),
-        "{}",
-        errors[1]
-    );
-    assert!(errors[2].to_string().contains("alias"), "{}", errors[2]);
+    for error in &errors[1..] {
+        assert!(
+            matches!(error, symtn::typed::Error::DestinationShared),
+            "{error:?}"
+        );
+    }
     drop(shared);
     assert_eq!(counters, CudaTransferStats::default(), "{counters:?}");
     assert_eq!(
