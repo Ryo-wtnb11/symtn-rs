@@ -125,10 +125,13 @@ pub enum OperationError {
         operation: Box<TreeTransformOperation>,
         message: &'static str,
     },
-    /// A broken internal invariant of symtn (TensorKit's `@assert`): a bug
-    /// in this library, not a misuse or a capability boundary, so no input
-    /// change avoids it. The message names the invariant. The facade reports
-    /// it as its own internal-invariant error.
+    /// A broken internal invariant (TensorKit's `@assert`): an invariant the
+    /// facade and its admitted execution paths establish before calling this
+    /// layer, so through the facade it is a bug in symtn, and no input change
+    /// avoids it. A direct call to a lower-layer entry that bypasses those
+    /// invariants (for example an operand outside the entry's documented
+    /// preconditions) can receive it. The message names the invariant. The
+    /// facade reports it as its own internal-invariant error.
     Internal {
         message: &'static str,
     },

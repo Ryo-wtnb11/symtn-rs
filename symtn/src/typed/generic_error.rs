@@ -113,3 +113,44 @@ impl<E> From<CheckedGenericTensorProductError<E>> for GenericTensorError<E> {
         Self::TensorProduct(error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use symtn_core::BraidingStyleKind;
+    use symtn_tensors::{BraidingOp, CheckedGenericPlanError, OperationError};
+
+    use super::{Error, GenericTensorError};
+
+    fn route(operation: OperationError) -> GenericTensorError<()> {
+        CheckedGenericPlanError::Operation(operation).into()
+    }
+
+    #[test]
+    fn checked_plan_errors_reported_at_the_facade_leave_plan() {
+        for internal in [
+            OperationError::Internal {
+                message: "invariant",
+            },
+            OperationError::StructureMismatch { tensor: "dst" },
+        ] {
+            assert!(matches!(
+                route(internal),
+                GenericTensorError::Facade(Error::Internal(_))
+            ));
+        }
+        assert!(matches!(
+            route(OperationError::UnsupportedContractionBraiding {
+                operation: BraidingOp::Contraction,
+                style: BraidingStyleKind::Fermionic,
+            }),
+            GenericTensorError::Facade(Error::Operation(operation))
+                if matches!(*operation, OperationError::UnsupportedContractionBraiding { .. })
+        ));
+        assert!(matches!(
+            route(OperationError::ElementCountOverflow),
+            GenericTensorError::Plan(CheckedGenericPlanError::Operation(
+                OperationError::ElementCountOverflow
+            ))
+        ));
+    }
+}
