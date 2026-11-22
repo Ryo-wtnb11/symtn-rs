@@ -293,58 +293,6 @@ where
     }
 }
 
-/// `dst[i] = scale_value(dst[i], beta) + scale_value(src[i], alpha)`, bit for
-/// bit, with the coefficient tests made once per call rather than per
-/// element. A zero `beta` never reads `dst` (a NaN there is discarded) and a
-/// zero `alpha` never reads `src`.
-///
-/// Why the exact-one arm multiplies by the constant `T::one()` instead of
-/// skipping the multiply: a complex `(1+0i) * (a+bi)` is `a - 0b`, which is
-/// NaN for an infinite `b`, and that is what a numeric `β = 1` gives in
-/// TensorKit (BLAS `axpby`). A constant one only lets the compiler drop the
-/// multiplies that are exact. A `beta` of `1 - 0i` compares equal to one and
-/// takes this arm, so only the sign of a zero output component can differ.
-#[doc(hidden)]
-#[inline]
-pub fn axpby_slice<T>(dst: &mut [T], src: &[T], alpha: T, beta: T)
-where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + One + PartialEq,
-{
-    fn each<T: Copy>(dst: &mut [T], src: &[T], f: impl Fn(T, T) -> T) {
-        for (value, &source) in dst.iter_mut().zip(src) {
-            *value = f(*value, source);
-        }
-    }
-    debug_assert_eq!(dst.len(), src.len());
-    let (zero_alpha, zero_beta, one) = (T::zero() * alpha, T::zero() * beta, T::one());
-    match (alpha.is_zero(), beta.is_zero()) {
-        (true, true) => dst.fill(zero_beta + zero_alpha),
-        (true, false) => dst
-            .iter_mut()
-            .for_each(|value| *value = beta * *value + zero_alpha),
-        (false, true) => each(dst, src, |_, source| zero_beta + alpha * source),
-        (false, false) if beta == one => {
-            each(dst, src, |value, source| one * value + alpha * source)
-        }
-        (false, false) => each(dst, src, |value, source| beta * value + alpha * source),
-    }
-}
-
-/// `dst[i] = scale_value(dst[i], factor)`, bit for bit, with the factor
-/// tested once per call: a zero factor overwrites without reading `dst`.
-#[doc(hidden)]
-#[inline]
-pub fn scale_slice<T>(dst: &mut [T], factor: T)
-where
-    T: Copy + Mul<T, Output = T> + Zero,
-{
-    if factor.is_zero() {
-        dst.fill(T::zero() * factor);
-    } else {
-        dst.iter_mut().for_each(|value| *value = factor * *value);
-    }
-}
-
 /// `ZeroBytes`: a dense block's zero is the all-zero byte pattern, so Host
 /// scratch of any payload dtype is zeroed by the allocator, not by a loop.
 #[doc(hidden)]

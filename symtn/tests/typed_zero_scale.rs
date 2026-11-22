@@ -138,7 +138,7 @@ macro_rules! check_dense {
         };
         // A destination factor of exactly one still multiplies, as TensorKit's
         // numeric `β = 1` (BLAS `axpby`) does: `(1+0i) * (inf+1i)` has a NaN
-        // real part.
+        // imaginary part.
         for a in [2.0, 1.0] {
             let (a, b) = (real::<$d>(a), real::<$d>(-1.5));
             let base: Vec<$d> = x
@@ -220,6 +220,52 @@ fn typed_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
     check_dense!(engine, "SU(2) c64", su2(), Complex64);
     check_dense!(engine, "fZ2 f64", fz2(), f64);
     check_dense!(engine, "fZ2 c64", fz2(), Complex64);
+}
+
+/// A destination factor equal to one but carrying `-0i` multiplies as given,
+/// as OpenBLAS `zaxpby` does: `(1-0i)(0-0i) + (1+0i)(-0-0i)` is `0-0i`,
+/// which the constant `1+0i` would turn into `0+0i`.
+#[test]
+fn unit_destination_factor_keeps_the_sign_of_its_zero_imaginary_part() {
+    macro_rules! check {
+        ($c:ty, $r:ty) => {{
+            let engine = &mut symtn::typed::CpuEngine::serial();
+            let runtime = Runtime::builder().build().unwrap();
+            let leg = u1();
+            let source = TensorMap::<_, $c>::from_subblock_fn(
+                engine,
+                &runtime,
+                [&leg, &leg],
+                [&leg],
+                |_, _| <$c>::new(-0.0, -0.0),
+            )
+            .unwrap();
+            let mut destination = TensorMap::<_, $c>::from_subblock_fn(
+                engine,
+                &runtime,
+                [&leg, &leg],
+                [&leg],
+                |_, _| <$c>::new(0.0, -0.0),
+            )
+            .unwrap();
+            source
+                .axpby_into(
+                    engine,
+                    &mut destination,
+                    <$c>::new(1.0, 0.0),
+                    <$c>::new(1.0, -0.0),
+                )
+                .unwrap();
+            let data = destination.dense_data().unwrap();
+            assert!(!data.is_empty());
+            assert!(data
+                .iter()
+                .all(|value| value.re.to_bits() == (0.0 as $r).to_bits()
+                    && value.im.to_bits() == (-0.0 as $r).to_bits()));
+        }};
+    }
+    check!(num_complex::Complex32, f32);
+    check!(Complex64, f64);
 }
 
 #[test]

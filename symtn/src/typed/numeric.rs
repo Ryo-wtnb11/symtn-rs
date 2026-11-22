@@ -1,6 +1,10 @@
 use super::*;
 
 impl ScalarOps for f64 {
+    fn is_exact_one(self) -> bool {
+        self.to_bits() == 1.0_f64.to_bits()
+    }
+
     const CONJUGATION_IS_IDENTITY: bool = true;
 
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
@@ -155,6 +159,10 @@ pub(super) fn julia_complex32_reciprocal_wide(c: f64, d: f64) -> (f64, f64) {
 }
 
 impl ScalarOps for num_complex::Complex64 {
+    fn is_exact_one(self) -> bool {
+        self.re.to_bits() == 1.0_f64.to_bits() && self.im.to_bits() == 0.0_f64.to_bits()
+    }
+
     const CONJUGATION_IS_IDENTITY: bool = false;
 
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
@@ -185,6 +193,10 @@ impl ScalarOps for num_complex::Complex64 {
 }
 
 impl ScalarOps for f32 {
+    fn is_exact_one(self) -> bool {
+        self.to_bits() == 1.0_f32.to_bits()
+    }
+
     const CONJUGATION_IS_IDENTITY: bool = true;
 
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
@@ -211,6 +223,10 @@ impl ScalarOps for f32 {
 }
 
 impl ScalarOps for num_complex::Complex32 {
+    fn is_exact_one(self) -> bool {
+        self.re.to_bits() == 1.0_f32.to_bits() && self.im.to_bits() == 0.0_f32.to_bits()
+    }
+
     const CONJUGATION_IS_IDENTITY: bool = false;
 
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(

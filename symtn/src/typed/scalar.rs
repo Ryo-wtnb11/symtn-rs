@@ -488,6 +488,10 @@ pub(crate) trait ScalarOps:
     fn abs_value(self) -> f64;
     fn exp_value(self) -> Self;
     fn recip_value(self) -> Self;
+    /// Whether `self` has exactly the bits of `Self::one()`: `1 - 0i` does
+    /// not, though it compares equal, so multiplying by the constant one in
+    /// its place would change the sign of a zero result component.
+    fn is_exact_one(self) -> bool;
 }
 
 impl<R, D> TensorMap<R, D>

@@ -93,7 +93,7 @@ pub use placement::ReportsPlacement;
 pub use probe::{take_checked_block_passes, take_owned_block_prefills, CheckedBlockPasses};
 pub use replay_backend::*;
 pub use scalar::{
-    axpby_slice, scale_slice, scale_value, ConjugateValue, DenseBlockScalar, DenseRecouplingScalar,
+    scale_value, ConjugateValue, DenseBlockScalar, DenseRecouplingScalar,
     RealStructuralCoefficient, RecouplingCoefficientAction, TransformScale, TreeTransformScalar,
     WideScalar,
 };
