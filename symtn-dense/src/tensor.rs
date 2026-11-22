@@ -237,7 +237,6 @@ impl DenseTensor {
     }
 
     #[cfg(feature = "tenferro")]
-    #[cfg(not(feature = "provider-inject"))]
     pub(crate) fn from_tenferro(tensor: tenferro_tensor::Tensor) -> Result<Self, DenseError> {
         Ok(Self {
             backend: DenseBackend::Tenferro,

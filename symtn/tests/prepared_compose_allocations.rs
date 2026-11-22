@@ -223,16 +223,6 @@ fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
 /// Purpose: a warm Host compose allocates nothing at any member count and
 /// its workspace retains no more than its high-water footprint.
 #[test]
-#[cfg_attr(
-    any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ),
-    ignore = "the warm-zero contract is the native grouped GEMM kernel's; a BLAS provider allocates its own per-call scratch"
-)]
 fn warm_host_compose_plan_allocates_nothing_and_retains_its_footprint() {
     let _serial = crate::counting_alloc::serial();
     record::<_, f64>("U1", u1_legs());

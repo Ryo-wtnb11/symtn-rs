@@ -1,61 +1,5 @@
 use super::*;
 
-#[cfg(feature = "provider-inject")]
-#[test]
-fn provider_inject_rejects_linalg_before_backend_work() {
-    let mut executor = DefaultDenseExecutor::new();
-    let data = [1.0, 0.0, 0.0, 1.0];
-    let error = executor
-        .svd(
-            &mut crate::CpuEngine::serial(),
-            DenseRead::F64(DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap()),
-        )
-        .unwrap_err();
-    let DenseError::Unsupported { op, message } = error else {
-        panic!("provider-inject SVD must be unsupported")
-    };
-    assert_eq!(op, "svd");
-    assert_eq!(
-        message,
-        "provider-inject does not route factorizations or solves; they are unsupported in this configuration"
-    );
-}
-#[cfg(feature = "provider-inject")]
-#[test]
-fn provider_inject_rejects_values_only_before_backend_work() {
-    let mut executor = DefaultDenseExecutor::new();
-    let data = [1.0, 0.0, 0.0, 1.0];
-
-    let error = executor
-        .svd_vals(
-            &mut crate::CpuEngine::serial(),
-            DenseRead::F64(DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap()),
-        )
-        .unwrap_err();
-    let DenseError::Unsupported { op, message } = error else {
-        panic!("provider-inject SVD values must be unsupported")
-    };
-    assert_eq!(op, "svd_vals");
-    assert_eq!(
-        message,
-        "provider-inject does not route factorizations or solves; they are unsupported in this configuration"
-    );
-
-    let error = executor
-        .eigh_vals(
-            &mut crate::CpuEngine::serial(),
-            DenseRead::F64(DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap()),
-        )
-        .unwrap_err();
-    let DenseError::Unsupported { op, message } = error else {
-        panic!("provider-inject EIGH values must be unsupported")
-    };
-    assert_eq!(op, "eigh_vals");
-    assert_eq!(
-        message,
-        "provider-inject does not route factorizations or solves; they are unsupported in this configuration"
-    );
-}
 #[cfg(feature = "tenferro")]
 #[test]
 fn default_executor_matmul_into_matches_tensorkit_recoupling_view_for_all_gemm_dtypes() {
@@ -1029,18 +973,12 @@ fn accumulate_form_matmul_default_overwrites_then_reports_unsupported() {
         "the unsupported arm must not drive a kernel"
     );
 }
-#[cfg(all(
-    any(feature = "cpu-faer", feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn default_executor_advertises_native_owned_full_svd() {
     assert!(DefaultDenseExecutor::new().supports_svd_full());
 }
-#[cfg(all(
-    any(feature = "cpu-faer", feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn native_owned_full_svd_validates_overflow_length_then_zero_extent() {
     let engine = &mut CpuEngine::serial();
@@ -1088,10 +1026,7 @@ fn native_owned_full_svd_validates_overflow_length_then_zero_extent() {
     ));
     assert!(inputs.owned_full_svd_inputs().is_empty());
 }
-#[cfg(all(
-    any(feature = "cpu-faer", feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn native_owned_full_svd_moves_each_dtype_input_buffer() {
     let engine = &mut CpuEngine::serial();
@@ -1358,7 +1293,6 @@ fn values_only_defaults_fall_back_to_the_full_decomposition_spectrum() {
         assert_c64_close(*a, *b, tol);
     }
 }
-#[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
     let engine = &mut CpuEngine::serial();
@@ -1434,7 +1368,6 @@ fn default_executor_svd_vals_returns_literal_spectra_for_every_dense_dtype() {
     }
     assert_eq!(c64_data, c64_before);
 }
-#[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
     let engine = &mut CpuEngine::serial();
@@ -1508,7 +1441,6 @@ fn default_executor_eigh_vals_returns_literal_spectra_for_every_dense_dtype() {
     }
     assert_eq!(c64_data, c64_before);
 }
-#[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_values_only_reads_offset_padded_transposed_views() {
     let engine = &mut CpuEngine::serial();
@@ -1582,7 +1514,6 @@ fn default_executor_values_only_reads_offset_padded_transposed_views() {
     }
     assert_eq!(overlap_data, [2.0]);
 }
-#[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_values_only_admits_batches_and_zero_extents() {
     let engine = &mut CpuEngine::serial();
@@ -1672,7 +1603,6 @@ fn per_matrix_factorization(
     }
 }
 
-#[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
     // What: `factorize_batch` for `Eigh`, `EighVals`, `SvdVals`, `Eig` and
@@ -1958,7 +1888,7 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
             },
         );
         assert_eq!(result, Ok(()), "{op:?}");
-        let native = cfg!(all(feature = "cpu-faer", not(feature = "cpu-blas-core")));
+        let native = cfg!(feature = "cpu-faer");
         match &delivered[..] {
             [(0, Ok(()))] if native => {}
             [(0, Err(FactorFailure::Solver(DenseError::Backend { .. })))] if !native => {}
@@ -2067,7 +1997,6 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
     }
 }
 
-#[cfg(not(feature = "provider-inject"))]
 #[test]
 fn eig_batch_returns_unit_norm_eigenpairs_at_every_engine_width() {
     // What: the batched general eigendecomposition of unequal real and
@@ -2109,8 +2038,7 @@ fn eig_batch_returns_unit_norm_eigenpairs_at_every_engine_width() {
     let nan = DenseRead::F64(DenseView::new(&nan, &[2, 2], &[1, 2], 0).unwrap());
     #[allow(unused_mut)]
     let mut policies = vec![(1, None), (4, None)];
-    // The BLAS lane refuses `Outer`: its vendor call owns the threading.
-    #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+    #[cfg(feature = "cpu-faer")]
     policies.push((
         4,
         Some(tcontract_exec::BatchPolicy::new(
@@ -2151,7 +2079,7 @@ fn eig_batch_returns_unit_norm_eigenpairs_at_every_engine_width() {
         }
         let batch = factorize_all(&mut executor, engine, DenseFactorization::Eig, &[nan]);
         let per_matrix = executor.eig(engine, nan);
-        #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+        #[cfg(feature = "cpu-faer")]
         assert!(batch.is_err() && per_matrix.is_err(), "{threads} threads");
         assert_eq!(batch.err(), per_matrix.err(), "{threads} threads");
     }
@@ -2161,7 +2089,7 @@ fn eig_batch_returns_unit_norm_eigenpairs_at_every_engine_width() {
 /// which no public input is known to reach through the solver) reaches the
 /// caller as tenferro's `eig_read` publishes it: its `DenseError` under the
 /// `eig_read` label, carrying the normalizer's own failure.
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn eig_normalization_failure_is_the_eig_read_error() {
     use crate::block_kernel::factor::Scalar;
@@ -2185,7 +2113,7 @@ fn eig_normalization_failure_is_the_eig_read_error() {
 /// Purpose: the native QR null basis is retained at its final size: the
 /// owned outcome of an `m x (m - 1)` input holds exactly `m` scalars of
 /// capacity, not a full `m x m` `Q` with its leading columns dropped.
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn native_null_basis_is_allocated_at_its_final_size() {
     let engine = &mut CpuEngine::serial();
@@ -2206,7 +2134,7 @@ fn native_null_basis_is_allocated_at_its_final_size() {
     assert_eq!(basis.into_f64_vec().unwrap().capacity(), m);
 }
 
-#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn native_lq_batch_stages_no_adjoint() {
     // What: the native provider's LQ reads each input's transpose in place,
@@ -2242,7 +2170,6 @@ fn native_lq_batch_stages_no_adjoint() {
         inputs.len()
     );
 }
-#[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
     let engine = &mut CpuEngine::serial();
@@ -2326,10 +2253,7 @@ fn default_executor_values_only_preserves_rank_and_dtype_rejections() {
         } if message.contains("does not support dtype Bool")
     ));
 }
-#[cfg(all(
-    not(feature = "provider-inject"),
-    any(feature = "cpu-faer", feature = "cpu-blas-core")
-))]
+#[cfg(feature = "cpu-faer")]
 #[test]
 fn default_executor_values_only_runs_the_compiled_provider() {
     assert_values_only_for_compiled_cpu_provider();

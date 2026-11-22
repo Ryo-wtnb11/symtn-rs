@@ -327,16 +327,6 @@ fn member_scales_are_resolved_once_per_role() {
 /// split over four member ranges (forced `Outer` on four workers) and
 /// leaves the engine usable.
 #[test]
-#[cfg_attr(
-    any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ),
-    ignore = "only a forced policy splits empty members (no copy estimate pays), and a BLAS provider refuses forced policies"
-)]
 fn a_huge_batch_of_empty_members_splits_without_overflow() {
     let blocks = Arc::new(BlockStructure::packed_column_major(1, [vec![0]]).unwrap());
     let transform =

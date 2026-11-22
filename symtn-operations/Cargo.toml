@@ -18,18 +18,13 @@ strided-kernel.workspace = true
 rustc-hash = "2"
 # Recovers the caller's `CpuEngine` behind `&mut dyn Engine` for Host
 # regions (`host_pool::region`); the version symtn-dense uses.
-tenferro-cpu = { version = "0.11.0", default-features = false, optional = true }
+tenferro-cpu = { version = "0.12.0", optional = true }
 
 [features]
 # A compiled CPU provider: Host regions take the caller CPU engine's token.
 tenferro = ["dep:tenferro-cpu", "symtn-dense/tenferro"]
 default = ["cpu-faer"]
 cpu-faer = ["tenferro", "symtn-dense/cpu-faer"]
-cpu-blas = ["tenferro", "symtn-dense/cpu-blas"]
-blas-accelerate = ["tenferro", "symtn-dense/blas-accelerate"]
-blas-openblas = ["tenferro", "symtn-dense/blas-openblas"]
-blas-mkl = ["tenferro", "symtn-dense/blas-mkl"]
-provider-inject = ["tenferro", "symtn-dense/provider-inject"]
 # Unstable, internal: reference oracle for tree-transform replay (per-block
 # strided driver and scalar recoupling); production replay never uses it.
 # It also adds `HostKernelAdapter::recoupling_src_times_u_transpose`,

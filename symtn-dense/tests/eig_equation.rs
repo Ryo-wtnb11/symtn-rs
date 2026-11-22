@@ -6,7 +6,7 @@
 //! complex companion matrix of `(x - r0)(x - r1)(x - r2)`. Both the input and
 //! the outputs are read column-major, the executor's layout convention.
 
-#![cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
+#![cfg(feature = "tenferro")]
 
 use num_complex::Complex64;
 use symtn_dense::{

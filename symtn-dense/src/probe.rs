@@ -57,10 +57,7 @@ pub(crate) fn add(event: Event, count: usize) {
 }
 
 /// Records the address of the buffer `svd_full_owned` handed to the backend.
-#[cfg(all(
-    any(feature = "cpu-faer", feature = "cpu-blas-core"),
-    not(feature = "provider-inject")
-))]
+#[cfg(feature = "cpu-faer")]
 pub(crate) fn owned_full_svd_input(pointer: usize) {
     PROBE.with(|probe| probe.borrow_mut().owned_full_svd_inputs.push(pointer));
 }
@@ -89,10 +86,7 @@ impl Recording {
     }
 
     /// Input buffer addresses of `svd_full_owned` since the recording started.
-    #[cfg(all(
-        any(feature = "cpu-faer", feature = "cpu-blas-core"),
-        not(feature = "provider-inject")
-    ))]
+    #[cfg(feature = "cpu-faer")]
     pub(crate) fn owned_full_svd_inputs(&self) -> Vec<usize> {
         PROBE.with(|probe| probe.borrow().owned_full_svd_inputs[self.inputs_start..].to_vec())
     }

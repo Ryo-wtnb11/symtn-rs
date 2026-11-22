@@ -93,16 +93,6 @@ fn second_compact_factorization_rebuilds_no_structure() {
 /// per-structure constant: the second call costs the same at degeneracy 2
 /// and 3.
 #[test]
-#[cfg_attr(
-    any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ),
-    ignore = "a LAPACK provider sizes its own workspace allocations by the block extents"
-)]
 fn second_compact_factorization_costs_independently_of_degeneracy() {
     let _serial = crate::counting_alloc::serial();
     let rows = second_factorizations();

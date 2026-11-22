@@ -15,11 +15,6 @@ path = "src/lib.rs"
 [features]
 default = ["cpu-faer"]
 cpu-faer = ["symtn-operations/cpu-faer"]
-cpu-blas = ["symtn-operations/cpu-blas"]
-blas-accelerate = ["symtn-operations/blas-accelerate"]
-blas-openblas = ["symtn-operations/blas-openblas"]
-blas-mkl = ["symtn-operations/blas-mkl"]
-provider-inject = ["symtn-operations/provider-inject"]
 cuda = ["symtn-dense/cuda", "symtn-operations/cuda"]
 cgc-gen = ["symtn-core/cgc-gen"]
 # Unstable, internal: the infallible Generic entries (`*_generic` facade,

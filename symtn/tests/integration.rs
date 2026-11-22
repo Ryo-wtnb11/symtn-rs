@@ -8,8 +8,6 @@ mod su2;
 use num_complex::{Complex32, Complex64};
 use symtn_core as sector_types;
 
-#[path = "../../tests/support/backend.rs"]
-mod backend;
 mod braiding_probe;
 #[macro_use]
 mod common;

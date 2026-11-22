@@ -186,10 +186,7 @@ pub(crate) fn cached_plan<T: Scalar>(
 /// The plan of `geometry` at scalar type `T` from the process-global
 /// geometry-plan cache, type-erased for a caller whose jobs are not generic
 /// over the scalar.
-#[cfg_attr(
-    not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))),
-    allow(dead_code)
-)]
+#[cfg_attr(not(feature = "cpu-faer"), allow(dead_code))]
 pub(crate) fn erased_plan<T: Scalar>(geometry: Geometry) -> Result<Arc<ErasedPlan>, DenseError> {
     let plan: Arc<ErasedPlan> = cached_plan::<T>(gemm_plans(), geometry)
         .map_err(|err| grouped_error(format!("plan: {err}")))?;
@@ -199,10 +196,7 @@ pub(crate) fn erased_plan<T: Scalar>(geometry: Geometry) -> Result<Arc<ErasedPla
 /// `d = alpha a b` (each operand as `plan`'s geometry lays it out,
 /// conjugated as it records) on `exec`; `plan` came from [`erased_plan`] at
 /// `T`. No prior value of `d` is read.
-#[cfg_attr(
-    not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))),
-    allow(dead_code)
-)]
+#[cfg_attr(not(feature = "cpu-faer"), allow(dead_code))]
 pub(crate) fn execute_erased<T: Scalar + Default>(
     plan: &ErasedPlan,
     exec: &mut Exec<'_>,
@@ -521,19 +515,6 @@ impl GemmScratch {
 }
 
 impl GemmScratch {
-    /// The kept job-slot capacity, emptied, for a caller that stages
-    /// `(index, slice)` pairs of its own.
-    #[cfg_attr(not(feature = "cpu-blas-core"), allow(dead_code))]
-    pub(crate) fn take_slots<'a, T>(&mut self) -> Vec<(usize, &'a mut [T])> {
-        recycle(std::mem::take(&mut self.slots))
-    }
-
-    /// Returns [`Self::take_slots`]'s capacity.
-    #[cfg_attr(not(feature = "cpu-blas-core"), allow(dead_code))]
-    pub(crate) fn keep_slots<T>(&mut self, slots: Vec<(usize, &mut [T])>) {
-        self.slots = recycle(slots);
-    }
-
     /// The kept fresh-slot capacity, emptied.
     pub(crate) fn take_fresh_slots<'a, T>(&mut self) -> FreshSlots<'a, T> {
         recycle(std::mem::take(&mut self.fresh_slots))
