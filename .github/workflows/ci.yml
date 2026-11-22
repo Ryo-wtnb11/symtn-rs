@@ -298,11 +298,19 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: |
-          ( while sleep 30; do date -u +%T; free -m | sed -n 2p; ps -eo pid,rss,pcpu,etime,comm --sort=-pcpu | head -4; done ) >&2 &
+          ( while sleep 30; do date -u +%T; free -m | sed -n 2,3p; if [ -r /proc/pressure/memory ]; then cat /proc/pressure/memory; fi; ps -eo pid,rss,pcpu,etime,comm --sort=-pcpu | head -4; done ) > >(tee -a "$RUNNER_TEMP/memtrace.log" >&2) 2>&1 &
           trace=$!
           trap 'kill "$trace"' EXIT
+          cargo test --no-run -j 2 --locked -p symtn --no-default-features --features "cgc-gen,cpu-faer" --tests
           cargo test --locked -p symtn --no-default-features --features "cgc-gen,cpu-faer" --tests
         working-directory: symtn
+      - name: Upload memory trace (cgc-gen)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memtrace-cgc-gen
+          path: ${{ runner.temp }}/memtrace.log
+          if-no-files-found: ignore
       - name: test symtn-network checked_generic_network (cgc-gen)
         if: ${{ !cancelled() }}
         run: 'cargo test --locked -p symtn-network --no-default-features --features "cgc-gen,cpu-faer" --test serial checked_generic_network::'
@@ -314,6 +322,13 @@ jobs:
       - name: clippy symtn-network (cgc-gen + opt-path)
         if: ${{ !cancelled() }}
         run: cargo clippy --locked -p symtn-network --no-default-features --features "cgc-gen,opt-path,cpu-faer" --all-targets -- -D warnings
+        working-directory: symtn
+      # cuda with every other optional feature: the `cuda-check` job lints
+      # only `cuda,cpu-faer`, so code gated on cuda plus another feature was
+      # never type-checked. A lint without a link needs no CUDA toolkit.
+      - name: clippy symtn, symtn-dense, symtn-network (cuda + all optional features)
+        if: ${{ !cancelled() }}
+        run: cargo clippy --locked -p symtn -p symtn-dense -p symtn-network --no-default-features --features "cuda,cpu-faer,cgc-gen,krylov,ledger-roots,opt-path,cotengra-python" --all-targets -- -D warnings
         working-directory: symtn
       - name: test symtn-network (cgc-gen + opt-path)
         if: ${{ !cancelled() }}
@@ -530,13 +545,23 @@ jobs:
       - name: Run remaining workspace tests
         timeout-minutes: 25
         run: |
-          ( while sleep 30; do date -u +%T; free -m | sed -n 2p; ps -eo pid,rss,pcpu,etime,comm --sort=-pcpu | head -4; done ) >&2 &
+          ( while sleep 30; do date -u +%T; free -m | sed -n 2,3p; if [ -r /proc/pressure/memory ]; then cat /proc/pressure/memory; fi; ps -eo pid,rss,pcpu,etime,comm --sort=-pcpu | head -4; done ) > >(tee -a "$RUNNER_TEMP/memtrace.log" >&2) 2>&1 &
           trace=$!
           trap 'kill "$trace"' EXIT
+          # `cargo llvm-cov --no-run` means report-only, so `--list` stands in
+          # for a build-only pass: it links at -j 2 and runs no test.
+          cargo llvm-cov --locked --no-report -j 2 --workspace --exclude symtn-tensors --tests -- --list >/dev/null
           cargo llvm-cov --locked --no-report --workspace --exclude symtn-tensors --tests
         working-directory: symtn
         env:
           CARGO_PROFILE_TEST_DEBUG: ${{ env.CI_HEAVY_TEST_DEBUG }}
+      - name: Upload memory trace (coverage)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memtrace-coverage
+          path: ${{ runner.temp }}/memtrace.log
+          if-no-files-found: ignore
       # Why: `lie.rs` is default-build code, but its rank >= 2 paths need
       # fusion-symbols' generated data, so only `cgc-gen` tests execute them.
       # `--tests` because the Lie oracles are integration tests; `--lib` alone
