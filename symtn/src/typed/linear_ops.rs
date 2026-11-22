@@ -557,14 +557,17 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
                             "tensors have different dense payload lengths",
                         ));
                     }
-                    for (value, &source) in destination_data.iter_mut().zip(source) {
-                        *value = scale_value(*value, beta) + scale_value(source, alpha);
-                    }
+                    axpby_slice(destination_data, source, alpha, beta);
                 }
                 TypedData::Diagonal(spectrum) => {
-                    for value in destination_data.iter_mut() {
-                        *value = scale_value(*value, beta);
-                    }
+                    let len = destination_data.len();
+                    symtn_operations::scale_raw_strided_kernel_trusted(
+                        destination_data,
+                        &[len],
+                        &[1],
+                        0,
+                        beta,
+                    )?;
                     add_spectrum_into(
                         x.logical_space().space(),
                         destination_data,
@@ -593,6 +596,38 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
             }
         }
         Ok(())
+    }
+}
+
+/// `dst[i] = scale_value(dst[i], beta) + scale_value(src[i], alpha)`, bit for
+/// bit, with the coefficient tests made once per call rather than per
+/// element. A zero `beta` never reads `dst` (a NaN there is discarded) and a
+/// zero `alpha` never reads `src`.
+///
+/// Why the exact-one arm still multiplies, by the constant one: a numeric
+/// `β = 1` is BLAS `axpby` in TensorKit, and `(1+0i) * (inf+1i)` has a NaN
+/// imaginary part, so the multiply cannot be skipped; the constant only lets
+/// the compiler drop the multiplies that are exact. The arm takes a `beta`
+/// whose bits are the constant's, so `1 - 0i` stays on the general arm and
+/// keeps its zero signs.
+fn axpby_slice<D: TensorScalar>(dst: &mut [D], src: &[D], alpha: D, beta: D) {
+    fn each<D: Copy>(dst: &mut [D], src: &[D], f: impl Fn(D, D) -> D) {
+        for (value, &source) in dst.iter_mut().zip(src) {
+            *value = f(*value, source);
+        }
+    }
+    let (zero_alpha, zero_beta) = (D::zero() * alpha, D::zero() * beta);
+    match (alpha.is_zero(), beta.is_zero()) {
+        (true, true) => dst.fill(zero_beta + zero_alpha),
+        (true, false) => dst
+            .iter_mut()
+            .for_each(|value| *value = beta * *value + zero_alpha),
+        (false, true) => each(dst, src, |_, source| zero_beta + alpha * source),
+        (false, false) if beta.is_exact_one() => {
+            let one = D::one();
+            each(dst, src, |value, source| one * value + alpha * source)
+        }
+        (false, false) => each(dst, src, |value, source| beta * value + alpha * source),
     }
 }
 
