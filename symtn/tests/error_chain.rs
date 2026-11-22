@@ -50,7 +50,7 @@ fn facade_wrappers_print_each_message_once() {
         (Error::Core(Box::new(core())), Box::new(core())),
         (
             Error::Operation(Box::new(operation.clone())),
-            Box::new(operation.clone()),
+            Box::new(core()),
         ),
         (
             Error::FusionAlgebra(Box::new(algebra.clone())),
@@ -64,6 +64,7 @@ fn facade_wrappers_print_each_message_once() {
         chain(&Error::Operation(Box::new(operation))),
         [
             "tensor operation failed",
+            "invalid tensor structure",
             "dimension mismatch: expected 3, got 5"
         ]
     );

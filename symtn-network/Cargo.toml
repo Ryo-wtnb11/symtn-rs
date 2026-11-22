@@ -15,11 +15,6 @@ path = "src/lib.rs"
 [features]
 default = ["cpu-faer"]
 cpu-faer = ["symtn/cpu-faer"]
-cpu-blas = ["symtn/cpu-blas"]
-blas-accelerate = ["symtn/blas-accelerate"]
-blas-openblas = ["symtn/blas-openblas"]
-blas-mkl = ["symtn/blas-mkl"]
-provider-inject = ["symtn/provider-inject"]
 cgc-gen = ["symtn/cgc-gen"]
 cuda = ["symtn/cuda"]
 # Wraps the `opt-einsum-path` crate (Apache-2.0) as a

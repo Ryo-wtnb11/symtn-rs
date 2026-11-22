@@ -2,8 +2,8 @@
 //!
 //! The probe counts caller-thread allocations whose size is exactly the
 //! payload length in bytes, which is the only allocation class a redundant
-//! payload copy can belong to; every other allocation Tenferro, CubeCL and the
-//! CUDA driver make is a different size and is ignored. The device is required
+//! payload copy can belong to; every other allocation Tenferro, the CUDA
+//! runtime and the driver make is a different size and is ignored. The device is required
 //! because `upload`/`download` are the units under test, so these are
 //! `#[ignore]` like the rest of the device suite.
 
@@ -14,21 +14,19 @@ use std::sync::Mutex;
 use num_complex::Complex64;
 use symtn_dense::{cuda_transfer_stats, CudaDenseContext, CudaDenseStorage, CudaScalar};
 
+/// Payload-sized host allocations an owned upload makes: none. The host
+/// tensor takes the vector by move, and the runtime stages the bytes through
+/// page-locked chunks from the CUDA driver, which the global allocator never
+/// sees. Any payload-sized allocation here is therefore a redundant copy.
+/// The borrowed entry point costs exactly one, the copy Tenferro's
+/// owned-host-tensor contract requires.
+const OWNED_UPLOAD_PAYLOAD_ALLOCATIONS: usize = 0;
+
 /// Payload-sized host allocations a download makes on the caller thread: the
-/// one vector Tenferro decodes the readback bytes into, handed straight back.
-/// Measured on an A100: 1 for both f64 and `Complex64`; a second copy of that
-/// vector by symtn would make it 2.
-///
-/// Payload-sized host allocations an owned upload makes, measured on the same
-/// host: CubeCL's own staging, which symtn does not control but must not add
-/// to. `Complex64` needs one more than f64 because CubeCL stages complex data
-/// through an extra buffer. Pinning them absolutely is what catches a copy
-/// reintroduced inside `upload_owned`; the borrowed entry point is then
-/// asserted at exactly one more, which is the copy Tenferro's owned-host-tensor
-/// contract requires.
-const OWNED_UPLOAD_PAYLOAD_ALLOCATIONS_F64: usize = 2;
-const OWNED_UPLOAD_PAYLOAD_ALLOCATIONS_C64: usize = 3;
-const DOWNLOAD_PAYLOAD_ALLOCATIONS: usize = 1;
+/// runtime's readback byte buffer and the typed vector Tenferro decodes it
+/// into, which symtn hands straight back. A copy of that vector by symtn
+/// would make it 3.
+const DOWNLOAD_PAYLOAD_ALLOCATIONS: usize = 2;
 
 use crate::counting_alloc;
 
@@ -42,12 +40,11 @@ fn measure<T>(payload_bytes: usize, f: impl FnOnce() -> T) -> (T, usize) {
     (output, allocs.matched_calls as usize)
 }
 
-/// Element count large enough to leave Tenferro's pinned small-payload
-/// readback path (`PINNED_SCALAR_BYTES`) and odd enough that no incidental
-/// allocation happens to share the payload size.
+/// Element count odd enough that no incidental allocation happens to share
+/// the payload size.
 const ELEMENTS: usize = 4099;
 
-fn assert_transfer_copies<D>(ctx: &CudaDenseContext, data: Vec<D>, owned_upload_allocations: usize)
+fn assert_transfer_copies<D>(ctx: &CudaDenseContext, data: Vec<D>)
 where
     D: CudaScalar + PartialEq + std::fmt::Debug,
 {
@@ -67,13 +64,12 @@ where
     let owned_upload = stats_delta(owned_before, cuda_transfer_stats());
 
     assert_eq!(
-        owned_hits, owned_upload_allocations,
-        "an owned upload of {payload_bytes} bytes must stage exactly what CubeCL \
-         stages and copy the payload no further"
+        owned_hits, OWNED_UPLOAD_PAYLOAD_ALLOCATIONS,
+        "an owned upload of {payload_bytes} bytes must not copy the payload on the host"
     );
     assert_eq!(
         borrowed_hits,
-        owned_upload_allocations + 1,
+        OWNED_UPLOAD_PAYLOAD_ALLOCATIONS + 1,
         "a borrowed upload of {payload_bytes} bytes costs exactly one host copy \
          more than an owned one"
     );
@@ -124,7 +120,7 @@ fn owned_f64_transfers_cost_no_redundant_host_copy() {
         symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
     let ctx = CudaDenseContext::new(&mut engine).unwrap();
     let data: Vec<f64> = (0..ELEMENTS).map(|index| index as f64).collect();
-    assert_transfer_copies(&ctx, data, OWNED_UPLOAD_PAYLOAD_ALLOCATIONS_F64);
+    assert_transfer_copies(&ctx, data);
 }
 
 #[test]
@@ -138,5 +134,5 @@ fn owned_complex64_transfers_cost_no_redundant_host_copy() {
     let data: Vec<Complex64> = (0..ELEMENTS)
         .map(|index| Complex64::new(index as f64, -(index as f64) - 0.5))
         .collect();
-    assert_transfer_copies(&ctx, data, OWNED_UPLOAD_PAYLOAD_ALLOCATIONS_C64);
+    assert_transfer_copies(&ctx, data);
 }

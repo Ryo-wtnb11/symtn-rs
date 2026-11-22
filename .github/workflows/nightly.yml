@@ -13,8 +13,7 @@ env:
 
 jobs:
   # Why-not every main push: this full default-provider suite dominates runner
-  # minutes. Nightly and manual main runs preserve its macOS runtime contracts;
-  # the scoped Accelerate backend checks remain in push/PR CI.
+  # minutes. Nightly and manual main runs preserve its macOS runtime contracts.
   test-macos:
     name: cargo test (macos-latest)
     if: github.ref == 'refs/heads/main'

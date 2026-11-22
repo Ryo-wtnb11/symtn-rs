@@ -6,10 +6,8 @@
 //! allocations that entry keeps, for every scalar, op lowering, plan strategy
 //! and small or large extents.
 //!
-//! Scope: the native provider (no BLAS), one serial engine, so every
+//! Scope: the native provider, one serial engine, so every
 //! allocation is on the measured thread.
-
-#![cfg(not(feature = "cpu-blas-core"))]
 
 use num_complex::{Complex32, Complex64};
 use symtn_core::{

@@ -4,7 +4,7 @@
 //!
 //! Scope: one serial engine, so every allocation is on the measured thread.
 
-#![cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
+#![cfg(feature = "tenferro")]
 
 use std::mem::MaybeUninit;
 
@@ -37,7 +37,7 @@ fn job(shape: (usize, usize, usize), dst: usize, lhs: usize, rhs: usize) -> Dens
 fn warm_fresh_op_bearing_batch_allocates_no_more_than_the_initialized_one() {
     let _serial = counting_alloc::serial();
     let engine = &mut CpuEngine::serial();
-    // Two heterogeneous jobs: the grouped (or BLAS op-bearing serial) route.
+    // Two heterogeneous jobs: the grouped route.
     let jobs = [job((2, 3, 2), 0, 0, 0), job((3, 2, 1), 4, 6, 6)];
     let runs = strided_batch_runs(&jobs);
     let (lhs, rhs) = ([1.0; 12], [2.0; 8]);

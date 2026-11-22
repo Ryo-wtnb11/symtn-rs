@@ -723,8 +723,8 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// Whether this executor's batch entries carry out a forced engine batch
     /// policy (`Inner`, `Outer`, `Split`) as the engine's batch decision
     /// places it. A replay that cannot honor such a policy through its
-    /// executor refuses it rather than running another placement. The BLAS
-    /// provider and every custom executor answer `false`.
+    /// executor refuses it rather than running another placement. The default
+    /// (faer) executor answers `true`; every custom executor answers `false`.
     #[doc(hidden)]
     fn honors_forced_batch_policy(&self) -> bool {
         false

@@ -22,7 +22,9 @@ pub enum BraidingOp {
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OperationError {
+    /// A structural error from `symtn-core`; the cause is on `source()`.
     Core(CoreError),
+    /// A dense-backend failure; the cause is on `source()`.
     Dense(DenseError),
     /// A finite encoded fusion algebra cannot represent a lowered layout.
     FusionAlgebra(Box<FusionAlgebraError>),
@@ -179,8 +181,8 @@ pub enum OperationError {
 impl fmt::Display for OperationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Core(err) => err.fmt(f),
-            Self::Dense(err) => err.fmt(f),
+            Self::Core(_) => f.write_str("invalid tensor structure"),
+            Self::Dense(_) => f.write_str("dense backend failed"),
             Self::FusionAlgebra(_) => f.write_str(
                 "the fusion algebra cannot represent the requested dual or fusion output",
             ),
@@ -330,6 +332,8 @@ impl fmt::Display for OperationError {
 impl std::error::Error for OperationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Core(err) => Some(err),
+            Self::Dense(err) => Some(err),
             Self::FusionAlgebra(err) => Some(err.as_ref()),
             _ => None,
         }
@@ -368,7 +372,33 @@ impl OperationError {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
+
     use super::*;
+
+    // A chain printer shows each message once only if a wrapper names its
+    // own layer and leaves the cause to `source()`.
+    #[test]
+    fn core_and_dense_wrappers_name_their_layer_and_expose_the_cause() {
+        let core = CoreError::DimensionMismatch {
+            expected: 2,
+            actual: 3,
+        };
+        let error = OperationError::Core(core.clone());
+        assert_eq!(error.to_string(), "invalid tensor structure");
+        assert_eq!(
+            error.source().and_then(|e| e.downcast_ref::<CoreError>()),
+            Some(&core)
+        );
+
+        let dense = DenseError::ElementCountOverflow;
+        let error = OperationError::Dense(dense.clone());
+        assert_eq!(error.to_string(), "dense backend failed");
+        assert_eq!(
+            error.source().and_then(|e| e.downcast_ref::<DenseError>()),
+            Some(&dense)
+        );
+    }
 
     // Canary against `OperationError` regrowing past the clippy
     // `result_large_err` threshold: `MissingBlockKey` boxes `BlockKey` and the

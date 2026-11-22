@@ -17,16 +17,9 @@
 mod su2;
 #[cfg(test)]
 use symtn_core as sector_types;
-#[cfg(not(any(
-    feature = "cpu-faer",
-    feature = "cpu-blas",
-    feature = "blas-accelerate",
-    feature = "blas-openblas",
-    feature = "blas-mkl",
-    feature = "provider-inject"
-)))]
+#[cfg(not(feature = "cpu-faer"))]
 compile_error!(
-    "symtn-operations requires a host execution backend; enable cpu-faer, cpu-blas, a blas-* provider, or provider-inject (cuda still requires host replay)"
+    "symtn-operations requires a host execution backend; enable cpu-faer (cuda still requires host replay)"
 );
 
 pub mod axis;

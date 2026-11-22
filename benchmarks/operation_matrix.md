@@ -75,9 +75,7 @@ before disconnecting if they are not already in the local Cargo cache.
 
 `OP_MATRIX_DEGENERACY` selects the common per-sector degeneracy (default 8).
 `OP_MATRIX_THREADS` is the width of the caller's engine every row runs on
-(default 1, a serial engine). The CPU provider is the compiled one: faer by
-default; a macOS BLAS control builds `blas-accelerate`, the same Apple
-Accelerate provider as the pinned TensorKit environment.
+(default 1, a serial engine). The CPU provider is Tenferro's faer stack.
 `OP_MATRIX_OPERATION` can select one exact operation name for focused profiling.
 `OP_MATRIX_FORM` similarly selects `owned` or `destination`.
 `OP_MATRIX_PROFILE_PAUSE_MS` pauses after that row's warm phase so an external
@@ -311,12 +309,9 @@ exposes no input-copy counter. Reported allocation totals remain caller-thread
 requested calls/bytes; peak, live, native, and worker-thread memory are
 unavailable.
 
-The Apple Accelerate control is:
+The TensorKit control is:
 
 ```sh
-OP_MATRIX_CARGO_FEATURES=blas-accelerate \
-benchmarks/operation_matrix.sh
-
 julia --project=benchmarks/tensorkit_benchmark \
     benchmarks/tensorkit_microbench.jl 8 300
 ```
