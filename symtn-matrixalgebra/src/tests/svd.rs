@@ -35,9 +35,6 @@ fn factorization_without_adjoint_route_refuses_lazy_adjoint_before_leasing() {
             parent: bound.as_ref().dynamic(),
         },
     );
-    assert!(matches!(
-        refused,
-        Err(OperationError::UnsupportedTensorContractScope { .. })
-    ));
+    assert!(matches!(refused, Err(OperationError::Internal { .. })));
     assert_eq!(leases.get(), 0);
 }

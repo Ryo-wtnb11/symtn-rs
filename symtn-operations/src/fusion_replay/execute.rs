@@ -281,7 +281,7 @@ where
         {
             return Ok(());
         }
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "signed stacked replay requires exact unit-magnitude coefficients",
         })
     }
@@ -294,7 +294,7 @@ where
         if self.lhs_op == MatrixOp::Identity && self.rhs_op == MatrixOp::Identity {
             return Ok(());
         }
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "storage-handle core replay does not expose transpose/adjoint matrix views",
         })
     }
@@ -307,7 +307,7 @@ where
         {
             return Ok(());
         }
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "scaled storage plan cannot execute through unscaled host replay",
         })
     }
@@ -345,7 +345,7 @@ where
         DRhs: TensorStorage<D>,
     {
         if self.direct_batch.len() != self.direct_batch_alpha.len() {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "storage-direct plan has misaligned GEMM coefficients",
             });
         }
@@ -356,7 +356,7 @@ where
                 .iter()
                 .any(|&alpha| alpha != C::one());
         if needs_general_gemm && !gemm.supports_matmul_with_ops_scaled(self.lhs_op, self.rhs_op) {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "storage GEMM backend does not implement scaled replay",
             });
         }
@@ -430,7 +430,7 @@ where
         DRhs: TensorStorage<D>,
     {
         if self.direct_batch.len() != self.direct_batch_alpha.len() {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "storage-direct plan has misaligned GEMM coefficients",
             });
         }

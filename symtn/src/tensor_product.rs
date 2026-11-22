@@ -477,8 +477,8 @@ where
                 dst_structure.find_block_index_by_fusion_tree_pair(key) != Some(index)
             })
     {
-        return Err(symtn_tensors::OperationError::StructureMismatch {
-            tensor: "tensor-product destination",
+        return Err(symtn_tensors::OperationError::Internal {
+            message: "prepared tensor-product keys disagree with the derived destination",
         });
     }
 
@@ -703,8 +703,8 @@ where
     let mut data = vec![D::from_real(0.0); prepared.required_len()];
     #[cfg(test)]
     if crate::typed::probe::fires(crate::typed::probe::Fault::TensorProductScatter) {
-        return Err(symtn_tensors::OperationError::StructureMismatch {
-            tensor: "forced late tensor-product scatter failure",
+        return Err(symtn_tensors::OperationError::Internal {
+            message: "forced late tensor-product scatter failure",
         }
         .into());
     }
@@ -770,8 +770,8 @@ where
             .chain(&rhs.shape()[rhs_nout..])
             .copied())
     {
-        return Err(symtn_tensors::OperationError::StructureMismatch {
-            tensor: "tensor-product destination",
+        return Err(symtn_tensors::OperationError::Internal {
+            message: "tensor-product destination block shape disagrees with its operands",
         });
     }
 

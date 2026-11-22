@@ -82,7 +82,7 @@ impl TensorContractStructure<f64> {
             || lhs_structure.block_count() != 1
             || rhs_structure.block_count() != 1
         {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: PLAIN_TENSORCONTRACT_BLOCK_SPARSE_UNSUPPORTED,
             });
         }

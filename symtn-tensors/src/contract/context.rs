@@ -1282,7 +1282,7 @@ where
     }
     let Some((lhs_axes, rhs_axes, output_axes)) = staged_contract_axes(*request, space.rank())
     else {
-        return Err(OperationError::UnsupportedTensorContractScope {
+        return Err(OperationError::Internal {
             message: "a composition plans only its core",
         }
         .into());
@@ -1430,8 +1430,8 @@ where
 /// `Core { swapped: false }` with unit job coefficients. The destination is
 /// in its space's canonical coupled-sector layout by construction, as for
 /// every contraction and composition entry; a composition the core declines
-/// is `UnsupportedTensorContractScope`: `mul!` has no transform route, so
-/// none is planned.
+/// is [`OperationError::Internal`]: `mul!` has no transform route, so none is
+/// planned.
 ///
 /// The braiding check stays with the caller: `mul!` admits every braiding
 /// style, since composition has no braid-dependent step.
@@ -1467,7 +1467,7 @@ where
     ));
     match compose_core_route::<M, R>(target, lhs, rhs)? {
         CoreRoute::Hit(resolution) => Ok(resolution),
-        CoreRoute::Miss(_) => Err(OperationError::UnsupportedTensorContractScope {
+        CoreRoute::Miss(_) => Err(OperationError::Internal {
             message:
                 "storage-direct composition supports only canonical fully-direct oriented operands",
         }
@@ -1928,7 +1928,7 @@ where
         axes,
         ContractKind::Contract,
     )?
-    .ok_or_else(|| OperationError::UnsupportedTensorContractScope {
+    .ok_or_else(|| OperationError::Internal {
         message:
             "storage-direct contraction supports only canonical fully-direct oriented operands",
     })?;

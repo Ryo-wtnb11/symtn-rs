@@ -304,7 +304,7 @@ fn materialized<D: CudaScalar>(
 // Eager provider
 // ---------------------------------------------------------------------------
 
-const EAGER_IS_ONE_MEMBER: OperationError = OperationError::UnsupportedTensorContractScope {
+const EAGER_IS_ONE_MEMBER: OperationError = OperationError::Internal {
     message: "eager CUDA contraction replays exactly one member",
 };
 
@@ -671,7 +671,7 @@ fn admit_member_call<D: CudaScalar>(
         ContractDestinationInit::Axpby(beta) => beta == D::ZERO,
     };
     if alpha != D::ONE || !overwrite {
-        return Err(OperationError::UnsupportedTensorContractScope {
+        return Err(OperationError::Internal {
             message: "CUDA member contraction only overwrites its destination with alpha = 1",
         });
     }
@@ -1058,10 +1058,7 @@ mod tests {
     #[test]
     fn member_admission_rejects_non_overwrite_calls_without_a_device() {
         let unsupported = |result: Result<(), OperationError>| {
-            matches!(
-                result,
-                Err(OperationError::UnsupportedTensorContractScope { .. })
-            )
+            matches!(result, Err(OperationError::Internal { .. }))
         };
         assert!(admit_member_call(1.0, ContractDestinationInit::Zeroed, 1).is_ok());
         assert!(admit_member_call(1.0, ContractDestinationInit::Axpby(0.0), 17).is_ok());

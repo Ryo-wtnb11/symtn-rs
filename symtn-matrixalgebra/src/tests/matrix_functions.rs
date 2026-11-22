@@ -23,10 +23,7 @@ fn dense_only_matrix_function_refuses_adjoint_and_diagonal_before_leasing() {
             output_space: bound.space().clone(),
         },
     );
-    assert!(matches!(
-        adjoint,
-        Err(OperationError::UnsupportedTensorContractScope { .. })
-    ));
+    assert!(matches!(adjoint, Err(OperationError::Internal { .. })));
     let leg = SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 1)], false);
     let bond = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         Arc::new(U1FusionRule),
@@ -57,10 +54,7 @@ fn dense_only_matrix_function_refuses_adjoint_and_diagonal_before_leasing() {
             spectrum: &spectrum,
         },
     );
-    assert!(matches!(
-        diagonal,
-        Err(OperationError::UnsupportedTensorContractScope { .. })
-    ));
+    assert!(matches!(diagonal, Err(OperationError::Internal { .. })));
     assert_eq!(leases.get(), 0);
 }
 

@@ -87,7 +87,7 @@ pub trait Rank2Gemm<D> {
         if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
             return self.matmul_rank2_batch(engine, dst, lhs, rhs, jobs, runs, alpha, beta);
         }
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "rank-2 GEMM backend does not implement transpose/adjoint batches",
         })
     }
@@ -268,7 +268,7 @@ pub trait StorageGemm<D, DDst, DLhs, DRhs> {
         _rhs_op: MatrixOp,
         _alpha: D,
     ) -> Result<(), OperationError> {
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "storage GEMM backend does not implement scaled replay",
         })
     }
@@ -294,7 +294,7 @@ pub trait StorageGemm<D, DDst, DLhs, DRhs> {
         _alpha: D,
         _beta: D,
     ) -> Result<(), OperationError> {
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "storage GEMM backend does not implement a beta-accumulating replay",
         })
     }

@@ -138,7 +138,7 @@ fn compact_factor_plan_rejects_duplicate_missing_mismatched_and_extra_routes() {
     let mut duplicate = u.to_vec();
     duplicate.push(u[0].clone());
     assert!(
-        matches!(crate::factorize::validate_compact_factor_routes_for_test(&source, &duplicate, &vh,), Err(OperationError::UnsupportedTensorContractScope { message }) if message.contains("duplicate sector"))
+        matches!(crate::factorize::validate_compact_factor_routes_for_test(&source, &duplicate, &vh,), Err(OperationError::Internal { message }) if message.contains("duplicate sector"))
     );
     assert!(
         matches!(crate::factorize::validate_compact_factor_routes_for_test(&source, &[], &vh,), Err(OperationError::SpaceMismatch { message }) if message.contains("left factor is missing"))

@@ -51,18 +51,22 @@ impl<E> From<symtn_tensors::OperationError> for GenericTensorError<E> {
     }
 }
 
-/// Whether an error is an axis misuse or a braiding-style refusal, which the
-/// facade reports in [`GenericTensorError::Facade`] exactly as the
-/// multiplicity-free mode reports them in its [`Error`] (#1873): the first is
-/// an argument error and the second a capability boundary of the request,
-/// not a plan failure. Below the facade each has one variant per kind
-/// (#1989).
-fn is_facade_misuse(error: &OperationError) -> bool {
+/// Whether an error is an axis misuse, a braiding-style refusal or a broken
+/// internal invariant, which the facade reports in
+/// [`GenericTensorError::Facade`] exactly as the multiplicity-free mode
+/// reports them in its [`Error`] (#1873): the first is an argument error,
+/// the second a capability boundary of the request and the third a symtn
+/// bug ([`Error::Internal`]), none a plan failure. Below the facade each has
+/// one variant per kind (#1989).
+fn reported_at_facade(error: &OperationError) -> bool {
     matches!(
         error,
         OperationError::InvalidPermutation { .. }
             | OperationError::InvalidAxisSet { .. }
             | OperationError::UnsupportedBraidingStyle { .. }
+            | OperationError::UnsupportedContractionBraiding { .. }
+            | OperationError::Internal { .. }
+            | OperationError::StructureMismatch { .. }
     )
 }
 
@@ -83,7 +87,7 @@ impl<E> From<CheckedGenericStructureError<E>> for GenericTensorError<E> {
 impl<E> From<CheckedGenericPlanError<E>> for GenericTensorError<E> {
     fn from(error: CheckedGenericPlanError<E>) -> Self {
         match error {
-            CheckedGenericPlanError::Operation(operation) if is_facade_misuse(&operation) => {
+            CheckedGenericPlanError::Operation(operation) if reported_at_facade(&operation) => {
                 Self::Facade(Error::from(operation))
             }
             other => Self::Plan(other),
@@ -107,5 +111,46 @@ impl<E> From<CheckedGenericFactorPlanError<E>> for GenericTensorError<E> {
 impl<E> From<CheckedGenericTensorProductError<E>> for GenericTensorError<E> {
     fn from(error: CheckedGenericTensorProductError<E>) -> Self {
         Self::TensorProduct(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use symtn_core::BraidingStyleKind;
+    use symtn_tensors::{BraidingOp, CheckedGenericPlanError, OperationError};
+
+    use super::{Error, GenericTensorError};
+
+    fn route(operation: OperationError) -> GenericTensorError<()> {
+        CheckedGenericPlanError::Operation(operation).into()
+    }
+
+    #[test]
+    fn checked_plan_errors_reported_at_the_facade_leave_plan() {
+        for internal in [
+            OperationError::Internal {
+                message: "invariant",
+            },
+            OperationError::StructureMismatch { tensor: "dst" },
+        ] {
+            assert!(matches!(
+                route(internal),
+                GenericTensorError::Facade(Error::Internal(_))
+            ));
+        }
+        assert!(matches!(
+            route(OperationError::UnsupportedContractionBraiding {
+                operation: BraidingOp::Contraction,
+                style: BraidingStyleKind::Fermionic,
+            }),
+            GenericTensorError::Facade(Error::Operation(operation))
+                if matches!(*operation, OperationError::UnsupportedContractionBraiding { .. })
+        ));
+        assert!(matches!(
+            route(OperationError::ElementCountOverflow),
+            GenericTensorError::Plan(CheckedGenericPlanError::Operation(
+                OperationError::ElementCountOverflow
+            ))
+        ));
     }
 }

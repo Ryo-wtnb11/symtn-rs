@@ -35,6 +35,9 @@ use super::resolution::{CoreMiss, CoreRoute};
 use super::structure::TensorContractAxisPlan;
 use crate::tree_transform::TreeTransformPlanning;
 
+const CHECKED_PLANAR_REQUEST: &str =
+    "the checked Generic planner received a planar contraction request";
+
 #[cfg(test)]
 type CheckedContractResult<P, D> = Result<
     (BoundDynamicFusionMapSpace<P>, Vec<D>),
@@ -335,12 +338,12 @@ where
                     lhs_nout,
                 )
             }
-            // A route capability, not a braiding decision: the checked
-            // planner has no planar route for any style. A Bosonic planar
-            // contraction is the ordinary one, which the facade runs.
+            // The facade admits checked planar contraction for Bosonic
+            // braiding only and runs it as the ordinary contraction, so no
+            // planar request reaches this planner.
             ContractRequest::Planar { .. } => {
-                return Err(OperationError::UnsupportedTensorContractScope {
-                    message: "checked Generic planar contraction requires Bosonic braiding",
+                return Err(OperationError::Internal {
+                    message: CHECKED_PLANAR_REQUEST,
                 }
                 .into())
             }
@@ -1857,9 +1860,9 @@ mod tests {
     }
 
     /// What: the checked planner has no planar route, so even a Bosonic
-    /// planar request is refused before pair admission.
+    /// planar request is an internal error before pair admission.
     #[test]
-    fn checked_planar_request_is_unsupported_for_bosonic_braiding() {
+    fn checked_planar_request_is_internal_for_bosonic_braiding() {
         let (left, lhs, right, rhs) = bound_pair(1, 1);
         let len = lhs.space().required_len().unwrap();
         let orders =
@@ -1878,11 +1881,9 @@ mod tests {
         assert!(
             matches!(
                 error,
-                CheckedGenericPlanError::Operation(
-                    OperationError::UnsupportedTensorContractScope {
-                        message: "checked Generic planar contraction requires Bosonic braiding",
-                    }
-                )
+                CheckedGenericPlanError::Operation(OperationError::Internal {
+                    message: CHECKED_PLANAR_REQUEST,
+                })
             ),
             "{error:?}"
         );

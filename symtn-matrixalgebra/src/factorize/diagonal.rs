@@ -213,7 +213,7 @@ where
             let canonical = authority.commit(staged, |_| Ok(()))?;
             let regions = checked_sector_regions(canonical.space().structure(), 1)?
                 .filter(|regions| aligned_one_tree_regions(regions))
-                .ok_or(OperationError::UnsupportedTensorContractScope {
+                .ok_or(OperationError::Internal {
                     message: "canonical bond layout has no aligned coupled-sector diagonal",
                 })?;
             (BondSpace::Normalized(canonical), regions)

@@ -70,7 +70,7 @@ where
 ///
 /// - [`OperationError::SpaceMismatch`] for a non-endomorphism or an output
 ///   whose hom space differs, and
-///   [`OperationError::UnsupportedTensorContractScope`] for an output layout
+///   [`OperationError::Internal`] for an output layout
 ///   without canonical coupled-sector storage;
 /// - on the Hermitian route, the eigensolver's error, or a
 ///   [`symtn_dense::DenseError::NumericalFailure`] with op
@@ -975,7 +975,7 @@ pub trait MatrixFunctionOp<R, D: FactorScalar>: Apply<R, D> {
 /// | [`op::Pinv`] | `input^+` | `(parent^H)^+` | `spectrum^+` |
 ///
 /// A refused source is an
-/// [`OperationError::UnsupportedTensorContractScope`], before any lease or
+/// [`OperationError::Internal`], before any lease or
 /// value scan.
 ///
 /// # Preconditions
@@ -1032,7 +1032,7 @@ where
 }
 
 fn no_route(message: &'static str) -> OperationError {
-    OperationError::UnsupportedTensorContractScope { message }
+    OperationError::Internal { message }
 }
 
 /// The source dispatch of exp, inv and solve, which have a dense route

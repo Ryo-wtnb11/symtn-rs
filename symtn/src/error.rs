@@ -11,10 +11,13 @@ use crate::typed::{PayloadRepresentation, SignatureField};
 /// Error produced by the user-layer [`crate::typed::TensorMap`] /
 /// [`crate::typed::GradedSpace`] / [`crate::typed::Runtime`] API.
 ///
-/// Lower-layer errors ([`CoreError`], [`OperationError`]) are passed through
-/// unchanged; [`Error::Internal`] reports a bug in symtn itself; the
-/// remaining variants report user-level misuse (mixing rules or mixing
-/// runtimes).
+/// Lower-layer errors ([`CoreError`], [`OperationError`]) are passed through,
+/// except that a lower internal invariant ([`OperationError::Internal`],
+/// [`OperationError::StructureMismatch`]) becomes [`Error::Internal`] and a
+/// device tree-transform limit becomes [`Error::UnsupportedOnDevice`].
+/// [`Error::Internal`] reports a bug in symtn itself, whichever layer
+/// detects it; the remaining variants report user-level misuse (mixing rules
+/// or mixing runtimes).
 ///
 /// A wrapping variant's `Display` names only its own layer; the wrapped error
 /// is reached through [`std::error::Error::source`], so a chain printer shows
@@ -200,6 +203,12 @@ impl From<OperationError> for Error {
             OperationError::UnsupportedDeviceTreeTransform { message } => {
                 Self::UnsupportedOnDevice(message.to_owned())
             }
+            OperationError::Internal { message } => Self::Internal(message),
+            // Why not keep the `tensor` name: `Error::Internal` holds a
+            // `&'static str`, and no facade input reaches this precondition.
+            OperationError::StructureMismatch { .. } => {
+                Self::Internal("an operand does not match the structure its plan was compiled for")
+            }
             other => Self::Operation(Box::new(other)),
         }
     }
@@ -214,5 +223,23 @@ impl From<TruncationError> for Error {
 impl From<FusionAlgebraError> for Error {
     fn from(err: FusionAlgebraError) -> Self {
         Self::FusionAlgebra(Box::new(err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lower_internal_invariants_are_the_facade_internal_error() {
+        let message = "a lower invariant";
+        assert_eq!(
+            Error::from(OperationError::Internal { message }),
+            Error::Internal(message)
+        );
+        assert!(matches!(
+            Error::from(OperationError::StructureMismatch { tensor: "dst" }),
+            Error::Internal(_)
+        ));
     }
 }

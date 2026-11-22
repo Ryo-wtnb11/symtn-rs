@@ -2283,7 +2283,7 @@ impl<R, D: FactorScalar> Run<R, D> for op::SvdFull {
             source,
             Some(FactorFamily::Svd),
             |_, _| {
-                Err(OperationError::UnsupportedTensorContractScope {
+                Err(OperationError::Internal {
                     message: "full SVD of a compact diagonal runs the compact route",
                 }
                 .into())
