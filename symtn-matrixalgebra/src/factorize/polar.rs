@@ -322,12 +322,12 @@ where
         input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
     let w_space = authority.same_homspace_output(input.space())?;
     let w_regions = checked_sector_regions(w_space.space().structure(), w_space.space().nout())?
-        .ok_or(OperationError::UnsupportedTensorContractScope {
+        .ok_or(OperationError::Internal {
             message: "polar requires coupled-sector W storage",
         })?;
     let p_nout = p_space.space().nout();
     let p_regions = checked_sector_regions(p_space.space().structure(), p_nout)?.ok_or(
-        OperationError::UnsupportedTensorContractScope {
+        OperationError::Internal {
             message: "polar requires coupled-sector P storage",
         },
     )?;

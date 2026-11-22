@@ -121,7 +121,7 @@ where
 /// The refusal of a [`FactorSource::AdjointOf`] by an operation without a
 /// lazy-adjoint route: its caller materializes or redirects the adjoint.
 fn no_adjoint_route() -> OperationError {
-    OperationError::UnsupportedTensorContractScope {
+    OperationError::Internal {
         message:
             "this factorization has no lazy-adjoint route; materialize or redirect the adjoint",
     }

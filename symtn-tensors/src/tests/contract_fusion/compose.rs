@@ -505,7 +505,7 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
             _contracted: usize,
             _cols: usize,
         ) -> Result<(), OperationError> {
-            Err(OperationError::UnsupportedTensorContractScope {
+            Err(OperationError::Internal {
                 message: "injected storage GEMM failure",
             })
         }
@@ -525,7 +525,7 @@ fn fermionic_tensorcompose_keeps_coefficient_free_semantics() {
             _rhs_op: MatrixOp,
             _alpha: f64,
         ) -> Result<(), OperationError> {
-            Err(OperationError::UnsupportedTensorContractScope {
+            Err(OperationError::Internal {
                 message: "injected scaled storage GEMM failure",
             })
         }

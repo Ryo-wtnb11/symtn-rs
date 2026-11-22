@@ -496,10 +496,7 @@ fn direct_batch_rejects_overlapping_destination_ranges() {
         group_plan((3, 2, 5), (6, 12, 7)),
     ];
     let error = compile_group_execution(&groups).unwrap_err();
-    assert!(matches!(
-        error,
-        OperationError::UnsupportedTensorContractScope { .. }
-    ));
+    assert!(matches!(error, OperationError::Internal { .. }));
 }
 
 #[test]
@@ -593,7 +590,7 @@ fn a_group_matrix_not_in_place_is_unsupported() {
     .unwrap();
     assert!(matches!(
         compile_group_execution(&[plan]).unwrap_err(),
-        OperationError::UnsupportedTensorContractScope {
+        OperationError::Internal {
             message: NON_COUPLED_OPERAND_MESSAGE
         }
     ));
@@ -645,7 +642,7 @@ fn op_bearing_plan_rejects_unsupported_storage_gemm_before_mutation() {
         .unwrap_err();
     assert!(matches!(
         error,
-        OperationError::UnsupportedTensorContractScope {
+        OperationError::Internal {
             message: "storage GEMM backend does not implement scaled replay"
         }
     ));
@@ -952,7 +949,7 @@ fn scaled_storage_jobs_keep_canonical_coefficients_aligned_and_convert_payload()
     .unwrap();
     assert!(matches!(
         non_sign.require_identity_signed_direct_replay(),
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "signed stacked replay requires exact unit-magnitude coefficients"
         })
     ));
@@ -1029,7 +1026,7 @@ fn scaled_storage_jobs_keep_canonical_coefficients_aligned_and_convert_payload()
         .unwrap_err();
     assert!(matches!(
         error,
-        OperationError::UnsupportedTensorContractScope {
+        OperationError::Internal {
             message: "storage GEMM backend does not implement scaled replay"
         }
     ));
@@ -1481,7 +1478,7 @@ fn a_storage_gemm_without_the_axpby_entry_rejects_before_writing() {
         )
         .unwrap_err();
     assert!(
-        matches!(error, OperationError::UnsupportedTensorContractScope { .. }),
+        matches!(error, OperationError::Internal { .. }),
         "{error:?}"
     );
     assert_eq!(gemm.unit_calls, 0);

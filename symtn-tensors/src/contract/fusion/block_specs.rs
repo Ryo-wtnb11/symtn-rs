@@ -66,6 +66,21 @@ impl ContractBlockSource for FusionOperandLayout<'_> {
     }
 }
 
+/// The block specs of the core-form contraction of `lhs` and `rhs` into
+/// `dst` over `axes`.
+///
+/// # Preconditions
+///
+/// `axes` must be a core-form source contraction: `lhs`'s contracted legs
+/// are its domain and `rhs`'s its codomain, in order, so no source tree-pair
+/// transform is needed. The facade pre-transforms operands to that form; a
+/// direct call with any other axes is refused with
+/// [`OperationError::Internal`].
+///
+/// # Errors
+///
+/// [`OperationError::StructureMismatch`] when `dst` is not the contracted
+/// hom space, and [`OperationError::Internal`] for the precondition above.
 pub fn tensorcontract_fusion_block_specs<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
@@ -115,7 +130,7 @@ where
         axis_plan.lhs_contracting_axes.as_slice(),
         axis_plan.rhs_contracting_axes.as_slice(),
     ) {
-        return Err(OperationError::UnsupportedTensorContractScope {
+        return Err(OperationError::Internal {
             message: SOURCE_TRANSFORM_REQUIRES_EXPLICIT,
         });
     }

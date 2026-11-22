@@ -94,7 +94,7 @@ where
                 engine, workspace, dst_data, lhs_data, rhs_data, rows, contracted, cols,
             );
         }
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "contract backend does not implement the accumulate-form rank-2 GEMM",
         })
     }
@@ -161,7 +161,7 @@ where
                 engine, workspace, dst_data, lhs_data, rhs_data, jobs, runs, alpha, beta,
             );
         }
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::Internal {
             message: "contract backend does not implement transpose/adjoint rank-2 batches",
         })
     }
@@ -807,7 +807,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             error,
-            OperationError::UnsupportedTensorContractScope {
+            OperationError::Internal {
                 message: "contract backend does not implement transpose/adjoint rank-2 batches"
             }
         ));

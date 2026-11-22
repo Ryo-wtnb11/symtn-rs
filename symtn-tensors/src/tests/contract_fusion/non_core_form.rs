@@ -397,7 +397,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
     .unwrap_err();
     assert_eq!(
             err,
-            OperationError::UnsupportedTensorContractScope {
+            OperationError::Internal {
                 message: "fusion contraction requiring source tree-pair transforms is not implemented; pre-transform operands explicitly",
             }
         );

@@ -673,6 +673,8 @@ pub symtn_operations::OperationError::FusionAlgebra(alloc::boxed::Box<symtn_sect
 pub symtn_operations::OperationError::FusionTreeGroupMismatch
 pub symtn_operations::OperationError::FusionTreeGroupMismatch::index: usize
 pub symtn_operations::OperationError::FusionTreeGroupMismatch::tensor: &'static str
+pub symtn_operations::OperationError::Internal
+pub symtn_operations::OperationError::Internal::message: &'static str
 pub symtn_operations::OperationError::InvalidArgument
 pub symtn_operations::OperationError::InvalidArgument::message: &'static str
 pub symtn_operations::OperationError::InvalidAxisSet
@@ -717,8 +719,6 @@ pub symtn_operations::OperationError::UnsupportedDeviceTreeTransform::message: &
 pub symtn_operations::OperationError::UnsupportedFusionStyle
 pub symtn_operations::OperationError::UnsupportedFusionStyle::operation: alloc::boxed::Box<symtn_operations::TreeTransformOperation>
 pub symtn_operations::OperationError::UnsupportedFusionStyle::style: symtn_sectors::FusionStyleKind
-pub symtn_operations::OperationError::UnsupportedTensorContractScope
-pub symtn_operations::OperationError::UnsupportedTensorContractScope::message: &'static str
 pub symtn_operations::OperationError::UnsupportedTreeTransformScope
 pub symtn_operations::OperationError::UnsupportedTreeTransformScope::message: &'static str
 pub symtn_operations::OperationError::UnsupportedTreeTransformScope::operation: alloc::boxed::Box<symtn_operations::TreeTransformOperation>

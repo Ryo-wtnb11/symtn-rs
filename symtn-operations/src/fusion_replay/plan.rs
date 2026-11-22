@@ -512,7 +512,7 @@ pub(super) fn compile_group_execution<C>(
             group.rhs.direct_offset,
             group.dst.direct_offset,
         ) else {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: NON_COUPLED_OPERAND_MESSAGE,
             });
         };
@@ -555,7 +555,7 @@ fn validate_disjoint_direct_destinations(jobs: &[Rank2GemmBatchJob]) -> Result<(
             .checked_add(len)
             .ok_or_else(|| OperationError::ElementCountOverflow)?;
         if end > pair[1].0 {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "core contraction groups must write disjoint destination ranges",
             });
         }

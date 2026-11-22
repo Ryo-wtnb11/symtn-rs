@@ -447,7 +447,7 @@ pub(super) fn sector_region_index_map(
     let mut by_sector = FxHashMap::with_capacity_and_hasher(regions.len(), Default::default());
     for (index, region) in regions.iter().enumerate() {
         if by_sector.insert(region_sector(region), index).is_some() {
-            return Err(OperationError::UnsupportedTensorContractScope {
+            return Err(OperationError::Internal {
                 message: "coupled-sector region description contains a duplicate sector",
             });
         }
