@@ -1608,8 +1608,15 @@ fn checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublishe
             BraidingStyleKind::Fermionic,
             -1.0,
         ));
-        let v =
-            GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 1), (Label::X, 1)]).unwrap();
+        let v = GradedSpace::try_new(
+            Arc::clone(&provider),
+            if late {
+                vec![(Label::Unit, 2)]
+            } else {
+                vec![(Label::Unit, 1), (Label::X, 1)]
+            },
+        )
+        .unwrap();
         let dual = v.try_dual().unwrap();
         let mut filled = |codomain: &[&GradedSpace<_>], domain: &[&GradedSpace<_>], seed: f64| {
             TensorMap::from_subblock_fn(
@@ -1622,17 +1629,18 @@ fn checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublishe
             .unwrap()
         };
         let (a, b, mut destination, spec) = if late {
-            // Both source orders differ from the core; theta varies within
-            // a coupled sector and must follow the staged source transforms.
+            // Both sources change split to 1/1, so theta follows both staged
+            // transforms. Unit-only bends have F = 1; this toy's R = 0 would
+            // erase the destination rows of a transform with crossings.
             (
-                filled(&[&v, &dual], &[&v, &v], 1.0),
-                filled(&[&v, &dual], &[&v, &dual], 3.0),
-                filled(&[&v, &dual], &[&v, &v], -7.0),
+                filled(&[&v, &v], &[], 1.0),
+                filled(&[], &[&v, &v], 3.0),
+                filled(&[&v], &[&v], -7.0),
                 ContractSpec {
-                    lhs: &[1, 0],
-                    rhs: &[3, 1],
-                    codomain: &[2, 0],
-                    domain: &[3, 1],
+                    lhs: &[1],
+                    rhs: &[1],
+                    codomain: &[0],
+                    domain: &[1],
                 },
             )
         } else {
