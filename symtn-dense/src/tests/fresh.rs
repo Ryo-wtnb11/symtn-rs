@@ -1,6 +1,6 @@
 //! `DenseExecutor::matmul_batch_fresh`: every job's output is
 //! `alpha * op(A) op(B)` in its own piece, reported once, without reading
-//! the destination; the default executor keeps its initialized route choice.
+//! the destination.
 
 use core::mem::MaybeUninit;
 use core::ops::{Add, Mul};
@@ -432,6 +432,43 @@ fn a_panic_after_a_finished_job_reports_no_job() {
 }
 
 #[cfg(feature = "tenferro")]
+#[test]
+fn default_fresh_entry_refuses_a_zero_fill_that_returns_other_storage() {
+    fn foreign(piece: &mut [MaybeUninit<f64>]) -> &mut [f64] {
+        let _ = piece;
+        vec![0.0; 6].leak()
+    }
+    let engine = &mut CpuEngine::serial();
+    let jobs = [batch_job((3, 4, 2), (0, 0, 0))];
+    let (lhs, rhs) = ([1.0; 12], [2.0; 8]);
+    let mut buffer = [MaybeUninit::<f64>::uninit(); 6];
+    let mut parts = vec![(0, &mut buffer[..])];
+    let mut written = |_: usize, _: &mut [f64]| panic!("nothing is reported on error");
+    let error = ScalarLoop::new()
+        .matmul_batch_fresh(
+            engine,
+            DenseFreshSegments::F64 {
+                segments: &mut parts,
+                zeroed: foreign,
+                written: &mut written,
+            },
+            DenseRead::F64(DenseView::new(&lhs, &[12], &[1], 0).unwrap()),
+            DenseRead::F64(DenseView::new(&rhs, &[8], &[1], 0).unwrap()),
+            &jobs,
+            [MatrixOp::Identity; 2],
+            DenseScalar::F64(1.0),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        DenseError::Unsupported {
+            op: "matmul_batch_fresh",
+            ..
+        }
+    ));
+}
+
+#[cfg(feature = "tenferro")]
 mod default_executor {
     use super::*;
 
@@ -550,86 +587,6 @@ mod default_executor {
         }
     }
 
-    /// A grouped batch whose `k = 0` job has no vendor plan, so the
-    /// initialized BLAS group goes native as a whole.
-    fn mixed_zero_k() -> Vec<DenseGemmBatchJob> {
-        vec![
-            batch_job((2, 3, 2), (0, 0, 0)),
-            batch_job((2, 0, 2), (5, 0, 0)),
-        ]
-    }
-
-    #[test]
-    fn fresh_batches_keep_the_initialized_route_except_gapped_runs() {
-        let engine = &mut CpuEngine::serial();
-        let mut cases = fixtures();
-        cases.retain(|(name, _)| *name != "heterogeneous");
-        cases.push(("mixed zero k", mixed_zero_k()));
-        for (name, jobs) in cases {
-            let (lhs, rhs) = operands::<f64>(&jobs);
-            let runs = strided_batch_runs(&jobs);
-            let len = destination_len(&jobs);
-            // The mixed batch is handed over as the one destination its
-            // initialized call writes; the others as their maximal runs.
-            let segments = if name == "mixed zero k" {
-                vec![(0, len)]
-            } else {
-                segments_of(&jobs)
-            };
-            for ops in [IDENTITY, OPS] {
-                let mut initialized = DefaultDenseExecutor::new();
-                let mut output = vec![0.0; len];
-                let (shape, lhs_shape, rhs_shape, strides) = ([len], [lhs.len()], [rhs.len()], [1]);
-                initialized
-                    .matmul_batch_axpby_with_ops_into(
-                        engine,
-                        DenseWrite::F64(
-                            DenseViewMut::new(&mut output, &shape, &strides, 0).unwrap(),
-                        ),
-                        DenseRead::F64(DenseView::new(&lhs, &lhs_shape, &strides, 0).unwrap()),
-                        DenseRead::F64(DenseView::new(&rhs, &rhs_shape, &strides, 0).unwrap()),
-                        &jobs,
-                        &runs,
-                        ops[0],
-                        ops[1],
-                        DenseScalar::F64(1.0),
-                        DenseScalar::F64(0.0),
-                    )
-                    .unwrap();
-                let mut fresh = DefaultDenseExecutor::new();
-                let mut buffer = poisoned::<f64>(len);
-                run_fresh(
-                    &mut fresh,
-                    engine,
-                    &mut buffer,
-                    &segments,
-                    &lhs,
-                    &rhs,
-                    &jobs,
-                    ops,
-                    1.0,
-                )
-                .unwrap();
-                let what = format!("{name} {ops:?}");
-                if name == "gapped run" {
-                    assert_eq!(initialized.staged_grouped_jobs(), 0, "{what}");
-                    assert_eq!(fresh.staged_grouped_jobs(), jobs.len(), "{what}");
-                    continue;
-                }
-                assert_eq!(
-                    fresh.seam_dispatches(),
-                    initialized.seam_dispatches(),
-                    "{what}"
-                );
-                assert_eq!(
-                    fresh.staged_grouped_jobs(),
-                    initialized.staged_grouped_jobs(),
-                    "{what}"
-                );
-            }
-        }
-    }
-
     fn many_segments_on<T: Val>(engine: &mut dyn Engine) {
         // Every job in its own one-element segment, in a job order unrelated
         // to destination order, so each job's segment must be found by
@@ -691,39 +648,38 @@ mod default_executor {
         }
     }
 
+    /// The executor must leave the first destination write to the GEMM.
     #[test]
-    fn fresh_entry_refuses_a_zero_fill_that_returns_other_storage() {
-        fn foreign(piece: &mut [MaybeUninit<f64>]) -> &mut [f64] {
-            let _ = piece;
-            vec![0.0; 6].leak()
+    fn fresh_batches_do_not_call_the_caller_zero_fill() {
+        fn no_fill(_: &mut [MaybeUninit<f64>]) -> &mut [f64] {
+            panic!("the GEMM must first-write its destination")
         }
         let engine = &mut CpuEngine::serial();
-        let jobs = [batch_job((3, 4, 2), (0, 0, 0))];
-        let (lhs, rhs) = operands::<f64>(&jobs);
-        let mut buffer = poisoned::<f64>(6);
-        let mut parts = vec![(0, &mut buffer[..])];
-        let mut written = |_: usize, _: &mut [f64]| panic!("nothing is reported on error");
-        let error = DefaultDenseExecutor::new()
-            .matmul_batch_fresh(
-                engine,
-                DenseFreshSegments::F64 {
-                    segments: &mut parts,
-                    zeroed: foreign,
-                    written: &mut written,
-                },
-                DenseRead::F64(DenseView::new(&lhs, &[12], &[1], 0).unwrap()),
-                DenseRead::F64(DenseView::new(&rhs, &[8], &[1], 0).unwrap()),
-                &jobs,
-                IDENTITY,
-                DenseScalar::F64(1.0),
-            )
-            .unwrap_err();
-        assert!(matches!(
-            error,
-            DenseError::Unsupported {
-                op: "matmul_batch_fresh",
-                ..
+        let jobs = [
+            batch_job((2, 3, 2), (0, 0, 0)),
+            batch_job((2, 3, 2), (4, 6, 6)),
+        ];
+        let (lhs, rhs) = ([1.0; 12], [2.0; 12]);
+        for jobs in [&jobs[..1], &jobs[..]] {
+            for ops in [IDENTITY, OPS] {
+                let mut buffer = [MaybeUninit::<f64>::uninit(); 8];
+                let mut parts = [(0, &mut buffer[..])];
+                DefaultDenseExecutor::new()
+                    .matmul_batch_fresh(
+                        engine,
+                        DenseFreshSegments::F64 {
+                            segments: &mut parts,
+                            zeroed: no_fill,
+                            written: &mut |_, _| {},
+                        },
+                        DenseRead::F64(DenseView::new(&lhs, &[12], &[1], 0).unwrap()),
+                        DenseRead::F64(DenseView::new(&rhs, &[12], &[1], 0).unwrap()),
+                        jobs,
+                        ops,
+                        DenseScalar::F64(1.0),
+                    )
+                    .unwrap();
             }
-        ));
+        }
     }
 }

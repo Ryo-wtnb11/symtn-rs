@@ -24,7 +24,7 @@ use tcontract_exec::{BatchQuery, Exec};
 use tenferro_cpu::CpuEngine;
 
 use super::driver::{self, BlockOp, Entry, LaneMembers, OpKind};
-use crate::fresh::{split_fresh_segments, FreshParts};
+use crate::fresh::{split_fresh_segments, split_single_fresh_segment, FreshParts};
 use crate::lanes::{self, recycle, Grant, GrantKey, LaneTables};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
@@ -675,19 +675,35 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
     alpha: T,
 ) -> Result<(), DenseError> {
     let [lhs_len, rhs_len] = grouped_operand_lens(lhs, rhs, jobs)?;
-    let mut slots: FreshSlots<'a, T> = scratch.take_fresh_slots();
-    let GemmScratch {
-        order,
-        geometries,
-        plans,
-        lanes,
-        ..
-    } = scratch;
-    slots.reserve(jobs.len());
-    index_plans::<T>(geometries, plans, jobs, ops, |plan| {
-        slots.push((plan, &mut [][..], &mut [][..]))
-    })?;
-    split_fresh_segments(parts.segments, jobs, order, |j, piece| slots[j].1 = piece)?;
+    let mut kept_slots: FreshSlots<'a, T> = scratch.take_fresh_slots();
+    let mut single_slot = [(0, &mut [][..], &mut [][..])];
+    let single_plan;
+    // A one-job eager executor needs no heap staging beyond the cached plan.
+    let (plans, slots): (&[_], &mut [_]) = if let [job] = jobs {
+        let Some(piece) = split_single_fresh_segment(parts.segments, job)? else {
+            scratch.keep_fresh_slots(kept_slots);
+            (parts.written)(0, &mut []);
+            return Ok(());
+        };
+        single_plan = [erased_plan::<T>(Geometry::new(job, ops)?)?];
+        #[cfg(test)]
+        crate::probe::add(crate::probe::Event::GemmPlanLookup, 1);
+        single_slot[0].1 = piece;
+        (&single_plan, &mut single_slot)
+    } else {
+        kept_slots.reserve(jobs.len());
+        index_plans::<T>(
+            &mut scratch.geometries,
+            &mut scratch.plans,
+            jobs,
+            ops,
+            |plan| kept_slots.push((plan, &mut [][..], &mut [][..])),
+        )?;
+        split_fresh_segments(parts.segments, jobs, &mut scratch.order, |j, piece| {
+            kept_slots[j].1 = piece
+        })?;
+        (&scratch.plans, &mut kept_slots)
+    };
 
     let blocks = FreshGemmBlocks {
         jobs,
@@ -697,13 +713,13 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         alpha,
         destination: PhantomData,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
+    let result = driver::drive(cpu, &blocks, slots, &mut scratch.lanes);
     if result.is_ok() {
         for (j, (_, _, written)) in slots.iter_mut().enumerate() {
             (parts.written)(j, std::mem::take(written));
         }
     }
-    plans.clear();
-    scratch.keep_fresh_slots(slots);
+    scratch.plans.clear();
+    scratch.keep_fresh_slots(kept_slots);
     result
 }

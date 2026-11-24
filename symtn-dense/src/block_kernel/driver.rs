@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use tcontract_exec::{Exec, WorkModel};
+use tcontract_exec::{BatchQuery, BatchStrategy, Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
 use crate::lanes::{self, Grant, GrantKey, JobModel, LaneAllocationCache, LaneTables};
@@ -287,6 +287,31 @@ fn on_lanes<B: BlockOp>(
     jobs: &mut [B::Job],
     tables: &mut LaneTables,
 ) -> tenferro_tensor::Result<lanes::Outcome<DenseError>> {
+    // One job needs the same share without heap placement or lane staging.
+    if let [job] = jobs {
+        let work = op.work(0, job);
+        let model = &exec.batch_policy().model;
+        let serial = if exec.budget() >= 2 {
+            op.serial(0, job, model, work)
+        } else {
+            cost(B::KIND, work, model)
+        };
+        let share = if exec.batch_policy().strategy == BatchStrategy::Auto {
+            exec.token_ref().width_for(serial, 1).get()
+        } else {
+            let decision = exec.batch_decision(&BatchQuery::new(1, work));
+            decision.lanes * decision.item_threads
+        };
+        let lane_exec = exec
+            .reborrow()
+            .limit(std::num::NonZeroUsize::new(share).unwrap_or(std::num::NonZeroUsize::MIN));
+        let mut lane = op.lane(&mut |each| each(job), &lane_exec);
+        #[cfg(test)]
+        crate::probe::add(crate::probe::Event::BlockLanes, 1);
+        return Ok(op
+            .run(0, job, &mut lane, lane_exec)
+            .map_err(|error| (0, error)));
+    }
     place(exec, op, jobs, lanes::lane_allocations(), tables);
     let placement = tables.placement();
     #[cfg(test)]
