@@ -895,30 +895,8 @@ where
         .collect()
 }
 
-/// Checked Generic Fermionic contraction is refused by the braiding
-/// admission before the compact arm, with the same typed facade error for
-/// every listed pattern and storage form.
-fn assert_checked_fermionic_contract_refused<D>(fixture: &BondFixture<CheckedZ2, D>)
-where
-    D: TensorScalar + std::fmt::Debug,
-    <CheckedZ2 as TypedSectorAdmission>::Mode: TypedTensorContractDispatch<CheckedZ2, D>,
-{
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    for (what, _, lhs, rhs, spec) in CONTRACT_CASES {
-        let spec = spec.unwrap();
-        let error = pick(fixture, lhs)
-            .contract(engine, pick(fixture, rhs), &spec)
-            .err()
-            .unwrap();
-        assert!(
-            is_checked_refusal(&error, symtn::typed::BraidingOp::Contraction),
-            "{what}: {error:?}"
-        );
-    }
-}
-
 /// Whether `error` is exactly the facade refusal of `expected` over the
-/// fixture's Fermionic braiding.
+/// fixture's Anyonic braiding.
 fn is_checked_refusal(
     error: &symtn::typed::GenericTensorError<InvalidSector>,
     expected: symtn::typed::BraidingOp,
@@ -930,7 +908,7 @@ fn is_checked_refusal(
                 **operation,
                 symtn::typed::OperationError::UnsupportedContractionBraiding {
                     operation: actual,
-                    style: BraidingStyleKind::Fermionic,
+                    style: BraidingStyleKind::Anyonic,
                 } if actual == expected
             )
     )
@@ -1012,9 +990,8 @@ fn compact_compose_and_contract_agree_across_modes() {
 fn fermionic_compact_compose_and_contract_agree_across_modes() {
     let _serial = crate::counting_alloc::serial();
     // What: the fermionic row. Composition is admitted in both modes and
-    // agrees; every multiplicity-free compact arm agrees with its dense
-    // route. Checked Generic fermionic contraction is refused whatever the
-    // storage form.
+    // agrees; every compact contraction arm agrees with its dense route
+    // and across modes.
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
     for complex in [false, true] {
         let conv = move |x: f64| {
@@ -1033,11 +1010,7 @@ fn fermionic_compact_compose_and_contract_agree_across_modes() {
             parity,
             conv,
         );
-        assert_rows_close(
-            &mf[..COMPOSE_CASES.len()],
-            &bond_rows(&checked, &COMPOSE_CASES),
-        );
-        assert_checked_fermionic_contract_refused(&checked);
+        assert_rows_close(&mf, &bond_rows(&checked, &cases));
     }
 }
 
@@ -1304,24 +1277,20 @@ fn checked_compose_arms_query_no_provider() {
 fn checked_contraction_refuses_a_cold_borrowed_adjoint_before_resolving_it() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: every checked contraction entry decides braiding from the
+    // What: every ordinary checked contraction entry decides braiding from the
     // provider style before it resolves a borrowed adjoint view. The view
     // of a dense `a: W ⊗ W ← W` on cold caches, whose resolution needs a
     // fallible provider query, still gets the entry's typed refusal, and no
     // query is made.
-    use symtn::typed::BraidingOp::{Contraction, PlanarContraction};
+    use symtn::typed::BraidingOp::Contraction;
     let fixture = bond_fixture(
-        &z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0)),
+        &z2_leg(CheckedZ2::new(BraidingStyleKind::Anyonic, -1.0)),
         parity,
         |x: f64| x,
     );
     let d = fixture.d.materialize(engine).unwrap();
     // `d · a†` is `W ← W ⊗ W`, `b`'s space.
-    let mut destinations = [
-        fixture.b.zeros_like(engine).unwrap(),
-        fixture.b.zeros_like(engine).unwrap(),
-    ];
-    let [ordinary_dst, planar_dst] = &mut destinations;
+    let ordinary_dst = &mut fixture.b.zeros_like(engine).unwrap();
     let one_leg = spec(&[1], &[0], &[0], &[1, 2]);
     let provider = fixture.a.provider();
     symtn_core::clear_structure_caches();
@@ -1338,16 +1307,6 @@ fn checked_contraction_refuses_a_cold_borrowed_adjoint_before_resolving_it() {
             "contract_into",
             Contraction,
             d.contract_into(engine, view(), &one_leg, ordinary_dst, 1.0, 0.0),
-        ),
-        (
-            "planar_contract",
-            PlanarContraction,
-            d.planar_contract(engine, view(), &one_leg).map(drop),
-        ),
-        (
-            "planar_contract_into",
-            PlanarContraction,
-            d.planar_contract_into(engine, view(), &one_leg, planar_dst, 1.0, 0.0),
         ),
     ];
     assert_eq!(provider.queries.load(Ordering::Relaxed), queries);
@@ -1497,8 +1456,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
     let _serial = crate::counting_alloc::serial();
     // What: the dense operands carry a dual open leg (`a: W ⊗ W' ← W`), so
     // the reordered arms permute a dual leg past the bond under a fermionic
-    // rule; they agree with the multiplicity-free dense route, compose
-    // agrees across modes, and checked contraction is refused.
+    // rule; compose and contract agree with the dense route and across modes.
     let cases: Vec<BondCase> = COMPOSE_CASES.into_iter().chain(CONTRACT_CASES).collect();
     fn fixture<R>(leg: GradedSpace<R>) -> BondFixture<R, Complex64>
     where
@@ -1512,11 +1470,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
     }
     let mf = bond_rows(&fixture(z2_leg(FermionParityFusionRule::new())), &cases);
     let checked = fixture(z2_leg(CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0)));
-    assert_rows_close(
-        &mf[..COMPOSE_CASES.len()],
-        &bond_rows(&checked, &COMPOSE_CASES),
-    );
-    assert_checked_fermionic_contract_refused(&checked);
+    assert_rows_close(&mf, &bond_rows(&checked, &cases));
 }
 
 // ---- Rank-(1,1) swap and braid ----
@@ -3171,11 +3125,11 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
 fn checked_contract_into_reports_the_same_error_cold_and_warm() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: the braiding admission (which refuses a checked fermionic
+    // What: the braiding admission (which refuses a checked anyonic
     // contraction) and staging run before the destination match, and no contraction staging step is
     // deferred to planning on a memo hit, so a call reports eager's staging
     // error cold and warm, on the result's space and on a wrong one alike.
-    let rule = CheckedZ2::new(BraidingStyleKind::Fermionic, -1.0).with_salt(0xf0);
+    let rule = CheckedZ2::new(BraidingStyleKind::Anyonic, -1.0).with_salt(0xf0);
     let fixture = bond_fixture(&z2_leg(rule), parity, |x: f64| x);
     let case = DENSE_AND_ARM_CASES[1];
     let (_, _, lhs, rhs, spec) = case;

@@ -363,13 +363,25 @@ where
     if rule.braiding_style() != BraidingStyleKind::Fermionic {
         return Ok(R::Scalar::one());
     }
+    contract_twist_factor(rhs, rhs_contracting_axes, rhs_core_codomain, |sector| {
+        Ok(rule.twist_scalar(sector))
+    })
+}
+
+pub(crate) fn contract_twist_factor<C: DenseBlockScalar, E: From<OperationError>>(
+    rhs: OrientedFusionTreeHomSpace<'_>,
+    rhs_contracting_axes: &[usize],
+    rhs_core_codomain: &FusionTreeKey,
+    mut theta: impl FnMut(SectorId) -> Result<C, E>,
+) -> Result<C, E> {
     if rhs_contracting_axes.len() != rhs_core_codomain.uncoupled().len() {
         return Err(OperationError::StructureRankMismatch {
             expected: rhs_contracting_axes.len(),
             actual: rhs_core_codomain.uncoupled().len(),
-        });
+        }
+        .into());
     }
-    let mut factor = R::Scalar::one();
+    let mut factor = C::one();
     for (position, &axis) in rhs_contracting_axes.iter().enumerate() {
         if rhs
             .external_axis_is_dual(axis)
@@ -379,10 +391,32 @@ where
                 rank: rhs.rank(),
             })?
         {
-            factor = factor * rule.twist_scalar(rhs_core_codomain.uncoupled()[position]);
+            factor = factor * theta(rhs_core_codomain.uncoupled()[position])?;
         }
     }
     Ok(factor)
+}
+
+pub(crate) fn uniform_contract_twist<'t, C: DenseBlockScalar, E: From<OperationError>>(
+    rhs: OrientedFusionTreeHomSpace<'_>,
+    rhs_contracting_axes: &[usize],
+    row_trees: impl IntoIterator<Item = &'t FusionTreeKey>,
+    mut theta: impl FnMut(SectorId) -> Result<C, E>,
+) -> Result<Option<C>, E> {
+    let mut row_trees = row_trees.into_iter();
+    let Some(first) = row_trees.next() else {
+        return Err(OperationError::Internal {
+            message: "canonical RHS coupled region has no row fusion tree",
+        }
+        .into());
+    };
+    let alpha = contract_twist_factor(rhs, rhs_contracting_axes, first, &mut theta)?;
+    for tree in row_trees {
+        if contract_twist_factor(rhs, rhs_contracting_axes, tree, &mut theta)? != alpha {
+            return Ok(None);
+        }
+    }
+    Ok(Some(alpha))
 }
 
 pub(crate) fn external_axis_is_dual(

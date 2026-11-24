@@ -339,10 +339,7 @@ impl<C> TensorTraceFusionStructure<C> {
         // Captured before any cache-4 lookup: a reset during the compile
         // leaves its built groups unpublished.
         let epoch = symtn_core::core_reset_epoch();
-        crate::admission::admit_braiding::<MultiplicityFreeAdmissionMode>(
-            crate::BraidingOp::Trace,
-            rule.braiding_style(),
-        )?;
+        crate::admission::admit_braiding(crate::BraidingOp::Trace, rule.braiding_style())?;
         let axis_plan =
             TensorTraceAxisPlan::compile(src.structure.rank(), dst_structure.rank(), axes)?;
         let admission = preflight(src.homspace, &axis_plan)?;

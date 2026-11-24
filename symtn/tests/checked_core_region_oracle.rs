@@ -32,19 +32,19 @@ use crate::toy_rules;
 use toy_rules::{GenericLabel, GenericToy};
 
 /// The dispatch a provider needs for the fixtures below.
-trait Mode<R: TypedSectorAdmission>:
+pub(crate) trait Mode<R: TypedSectorAdmission, D: symtn::typed::TensorScalar = f64>:
     TypedTensorModeDispatch<R>
-    + TypedTensorConstructionDispatch<R, f64>
-    + TypedTensorContractDispatch<R, f64>
-    + TypedTensorTransformDispatch<R, f64>
+    + TypedTensorConstructionDispatch<R, D>
+    + TypedTensorContractDispatch<R, D>
+    + TypedTensorTransformDispatch<R, D>
 {
 }
 
-impl<R: TypedSectorAdmission, M> Mode<R> for M where
+impl<R: TypedSectorAdmission, D: symtn::typed::TensorScalar, M> Mode<R, D> for M where
     M: TypedTensorModeDispatch<R>
-        + TypedTensorConstructionDispatch<R, f64>
-        + TypedTensorContractDispatch<R, f64>
-        + TypedTensorTransformDispatch<R, f64>
+        + TypedTensorConstructionDispatch<R, D>
+        + TypedTensorContractDispatch<R, D>
+        + TypedTensorTransformDispatch<R, D>
 {
 }
 
@@ -89,14 +89,14 @@ fn label_value<S: Debug>(trees: &BlockFusionTrees<S>, index: &[usize], seed: u64
     hashed_value(&text, seed)
 }
 
-fn operands<R: TypedSectorAdmission>(
+fn operands<R: TypedSectorAdmission, D: symtn::typed::TensorScalar>(
     runtime: &Runtime,
     v: &GradedSpace<R>,
     w: &GradedSpace<R>,
-    value: impl Fn(&BlockFusionTrees<R::Sector>, &[usize], u64) -> f64,
-) -> (TensorMap<R, f64>, TensorMap<R, f64>)
+    value: impl Fn(&BlockFusionTrees<R::Sector>, &[usize], u64) -> D,
+) -> (TensorMap<R, D>, TensorMap<R, D>)
 where
-    R::Mode: Mode<R>,
+    R::Mode: Mode<R, D>,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let a = TensorMap::from_subblock_fn(engine, runtime, [v, w], [v, w], |t, i| value(t, i, 1))
@@ -106,7 +106,7 @@ where
     (a, b)
 }
 
-fn read<R>(block: &CoupledBlock<'_, R, f64>) -> Vec<f64> {
+fn read<R, D: symtn::typed::TensorScalar>(block: &CoupledBlock<'_, R, D>) -> Vec<D> {
     let mut out = Vec::with_capacity(block.rows() * block.cols());
     for c in 0..block.cols() {
         for r in 0..block.rows() {
@@ -392,4 +392,456 @@ fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
         .unwrap()
         .irrep(labels)
         .unwrap()
+}
+
+#[cfg(feature = "cgc-gen")]
+pub(crate) mod fermionic {
+    use super::*;
+    use crate::numerics;
+    use symtn::sector::{
+        product_sector, CheckedGenericAdmissionMode, FermionParityFusionRule, FermionParityIrrep,
+        LieGroupFusionRule, MultiplicityFreeAdmissionMode, ProductFusionRule,
+    };
+    use symtn::typed::{Complex64, Direction, TensorScalar, TypedTensorTwistDispatch};
+
+    pub(crate) trait FermionMode<R: TypedSectorAdmission, D: TensorScalar>:
+        Mode<R, D> + TypedTensorTwistDispatch<R, D>
+    {
+    }
+    impl<R: TypedSectorAdmission, D: TensorScalar, M> FermionMode<R, D> for M where
+        M: Mode<R, D> + TypedTensorTwistDispatch<R, D>
+    {
+    }
+
+    pub(crate) type Su3 =
+        ProductFusionRule<LieGroupFusionRule<CheckedGenericAdmissionMode>, FermionParityFusionRule>;
+
+    pub(crate) fn su3_space() -> GradedSpace<Su3> {
+        let su3 = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(3).unwrap(),
+        )
+        .unwrap();
+        GradedSpace::try_new(
+            Arc::new(ProductFusionRule::try_new(su3, FermionParityFusionRule::new()).unwrap()),
+            [
+                (
+                    product_sector(su_irrep(&[0, 0]), FermionParityIrrep::EVEN),
+                    1,
+                ),
+                (
+                    product_sector(su_irrep(&[1, 1]), FermionParityIrrep::ODD),
+                    2,
+                ),
+                (
+                    product_sector(su_irrep(&[1, 1]), FermionParityIrrep::EVEN),
+                    1,
+                ),
+                (
+                    product_sector(su_irrep(&[1, 0]), FermionParityIrrep::ODD),
+                    1,
+                ),
+                (
+                    product_sector(su_irrep(&[0, 1]), FermionParityIrrep::ODD),
+                    2,
+                ),
+            ],
+        )
+        .unwrap()
+    }
+
+    pub(crate) fn filled<R, D>(
+        engine: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+        codomain: &[&GradedSpace<R>],
+        domain: &[&GradedSpace<R>],
+        seed: u64,
+        value: impl Fn(f64, f64) -> D,
+    ) -> TensorMap<R, D>
+    where
+        R: TypedSectorAdmission,
+        R::Mode: Mode<R, D>,
+        D: TensorScalar,
+    {
+        TensorMap::from_subblock_fn(
+            engine,
+            runtime,
+            codomain.iter().copied(),
+            domain.iter().copied(),
+            |t, i| value(label_value(t, i, seed), label_value(t, i, seed + 97)),
+        )
+        .unwrap()
+    }
+
+    // Every entry is bilinear in the original payloads, including recoupling.
+    pub(crate) fn compare<R, D>(
+        what: &str,
+        got: &TensorMap<R, D>,
+        want: &TensorMap<R, D>,
+        terms: usize,
+    ) where
+        R: TypedSectorAdmission,
+        R::Mode: Mode<R, D>,
+        D: TensorScalar + numerics::Numeric,
+    {
+        assert_eq!(got.codomain(), want.codomain(), "{what}: codomain");
+        assert_eq!(got.domain(), want.domain(), "{what}: domain");
+        numerics::assert_slices_close(
+            what,
+            got.dense_data().unwrap(),
+            want.dense_data().unwrap(),
+            terms,
+        );
+    }
+
+    fn canonical<D>(value: impl Fn(f64, f64) -> D + Copy)
+    where
+        D: TensorScalar + numerics::Numeric + std::ops::AddAssign,
+    {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let v = su3_space();
+        let dual = v.try_dual().unwrap();
+        for uniform in [false, true] {
+            let middle = if uniform { [&dual, &dual] } else { [&v, &dual] };
+            let a = filled(engine, &runtime, &[&v, &v], &middle, 3, value);
+            let b = filled(engine, &runtime, &middle, &[&v], 7, value);
+            let spec = ContractSpec {
+                lhs: &[2, 3],
+                rhs: &[0, 1],
+                codomain: &[0, 1],
+                domain: &[2],
+            };
+            let got = a.contract(engine, &b, &spec).unwrap();
+            let untwisted = a.compose(engine, &b).unwrap();
+            let mut differs = false;
+            let mut multiplicity = false;
+            let mut nonuniform = false;
+            for (sector, block) in got.blocks().unwrap() {
+                let (left, right) = (a.block(&sector).unwrap(), b.block(&sector).unwrap());
+                let mut theta = vec![1.0; right.rows()];
+                for (tree, range) in right.row_trees().unwrap() {
+                    let sign = tree
+                        .uncoupled()
+                        .iter()
+                        .zip(middle)
+                        .filter(|(_, leg)| leg.is_dual())
+                        .fold(1.0, |sign, (s, _)| {
+                            sign * if *s.right() == FermionParityIrrep::ODD {
+                                -1.0
+                            } else {
+                                1.0
+                            }
+                        });
+                    theta[range].fill(sign);
+                    multiplicity |= tree.vertices().iter().any(|mu| mu.get() == 2);
+                }
+                nonuniform |= theta.windows(2).any(|signs| signs[0] != signs[1]);
+                let (rows, inner, cols) = (left.rows(), left.cols(), right.cols());
+                let mut expected = vec![D::from_real(0.0); rows * cols];
+                for j in 0..cols {
+                    for (k, &theta_k) in theta.iter().enumerate().take(inner) {
+                        for i in 0..rows {
+                            expected[i + rows * j] += left.get(i, k).unwrap()
+                                * D::from_real(theta_k)
+                                * right.get(k, j).unwrap();
+                        }
+                    }
+                }
+                numerics::assert_slices_close(
+                    "odd dual block product",
+                    &read(&block),
+                    &expected,
+                    inner,
+                );
+                let control = read(&untwisted.block(&sector).unwrap());
+                differs |= expected
+                    .iter()
+                    .zip(control)
+                    .any(|(a, b)| (a.wide() - b.wide()).norm() > 1e-6);
+            }
+            assert!(
+                multiplicity,
+                "the octet channel must include its second vertex"
+            );
+            assert!(differs, "removing theta must change the hand oracle");
+            assert_eq!(
+                nonuniform, !uniform,
+                "the public row labels distinguish the two fixtures"
+            );
+        }
+    }
+
+    #[test]
+    fn checked_fermionic_uniform_and_nonuniform_twists_match_label_block_products() {
+        // What: multiplicity-two blocks carry the product of the odd dual
+        // contracted labels, including non-self-dual 3/3bar, on real and complex data.
+        canonical(|x, _| x);
+        canonical(Complex64::new);
+    }
+
+    pub(crate) fn reference_rows<R, D>(
+        v: &GradedSpace<R>,
+        value: impl Fn(f64, f64) -> D + Copy,
+    ) -> Vec<(TensorMap<R, D>, usize)>
+    where
+        R: TypedSectorAdmission,
+        R::Mode: FermionMode<R, D> + symtn::typed::TypedAdjointSpace<R>,
+        D: TensorScalar + numerics::Numeric,
+    {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let dual = v.try_dual().unwrap();
+        let spaces = [v, &dual];
+        // TensorKit copyA/copyB cases followed by mixed-side, reordered contractions.
+        #[allow(clippy::type_complexity)]
+        let geometries: [(
+            &[usize],
+            &[usize],
+            &[usize],
+            &[usize],
+            &[usize],
+            &[usize],
+            &[usize],
+            bool,
+        ); 6] = [
+            (
+                &[0, 0],
+                &[0],
+                &[1],
+                &[0, 0],
+                &[1],
+                &[0],
+                &[0, 1, 2, 3],
+                true,
+            ),
+            (
+                &[0],
+                &[0, 1],
+                &[0, 1],
+                &[0, 0],
+                &[1, 2],
+                &[0, 1],
+                &[0, 1, 2],
+                true,
+            ),
+            (
+                &[0, 0],
+                &[1],
+                &[0],
+                &[0, 0],
+                &[2],
+                &[1],
+                &[0, 1, 2, 3],
+                false,
+            ),
+            (
+                &[0, 0],
+                &[0],
+                &[0, 1],
+                &[0, 0],
+                &[1, 0],
+                &[3, 1],
+                &[0, 1, 2],
+                true,
+            ),
+            (
+                &[0, 0],
+                &[0, 0],
+                &[0, 1],
+                &[0, 0],
+                &[1, 0],
+                &[3, 1],
+                &[2, 0, 3, 1],
+                true,
+            ),
+            (
+                &[0, 1],
+                &[0, 0],
+                &[0, 1],
+                &[0, 1],
+                &[1, 0],
+                &[3, 1],
+                &[2, 0, 3, 1],
+                true,
+            ),
+        ];
+        let mut rows = Vec::new();
+        for (ac, ad, bc, bd, ca, cb, output, twist_a) in geometries {
+            let legs = |indices: &[usize]| indices.iter().map(|&i| spaces[i]).collect::<Vec<_>>();
+            let a = filled(engine, &runtime, &legs(ac), &legs(ad), 11, value);
+            let b = filled(engine, &runtime, &legs(bc), &legs(bd), 17, value);
+            let parent_a = a.adjoint(engine).unwrap().materialize(engine).unwrap();
+            let parent_b = b.adjoint(engine).unwrap().materialize(engine).unwrap();
+            let lazy_a = parent_a.adjoint(engine).unwrap();
+            let lazy_b = parent_b.adjoint(engine).unwrap();
+            for (a, b) in [(&a, &b), (&lazy_a, &b), (&a, &lazy_b), (&lazy_a, &lazy_b)] {
+                let oa = (0..a.rank())
+                    .filter(|i| !ca.contains(i))
+                    .collect::<Vec<_>>();
+                let ob = (0..b.rank())
+                    .filter(|i| !cb.contains(i))
+                    .collect::<Vec<_>>();
+                let mut ap = a.permute(engine, &oa, ca).unwrap();
+                let mut bp = b.permute(engine, cb, &ob).unwrap();
+                if twist_a {
+                    // An external domain index has the dual of the stored
+                    // domain leg: TensorKit's !isdual selects stored dual legs.
+                    let axes = ap
+                        .domain()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| l.is_dual())
+                        .map(|(i, _)| ap.codomain_rank() + i)
+                        .collect::<Vec<_>>();
+                    ap = ap.twist(engine, &axes, Direction::Forward).unwrap();
+                } else {
+                    let axes = bp
+                        .codomain()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| l.is_dual())
+                        .map(|(i, _)| i)
+                        .collect::<Vec<_>>();
+                    bp = bp.twist(engine, &axes, Direction::Forward).unwrap();
+                }
+                let split = oa.len();
+                let steps = ap
+                    .compose(engine, &bp)
+                    .unwrap()
+                    .permute(engine, &output[..split], &output[split..])
+                    .unwrap();
+                let spec = ContractSpec {
+                    lhs: ca,
+                    rhs: cb,
+                    codomain: &output[..split],
+                    domain: &output[split..],
+                };
+                let got = a.contract(engine, b, &spec).unwrap();
+                let terms = a
+                    .dense_data()
+                    .map_or_else(|_| parent_a.dense_data().unwrap().len(), |d| d.len())
+                    * b.dense_data()
+                        .map_or_else(|_| parent_b.dense_data().unwrap().len(), |d| d.len());
+                compare(
+                    "blas_contract steps including lazy operands",
+                    &got,
+                    &steps,
+                    terms,
+                );
+                rows.push((got, terms));
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn checked_fermionic_general_and_lazy_contraction_match_blas_contract_steps() {
+        // What: both twist placements and logical adjoints on either or both
+        // inputs give TensorKit's permute/twist/compose/permute value.
+        let v = su3_space();
+        reference_rows(&v, |x, _| x);
+        reference_rows(&v, Complex64::new);
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn su2_spaces() -> (
+        GradedSpace<
+            ProductFusionRule<
+                FermionParityFusionRule,
+                LieGroupFusionRule<MultiplicityFreeAdmissionMode>,
+            >,
+        >,
+        GradedSpace<
+            ProductFusionRule<
+                FermionParityFusionRule,
+                LieGroupFusionRule<CheckedGenericAdmissionMode>,
+            >,
+        >,
+    ) {
+        let labels = [
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 1),
+            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+        ];
+        let checked = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
+            fusion_symbols::lie::GroupId::su(2).unwrap(),
+        )
+        .unwrap();
+        (
+            GradedSpace::try_new(
+                Arc::new(
+                    ProductFusionRule::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap(),
+                ),
+                labels.clone(),
+            )
+            .unwrap(),
+            GradedSpace::try_new(
+                Arc::new(
+                    ProductFusionRule::try_new(FermionParityFusionRule::new(), checked).unwrap(),
+                ),
+                labels,
+            )
+            .unwrap(),
+        )
+    }
+
+    pub(crate) fn label_entries<R, D>(
+        tensor: &TensorMap<R, D>,
+    ) -> std::collections::BTreeMap<String, Vec<D>>
+    where
+        R: TypedSectorAdmission,
+        R::Mode: Mode<R, D>,
+        D: TensorScalar,
+    {
+        tensor
+            .subblocks()
+            .unwrap()
+            .map(|(t, b)| {
+                let len = b.shape().iter().product();
+                let values = (0..len)
+                    .map(|mut linear| {
+                        let index = b
+                            .shape()
+                            .iter()
+                            .map(|&extent| {
+                                let i = linear % extent;
+                                linear /= extent;
+                                i
+                            })
+                            .collect::<Vec<_>>();
+                        *b.get(&index).unwrap()
+                    })
+                    .collect();
+                (format!("{t:?}"), values)
+            })
+            .collect()
+    }
+
+    fn cross_mode<D>(value: impl Fn(f64, f64) -> D + Copy)
+    where
+        D: TensorScalar + numerics::Numeric,
+    {
+        let (mf, checked) = su2_spaces();
+        let mf = reference_rows(&mf, value);
+        let checked = reference_rows(&checked, value);
+        for ((mf, terms), (checked, _)) in mf.iter().zip(&checked) {
+            let (mf, checked) = (label_entries(mf), label_entries(checked));
+            assert_eq!(
+                mf.keys().collect::<Vec<_>>(),
+                checked.keys().collect::<Vec<_>>()
+            );
+            for (key, expected) in mf {
+                // Bilinear comparison bound includes all source entries.
+                numerics::assert_slices_close(&key, &checked[&key], &expected, *terms);
+            }
+        }
+    }
+
+    #[test]
+    fn fermionic_contraction_agrees_across_modes_by_labels() {
+        // What: fZ2 x SU(2) agrees across admission modes for the same real
+        // and complex values and the same ordinary/lazy contraction geometries.
+        cross_mode(|x, _| x);
+        cross_mode(Complex64::new);
+    }
 }

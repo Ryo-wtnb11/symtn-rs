@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use symtn::typed::ContractSpec;
 use symtn::typed::Direction;
 
+use crate::numerics;
 use symtn::sector::SectorId;
 use symtn::sector::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
@@ -259,7 +260,12 @@ impl CheckedGenericRigidSymbols for CheckedPivotalToy {
             Self::nsymbol(a, f, d),
         );
         let len = shape.0 * shape.1 * shape.2 * shape.3;
-        Ok(GenericFArray::new(vec![0.0; len], shape))
+        let coefficient = if [a, b, c, d, e, f].iter().all(|&s| s == Self::unit()) {
+            1.0
+        } else {
+            0.0
+        };
+        Ok(GenericFArray::new(vec![coefficient; len], shape))
     }
 
     fn try_r_symbol_generic(
@@ -1209,17 +1215,11 @@ fn checked_generic_compose_admits_every_braiding_like_tensorkit_mul() {
     }
 }
 
-#[test]
-fn checked_generic_contraction_braiding_matrix() {
+fn contraction_braiding_matrix<D>(value: impl Fn(f64) -> D + Copy)
+where
+    D: TensorScalar + numerics::Numeric + PartialEq,
+{
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: every checked facade contraction entry decides braiding in one
-    // place, with one typed refusal per (operation, style), in
-    // `GenericTensorError::Facade` and with the destination untouched.
-    // Bosonic contracts, and its planar contraction is the ordinary one;
-    // Fermionic ordinary contraction needs the supertrace twist the checked
-    // engine lacks; a non-symmetric style refuses ordinary contraction, and
-    // the checked engine has no planar route for any non-Bosonic style.
     let runtime = Runtime::builder().build().unwrap();
     let spec = ContractSpec {
         lhs: &[1],
@@ -1227,84 +1227,146 @@ fn checked_generic_contraction_braiding_matrix() {
         codomain: &[0],
         domain: &[1],
     };
-    use symtn::typed::BraidingOp::{Contraction, PlanarContraction};
-    for (tag, braiding, ordinary) in [
-        (22, BraidingStyleKind::Bosonic, None),
-        (23, BraidingStyleKind::Fermionic, Some(Contraction)),
-        (21, BraidingStyleKind::Anyonic, Some(Contraction)),
-        (20, BraidingStyleKind::NoBraiding, Some(Contraction)),
+    use symtn::typed::BraidingOp::Contraction;
+    for (tag, braiding, refused, rotated) in [
+        (22, BraidingStyleKind::Bosonic, false, false),
+        (23, BraidingStyleKind::Fermionic, false, false),
+        (21, BraidingStyleKind::Anyonic, true, false),
+        (20, BraidingStyleKind::NoBraiding, true, false),
+        (24, BraidingStyleKind::Anyonic, true, true),
     ] {
-        let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, 1.0));
-        let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
-        let mut matrix = |offset: f64| -> TensorMap<_, f64> {
-            TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&unit], |_, index| {
-                offset + (2 * index[0] + index[1]) as f64
+        let spec = if rotated {
+            ContractSpec {
+                lhs: &[0],
+                rhs: &[1],
+                codomain: &[1],
+                domain: &[0],
+            }
+        } else {
+            spec
+        };
+        let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, -1.0));
+        let label = if rotated { Label::Unit } else { Label::X };
+        let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
+        let dual = leg.try_dual().unwrap();
+        let mut matrix = |offset: f64| -> TensorMap<_, D> {
+            TensorMap::from_subblock_fn(engine, &runtime, [&dual], [&dual], |_, index| {
+                value(offset + (2 * index[0] + index[1]) as f64)
             })
             .unwrap()
         };
         let (lhs, rhs) = (matrix(1.0), matrix(5.0));
-        // Hand oracle: the one block is [[1,2],[3,4]]·[[5,6],[7,8]] =
-        // [[19,22],[43,50]], stored column-major.
-        let oracle = [19.0, 43.0, 22.0, 50.0];
+        // Hand matrix product; the unrotated Fermionic row twists odd X
+        // by -1 on the dual contracted leg.
+        let unrotated_oracle = [
+            value(1.0) * value(5.0) + value(2.0) * value(7.0),
+            value(3.0) * value(5.0) + value(4.0) * value(7.0),
+            value(1.0) * value(6.0) + value(2.0) * value(8.0),
+            value(3.0) * value(6.0) + value(4.0) * value(8.0),
+        ];
+        // Unit-sector rank-2 bends have unit F, dimension and FS factors:
+        // rotating both operands and the output gives (A^T B^T)^T = BA.
+        let oracle = if rotated {
+            let rotated_oracle = [
+                value(5.0) * value(1.0) + value(6.0) * value(3.0),
+                value(7.0) * value(1.0) + value(8.0) * value(3.0),
+                value(5.0) * value(2.0) + value(6.0) * value(4.0),
+                value(7.0) * value(2.0) + value(8.0) * value(4.0),
+            ];
+            assert_ne!(
+                rotated_oracle, unrotated_oracle,
+                "negative control: unrotated AB must differ from rotated BA"
+            );
+            rotated_oracle
+        } else {
+            unrotated_oracle
+        };
+        let ordinary_oracle = oracle.map(|x| {
+            x * D::from_real(if braiding == BraidingStyleKind::Fermionic {
+                -1.0
+            } else {
+                1.0
+            })
+        });
         let mut destinations = [matrix(-3.0), matrix(-3.0)];
         let before = destinations[0].dense_data().unwrap().to_vec();
-        let planar = ordinary.map(|_| PlanarContraction);
         let [ordinary_dst, planar_dst] = &mut destinations;
         let cells = [
             (
                 "contract",
-                ordinary,
+                refused,
+                false,
                 lhs.contract(engine, &rhs, &spec)
                     .map(|out| out.dense_data().unwrap().to_vec()),
             ),
             (
                 "contract_into",
-                ordinary,
-                lhs.contract_into(engine, &rhs, &spec, ordinary_dst, 1.0, 0.0)
-                    .map(|()| ordinary_dst.dense_data().unwrap().to_vec()),
+                refused,
+                false,
+                lhs.contract_into(
+                    engine,
+                    &rhs,
+                    &spec,
+                    ordinary_dst,
+                    D::from_real(1.0),
+                    D::from_real(0.0),
+                )
+                .map(|()| ordinary_dst.dense_data().unwrap().to_vec()),
             ),
             (
                 "planar_contract",
-                planar,
+                false,
+                true,
                 lhs.planar_contract(engine, &rhs, &spec)
                     .map(|out| out.dense_data().unwrap().to_vec()),
             ),
             (
                 "planar_contract_into",
-                planar,
-                lhs.planar_contract_into(engine, &rhs, &spec, planar_dst, 1.0, 0.0)
-                    .map(|()| planar_dst.dense_data().unwrap().to_vec()),
+                false,
+                true,
+                lhs.planar_contract_into(
+                    engine,
+                    &rhs,
+                    &spec,
+                    planar_dst,
+                    D::from_real(1.0),
+                    D::from_real(0.0),
+                )
+                .map(|()| planar_dst.dense_data().unwrap().to_vec()),
             ),
         ];
-        for (entry, expected, result) in cells {
-            match (expected, result) {
-                (None, Ok(data)) => assert_eq!(data, oracle, "{braiding:?} {entry}"),
-                (Some(op), Err(GenericTensorError::Facade(Error::Operation(operation)))) => {
-                    assert!(
-                        matches!(
-                            *operation,
-                            OperationError::UnsupportedContractionBraiding { operation, style }
-                                if operation == op && style == braiding
-                        ),
-                        "{braiding:?} {entry}: {operation:?}"
-                    )
+        for (entry, refused, planar, result) in cells {
+            match (refused, result) {
+                (false, Ok(data)) => numerics::assert_slices_close(
+                    &format!("{braiding:?} {entry}"),
+                    &data,
+                    if planar { &oracle } else { &ordinary_oracle },
+                    2,
+                ),
+                (true, Err(GenericTensorError::Facade(Error::Operation(operation)))) => {
+                    assert!(matches!(*operation,
+                        OperationError::UnsupportedContractionBraiding { operation: Contraction, style }
+                            if style == braiding));
                 }
                 (_, other) => panic!("{braiding:?} {entry}: {:?}", other.err()),
             }
         }
-        if ordinary.is_some() {
-            for destination in &destinations {
-                let after = destination.dense_data().unwrap();
-                assert!(
-                    before
-                        .iter()
-                        .zip(after.iter())
-                        .all(|(x, y)| x.to_bits() == y.to_bits()),
-                    "{braiding:?}: destination written"
-                );
-            }
+        if refused {
+            assert_eq!(destinations[0].dense_data().unwrap(), before);
+        }
+        if braiding != BraidingStyleKind::Fermionic {
+            assert_eq!(provider.twist_queries.load(Ordering::Relaxed), 0);
         }
     }
+}
+
+#[test]
+fn checked_generic_contraction_braiding_matrix() {
+    let _serial = crate::counting_alloc::serial();
+    // What: ordinary contraction admits symmetric styles and twists an odd
+    // dual leg; planar contraction admits every style without a twist.
+    contraction_braiding_matrix(|x| x);
+    contraction_braiding_matrix(|x| Complex64::new(x, 0.25 * x + 0.5));
 }
 
 #[test]
@@ -1492,4 +1554,139 @@ fn su_irrep(labels: &[i64]) -> symtn::sector::LieIrrep {
         .unwrap()
         .irrep(labels)
         .unwrap()
+}
+
+#[test]
+fn checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublished() {
+    let _serial = crate::counting_alloc::serial();
+    // What: an early core-alpha or late source-transform twist failure keeps
+    // the provider error, destination bits and shared structural owners intact.
+    const ISOLATED: &str = "SYMTN_CHECKED_CONTRACT_TWIST_PUBLICATION_ISOLATED";
+    const NAME: &str = "checked_generic_braiding::checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublished";
+    if std::env::var_os(ISOLATED).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", NAME, "--nocapture"])
+            .env(ISOLATED, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated publication test failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout)
+            .contains("test result: ok. 1 passed; 0 failed;"));
+        return;
+    }
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    use symtn_core::{structure_cache_info, StructureCacheKind};
+    let published = || {
+        [
+            StructureCacheKind::DegeneracyStructure,
+            StructureCacheKind::CompletedTreeTransformer,
+            StructureCacheKind::TreeTransformCoefficients,
+        ]
+        .map(|kind| {
+            let info = structure_cache_info(kind);
+            (info.admissions(), info.entries(), info.charged_bytes())
+        })
+    };
+    let bits = |tensor: &TensorMap<CheckedPivotalToy, Complex64>| {
+        tensor
+            .dense_data()
+            .unwrap()
+            .iter()
+            .map(|v| (v.re.to_bits(), v.im.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    for late in [false, true] {
+        symtn_core::clear_structure_caches();
+        let runtime = Runtime::builder().build().unwrap();
+        let provider = Arc::new(CheckedPivotalToy::new(
+            70 + u8::from(late),
+            BraidingStyleKind::Fermionic,
+            -1.0,
+        ));
+        let v = GradedSpace::try_new(
+            Arc::clone(&provider),
+            if late {
+                vec![(Label::Unit, 2)]
+            } else {
+                vec![(Label::Unit, 1), (Label::X, 1)]
+            },
+        )
+        .unwrap();
+        let dual = v.try_dual().unwrap();
+        let mut filled = |codomain: &[&GradedSpace<_>], domain: &[&GradedSpace<_>], seed: f64| {
+            TensorMap::from_subblock_fn(
+                engine,
+                &runtime,
+                codomain.iter().copied(),
+                domain.iter().copied(),
+                |_, index| Complex64::new(seed + index.iter().sum::<usize>() as f64, 0.25 * seed),
+            )
+            .unwrap()
+        };
+        let (a, b, mut destination, spec) = if late {
+            // Both sources change split to 1/1, so theta follows both staged
+            // transforms. Unit-only bends have F = 1; this toy's R = 0 would
+            // erase the destination rows of a transform with crossings.
+            (
+                filled(&[&v, &v], &[], 1.0),
+                filled(&[], &[&v, &v], 3.0),
+                filled(&[&v], &[&v], -7.0),
+                ContractSpec {
+                    lhs: &[1],
+                    rhs: &[1],
+                    codomain: &[0],
+                    domain: &[1],
+                },
+            )
+        } else {
+            (
+                filled(&[&v, &v], &[&dual, &dual], 1.0),
+                filled(&[&dual, &dual], &[&v], 3.0),
+                filled(&[&v, &v], &[&v], -7.0),
+                ContractSpec {
+                    lhs: &[2, 3],
+                    rhs: &[0, 1],
+                    codomain: &[0, 1],
+                    domain: &[2],
+                },
+            )
+        };
+        // Coupled-region metadata is charged lazily to the existing source
+        // owners; include that ordinary lookup in the baseline.
+        for tensor in [&a, &b, &destination] {
+            drop(tensor.blocks().unwrap());
+        }
+        let before_bits = bits(&destination);
+        let before_owners = published();
+        provider.reset_ledger(0);
+        provider.fail_twist_on.store(1, Ordering::Relaxed);
+        let result = a.contract_into(
+            engine,
+            &b,
+            &spec,
+            &mut destination,
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.5, 0.0),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(GenericTensorError::Plan(CheckedGenericPlanError::Provider(
+                    PivotalError::Twist
+                )))
+            ),
+            "late={late}: {result:?}"
+        );
+        assert_eq!(bits(&destination), before_bits, "late={late}");
+        assert_eq!(
+            published(),
+            before_owners,
+            "late={late}: staged owners published"
+        );
+    }
 }

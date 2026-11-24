@@ -205,7 +205,7 @@ where
     R: TypedSectorAdmission<
             Error = <R as CheckedGenericFusion>::Error,
             Mode = CheckedGenericAdmissionMode,
-        > + CheckedGenericRigidSymbols<Scalar = f64>,
+        > + CheckedGenericPivotal<Scalar = f64>,
     D: TensorScalar,
 {
     const REUSE_DESTINATIONS: bool = true;

@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use symtn_core::{
-    BlockStructure, CategoricalScalar, FusionTreeHomSpace, FusionTreePairOrientation,
-    MultiplicityFreeRigidSymbols,
+    BlockStructure, FusionTreeHomSpace, FusionTreePairOrientation, MultiplicityFreeRigidSymbols,
 };
 
 use crate::mode::{MultiplicityFreePlanningScalar, PlanningAlgebra, TreeStructureSource};
@@ -60,8 +59,8 @@ pub(crate) use transformed_spaces::{
     compile_core_dst, compile_transformed_source, DynamicFusionCoreDstEntry,
     DynamicFusionTransformedSourceEntry,
 };
-pub(crate) use twist::compile_contract_twist;
 pub(super) use twist::*;
+pub(crate) use twist::{compile_contract_twist, compile_contract_twist_with};
 #[cfg(test)]
 pub(crate) use typed_eager::*;
 

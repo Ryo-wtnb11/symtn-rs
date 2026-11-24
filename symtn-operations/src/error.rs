@@ -13,8 +13,6 @@ use crate::TreeTransformOperation;
 pub enum BraidingOp {
     /// General-axis contraction (TensorKit `blas_contract!`).
     Contraction,
-    /// Planar contraction (TensorKit `planarcontract!`).
-    PlanarContraction,
     /// Fusion trace (TensorKit `trace_permute!`).
     Trace,
 }
@@ -137,11 +135,10 @@ pub enum OperationError {
     Internal {
         message: &'static str,
     },
-    /// A contraction, planar contraction or trace refused by the rule's
+    /// A contraction or trace refused by the rule's
     /// braiding style at admission (TensorKit `SectorMismatch` in
     /// `blas_contract!` and `trace_permute!`). Ordinary contraction and trace
-    /// need a symmetric braiding; the checked-Generic engine admits ordinary
-    /// and planar contraction for Bosonic braiding only.
+    /// need a symmetric braiding in every admission mode.
     UnsupportedContractionBraiding {
         operation: BraidingOp,
         style: BraidingStyleKind,
@@ -291,20 +288,14 @@ impl fmt::Display for OperationError {
             Self::Internal { message } => {
                 write!(f, "internal invariant violated: {message}")
             }
-            Self::UnsupportedContractionBraiding { operation, style } => {
-                let reason = match (operation, style.is_symmetric()) {
-                    (BraidingOp::Contraction, false) => {
+            Self::UnsupportedContractionBraiding { operation, .. } => {
+                let reason = match operation {
+                    BraidingOp::Contraction => {
                         "ordinary contraction requires symmetric (bosonic or fermionic) braiding; \
                          use compose for the composition of morphisms, \
                          or planar_contract for a planar contraction"
                     }
-                    (BraidingOp::Contraction, true) => {
-                        "checked Generic contraction requires Bosonic braiding"
-                    }
-                    (BraidingOp::PlanarContraction, _) => {
-                        "checked Generic planar contraction requires Bosonic braiding"
-                    }
-                    (BraidingOp::Trace, _) => "fusion tensortrace requires symmetric braiding",
+                    BraidingOp::Trace => "fusion tensortrace requires symmetric braiding",
                 };
                 write!(f, "unsupported tensor contraction scope: {reason}")
             }

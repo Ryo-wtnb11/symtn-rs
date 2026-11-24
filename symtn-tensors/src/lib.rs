@@ -37,7 +37,7 @@ pub use adjoint::{
     adjoint_bound_dyn, adjoint_bound_space_dyn, materialize_adjoint_data_dyn, AdjointBlockMap,
 };
 #[doc(hidden)]
-pub use admission::{admit_braiding, admit_checked_generic_pair, BraidingAdmission};
+pub use admission::{admit_braiding, admit_checked_generic_pair};
 pub use bound_tensor::BoundDynamicTensorRef;
 #[cfg(test)]
 pub(crate) use contract::tensorcontract_fusion_dyn_prelowered_direct_on_storage;

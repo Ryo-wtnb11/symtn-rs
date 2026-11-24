@@ -24,11 +24,27 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    let mut scales = Vec::new();
     if rule.braiding_style() != symtn_core::BraidingStyleKind::Fermionic {
-        return Ok(scales);
+        return Ok(Vec::new());
     }
-    let structure = std::sync::Arc::clone(space.structure());
+    compile_contract_twist_with(
+        space,
+        core_right,
+        space_is_core_left,
+        rhs_contracting_axes,
+        |sector| Ok(rule.twist_scalar(sector)),
+    )
+}
+
+pub(crate) fn compile_contract_twist_with<C: DenseBlockScalar, E: From<OperationError>>(
+    space: &DynamicFusionMapSpace,
+    core_right: &FusionTreeHomSpace,
+    space_is_core_left: bool,
+    rhs_contracting_axes: &[usize],
+    mut theta: impl FnMut(symtn_core::SectorId) -> Result<C, E>,
+) -> Result<Vec<(usize, C)>, E> {
+    let structure = space.structure();
+    let mut scales = Vec::new();
     for index in 0..structure.block_count() {
         let block = structure
             .block(index)
@@ -44,13 +60,16 @@ where
         } else {
             key.codomain_tree()
         };
-        let factor = super::fusion::rhs_contract_twist_factor(
-            rule,
-            core_right,
+        let factor = super::fusion::contract_twist_factor(
+            symtn_core::OrientedFusionTreeHomSpace::new(
+                core_right,
+                symtn_core::FusionTreePairOrientation::Direct,
+            ),
             rhs_contracting_axes,
             contracted_tree,
+            &mut theta,
         )?;
-        if factor != R::Scalar::one() {
+        if factor != C::one() {
             scales.push((block.offset(), factor));
         }
     }

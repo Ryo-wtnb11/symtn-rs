@@ -7,66 +7,24 @@
 //! messages identical everywhere.
 
 use symtn_core::{
-    BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CoreError,
-    FusionStyleKind, MultiplicityFreeAdmissionMode, RuleIdentity,
+    BraidingStyleKind, CheckedGenericFusion, CoreError, FusionStyleKind, RuleIdentity,
 };
 
 use crate::{BoundDynamicFusionMapSpace, BraidingOp, OperationError};
 
-/// The checked engine's internal fail-closed refusal (twist and core-alpha
-/// invariants after admission).
-pub(crate) const CHECKED_CONTRACTION_REQUIRES_BOSONIC: OperationError = OperationError::Internal {
-    message: "checked Generic contraction requires Bosonic braiding",
+pub(crate) const CROSSING_FREE_CONTRACTION_TWIST: OperationError = OperationError::Internal {
+    message: "contraction twist asked of a crossing-free request",
 };
 
-mod sealed {
-    pub trait Sealed {}
-    impl Sealed for symtn_core::MultiplicityFreeAdmissionMode {}
-    impl Sealed for symtn_core::CheckedGenericAdmissionMode {}
-}
-
-/// The braiding styles an admission mode admits for each [`BraidingOp`].
+/// The one braiding admission of contraction and trace, independent of mode
+/// and storage. TensorKit requires symmetric braiding for both operations;
+/// planar contraction has no braiding admission.
 #[doc(hidden)]
-pub trait BraidingAdmission: sealed::Sealed {
-    /// Whether `style` is admitted for `op`.
-    fn admits(op: BraidingOp, style: BraidingStyleKind) -> bool;
-}
-
-/// TensorKit: ordinary contraction and trace need a symmetric braiding;
-/// planar contraction admits every style.
-impl BraidingAdmission for MultiplicityFreeAdmissionMode {
-    fn admits(op: BraidingOp, style: BraidingStyleKind) -> bool {
-        match op {
-            BraidingOp::Contraction | BraidingOp::Trace => style.is_symmetric(),
-            BraidingOp::PlanarContraction => true,
-        }
-    }
-}
-
-/// The checked engine implements neither TensorKit `blas_contract!`'s
-/// Fermionic twist nor a planar route, so ordinary and planar contraction
-/// admit Bosonic braiding only; trace follows TensorKit.
-impl BraidingAdmission for CheckedGenericAdmissionMode {
-    fn admits(op: BraidingOp, style: BraidingStyleKind) -> bool {
-        match op {
-            BraidingOp::Trace => style.is_symmetric(),
-            BraidingOp::Contraction | BraidingOp::PlanarContraction => {
-                style == BraidingStyleKind::Bosonic
-            }
-        }
-    }
-}
-
-/// The one braiding admission of contraction and trace: the outcome depends
-/// only on the mode `M`, `op` and `style`, never on storage form, and a
-/// refusal is [`OperationError::UnsupportedContractionBraiding`] carrying
-/// both.
-#[doc(hidden)]
-pub fn admit_braiding<M: BraidingAdmission>(
-    op: BraidingOp,
-    style: BraidingStyleKind,
-) -> Result<(), OperationError> {
-    if M::admits(op, style) {
+pub fn admit_braiding(op: BraidingOp, style: BraidingStyleKind) -> Result<(), OperationError> {
+    let admitted = match op {
+        BraidingOp::Contraction | BraidingOp::Trace => style.is_symmetric(),
+    };
+    if admitted {
         return Ok(());
     }
     Err(OperationError::UnsupportedContractionBraiding {
@@ -125,43 +83,25 @@ mod tests {
 
     #[test]
     fn braiding_admission_table() {
-        use BraidingOp::{Contraction, PlanarContraction, Trace};
+        use BraidingOp::{Contraction, Trace};
         use BraidingStyleKind::{Anyonic, Bosonic, Fermionic, NoBraiding};
-        // (op, [B, F, A, N]): whether the style is admitted.
-        let mf: [(BraidingOp, [bool; 4]); 3] = [
-            (Contraction, [true, true, false, false]),
-            (PlanarContraction, [true; 4]),
-            (Trace, [true, true, false, false]),
-        ];
-        let checked: [(BraidingOp, [bool; 4]); 3] = [
-            (Contraction, [true, false, false, false]),
-            (PlanarContraction, [true, false, false, false]),
-            (Trace, [true, true, false, false]),
-        ];
-        let styles = [Bosonic, Fermionic, Anyonic, NoBraiding];
-        let expect = |operation, style, admitted: bool| {
-            if admitted {
-                Ok(())
-            } else {
-                Err(OperationError::UnsupportedContractionBraiding { operation, style })
-            }
-        };
-        for (op, row) in mf {
-            for (style, admitted) in styles.into_iter().zip(row) {
-                assert_eq!(
-                    admit_braiding::<MultiplicityFreeAdmissionMode>(op, style),
-                    expect(op, style, admitted),
-                    "MF {op:?} {style:?}"
-                );
-            }
-        }
-        for (op, row) in checked {
-            for (style, admitted) in styles.into_iter().zip(row) {
-                assert_eq!(
-                    admit_braiding::<CheckedGenericAdmissionMode>(op, style),
-                    expect(op, style, admitted),
-                    "checked {op:?} {style:?}"
-                );
+        // Purpose: ordinary contraction and trace share TensorKit's admission table.
+        for op in [Contraction, Trace] {
+            for (style, admitted) in [
+                (Bosonic, true),
+                (Fermionic, true),
+                (Anyonic, false),
+                (NoBraiding, false),
+            ] {
+                let expected = if admitted {
+                    Ok(())
+                } else {
+                    Err(OperationError::UnsupportedContractionBraiding {
+                        operation: op,
+                        style,
+                    })
+                };
+                assert_eq!(admit_braiding(op, style), expected, "{op:?} {style:?}");
             }
         }
     }

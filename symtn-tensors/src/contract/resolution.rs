@@ -422,6 +422,7 @@ pub(crate) fn try_zero_copy_contract_candidates<'a, T, E>(
 /// applies it per block.
 fn try_compile_scaled_storage_contract_plan<M, R>(
     rule: &R,
+    authority: M::SpaceAuthority<'_>,
     validated: &ValidatedCoreContract<'_, R>,
     dst: &DynamicFusionMapSpace,
     lhs: &DynamicFusionMapSpace,
@@ -447,6 +448,7 @@ where
         };
         let Some(alpha) = M::core_alpha(
             rule,
+            authority,
             validated.rhs_homspace(),
             validated.rhs_contracting_axes(),
             row_trees.iter().map(|extent| extent.tree()),
@@ -501,6 +503,7 @@ where
     let plan = if twisted {
         try_compile_scaled_storage_contract_plan::<M, R>(
             rule,
+            authority,
             &validated,
             dst,
             lhs.storage_space(),

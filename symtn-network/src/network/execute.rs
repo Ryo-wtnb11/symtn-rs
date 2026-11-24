@@ -457,10 +457,7 @@ pub(super) fn device_operand_admission(
         ));
     }
     if contracts {
-        symtn::typed::admit_braiding::<symtn::sector::MultiplicityFreeAdmissionMode>(
-            symtn::typed::BraidingOp::Contraction,
-            braiding,
-        )?;
+        symtn::typed::admit_braiding(symtn::typed::BraidingOp::Contraction, braiding)?;
     }
     Ok(())
 }

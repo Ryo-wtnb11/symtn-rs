@@ -41,18 +41,19 @@ use symtn_core::{
 };
 use symtn_operations::TreeTransformStructure;
 
-use crate::admission::CHECKED_CONTRACTION_REQUIRES_BOSONIC;
+use crate::admission::CROSSING_FREE_CONTRACTION_TWIST;
 use crate::contract::{
-    compile_checked_generic_core_plan_general, compile_contract_twist, compile_core_dst,
-    compile_derived_core_plan, compile_prelowered_dynamic_tree, compile_stored_dynamic_tree,
-    compile_transformed_source, contract_axes_require_twist, core_homspace_matches,
-    prepare_tensorcontract_fusion_plan_dyn_raw_canonical, rhs_contract_twist_factor_oriented,
+    compile_checked_generic_core_plan_general, compile_contract_twist, compile_contract_twist_with,
+    compile_core_dst, compile_derived_core_plan, compile_prelowered_dynamic_tree,
+    compile_stored_dynamic_tree, compile_transformed_source, contract_axes_require_twist,
+    core_homspace_matches, prepare_tensorcontract_fusion_plan_dyn_raw_canonical,
     select_complete_tensorcontract_fusion_plan, source_is_storage_adjoint,
-    storage_layout_is_canonical, tree_transform_operation_axes, validate_fusion_contract_rule,
-    CheckedAuthority, CheckedContractTxn, DynamicFusionCoreDstEntry, DynamicFusionMapSpace,
-    DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact, FusionContractPlan,
-    FusionOperand, FusionOperandLayout, FusionSource, LayoutKeyBuilder, PlanTarget,
-    PlanarContractOrders, PreparedCheckedGenericDynamicSpace, StorageContractResolution,
+    storage_layout_is_canonical, tree_transform_operation_axes, uniform_contract_twist,
+    validate_fusion_contract_rule, CheckedAuthority, CheckedContractTxn, ContractTwist,
+    DynamicFusionCoreDstEntry, DynamicFusionMapSpace, DynamicFusionTransformedSourceEntry,
+    DynamicTreeExecutionArtifact, FusionContractPlan, FusionOperand, FusionOperandLayout,
+    FusionSource, LayoutKeyBuilder, PlanTarget, PlanarContractOrders,
+    PreparedCheckedGenericDynamicSpace, StorageContractResolution,
 };
 use crate::tree_context::CheckedTreeTransformStage;
 use crate::tree_transform::{
@@ -322,6 +323,7 @@ pub(crate) trait PlanningAlgebra<R>: sealed::Sealed {
     /// `None` when the core cannot carry it as one per-job alpha.
     fn core_alpha<'t>(
         rule: &R,
+        authority: Self::SpaceAuthority<'_>,
         rhs: OrientedFusionTreeHomSpace<'_>,
         rhs_contracting_axes: &[usize],
         row_trees: impl IntoIterator<Item = &'t FusionTreeKey>,
@@ -556,7 +558,7 @@ pub enum ContractRequest<'s> {
     Compose,
     /// TensorKit `planarcontract!` over `axes` (output as for `Contract`):
     /// the admitted `orders`' transposes around the core GEMMs, no
-    /// supertrace twist and no R symbol. Multiplicity-free only.
+    /// supertrace twist and no R symbol.
     Planar {
         axes: TensorContractSpec<'s>,
         codomain_rank: usize,
@@ -667,6 +669,7 @@ where
     /// sector declines, so the `DynamicTree` artifact applies it per block.
     fn core_alpha<'t>(
         rule: &R,
+        _authority: Self::SpaceAuthority<'_>,
         rhs: OrientedFusionTreeHomSpace<'_>,
         rhs_contracting_axes: &[usize],
         row_trees: impl IntoIterator<Item = &'t FusionTreeKey>,
@@ -674,19 +677,12 @@ where
     where
         R::Scalar: DenseBlockScalar,
     {
-        let mut row_trees = row_trees.into_iter();
-        let Some(first) = row_trees.next() else {
-            return Err(OperationError::Internal {
-                message: "canonical RHS coupled region has no row fusion tree",
-            });
-        };
-        let alpha = rhs_contract_twist_factor_oriented(rule, rhs, rhs_contracting_axes, first)?;
-        for tree in row_trees {
-            if rhs_contract_twist_factor_oriented(rule, rhs, rhs_contracting_axes, tree)? != alpha {
-                return Ok(None);
-            }
+        if rule.braiding_style() != BraidingStyleKind::Fermionic {
+            return Ok(Some(R::Scalar::one()));
         }
-        Ok(Some(alpha))
+        uniform_contract_twist(rhs, rhs_contracting_axes, row_trees, |sector| {
+            Ok(rule.twist_scalar(sector))
+        })
     }
 
     fn tree_structure_with(
@@ -1142,20 +1138,22 @@ where
     where
         R: 'a;
 
-    /// Unit for Bosonic braiding, independent of the trees; the checked
-    /// engine implements neither the fermionic twist branch of TensorKit's
-    /// `blas_contract!` nor non-symmetric braiding (its `SymmetricBraiding`
-    /// guard).
     fn core_alpha<'t>(
         rule: &R,
-        _rhs: OrientedFusionTreeHomSpace<'_>,
-        _rhs_contracting_axes: &[usize],
-        _row_trees: impl IntoIterator<Item = &'t FusionTreeKey>,
+        authority: CheckedAuthority<'_, R>,
+        rhs: OrientedFusionTreeHomSpace<'_>,
+        rhs_contracting_axes: &[usize],
+        row_trees: impl IntoIterator<Item = &'t FusionTreeKey>,
     ) -> Result<Option<f64>, Self::Error> {
-        if rule.braiding_style() != BraidingStyleKind::Bosonic {
-            return Err(CHECKED_CONTRACTION_REQUIRES_BOSONIC.into());
+        match authority.twist() {
+            ContractTwist::Unasked => Err(CROSSING_FREE_CONTRACTION_TWIST.into()),
+            ContractTwist::Free => Ok(Some(1.0)),
+            ContractTwist::Fermionic(theta) => {
+                uniform_contract_twist(rhs, rhs_contracting_axes, row_trees, |sector| {
+                    theta(rule, sector).map_err(CheckedGenericPlanError::Provider)
+                })
+            }
         }
-        Ok(Some(f64::one()))
     }
 
     fn tree_structure_with(
@@ -1471,17 +1469,15 @@ where
         Ok(true)
     }
 
-    /// The entry's answer: a contraction entry read the braiding style
-    /// once, before staging, and admits Bosonic only. Composition never
-    /// asks; asked without an answer, it fails closed.
+    /// The entry captures the twist before destination staging; crossing-free
+    /// composition and planar requests never ask this question.
     fn contract_twist_possible(
         _rule: &R,
         authority: CheckedAuthority<'_, R>,
     ) -> Result<bool, Self::Error> {
-        if authority.twist_free() {
-            Ok(false)
-        } else {
-            Err(CHECKED_CONTRACTION_REQUIRES_BOSONIC.into())
+        match authority.twist() {
+            ContractTwist::Unasked => Err(CROSSING_FREE_CONTRACTION_TWIST.into()),
+            twist => Ok(matches!(twist, ContractTwist::Fermionic(_))),
         }
     }
 
@@ -1543,7 +1539,12 @@ where
         source_conjugate: bool,
     ) -> Result<DynamicFusionTransformedSourceEntry<f64>, Self::Error> {
         let identity = operation.is_identity_for(source.nout(), source.nin());
-        if identity && !source_conjugate {
+        // ponytail: both identity operands get a transformer in Fermionic calls;
+        // build only the side selected by source_borrowing if lookup cost matters.
+        if identity
+            && !source_conjugate
+            && !matches!(authority.twist(), ContractTwist::Fermionic(_))
+        {
             return Ok(DynamicFusionTransformedSourceEntry {
                 space: Arc::new(source.clone()),
                 replay_structure: Arc::clone(source_structure),
@@ -1702,20 +1703,25 @@ where
         Ok(txn.stage(prepared, None))
     }
 
-    /// None: a twist is never possible once the entry admitted Bosonic
-    /// braiding.
     fn contract_twist_scales(
         rule: &R,
         authority: CheckedAuthority<'_, R>,
-        _space: &DynamicFusionMapSpace,
-        _core_right: &FusionTreeHomSpace,
-        _space_is_core_left: bool,
-        _rhs_contracting_axes: &[usize],
+        space: &DynamicFusionMapSpace,
+        core_right: &FusionTreeHomSpace,
+        space_is_core_left: bool,
+        rhs_contracting_axes: &[usize],
     ) -> Result<Vec<(usize, f64)>, Self::Error> {
-        if Self::contract_twist_possible(rule, authority)? {
-            return Err(CHECKED_CONTRACTION_REQUIRES_BOSONIC.into());
+        match authority.twist() {
+            ContractTwist::Unasked => Err(CROSSING_FREE_CONTRACTION_TWIST.into()),
+            ContractTwist::Free => Ok(Vec::new()),
+            ContractTwist::Fermionic(theta) => compile_contract_twist_with(
+                space,
+                core_right,
+                space_is_core_left,
+                rhs_contracting_axes,
+                |sector| theta(rule, sector).map_err(CheckedGenericPlanError::Provider),
+            ),
         }
-        Ok(Vec::new())
     }
 
     /// The canonical coupled-region plan, else the structure-only re-base
