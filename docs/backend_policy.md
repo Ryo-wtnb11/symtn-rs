@@ -202,9 +202,14 @@ on its lane's whole share (`Inner`: every block on the whole engine). Prepared
 grouped core batches the same way. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view), and keeps its own outcome; the
 outcomes, then that refusal, reach the operation in block order, where the
-same per-sector checks as a block-by-block loop run on each, so the error
-reported is the lowest-indexed sector's, the one the per-matrix loop would
-report, and nothing is returned on error. Two costs differ from that loop
+operation applies its error precedence, and nothing is returned on error.
+Compact SVD checks each delivered sector's output, gauge and spectrum before
+staging the next, so the lowest-indexed failing sector's error is reported;
+the operation's own linear-algebra scope's refusal takes precedence over that error.
+Full EIGH, polar and exp also report the lowest failing sector.
+The solver-first destination routes (full SVD, QR/LQ, null bases and inverse)
+instead let a later solver failure override an earlier malformed output.
+Two costs differ from a block-by-block loop
 and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
 where the loop would have returned the earlier error. Compact QR, compact

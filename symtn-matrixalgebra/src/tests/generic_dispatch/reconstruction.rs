@@ -745,9 +745,9 @@ impl Observer for MalformedBatch {
 #[test]
 fn compact_factorizations_reject_a_malformed_executor_batch() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the planned compact QR/LQ/SVD batch is solver-first: a delivered
-    // solver error is the result even after an earlier malformed factor,
-    // which is checked only once the batch succeeded. A missing,
+    // What: the planned compact QR/LQ batch is solver-first: a delivered
+    // solver error wins over an earlier malformed factor. Compact SVD
+    // reports the lowest failing sector instead. A missing,
     // repeated or misplaced delivery is symtn's own typed arity error,
     // never a dropped sector, a panic or a backend error; a missing factor
     // keeps the per-matrix path's error.
@@ -788,7 +788,7 @@ fn compact_factorizations_reject_a_malformed_executor_batch() {
             Delivery::DropFactorThenFail,
             Box::new(solver),
             Box::new(solver),
-            Box::new(solver),
+            Box::new(|error| *error == OperationError::Dense(arity_mismatch("svd_into", 3, 2))),
         ),
         (
             Delivery::Duplicate,
@@ -927,8 +927,9 @@ fn compact_factorizations_reject_a_malformed_destination_batch() {
     // batch-arity error, and no misdelivered destination is staged as a
     // sector; a batch error after a delivered prefix is the result; a
     // staging stop wins over whatever the executor returns after ignoring
-    // it; the solver-first QR/SVD batches let a later solver failure win
-    // over an earlier malformed output.
+    // it; the solver-first QR/LQ batches let a later solver failure win
+    // over an earlier malformed output, while compact SVD reports the
+    // lowest failing sector.
     let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -943,19 +944,21 @@ fn compact_factorizations_reject_a_malformed_destination_batch() {
         )
     };
     let solver = |error: &OperationError| *error == OperationError::Dense(solver_failure());
+    let output =
+        |error: &OperationError| *error == OperationError::Dense(arity_mismatch("qr_into", 2, 1));
     let batch = |error: &OperationError| *error == OperationError::Dense(batch_failure());
     type Expect = fn(&OperationError) -> bool;
-    let cases: [(IntoDelivery, Expect); 8] = [
-        (IntoDelivery::DropLast, arity),
-        (IntoDelivery::FailFirst, solver),
-        (IntoDelivery::OutputThenFail, solver),
-        (IntoDelivery::Duplicate, arity),
-        (IntoDelivery::Swapped, arity),
-        (IntoDelivery::OutOfRange, arity),
-        (IntoDelivery::PrefixThenError, batch),
-        (IntoDelivery::IgnoresStop, solver),
+    let cases: [(IntoDelivery, Expect, Expect); 8] = [
+        (IntoDelivery::DropLast, arity, arity),
+        (IntoDelivery::FailFirst, solver, solver),
+        (IntoDelivery::OutputThenFail, solver, output),
+        (IntoDelivery::Duplicate, arity, arity),
+        (IntoDelivery::Swapped, arity, arity),
+        (IntoDelivery::OutOfRange, arity, arity),
+        (IntoDelivery::PrefixThenError, batch, batch),
+        (IntoDelivery::IgnoresStop, solver, solver),
     ];
-    for (delivery, expect) in cases {
+    for (delivery, qr_expect, svd_expect) in cases {
         // Only in-order, in-range deliveries reach a sector: the staged
         // indices are a prefix of `0, 1`.
         let staged_in_order = |recording: &crate::probe::Recording| {
@@ -967,13 +970,13 @@ fn compact_factorizations_reject_a_malformed_destination_batch() {
         let qr = qr_compact(engine, &mut dense, &input)
             .map(|_| ())
             .unwrap_err();
-        assert!(expect(&qr), "{delivery:?} qr_compact: {qr:?}");
+        assert!(qr_expect(&qr), "{delivery:?} qr_compact: {qr:?}");
         assert!(staged_in_order(&recording), "{delivery:?} qr_compact");
         let recording = crate::probe::record();
         let svd = svd_compact(engine, &mut dense, &input)
             .map(|_| ())
             .unwrap_err();
-        assert!(expect(&svd), "{delivery:?} svd_compact: {svd:?}");
+        assert!(svd_expect(&svd), "{delivery:?} svd_compact: {svd:?}");
         assert!(staged_in_order(&recording), "{delivery:?} svd_compact");
         assert_eq!(dense.counts().factorize_batch, 0, "{delivery:?}");
     }

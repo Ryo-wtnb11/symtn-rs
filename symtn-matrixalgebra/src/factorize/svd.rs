@@ -951,6 +951,9 @@ where
     svd_compact_direct_regions(engine, dense, input, &plan, gauge, adjoint_spaces)
 }
 
+/// Compact SVD into final factor regions: each sector's outcome, gauge and
+/// spectrum are checked before staging the next sector. One scope spans the
+/// batch; its refusal takes precedence over the first failing sector's error.
 pub(super) fn svd_compact_direct_regions<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -1104,33 +1107,38 @@ where
             .collect::<Result<Vec<_>, OperationError>>()?;
         let mut layouts = Vec::new();
         let inputs = col_major_reads(&blocks, &mut layouts)?;
-        factorize_into_solver_first(
-            engine,
-            dense,
-            DenseFactorization::Svd,
-            &inputs,
-            &mut dests,
-            |index, dest| {
-                let (_, rows, cols) = blocks[index];
-                let rank = rows.min(cols);
-                let [u, s, vh] = dest.outputs_mut();
-                let (u, vh) = (
-                    dest_data::<D>(u, "svd_into")?,
-                    dest_data::<D>(vh, "svd_into")?,
-                );
-                match gauge {
-                    CompactSvdGauge::Left => svd_compact_gauge(u, rows, rows, vh, rank, cols, rank),
-                    // The adjoint's `u` columns are the conjugated parent `Vh`
-                    // rows, so its left gauge is the parent-row gauge.
-                    CompactSvdGauge::AdjointLeft => {
-                        svd_compact_gauge(u, cols, cols, vh, rank, rows, rank)
+        in_linalg_scope(engine, dense, |dense, engine| {
+            factorize_batch_into_staged(
+                engine,
+                dense,
+                DenseFactorization::Svd,
+                &inputs,
+                &mut dests,
+                |index, dest, outcome| {
+                    outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
+                    let (_, rows, cols) = blocks[index];
+                    let rank = rows.min(cols);
+                    let [u, s, vh] = dest.outputs_mut();
+                    let (u, vh) = (
+                        dest_data::<D>(u, "svd_into")?,
+                        dest_data::<D>(vh, "svd_into")?,
+                    );
+                    match gauge {
+                        CompactSvdGauge::Left => {
+                            svd_compact_gauge(u, rows, rows, vh, rank, cols, rank)
+                        }
+                        // The adjoint's `u` columns are the conjugated parent `Vh`
+                        // rows, so its left gauge is the parent-row gauge.
+                        CompactSvdGauge::AdjointLeft => {
+                            svd_compact_gauge(u, cols, cols, vh, rank, rows, rank)
+                        }
                     }
-                }
-                singular_values[solved[index]].values =
-                    widened_spectrum(dest_data::<D::Real>(s, "svd_into")?);
-                Ok(())
-            },
-        )?;
+                    singular_values[solved[index]].values =
+                        widened_spectrum(dest_data::<D::Real>(s, "svd_into")?);
+                    Ok(())
+                },
+            )
+        })?;
     }
     let u = BoundDynFactor::from_bound(
         left_space,

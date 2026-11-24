@@ -50,7 +50,9 @@ where
 
 /// Runs `op` over `inputs` as one executor batch and hands `stage` each
 /// input's outcome in input order; a `stage` error stops the batch and is
-/// returned.
+/// returned before the batch's own error. Validating each delivered outcome
+/// in `stage` therefore preserves the lowest failing input, as in `pinv`'s
+/// owned SVD stage. Scope admission and exit belong to [`in_linalg_scope`].
 ///
 /// An overriding executor is outside this crate, so its delivery is checked:
 /// an input delivered twice, out of order or not at all is symtn's typed
@@ -105,7 +107,10 @@ where
 /// [`factorize_batch_staged`] into caller-owned destinations: `stage` sees
 /// each delivered input's destination and tagged outcome in input order;
 /// a `stage` error stops the batch and is returned. The same delivery check
-/// guards an executor that overrides the destination entry.
+/// guards an executor that overrides the destination entry. Mapping either
+/// tagged failure to an error in `stage` preserves the lowest failing input,
+/// including malformed outputs; [`factorize_into_solver_first`] instead
+/// defers output failures. Scope precedence belongs to [`in_linalg_scope`].
 pub(super) fn factorize_batch_into_staged<E>(
     engine: &mut dyn Engine,
     dense: &mut E,
