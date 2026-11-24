@@ -610,8 +610,8 @@ where
 ///
 /// The moves before and after the GEMM each run in one engine entry at the
 /// width [`symtn_dense::lanes::movement_width`] chooses over the members:
-/// under `Auto` calibrated dispatch plus the serial copy estimate divided
-/// by width is minimized; a forced policy keeps its batch decision, one under
+/// under `Auto` the calibrated split model is compared with inline items on
+/// the whole token; a forced policy keeps its batch decision, one under
 /// `Sequential`. At width one every member moves on the caller's token;
 /// above it the members split into at most that many contiguous ranges,
 /// each moving its members as one member-axis move per role.

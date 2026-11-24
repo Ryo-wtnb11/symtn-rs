@@ -344,11 +344,9 @@ where
     expected
 }
 
-/// Runs both replay modes with `threads` replay workers and returns
-/// `(axpby, overwrite)`. A fresh workspace sizes its fused-index scratch per
-/// worker, so its length shows the driver used. The pool has two workers per
-/// replay worker and declares free dispatch, so every block an overwrite
-/// visits is widened onto its compiled plan.
+/// Runs both replay modes and returns `(axpby, overwrite)`. The pool has
+/// `2 * threads` workers and declares free dispatch, so every block an
+/// overwrite visits can widen onto its compiled plan on the whole token.
 fn replay_recoupling_fixture<D>(
     threads: usize,
     src: &[D],

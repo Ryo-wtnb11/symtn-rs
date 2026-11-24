@@ -220,19 +220,24 @@ fn singles_are_offered_the_tokens_of_mains_recursion() {
     assert_eq!(counts, Counts::default());
 }
 
-/// What (r6 short scatter and P2 trace): two slice-disjoint groups of
-/// `[2, 1666]` and `[2, 1667]` transposes (four pack columns, so four
-/// workers) under forced `Outer` at flat 100 ns: the chunk's two groups split over four logical
-/// threads, each offered two slots; the two leaf gates share one cost key,
-/// so one of them scans with main's global bound, making main's `pays`
-/// queries on a two-slot token, and both roles are admitted.
+/// Two transposing groups share one gate scan after narrowing eight slots
+/// to six: their six pack columns select six slots under `Outer`, and the
+/// two scatter leaves each get three. Those budgets are absent from the
+/// original eight-slot root's halving tree.
 #[test]
 fn a_short_scatter_phase_follows_mains_recursion_and_gate() {
     let dst = blocks(&[([2, 1666], [1666, 1], 0), ([2, 1667], [1667, 1], 3332)]);
     let src = Arc::new(
         BlockStructure::packed_column_major(
             2,
-            vec![vec![2, 1666], vec![2, 1666], vec![2, 1667], vec![2, 1667]],
+            vec![
+                vec![2, 1666],
+                vec![2, 1666],
+                vec![2, 1666],
+                vec![2, 1667],
+                vec![2, 1667],
+                vec![2, 1667],
+            ],
         )
         .unwrap(),
     );
@@ -240,20 +245,20 @@ fn a_short_scatter_phase_follows_mains_recursion_and_gate() {
         &dst,
         &src,
         &[
-            TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![1.0, 1.0]),
-            TreeTransformBlockSpec::multi(vec![1], vec![2, 3], vec![1.0, 1.0]),
+            TreeTransformBlockSpec::multi(vec![0], vec![0, 1, 2], vec![1.0, 1.0, 1.0]),
+            TreeTransformBlockSpec::multi(vec![1], vec![3, 4, 5], vec![1.0, 1.0, 1.0]),
         ],
     )
     .unwrap();
     let bound = transform.layouts().max_planned_elements();
     assert_eq!(bound, 3334);
-    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Outer);
+    let mut engine = flat_engine(8, 100, CpuBatchStrategy::Outer);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
-    assert_eq!(offers, [2, 2]);
+    assert_eq!(offers, [3, 3]);
     let probes = crate::host_pool::region(
         &mut engine,
         crate::host_pool::HostPoolSite::Replay,
-        |exec| main_scan_probes(&exec.limit(core::num::NonZeroUsize::new(2).unwrap()), bound),
+        |exec| main_scan_probes(&exec.limit(core::num::NonZeroUsize::new(3).unwrap()), bound),
     )
     .unwrap();
     let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
@@ -359,14 +364,14 @@ impl DenseExecutor for Batches {
     }
 }
 
-/// What (audit 1): ten identity groups on four free-dispatch workers replay
+/// Ten identity groups on four cheap-dispatch workers replay
 /// in chunks of four consecutive groups, one grouped submission each:
 /// `ceil(10 / 4)` submissions of 4, 4 and 2 jobs, and the values copy.
 #[test]
 fn each_chunk_is_one_grouped_submission() {
     let groups = 10;
     let structure =
-        Arc::new(BlockStructure::packed_column_major(2, vec![vec![4, 6]; 2 * groups]).unwrap());
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![64, 64]; 2 * groups]).unwrap());
     let specs = (0..groups)
         .map(|g| {
             TreeTransformBlockSpec::multi(
@@ -384,7 +389,7 @@ fn each_chunk_is_one_grouped_submission() {
     let mut out = vec![f64::NAN; source.len()];
     let mut dense = Batches::default();
     tree_transform_structure_overwrite_with_structural_recoupling_raw(
-        &mut engine(4, CpuBatchStrategy::Auto),
+        &mut flat_engine(4, 1, CpuBatchStrategy::Auto),
         &mut StridedHostKernelAdapter::default(),
         &mut dense,
         &mut TreeTransformWorkspace::default(),
@@ -530,7 +535,7 @@ fn overwrite(
     out
 }
 
-/// What (H fill, audit 2): the ten-group overwrite on `t = 4` free-dispatch
+/// The ten-group overwrite on `t = 4` forced `Outer`
 /// workers replays `Q = ceil(10 / 4)` chunks of consecutive groups in
 /// `1 + 2 Q` parallel movement phases (one direct, a pack and a scatter per
 /// chunk) on every call. A fresh workspace initializes the largest chunk's
@@ -552,7 +557,7 @@ fn a_parallel_replay_fills_its_destination_scratch_once_in_its_phases() {
         let (fills, phases) = (workspace.destination_fills(), workspace.movement_phases());
         overwrite(
             threads,
-            CpuBatchStrategy::Auto,
+            CpuBatchStrategy::Outer,
             workspace,
             &transform,
             &structure,
@@ -782,11 +787,10 @@ fn inactive_runs_split_under_a_serial_replay_width() {
 
 /// What: on three workers, three disjoint inactive layouts
 /// and three one-source, two-destination groups of `0`, `m` and `m` rows
-/// (the empty group first in plan order): the two pack columns admit main's
-/// width `t_0 = 2` for the groups, whatever the three inactive runs admit
-/// for their own phase, so the chunks, the grouped submissions and the
-/// packed scratch are those of consecutive chunks of two jobs, derived here
-/// from the jobs' geometry, and the copy is exact.
+/// (the empty group first in plan order): Auto shares all three slots among
+/// the two pack columns. The grouped submissions and packed scratch follow
+/// consecutive chunks of three jobs, derived from the jobs' geometry,
+/// independently of the inactive phase, and the copy is exact.
 #[test]
 fn inactive_runs_leave_the_chunk_width_alone() {
     let m = 4096;
@@ -813,7 +817,7 @@ fn inactive_runs_leave_the_chunk_width_alone() {
     let schedule = transform.parallel_schedule();
     assert_eq!(schedule.pack_columns.len(), 2);
     assert_eq!(schedule.inactive_runs.len(), 3);
-    let width = 2;
+    let width = 3;
     let jobs = transform.recoupling_plan().jobs();
     let span = |chunk: &[DenseGemmBatchJob], of: fn(&DenseGemmBatchJob) -> (usize, usize)| {
         let (first, _) = of(&chunk[0]);

@@ -276,8 +276,8 @@ pub fn test_engine(threads: usize) -> tenferro_cpu::CpuEngine {
 }
 
 /// Test support: a `threads`-worker engine whose pool declares zero dispatch
-/// cost, so its own cost rule admits every parallel section and small
-/// fixtures take the parallel replay (serial at one).
+/// cost, so Strided can widen planned moves on the whole token. Auto replay
+/// keeps an inline route when its modeled time ties a split (serial at one).
 #[cfg(all(any(test, feature = "testing"), feature = "tenferro"))]
 #[doc(hidden)]
 pub fn eager_test_engine(threads: usize) -> tenferro_cpu::CpuEngine {

@@ -370,38 +370,50 @@ no token from it.
 
 A tree-transform replay follows TensorKit's threaded kernels and main's
 replay. One internal chooser fixes its movement width `t`: under `Auto` it
-minimizes `D(q) + estimate / q` over integer widths from one through the
-smaller of the engine budget and the compiled runnable parts (the Singles
-when their destinations are slice-disjoint, else one, or the pack columns,
-whichever is more). `estimate` remains Strided's serial copy estimate of the
-whole destination. Ties choose the smaller width, including intermediate
-widths between calibration anchors. Under a forced policy the batch decision
-(`lanes * item_threads`, one for `Sequential`) is capped by the runnable
-parts. A split runs on a token narrowed to that chosen width.
+considers every integer width through the engine budget, including widths
+larger than the compiled runnable item count. Split items share all chosen
+slots, so a leaf containing one large item can offer several slots to Strided.
+The aggregate split estimate is `D(q) + estimate / q`, where `estimate` is
+Strided's serial copy estimate of the whole destination. Width one instead
+keeps the caller's whole token: its baseline is the minimum of
+`runnable * D(w) + estimate / w` over `w` through the budget, modeling sequential
+items that can each fan out. These are equal-size, divisible-work estimates;
+they do not model per-role plan eligibility, unequal item sizes, or additional
+inner forks inside split leaves. Ties choose width one, then the smaller split
+width, including intermediate widths between calibration anchors. Under a
+forced policy the batch decision (`lanes * item_threads`, one for `Sequential`)
+is capped by the runnable parts. A split narrows its token to the chosen width;
+its recursive shares retain every slot even when items are fewer than slots.
 
 The dispatch ladder is calibrated on the engine's own `limit(q)` prefixes
-at widths 1, 2, 4, ... and the full budget, and linearly interpolated. Each
-anchor above one is the median of five batches of 200 empty sections, with
-one unmeasured warmup section. Measurements are bounded to [0.5, 20] times
-the token's effective threadteam dispatch table; a caller's `PoolBuilder`
-override takes precedence over the default host-class row (zero stays zero).
-An invalid elapsed interval falls back to the table. A nondecreasing envelope
-is used where compatible with those bounds. Width one has no dispatch cost.
-Threadteam 0.5 supplies no prefix node map, so no NUMA boundaries are added;
-bandwidth and topology calibration are deferred to the flat vector operations.
+at widths 1, 2, 4, ... and the full budget, and linearly interpolated. The
+10 ms table-priced target is divided among anchors above one. Each anchor
+uses five equal median batches, with 20–200 sections total (rounded down to
+a multiple of five), plus one unmeasured warmup section. This bounds planned
+work, not elapsed time under interruption or a mispriced dispatch table.
+Measurements are bounded to [0.5, 20] times the token's effective threadteam
+dispatch table; the precheck reads that same token kind. A caller's
+`PoolBuilder` override takes precedence over the default host-class row
+(zero stays zero). An invalid elapsed interval falls back to the table.
+A nondecreasing envelope is used where compatible with those bounds.
+Width one has no dispatch cost. Threadteam 0.5 supplies no prefix node map,
+so no NUMA boundaries are added; bandwidth and topology calibration are
+deferred to the flat vector operations.
 
-The first Auto decision with multiple runnable parts calibrates only when
-the model using half the table cost can beat width one. Thus serial engines,
-one-part phases and provably tiny phases perform no calibration. The ladder
-is a separate, byte-charged entry in the existing per-engine extension store,
-not a structure cache; a retained entry is reused without measurement.
-Eviction, limits that refuse retention, or `symtn::scratch::trim` cause the
-next eligible decision to recalibrate. Only the small ladder is retained;
-there is no bandwidth buffer. The pure chooser evaluates each interpolated
-interval's endpoints and integer neighbours of its analytic minimum, in
-O(ladder size) time with no allocation per decision. Block-lane placement
-and provider inner-width choice keep their existing cost models. This is a
-scheduling estimate, not a guarantee of measured speedup.
+The first eligible Auto decision calibrates only when the model using half
+the table cost can beat fully serial execution. Serial engines and provably
+tiny phases and single-item inline phases perform no calibration. The ladder is a separate, byte-charged
+entry in the existing per-engine extension store, not a structure cache;
+a retained entry is reused without measurement. Admission is checked before
+measuring: when the byte or entry limits refuse the ladder, decisions use
+the token's table without repeatedly measuring an unretainable entry.
+Eviction or `symtn::scratch::trim` makes an admitted entry cold again; freeing
+store capacity permits a previously refused engine to calibrate. Only the
+small ladder is retained; there is no bandwidth buffer. The pure chooser
+evaluates each interpolated interval's endpoints and integer neighbours of
+its analytic minimum, in O(ladder size) time with no allocation per decision.
+Block-lane placement and provider inner-width choice keep their existing
+cost models. This is a scheduling estimate, not a guarantee of measured speedup.
 
 Destinations are grouped into hull runs:
 maximal address-ordered stretches whose bounding slices overlap
@@ -438,7 +450,8 @@ one per split leaf, answers that rule exactly, scanning the token's
 dispatch costs once and searching widths only for a role at or above the
 smallest paying size; the split leaves of one call share that smallest
 size per cost of their cheapest width, which the caller prepares for every
-leaf budget before the first split, so each such cost is searched at most
+leaf budget from the chosen replay and run widths before the first split
+(including their exact recursive shares), so each such cost is searched at most
 once per call among the leaves, and only when a leaf needs it (the
 caller's own gate may search once more, as before). A leaf stops at its first failure, a split runs both
 halves and returns the left failure first, and the first failing phase or
@@ -451,9 +464,9 @@ destination scale once per role, then moves its members (the member axis
 one more strided dimension of each move) around one dense submission of
 every member's GEMMs, ordered plan job outer, member inner, and returns
 the first failure in that order. Each move phase takes the width the
-replay rule admits over the members (under `Auto` the engine's width when
-Strided's copy estimate of the whole batch destination pays for it, under
-a forced policy its batch decision): at one every member moves on the
+same chooser selects over the members (under `Auto` using the whole batch
+destination's serial copy estimate and the inline-item baseline; under a
+forced policy its batch decision): at one every member moves on the
 caller's token, above it the members split into at most that many
 contiguous ranges, each moving its members as one move per role. An executor that cannot honor a forced
 batch policy (every custom executor) refuses a

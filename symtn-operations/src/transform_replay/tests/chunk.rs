@@ -10,13 +10,13 @@ use super::*;
 use symtn_dense::{CpuEngine, Pool};
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
-/// A free two-worker prefix beats serial, while the costly four-worker
+/// A cheap two-worker prefix beats inline item dispatch, while the costly four-worker
 /// prefix cannot: the public Singles replay uses the intermediate width.
 #[test]
 fn singles_replay_uses_the_intermediate_movement_width() {
     use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
     let row = WidthCosts::new([
-        Duration::ZERO,
+        Duration::from_nanos(1),
         Duration::from_secs(1),
         Duration::from_secs(1),
     ]);
@@ -27,7 +27,7 @@ fn singles_replay_uses_the_intermediate_movement_width() {
             .build()
             .unwrap(),
     );
-    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![4]; 4]).unwrap());
+    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![4096]; 4]).unwrap());
     let specs = (0..4)
         .map(|block| TreeTransformBlockSpec::single(block, block, 1.0))
         .collect::<Vec<_>>();
@@ -39,6 +39,38 @@ fn singles_replay_uses_the_intermediate_movement_width() {
         .filter_map(|mark| mark.worker)
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(workers.len(), 2);
+}
+
+/// Auto gives every leaf its chosen slots even when there are fewer Singles than workers.
+#[test]
+fn auto_singles_share_surplus_slots() {
+    for (items, expected) in [(2, vec![4, 4]), (3, vec![2, 2, 4])] {
+        let structure =
+            Arc::new(BlockStructure::packed_column_major(1, vec![vec![131_072]; items]).unwrap());
+        let specs = (0..items)
+            .map(|block| TreeTransformBlockSpec::single(block, block, 1.0))
+            .collect::<Vec<_>>();
+        let transform =
+            TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+        let mut engine = flat_engine(8, 1, CpuBatchStrategy::Auto);
+        let (offers, _) = recorded(&mut engine, &transform, &structure, &structure);
+        assert_eq!(offers, expected);
+    }
+}
+
+/// One large Single stays inline on the whole token so Strided can fan it out.
+#[test]
+fn auto_single_keeps_the_full_inline_token() {
+    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![131_072]]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &[TreeTransformBlockSpec::single(0, 0, 1.0)],
+    )
+    .unwrap();
+    let mut engine = flat_engine(8, 1, CpuBatchStrategy::Auto);
+    let (offers, _) = recorded(&mut engine, &transform, &structure, &structure);
+    assert_eq!(offers, [8]);
 }
 
 /// `alpha T(src) + beta dst` on `budget` workers under `strategy`.
@@ -167,8 +199,7 @@ fn custom_executor_values_equal_the_built_in_replay() {
     }
 }
 
-/// What: on four workers, under `Auto` (the eager engine's free dispatch
-/// admits every phase on all four), a forced `Sequential` and, where the
+/// What: on four workers, under `Auto`, a forced `Sequential` and, where the
 /// built-in executor honors it, a forced `Outer`, every destination element
 /// of the interleaved fixture is written exactly once and nothing else is.
 #[test]
@@ -278,8 +309,7 @@ fn one_worker_singles_follow_the_destination_kinds_order() {
 }
 
 /// What: two of three Multi groups' GEMMs fail. On one worker and on two,
-/// three and four (`Auto` on free dispatch: chunks of two, three and three
-/// groups), the replay stops at the first failing GEMM in plan order: the
+/// three and four (`Auto` on free dispatch), the replay stops at the first failing GEMM in plan order: the
 /// executor saw exactly the plan's GEMMs up to it, and its error is
 /// returned; no failed GEMM is submitted twice.
 #[test]
@@ -327,8 +357,7 @@ fn the_first_failing_gemm_in_plan_order_stops_the_replay() {
 }
 
 /// What: a movement panic on a split worker (the second of two
-/// slice-disjoint Singles, split over two workers of a free-dispatch
-/// engine) unwinds out of the replay after the fork joined, leaves the
+/// slice-disjoint Singles, split over two workers under forced `Outer`) unwinds out of the replay after the fork joined, leaves the
 /// engine broken, and the engine refuses its next entry.
 #[test]
 fn a_split_worker_panic_breaks_the_engine() {
@@ -344,7 +373,7 @@ fn a_split_worker_panic_breaks_the_engine() {
     .unwrap();
     assert!(transform.parallel_schedule().singles_slice_disjoint());
     let source = (1..=64).map(f64::from).collect::<Vec<_>>();
-    let mut engine = engine(2, CpuBatchStrategy::Auto);
+    let mut engine = engine(2, CpuBatchStrategy::Outer);
     let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
             &mut engine,

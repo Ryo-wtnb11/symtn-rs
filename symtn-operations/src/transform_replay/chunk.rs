@@ -38,8 +38,8 @@ use crate::transform_structure::{
 /// `t` it admits there, with whether the policy is a forced `Sequential`.
 ///
 /// `t` is [`lanes::movement_width`] of a copy of the whole destination over
-/// the compiled runnable parts: under `Auto` the minimum modeled time from
-/// calibrated dispatch plus the serial estimate divided by width; a forced
+/// the compiled runnable parts: under `Auto` the calibrated split model
+/// compared with inline items on the whole token; a forced
 /// policy's decision, at most the runnable parts. It fixes the chunks of
 /// the plan groups, and the Singles' split when they are slice-disjoint.
 ///
@@ -107,6 +107,7 @@ where
             workspace.gate_keys.prepare(
                 &mut exec.reborrow().into_token(),
                 layouts.max_planned_elements(),
+                &[threads, run_threads],
             );
             #[cfg(test)]
             workspace.gate_keys.watch_as(gate);

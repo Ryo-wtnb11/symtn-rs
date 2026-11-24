@@ -96,26 +96,35 @@ mod store {
             .and_then(|slot| held(slot).take())
     }
 
+    pub(super) fn admits<T: Send + 'static>(
+        store: &mut ExtensionCacheStore,
+        key: &ExtensionCacheKey,
+        bytes: usize,
+        charge: fn(&T) -> usize,
+    ) -> bool {
+        let ours_now = store
+            .get_mut::<Slot<T>>(key)
+            .map(|slot| slot_charge(held(slot).as_ref(), charge));
+        let foreign = store
+            .stats(ExtensionCacheSelector::All)
+            .retained_bytes
+            .saturating_sub(ours_now.unwrap_or(0));
+        let candidate = slot_charge::<T>(None, charge).saturating_add(bytes);
+        let limits = store.limits();
+        let bytes_fit = limits
+            .max_retained_bytes()
+            .is_none_or(|limit| foreign.saturating_add(candidate) <= limit.get());
+        let entries_fit = ours_now.is_some() || store.len() < limits.max_entries().get();
+        bytes_fit && entries_fit
+    }
+
     pub(super) fn checkin<T: Send + 'static>(
         store: &mut ExtensionCacheStore,
         key: ExtensionCacheKey,
         value: T,
         charge: fn(&T) -> usize,
     ) {
-        let ours_now = store
-            .get_mut::<Slot<T>>(&key)
-            .map(|slot| slot_charge(held(slot).as_ref(), charge));
-        let foreign = store
-            .stats(ExtensionCacheSelector::All)
-            .retained_bytes
-            .saturating_sub(ours_now.unwrap_or(0));
-        let candidate = slot_charge(Some(&value), charge);
-        let limits = store.limits();
-        let bytes_fit = limits
-            .max_retained_bytes()
-            .is_none_or(|limit| foreign.saturating_add(candidate) <= limit.get());
-        let entries_fit = ours_now.is_some() || store.len() < limits.max_entries().get();
-        if !(bytes_fit && entries_fit) {
+        if !admits(store, &key, charge(&value), charge) {
             return;
         }
         #[cfg(test)]
@@ -205,4 +214,17 @@ pub(crate) fn checkin_movement(engine: &mut dyn Engine, value: crate::lanes::Cal
             crate::lanes::Calibration::retained_bytes,
         )
     });
+}
+
+#[cfg(feature = "tenferro")]
+pub(crate) fn movement_fits(engine: &mut dyn Engine, bytes: usize) -> bool {
+    store::with_store(engine, |s| {
+        store::admits(
+            s,
+            &store::MOVEMENT,
+            bytes,
+            crate::lanes::Calibration::retained_bytes,
+        )
+    })
+    .unwrap_or(false)
 }

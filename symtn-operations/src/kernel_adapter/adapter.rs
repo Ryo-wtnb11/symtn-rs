@@ -186,7 +186,7 @@ pub(crate) mod sealed {
     }
 
     /// The gate cost keys of one replay call, prepared by its caller before
-    /// any split: for each budget a split leaf of the call's root token can
+    /// any split: for each budget a split leaf of the chosen phase widths can
     /// get, the dispatch cost of its cheapest width, and one lazily filled
     /// scan per distinct cost.
     ///
@@ -217,44 +217,52 @@ pub(crate) mod sealed {
     }
 
     impl GateKeys {
-        /// Prepares the keys of `exec`'s halving budgets for gates of
+        /// Prepares the keys of the phase widths' halving budgets for gates of
         /// `bound`, or none when no role is planned (`bound` zero) or
         /// `exec` carries no team.
-        pub(crate) fn prepare(&mut self, exec: &mut crate::host_pool::Exec<'_>, bound: usize) {
+        pub(crate) fn prepare(
+            &mut self,
+            exec: &mut crate::host_pool::Exec<'_>,
+            bound: usize,
+            widths: &[usize],
+        ) {
             self.bound = bound;
             self.budgets.clear();
             self.slots.clear();
             if bound == 0 || exec.is_serial() || !exec.carries_team() {
                 return;
             }
-            // Split halves a token as threadteam's even fork does, so the
-            // budgets at depth d are the floor and ceil of `root / 2^d`.
-            let root = exec.budget().get();
-            let mut divisor = 1usize;
-            while root.div_ceil(divisor) >= 2 {
-                for budget in [root / divisor, root.div_ceil(divisor)] {
-                    if budget < 2 || self.budgets.iter().any(|&(b, _)| b == budget) {
-                        continue;
-                    }
-                    let limited = exec
-                        .reborrow()
-                        .limit(core::num::NonZeroUsize::new(budget).expect("budget >= 2"));
-                    let Some((_, cost)) = LeafGate::cheapest(&limited) else {
-                        continue;
-                    };
-                    let slot = match self.slots.iter().position(|&(c, _)| c == cost) {
-                        Some(slot) => slot,
-                        None => {
-                            self.slots.push((cost, std::sync::OnceLock::new()));
-                            self.slots.len() - 1
+            // Split first narrows to a phase width, then halves exact shares.
+            let budget = exec.budget().get();
+            for root in
+                std::iter::once(budget).chain(widths.iter().copied().map(|width| width.min(budget)))
+            {
+                let mut divisor = 1usize;
+                while root.div_ceil(divisor) >= 2 {
+                    for budget in [root / divisor, root.div_ceil(divisor)] {
+                        if budget < 2 || self.budgets.iter().any(|&(b, _)| b == budget) {
+                            continue;
                         }
+                        let limited = exec
+                            .reborrow()
+                            .limit(core::num::NonZeroUsize::new(budget).expect("budget >= 2"));
+                        let Some((_, cost)) = LeafGate::cheapest(&limited) else {
+                            continue;
+                        };
+                        let slot = match self.slots.iter().position(|&(c, _)| c == cost) {
+                            Some(slot) => slot,
+                            None => {
+                                self.slots.push((cost, std::sync::OnceLock::new()));
+                                self.slots.len() - 1
+                            }
+                        };
+                        self.budgets.push((budget, slot));
+                    }
+                    let Some(next) = divisor.checked_mul(2) else {
+                        break;
                     };
-                    self.budgets.push((budget, slot));
+                    divisor = next;
                 }
-                let Some(next) = divisor.checked_mul(2) else {
-                    break;
-                };
-                divisor = next;
             }
         }
 

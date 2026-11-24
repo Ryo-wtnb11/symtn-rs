@@ -352,9 +352,9 @@ fn a_huge_batch_of_empty_members_splits_without_overflow() {
     assert!(engine.with_exec(|exec| exec.budget()).is_ok());
 }
 
-/// Four packed `[8]` blocks, each a Single of coefficient `c`.
+/// Four packed `[4096]` blocks, each a Single of coefficient `c`.
 fn four_singles<C: Copy>(c: C) -> (Arc<BlockStructure>, TreeTransformStructure<C>) {
-    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![8]; 4]).unwrap());
+    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![4096]; 4]).unwrap());
     let specs = (0..4)
         .map(|b| TreeTransformBlockSpec::single(b, b, c))
         .collect::<Vec<_>>();
@@ -364,20 +364,34 @@ fn four_singles<C: Copy>(c: C) -> (Arc<BlockStructure>, TreeTransformStructure<C
 }
 
 /// What: when a member-range move fails (the write of member 2's first
-/// Single, injected at the kernel adapter) on four free-dispatch workers
+/// Single, injected at the kernel adapter) on four cheap-dispatch workers
 /// split into four member ranges, the batch returns that error; the
 /// sibling range of member 3 still runs its moves, no grouped GEMM is
 /// submitted and no scatter writes a group destination; the engine stays
 /// usable.
 #[test]
 fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
-    let (layout, dst, src, transform) = interleaved_blocks(true);
+    let layout = (0..4)
+        .map(|block| (block * 8192, [2, 4096], [1, 2]))
+        .collect::<Vec<_>>();
+    let dst = Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, 4096]; 4]).unwrap());
+    let src = Arc::clone(&dst);
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(0, 0, -2.0),
+            TreeTransformBlockSpec::multi(vec![1, 2], vec![1, 2], vec![1.0, 2.0, 3.0, 4.0]),
+            TreeTransformBlockSpec::single(3, 3, 1.0),
+        ],
+    )
+    .unwrap();
     let members = 4;
     let len = dst.required_len().unwrap();
     let source = (0..members * src.required_len().unwrap())
         .map(|v| v as f64)
         .collect::<Vec<_>>();
-    let mut engine = engine(4, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
     let mut workspace = TreeTransformWorkspace::default();
     let mut out = vec![f64::NAN; members * len];
     tree_transform_members_overwrite_raw(
@@ -423,7 +437,15 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
         "{error:?}"
     );
     assert!(dense.attempts().is_empty());
-    let writes = kernels.writes.as_ref().unwrap().lock().unwrap().clone();
+    let writes = kernels
+        .writes
+        .as_ref()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
     assert!(writes.contains(&element(3, 0)), "member 3's range ran");
     let group = (1..=2)
         .flat_map(|block| {
@@ -444,7 +466,7 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
 }
 
 /// What: a movement panic in one member range (member 2's Single meets
-/// the source value 40) on four free-dispatch workers, split into four
+/// the source value 40) on four cheap-dispatch workers, split into four
 /// member ranges, unwinds out of the batch after the fork joined and
 /// leaves the engine broken.
 #[test]
@@ -452,7 +474,7 @@ fn a_member_range_panic_breaks_the_engine() {
     let (structure, transform) = four_singles(Panicking(2.0));
     let members = 4;
     let len = structure.required_len().unwrap();
-    let mut engine = engine(4, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
     let mut workspace = TreeTransformWorkspace::default();
     let run =
         |engine: &mut CpuEngine, workspace: &mut TreeTransformWorkspace<f64>, source: &[f64]| {

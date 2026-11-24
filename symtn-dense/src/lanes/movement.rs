@@ -4,13 +4,15 @@ use std::time::Instant;
 
 /// Internal seam between workspace crates, not a user API: the width of a
 /// movement phase whose serial estimate is `estimate` and whose independent
-/// parts cap its width at `runnable`. Auto minimizes calibrated dispatch plus
-/// `estimate / q`; forced policies retain their batch decision. A serial
+/// parts number `runnable`. Auto shares the chosen slots among these parts,
+/// comparing split execution with sequential items on the whole token;
+/// forced policies retain their batch decision. A serial
 /// engine does no calibration. Non-CPU and broken engines are refused.
 ///
 /// Calibration uses the engine's narrowed tokens on first fork candidacy,
 /// and is retained separately from contraction scratch under the engine's
-/// extension-store limits. Eviction or `symtn::scratch::trim` makes it cold.
+/// extension-store limits. Refused admission uses the token table without
+/// measurement; eviction or `symtn::scratch::trim` makes a retained entry cold.
 /// The chooser is O(ladder size), with no per-decision allocation.
 #[doc(hidden)]
 pub fn movement_width(
@@ -28,8 +30,7 @@ pub fn movement_width(
             return cpu.exec().map(|_| 1).map_err(backend_error);
         }
         let budget = cpu.num_threads();
-        let cap = budget.min(runnable.max(1));
-        if cap <= 1 {
+        if budget <= 1 || runnable <= 1 {
             return Ok(1);
         }
         if cpu.batch_policy().strategy != BatchStrategy::Auto {
@@ -39,36 +40,45 @@ pub fn movement_width(
                     decision
                         .lanes
                         .saturating_mul(decision.item_threads)
-                        .clamp(1, cap)
+                        .clamp(1, budget.min(runnable.max(1)))
                 })
                 .map_err(backend_error);
         }
         let rates = match crate::engine_slot::checkout_movement(cpu) {
             Some(rates) => rates,
             None => {
-                // Even the lowest admissible calibration cannot beat serial:
-                // tiny calls do not mint a token or pay for measurement.
                 let mut lower = [(1, Duration::ZERO); usize::BITS as usize + 1];
-                let mut len = 0;
-                for width in widths(budget) {
-                    let cost = if width == 1 {
-                        Duration::ZERO
-                    } else {
-                        cpu.dispatch_costs().cost(
-                            threadteam::DispatchKind::Team,
-                            NonZeroUsize::new(width).unwrap(),
-                        ) / 2
-                    };
-                    lower[len] = (width, cost);
-                    len += 1;
+                let mut table = lower;
+                let len = cpu
+                    .exec()
+                    .map(|exec| {
+                        let mut len = 0;
+                        for width in widths(budget) {
+                            let cost = if width == 1 {
+                                Duration::ZERO
+                            } else {
+                                exec.token_ref()
+                                    .dispatch_cost(NonZeroUsize::new(width).unwrap())
+                            };
+                            table[len] = (width, cost);
+                            lower[len] = (width, cost / 2);
+                            len += 1;
+                        }
+                        len
+                    })
+                    .map_err(backend_error)?;
+                // Never measure a ladder the slot cannot retain.
+                if !crate::engine_slot::movement_fits(cpu, Calibration::bytes(len)) {
+                    return Ok(choose_phase(&table[..len], estimate, budget, runnable));
                 }
-                if choose(&lower[..len], estimate, cap) == 1 {
+                // Tiny calls stay cold when even the lowest admissible costs lose.
+                if choose(&lower[..len], estimate, budget) == 1 {
                     return Ok(1);
                 }
                 cpu.with_exec(Calibration::measure).map_err(backend_error)?
             }
         };
-        let width = choose(&rates.dispatch, estimate, cap);
+        let width = choose_phase(&rates.dispatch, estimate, budget, runnable);
         crate::engine_slot::checkin_movement(cpu, rates);
         Ok(width)
     })
@@ -86,36 +96,39 @@ pub(crate) struct Calibration {
 
 impl Calibration {
     pub(crate) fn retained_bytes(&self) -> usize {
-        self.dispatch
-            .capacity()
-            .saturating_mul(std::mem::size_of::<(usize, Duration)>())
+        Self::bytes(self.dispatch.capacity())
+    }
+
+    fn bytes(anchors: usize) -> usize {
+        anchors.saturating_mul(std::mem::size_of::<(usize, Duration)>())
     }
 
     fn measure(exec: &mut Exec<'_>) -> Self {
         #[cfg(test)]
         crate::probe::add(crate::probe::Event::MovementCalibration, 1);
-        // Median of five batches rejects interruptions without timing individual
-        // sub-microsecond sections; 5 * 200 = 1000 empty sections per anchor.
+        // Five batches share a 10 ms table-priced target across the anchors.
         const BATCHES: usize = 5;
-        const SECTIONS: u32 = 200;
         // Bound noise to [0.5, 20] times the token's threadteam table. A
         // PoolBuilder override takes precedence over the default class row;
         // in particular, an explicitly free dispatch remains free.
         const MAX_TABLE_MULTIPLE: u32 = 20;
-        let mut dispatch = vec![(1, Duration::ZERO)];
+        let anchors = widths(exec.budget()).count();
+        let mut dispatch = Vec::with_capacity(anchors);
+        dispatch.push((1, Duration::ZERO));
         for width in widths(exec.budget()).skip(1) {
             let k = NonZeroUsize::new(width).unwrap();
             let baseline = exec.token_ref().dispatch_cost(k);
+            let sections = sections_per_batch(baseline, anchors - 1);
             let mut samples = [Duration::ZERO; BATCHES];
             exec.reborrow().limit(k).into_token().fork(width, |_, _| {});
             for sample in &mut samples {
                 let start = Instant::now();
-                for _ in 0..SECTIONS {
+                for _ in 0..sections {
                     exec.reborrow().limit(k).into_token().fork(width, |_, _| {});
                 }
                 *sample = Instant::now()
                     .checked_duration_since(start)
-                    .map(|elapsed| elapsed / SECTIONS)
+                    .map(|elapsed| elapsed / sections)
                     .filter(|elapsed| !elapsed.is_zero())
                     .unwrap_or(baseline);
             }
@@ -132,6 +145,59 @@ impl Calibration {
     }
 }
 
+fn sections_per_batch(cost: Duration, anchors: usize) -> u32 {
+    // At most 200 sections per anchor, shared evenly by five median batches.
+    let sections =
+        (Duration::from_millis(10).as_nanos() / anchors.max(1) as u128 / cost.as_nanos().max(1))
+            .clamp(20, 200);
+    (sections / 5) as u32
+}
+
+fn choose_phase(
+    dispatch: &[(usize, Duration)],
+    estimate: Duration,
+    budget: usize,
+    runnable: usize,
+) -> usize {
+    let split = choose(dispatch, estimate, budget);
+    if split == 1 {
+        return 1;
+    }
+    let items = runnable.max(1) as u128;
+    let serial = estimate.as_nanos();
+    let inline = choose_sections(dispatch, estimate, budget, items);
+    let inline_time = phase_time(dispatch, inline, serial, items);
+    let split_time = phase_time(dispatch, split, serial, 1);
+    let order = split_time.0.cmp(&inline_time.0).then_with(|| {
+        compare_fractions((split_time.1, split_time.2), (inline_time.1, inline_time.2))
+    });
+    if order.is_lt() {
+        split
+    } else {
+        1
+    }
+}
+
+fn phase_time(
+    dispatch: &[(usize, Duration)],
+    width: usize,
+    serial: u128,
+    sections: u128,
+) -> (u128, u128, u128) {
+    if width == 1 {
+        return (serial, 0, 1);
+    }
+    let pair = dispatch.windows(2).find(|pair| width <= pair[1].0).unwrap();
+    model_time(
+        pair[0].1.as_nanos().saturating_mul(sections),
+        pair[1].1.as_nanos().saturating_mul(sections),
+        pair[1].0 - pair[0].0,
+        width - pair[0].0,
+        serial,
+        width,
+    )
+}
+
 fn widths(budget: usize) -> impl Iterator<Item = usize> {
     std::iter::successors(Some(1), move |&width| {
         (width < budget).then(|| width.saturating_mul(2).min(budget))
@@ -139,6 +205,15 @@ fn widths(budget: usize) -> impl Iterator<Item = usize> {
 }
 
 fn choose(dispatch: &[(usize, Duration)], estimate: Duration, cap: usize) -> usize {
+    choose_sections(dispatch, estimate, cap, 1)
+}
+
+fn choose_sections(
+    dispatch: &[(usize, Duration)],
+    estimate: Duration,
+    cap: usize,
+    sections: u128,
+) -> usize {
     let serial = estimate.as_nanos();
     let (mut best, mut score) = (1, (serial, 0, 1));
     for pair in dispatch.windows(2) {
@@ -147,7 +222,11 @@ fn choose(dispatch: &[(usize, Duration)], estimate: Duration, cap: usize) -> usi
         if right < lo {
             break;
         }
-        let delta = high.as_nanos().abs_diff(low.as_nanos()) as f64 / (hi - lo) as f64;
+        let (low, high) = (
+            low.as_nanos().saturating_mul(sections),
+            high.as_nanos().saturating_mul(sections),
+        );
+        let delta = high.abs_diff(low) as f64 / (hi - lo) as f64;
         let slope = if high >= low { delta } else { -delta };
         // On a linear dispatch interval, a*q+b+serial/q is convex;
         // only its endpoints and the two neighbours of sqrt(serial/a)
@@ -163,7 +242,7 @@ fn choose(dispatch: &[(usize, Duration)], estimate: Duration, cap: usize) -> usi
             optimum.clamp(lo, right),
             optimum.saturating_add(1).clamp(lo, right),
         ] {
-            let cost = model_time(low.as_nanos(), high.as_nanos(), hi - lo, q - lo, serial, q);
+            let cost = model_time(low, high, hi - lo, q - lo, serial, q);
             let order = cost
                 .0
                 .cmp(&score.0)
@@ -207,7 +286,11 @@ fn model_time(
     } else {
         (0, left + right)
     };
-    (whole + serial / q + carry, numerator, denominator)
+    (
+        whole.saturating_add(serial / q).saturating_add(carry),
+        numerator,
+        denominator,
+    )
 }
 
 // Continued quotients compare fractions exactly without cross-products.
@@ -276,6 +359,71 @@ mod tests {
         }
     }
 
+    /// Planned sections share the target and stay bounded even for free or costly tables.
+    #[test]
+    fn calibration_sections_share_the_time_target() {
+        let anchors = 5;
+        assert_eq!(sections_per_batch(Duration::from_micros(20), anchors), 20);
+        assert_eq!(sections_per_batch(Duration::ZERO, anchors), 40);
+        assert_eq!(sections_per_batch(Duration::from_secs(1), anchors), 4);
+    }
+
+    /// Inline items retain the full token; a split may offer more slots than items.
+    #[test]
+    fn movement_models_inline_fanout_and_surplus_slots() {
+        let positive = [(1, Duration::ZERO), (8, Duration::from_nanos(7))];
+        assert_eq!(
+            choose_phase(&positive, Duration::from_nanos(10_000), 8, 1),
+            1
+        );
+        for items in [2, 3, 8] {
+            assert_eq!(
+                choose_phase(&positive, Duration::from_nanos(10_000), 8, items),
+                8
+            );
+        }
+        let free = [(1, Duration::ZERO), (8, Duration::ZERO)];
+        assert_eq!(choose_phase(&free, Duration::from_nanos(10_000), 8, 3), 1);
+    }
+
+    /// Saturated repeated-dispatch estimates cannot overflow or beat a finite phase.
+    #[test]
+    fn movement_repeated_dispatch_saturates_without_overflow() {
+        let dispatch = [(1, Duration::ZERO), (2, Duration::MAX / 10)];
+        assert_eq!(choose_phase(&dispatch, Duration::MAX, 2, usize::MAX), 2);
+    }
+
+    /// Refused bytes or entries use the table without measuring it repeatedly.
+    #[test]
+    fn refused_calibration_uses_the_table_without_measurement() {
+        use tenferro_runtime::{ExecutionEngine, ExtensionCacheKey, ExtensionCacheLimits};
+        for bytes in [true, false] {
+            let mut engine = tenferro_cpu::CpuEngine::new(
+                tenferro_cpu::Pool::builder().threads(2).build().unwrap(),
+            );
+            let mut store = engine.take_extension_caches();
+            let limits = if bytes {
+                ExtensionCacheLimits::default().with_max_retained_bytes(NonZeroUsize::MIN)
+            } else {
+                store.put(ExtensionCacheKey::new("test.foreign", "entry", 0), (), 0);
+                ExtensionCacheLimits::new(NonZeroUsize::MIN)
+            };
+            store.set_limits(limits);
+            engine.restore_extension_caches(store);
+            let seen = record();
+            for _ in 0..3 {
+                movement_width(&mut engine, Duration::from_secs(1), 2).unwrap();
+            }
+            assert_eq!(seen.get(Event::MovementCalibration), 0);
+            let mut store = engine.take_extension_caches();
+            store.clear();
+            store.set_limits(ExtensionCacheLimits::default());
+            engine.restore_extension_caches(store);
+            movement_width(&mut engine, Duration::from_secs(1), 2).unwrap();
+            assert_eq!(seen.get(Event::MovementCalibration), 1);
+        }
+    }
+
     /// Serial engines never create a calibration entry or run its probe.
     #[test]
     fn serial_movement_does_not_calibrate() {
@@ -283,6 +431,20 @@ mod tests {
         let seen = record();
         assert_eq!(
             movement_width(&mut engine, Duration::from_secs(1), 8).unwrap(),
+            1
+        );
+        assert_eq!(seen.get(Event::MovementCalibration), 0);
+        assert_eq!(crate::engine_slot::retained_bytes(&mut engine), 0);
+    }
+
+    /// A single inline item can use the whole token without calibrating a split.
+    #[test]
+    fn single_item_movement_does_not_calibrate() {
+        let mut engine =
+            tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(2).build().unwrap());
+        let seen = record();
+        assert_eq!(
+            movement_width(&mut engine, Duration::from_secs(1), 1).unwrap(),
             1
         );
         assert_eq!(seen.get(Event::MovementCalibration), 0);
