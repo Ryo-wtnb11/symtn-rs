@@ -862,6 +862,14 @@ fn pinv_outcome<O: Observer>(mut dense: ScriptedExecutor<O>) -> Result<(), Opera
     pinv(engine, &mut dense, &bound.as_ref(), 1e-12).map(|_| ())
 }
 
+/// Runs compact SVD of the canonical two-sector fixture on `dense`.
+fn svd_compact_outcome<O: Observer>(mut dense: ScriptedExecutor<O>) -> Result<(), OperationError> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
+    svd_compact_dyn(engine, &mut dense, &bound.as_ref().dynamic()).map(|_| ())
+}
+
 /// A stateful executor: its first SVD solve returns one output instead of
 /// three, and every linear-algebra scope refuses at exit, telling whether a
 /// second SVD solve ran inside it.
@@ -891,15 +899,20 @@ impl Observer for MalformedFirstSvdRefusingScope {
 }
 
 #[test]
-fn pinv_checks_each_sector_before_the_next_solve_inside_its_scope() {
+fn pinv_and_compact_svd_check_each_sector_inside_their_scope() {
     // What: on an executor that keeps the default batch, sector 0's SVD
     // outputs are checked before sector 1 is solved, inside the operation's
     // one linear-algebra scope, whose own refusal takes precedence over the
     // body's error.
-    assert_eq!(
-        pinv_outcome(ScriptedExecutor::<MalformedFirstSvdRefusingScope>::default()),
-        Err(OperationError::Dense(scope_refusal("scope after sector 0")))
-    );
+    for operation in [
+        pinv_outcome::<MalformedFirstSvdRefusingScope>,
+        svd_compact_outcome::<MalformedFirstSvdRefusingScope>,
+    ] {
+        assert_eq!(
+            operation(ScriptedExecutor::default()),
+            Err(OperationError::Dense(scope_refusal("scope after sector 0")))
+        );
+    }
 }
 
 /// A forwarded batch whose sector 0 delivers one SVD output instead of three
@@ -927,7 +940,7 @@ impl Observer for MalformedThen {
 }
 
 #[test]
-fn pinv_reports_the_first_sector_failure_over_later_batch_outcomes() {
+fn pinv_and_compact_svd_report_the_first_sector_failure_over_later_batch_outcomes() {
     // What: a batch that solved every sector before delivering reports the
     // lowest sector's failure, as the per-sector loop does: sector 0's
     // one-output arity error, not sector 1's solver error or its two-output
@@ -946,17 +959,22 @@ fn pinv_reports_the_first_sector_failure_over_later_batch_outcomes() {
         }
     };
     for solver_error in [true, false] {
-        let outcome = pinv_outcome(ScriptedExecutor::new(MalformedThen {
-            second: Some(second(solver_error)),
-        }));
-        assert_eq!(
-            outcome,
-            Err(OperationError::Dense(DenseError::ShapeMismatch {
-                op: "svd_into",
-                expected: vec![3],
-                actual: vec![1],
-            }))
-        );
+        for operation in [
+            pinv_outcome::<MalformedThen>,
+            svd_compact_outcome::<MalformedThen>,
+        ] {
+            let outcome = operation(ScriptedExecutor::new(MalformedThen {
+                second: Some(second(solver_error)),
+            }));
+            assert_eq!(
+                outcome,
+                Err(OperationError::Dense(DenseError::ShapeMismatch {
+                    op: "svd_into",
+                    expected: vec![3],
+                    actual: vec![1],
+                }))
+            );
+        }
     }
 }
 
