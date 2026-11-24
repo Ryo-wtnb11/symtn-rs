@@ -235,10 +235,10 @@ pub fn take_host_pool_observations() -> Vec<HostPoolObservation> {
 
 #[cfg(not(any(test, feature = "testing")))]
 #[inline(always)]
-fn observe(_site: HostPoolSite, _budget: usize) {}
+pub(crate) fn observe(_site: HostPoolSite, _budget: usize) {}
 
 #[cfg(any(test, feature = "testing"))]
-fn observe(site: HostPoolSite, token_budget: usize) {
+pub(crate) fn observe(site: HostPoolSite, token_budget: usize) {
     if !OBSERVING.load(Ordering::Relaxed) {
         return;
     }

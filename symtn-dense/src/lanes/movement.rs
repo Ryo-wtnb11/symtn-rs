@@ -2,85 +2,89 @@ use super::*;
 use crate::{DenseBackend, DenseError, Engine};
 use std::time::Instant;
 
-/// Internal seam between workspace crates, not a user API: the width of a
-/// movement phase whose serial estimate is `estimate` and whose independent
-/// parts number `runnable`. Auto shares the chosen slots among these parts,
-/// comparing split execution with sequential items on the whole token;
-/// forced policies retain their batch decision. A serial
-/// engine does no calibration. Non-CPU and broken engines are refused.
+/// Internal seam between workspace crates, not a user API: choose each
+/// movement phase's width and run `op` on the same execution context.
+/// Each phase has serial estimate `estimate` and `runnable` independent parts.
+/// Auto compares split execution with sequential items on the whole token;
+/// forced policies retain their batch decision. Non-CPU and broken engines
+/// are refused, and a serial engine does no calibration.
 ///
-/// Calibration uses the engine's narrowed tokens on first fork candidacy,
-/// and is retained separately from contraction scratch under the engine's
-/// extension-store limits. Refused admission uses the token table without
-/// measurement; eviction or `symtn::scratch::trim` makes a retained entry cold.
+/// Calibration forks only inside this guarded entry, sharing its root with
+/// `op`. It is retained separately from contraction scratch under the engine's
+/// extension-store limits. Refused admission uses the engine's dispatch table
+/// without measurement; eviction or `symtn::scratch::trim` makes it cold.
 /// The chooser is O(ladder size), with no per-decision allocation.
 #[doc(hidden)]
-pub fn movement_width(
+pub fn movement_region<const N: usize, R>(
     engine: &mut dyn Engine,
     estimate: Duration,
-    runnable: usize,
-) -> Result<usize, DenseError> {
+    runnable: [usize; N],
+    op: impl FnOnce(Exec<'_>, [usize; N]) -> R,
+) -> Result<R, DenseError> {
     let backend_error = |error: tenferro_tensor::Error| DenseError::Backend {
         backend: DenseBackend::Tenferro,
         op: "host_region",
         message: error.to_string(),
     };
     tenferro_cpu::with_cpu_engine(engine, |cpu| {
-        if cpu.is_broken() {
-            return cpu.exec().map(|_| 1).map_err(backend_error);
-        }
         let budget = cpu.num_threads();
-        if budget <= 1 || runnable <= 1 {
-            return Ok(1);
-        }
-        if cpu.batch_policy().strategy != BatchStrategy::Auto {
-            return cpu
-                .with_exec(|exec| {
-                    let decision = exec.batch_decision(&BatchQuery::new(runnable, 0.0));
-                    decision
-                        .lanes
-                        .saturating_mul(decision.item_threads)
-                        .clamp(1, budget.min(runnable.max(1)))
-                })
-                .map_err(backend_error);
-        }
-        let rates = match crate::engine_slot::checkout_movement(cpu) {
-            Some(rates) => rates,
-            None => {
-                let mut lower = [(1, Duration::ZERO); usize::BITS as usize + 1];
-                let mut table = lower;
-                let len = cpu
-                    .exec()
-                    .map(|exec| {
-                        let mut len = 0;
-                        for width in widths(budget) {
-                            let cost = if width == 1 {
-                                Duration::ZERO
-                            } else {
-                                exec.token_ref()
-                                    .dispatch_cost(NonZeroUsize::new(width).unwrap())
-                            };
-                            table[len] = (width, cost);
-                            lower[len] = (width, cost / 2);
-                            len += 1;
-                        }
-                        len
-                    })
-                    .map_err(backend_error)?;
-                // Never measure a ladder the slot cannot retain.
-                if !crate::engine_slot::movement_fits(cpu, Calibration::bytes(len)) {
-                    return Ok(choose_phase(&table[..len], estimate, budget, runnable));
+        let mut rates = None;
+        let mut table = [(1, Duration::ZERO); usize::BITS as usize + 1];
+        let mut len = 0;
+        let mut measure = false;
+        if !cpu.is_broken()
+            && budget > 1
+            && runnable.iter().any(|&parts| parts > 1)
+            && cpu.batch_policy().strategy == BatchStrategy::Auto
+        {
+            rates = crate::engine_slot::checkout_movement(cpu);
+            if rates.is_none() {
+                let mut lower = table;
+                for width in widths(budget) {
+                    let cost = if width == 1 {
+                        Duration::ZERO
+                    } else {
+                        cpu.dispatch_costs().cost(
+                            threadteam::DispatchKind::Team,
+                            NonZeroUsize::new(width).unwrap(),
+                        )
+                    };
+                    table[len] = (width, cost);
+                    lower[len] = (width, cost / 2);
+                    len += 1;
                 }
-                // Tiny calls stay cold when even the lowest admissible costs lose.
-                if choose(&lower[..len], estimate, budget) == 1 {
-                    return Ok(1);
-                }
-                cpu.with_exec(Calibration::measure).map_err(backend_error)?
+                // Never measure a ladder the slot cannot retain, or a tiny phase.
+                measure = crate::engine_slot::movement_fits(cpu, Calibration::bytes(len))
+                    && choose(&lower[..len], estimate, budget) > 1;
             }
-        };
-        let width = choose_phase(&rates.dispatch, estimate, budget, runnable);
-        crate::engine_slot::checkin_movement(cpu, rates);
-        Ok(width)
+        }
+        let result = cpu
+            .with_exec(|exec| {
+                if measure {
+                    rates = Some(Calibration::measure(exec));
+                }
+                let widths = runnable.map(|parts| {
+                    if budget <= 1 || parts <= 1 {
+                        1
+                    } else if exec.batch_policy().strategy != BatchStrategy::Auto {
+                        let decision = exec.batch_decision(&BatchQuery::new(parts, 0.0));
+                        decision
+                            .lanes
+                            .saturating_mul(decision.item_threads)
+                            .clamp(1, budget.min(parts))
+                    } else if let Some(rates) = &rates {
+                        choose_phase(&rates.dispatch, estimate, budget, parts)
+                    } else {
+                        choose_phase(&table[..len], estimate, budget, parts)
+                    }
+                });
+                op(exec.reborrow(), widths)
+            })
+            .map_err(backend_error);
+        if let Some(rates) = rates {
+            crate::engine_slot::checkin_movement(cpu, rates);
+        }
+        result
     })
     .unwrap_or_else(|| {
         Err(DenseError::Unsupported {
@@ -412,14 +416,15 @@ mod tests {
             engine.restore_extension_caches(store);
             let seen = record();
             for _ in 0..3 {
-                movement_width(&mut engine, Duration::from_secs(1), 2).unwrap();
+                movement_region(&mut engine, Duration::from_secs(1), [2], |_, [width]| width)
+                    .unwrap();
             }
             assert_eq!(seen.get(Event::MovementCalibration), 0);
             let mut store = engine.take_extension_caches();
             store.clear();
             store.set_limits(ExtensionCacheLimits::default());
             engine.restore_extension_caches(store);
-            movement_width(&mut engine, Duration::from_secs(1), 2).unwrap();
+            movement_region(&mut engine, Duration::from_secs(1), [2], |_, [width]| width).unwrap();
             assert_eq!(seen.get(Event::MovementCalibration), 1);
         }
     }
@@ -430,7 +435,7 @@ mod tests {
         let mut engine = tenferro_cpu::CpuEngine::serial();
         let seen = record();
         assert_eq!(
-            movement_width(&mut engine, Duration::from_secs(1), 8).unwrap(),
+            movement_region(&mut engine, Duration::from_secs(1), [8], |_, [width]| width).unwrap(),
             1
         );
         assert_eq!(seen.get(Event::MovementCalibration), 0);
@@ -444,7 +449,7 @@ mod tests {
             tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(2).build().unwrap());
         let seen = record();
         assert_eq!(
-            movement_width(&mut engine, Duration::from_secs(1), 1).unwrap(),
+            movement_region(&mut engine, Duration::from_secs(1), [1], |_, [width]| width).unwrap(),
             1
         );
         assert_eq!(seen.get(Event::MovementCalibration), 0);
@@ -457,7 +462,10 @@ mod tests {
         let mut engine =
             tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(2).build().unwrap());
         let seen = record();
-        assert_eq!(movement_width(&mut engine, Duration::ZERO, 2).unwrap(), 1);
+        assert_eq!(
+            movement_region(&mut engine, Duration::ZERO, [2], |_, [width]| width).unwrap(),
+            1
+        );
         assert_eq!(seen.get(Event::MovementCalibration), 0);
         assert_eq!(crate::engine_slot::retained_bytes(&mut engine), 0);
     }
@@ -470,10 +478,10 @@ mod tests {
             tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(2).build().unwrap());
         crate::engine_slot::checkin(&mut engine, vec![1u8], Vec::capacity);
         let seen = record();
-        movement_width(&mut engine, Duration::from_secs(1), 2).unwrap();
+        movement_region(&mut engine, Duration::from_secs(1), [2], |_, [width]| width).unwrap();
         let cold = seen.get(Event::MovementCalibration);
         assert_eq!(cold, 1);
-        movement_width(&mut engine, Duration::from_secs(1), 2).unwrap();
+        movement_region(&mut engine, Duration::from_secs(1), [2], |_, [width]| width).unwrap();
         assert_eq!(seen.get(Event::MovementCalibration), cold);
         assert_eq!(
             crate::engine_slot::checkout::<Vec<u8>>(&mut engine),
@@ -481,7 +489,7 @@ mod tests {
         );
         crate::engine_slot::clear(&mut engine);
         assert_eq!(crate::engine_slot::retained_bytes(&mut engine), 0);
-        movement_width(&mut engine, Duration::from_secs(1), 2).unwrap();
+        movement_region(&mut engine, Duration::from_secs(1), [2], |_, [width]| width).unwrap();
         assert_eq!(seen.get(Event::MovementCalibration), cold * 2);
     }
 }

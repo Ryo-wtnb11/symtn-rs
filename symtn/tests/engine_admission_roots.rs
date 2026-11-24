@@ -88,9 +88,14 @@ macro_rules! no_decision_ops_create_no_root {
             // Why the control: zero roots on an engine that never forks would
             // prove nothing. A nonidentity permute replays its blocks across
             // the team on this same engine.
-            let roots = roots_of(&mut engine, |e| x.permute(e, &[2, 0], &[1]).unwrap());
-            assert_eq!(roots.len(), 1, "one root for the forking permute");
-            assert!(ledger::max_live(roots[0]) > 1, "the permute forks");
+            for state in ["cold", "warm", "trimmed"] {
+                if state == "trimmed" {
+                    symtn::scratch::trim(&mut engine);
+                }
+                let roots = roots_of(&mut engine, |e| x.permute(e, &[2, 0], &[1]).unwrap());
+                assert_eq!(roots.len(), 1, "one root for the {state} forking permute");
+                assert!(ledger::max_live(roots[0]) > 1, "the {state} permute forks");
+            }
         }
     };
 }

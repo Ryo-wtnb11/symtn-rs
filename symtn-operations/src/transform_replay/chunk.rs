@@ -37,7 +37,7 @@ use crate::transform_structure::{
 /// The direct items of a replay in one engine entry, and the replay width
 /// `t` it admits there, with whether the policy is a forced `Sequential`.
 ///
-/// `t` is [`lanes::movement_width`] of a copy of the whole destination over
+/// `t` is chosen by [`lanes::movement_region`] for a copy of the whole destination over
 /// the compiled runnable parts: under `Auto` the calibrated split model
 /// compared with inline items on the whole token; a forced
 /// policy's decision, at most the runnable parts. It fixes the chunks of
@@ -85,22 +85,17 @@ where
     } else {
         schedule.single_runs.len()
     };
-    let threads = lanes::movement_width(engine, estimate, schedule.replay_runnable)
-        .map_err(OperationError::Dense)?;
     let run_runnable = [inactive_runs, single_runs]
         .into_iter()
         .filter(|&runs| runs >= 2)
         .max()
         .unwrap_or(0);
-    let run_threads = if run_runnable >= 2 {
-        lanes::movement_width(engine, estimate, run_runnable).map_err(OperationError::Dense)?
-    } else {
-        1
-    };
-    let admitted = crate::host_pool::lane_region(
+    let admitted = lanes::movement_region(
         engine,
-        crate::host_pool::HostPoolSite::Replay,
-        |mut exec| {
+        estimate,
+        [schedule.replay_runnable, run_runnable],
+        |mut exec, [threads, run_threads]| {
+            crate::host_pool::observe(crate::host_pool::HostPoolSite::Replay, exec.budget());
             let sequential =
                 exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
             workspace.prepare_fused_indices(threads.max(run_threads), rank)?;
@@ -192,7 +187,8 @@ where
             }
             Ok::<_, OperationError>((threads, sequential, split_inactive || split_singles))
         },
-    )??;
+    )
+    .map_err(OperationError::Dense)??;
     #[cfg(any(test, feature = "testing"))]
     if admitted.0 > 1 || admitted.2 {
         workspace.movement_phases += 1;

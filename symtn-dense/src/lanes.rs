@@ -16,7 +16,7 @@
 //! `BatchDecision` for `(J, w)` (forced: `lanes * item_threads`); a forced
 //! policy's lane count is `min(decision.lanes, J)`, and Auto's is at most
 //! `L0 = min(S, J, decision.lanes)`. Block placement uses the token's table;
-//! movement phases separately use [`movement_width`]'s calibration. A
+//! movement phases separately use [`movement_region`]'s calibration. A
 //! single lane (one of the counts is one, or no job) takes every job on all
 //! S slots, before any ordering.
 //!
@@ -84,7 +84,7 @@ mod movement;
 mod placement;
 mod runner;
 
-pub use movement::movement_width;
+pub use movement::movement_region;
 pub(crate) use movement::Calibration;
 pub(crate) use placement::item_time;
 pub(crate) use placement::{allocate, lane_allocations, searchable, slots, LaneAllocationCache};

@@ -609,7 +609,7 @@ where
 /// each scale resolved once per role for the whole batch.
 ///
 /// The moves before and after the GEMM each run in one engine entry at the
-/// width [`symtn_dense::lanes::movement_width`] chooses over the members:
+/// width [`symtn_dense::lanes::movement_region`] chooses over the members:
 /// under `Auto` the calibrated split model is compared with inline items on
 /// the whole token; a forced policy keeps its batch decision, one under
 /// `Sequential`. At width one every member moves on the caller's token;
@@ -805,53 +805,55 @@ where
     {
         use symtn_dense::lanes;
         let estimate = strided_kernel::execution::KernelClass::Copy.estimate(dst.len());
-        let width = match threads {
-            Some(width) => width,
-            None => {
-                lanes::movement_width(engine, estimate, members).map_err(OperationError::Dense)?
-            }
-        };
-        crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Strided, |exec| {
-            if width <= 1 {
-                let token = exec.into_token();
-                return if scatter {
-                    moves.scatter(token, kernels, &mut scratch[0], dst, packed_dst, 0, members)
-                } else {
-                    moves.pack(token, kernels, &mut scratch[0], dst, packed_src, 0, members)
+        lanes::movement_region(
+            engine,
+            estimate,
+            [if scatter { 0 } else { members }],
+            |exec, [width]| {
+                crate::host_pool::observe(crate::host_pool::HostPoolSite::Strided, exec.budget());
+                let width = threads.unwrap_or(width);
+                if width <= 1 {
+                    let token = exec.into_token();
+                    return if scatter {
+                        moves.scatter(token, kernels, &mut scratch[0], dst, packed_dst, 0, members)
+                    } else {
+                        moves.pack(token, kernels, &mut scratch[0], dst, packed_src, 0, members)
+                    }
+                    .map(|()| width);
                 }
-                .map(|()| width);
-            }
-            if scratch.len() < width {
-                scratch.resize_with(width, MemberScratch::default);
-            }
-            let ranges = width.min(members);
-            let work = MemberPhase {
-                moves,
-                packed_dst,
-                lens,
-                members,
-                ranges,
-                scatter,
-                kernels: &*kernels,
-                lane: core::marker::PhantomData,
-            };
-            let mut lane = MemberLane {
-                dst,
-                packed: packed_src,
-                first: 0,
-                kernels: kernels.clone(),
-                scratch: &mut scratch[..width],
-            };
-            let mut states = vec![(); ranges];
-            super::chunk::outcome(lanes::run_native(
-                exec,
-                &work,
-                super::chunk::split(width, |lane, cut| work.cut(lane, cut)),
-                &mut states,
-                core::slice::from_mut(&mut lane),
-            ))
-            .map(|()| width)
-        })?
+                if scratch.len() < width {
+                    scratch.resize_with(width, MemberScratch::default);
+                }
+                let ranges = width.min(members);
+                let work = MemberPhase {
+                    moves,
+                    packed_dst,
+                    lens,
+                    members,
+                    ranges,
+                    scatter,
+                    kernels: &*kernels,
+                    lane: core::marker::PhantomData,
+                };
+                let mut lane = MemberLane {
+                    dst,
+                    packed: packed_src,
+                    first: 0,
+                    kernels: kernels.clone(),
+                    scratch: &mut scratch[..width],
+                };
+                let mut states = vec![(); ranges];
+                super::chunk::outcome(lanes::run_native(
+                    exec,
+                    &work,
+                    super::chunk::split(width, |lane, cut| work.cut(lane, cut)),
+                    &mut states,
+                    core::slice::from_mut(&mut lane),
+                ))
+                .map(|()| width)
+            },
+        )
+        .map_err(OperationError::Dense)?
     }
     #[cfg(not(feature = "tenferro"))]
     {

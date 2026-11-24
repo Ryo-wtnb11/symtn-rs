@@ -392,7 +392,10 @@ uses five equal median batches, with 20–200 sections total (rounded down to
 a multiple of five), plus one unmeasured warmup section. This bounds planned
 work, not elapsed time under interruption or a mispriced dispatch table.
 Measurements are bounded to [0.5, 20] times the token's effective threadteam
-dispatch table; the precheck reads that same token kind. A caller's
+dispatch table; the precheck reads the engine's team costs without minting
+an execution token. Calibration and the movement phase run inside the same
+guarded engine entry and share its single ledger root; forced and retained
+width decisions also reuse that entry. A caller's
 `PoolBuilder` override takes precedence over the default host-class row
 (zero stays zero). An invalid elapsed interval falls back to the table.
 A nondecreasing envelope is used where compatible with those bounds.
