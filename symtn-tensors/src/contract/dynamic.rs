@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use symtn_core::{
-    BlockStructure, CategoricalScalar, FusionTreeHomSpace, FusionTreePairOrientation,
-    MultiplicityFreeRigidSymbols,
+    BlockStructure, FusionTreeHomSpace, FusionTreePairOrientation, MultiplicityFreeRigidSymbols,
 };
 
 use crate::mode::{MultiplicityFreePlanningScalar, PlanningAlgebra, TreeStructureSource};
