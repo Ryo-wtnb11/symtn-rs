@@ -846,6 +846,57 @@ fn cold_query_count(engine: &mut dyn Engine, operands: usize, permute_output: bo
 }
 
 #[test]
+fn checked_generic_fermionic_network_forwards_to_facade_contract() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let _serial = crate::counting_alloc::serial();
+    // What: eager and planned network contraction forward Fermionic checked
+    // operands to the facade. Bosonic is the unchanged admission control;
+    // the inner SU(3) rule has unit twists, so this is not a sign oracle.
+    for fermionic in [false, true] {
+        let runtime = Runtime::builder().build().unwrap();
+        let provider = Arc::new(InjectedGeneric::new());
+        provider.fermionic.store(fermionic, Ordering::SeqCst);
+        let tensors = injected_chain(engine, &runtime, &provider);
+        let operands = [&tensors[0], &tensors[1]];
+        let network = injected_network(operands.len(), false);
+        let expected = tensors[0]
+            .contract(
+                engine,
+                &tensors[1],
+                &ContractSpec {
+                    lhs: &[2],
+                    rhs: &[0],
+                    codomain: &[0, 1],
+                    domain: &[2],
+                },
+            )
+            .unwrap();
+        assert_ne!(
+            expected.dense_data().unwrap(),
+            tensors[0].dense_data().unwrap(),
+            "negative control: returning the uncontracted lhs omits the factor 2"
+        );
+        for actual in [
+            network.contract(engine, &operands).unwrap(),
+            network
+                .plan(&operands, &GreedyDenseOptimizer)
+                .unwrap()
+                .execute(engine, &operands, &mut Default::default())
+                .unwrap(),
+        ] {
+            assert_eq!(actual.codomain(), expected.codomain());
+            assert_eq!(actual.domain(), expected.domain());
+            crate::numerics::assert_slices_close(
+                "network forwards checked contraction",
+                actual.dense_data().unwrap(),
+                expected.dense_data().unwrap(),
+                tensors[0].dense_data().unwrap().len() * tensors[1].dense_data().unwrap().len(),
+            );
+        }
+    }
+}
+
+#[test]
 fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();

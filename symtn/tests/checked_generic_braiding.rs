@@ -260,7 +260,12 @@ impl CheckedGenericRigidSymbols for CheckedPivotalToy {
             Self::nsymbol(a, f, d),
         );
         let len = shape.0 * shape.1 * shape.2 * shape.3;
-        Ok(GenericFArray::new(vec![0.0; len], shape))
+        let coefficient = if [a, b, c, d, e, f].iter().all(|&s| s == Self::unit()) {
+            1.0
+        } else {
+            0.0
+        };
+        Ok(GenericFArray::new(vec![coefficient; len], shape))
     }
 
     fn try_r_symbol_generic(
@@ -1223,15 +1228,27 @@ where
         domain: &[1],
     };
     use symtn::typed::BraidingOp::Contraction;
-    for (tag, braiding, refused) in [
-        (22, BraidingStyleKind::Bosonic, false),
-        (23, BraidingStyleKind::Fermionic, false),
-        (21, BraidingStyleKind::Anyonic, true),
-        (20, BraidingStyleKind::NoBraiding, true),
+    for (tag, braiding, refused, rotated) in [
+        (22, BraidingStyleKind::Bosonic, false, false),
+        (23, BraidingStyleKind::Fermionic, false, false),
+        (21, BraidingStyleKind::Anyonic, true, false),
+        (20, BraidingStyleKind::NoBraiding, true, false),
+        (24, BraidingStyleKind::Anyonic, true, true),
     ] {
+        let spec = if rotated {
+            ContractSpec {
+                lhs: &[0],
+                rhs: &[1],
+                codomain: &[1],
+                domain: &[0],
+            }
+        } else {
+            spec
+        };
         let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, -1.0));
-        let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
-        let dual = x.try_dual().unwrap();
+        let label = if rotated { Label::Unit } else { Label::X };
+        let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
+        let dual = leg.try_dual().unwrap();
         let mut matrix = |offset: f64| -> TensorMap<_, D> {
             TensorMap::from_subblock_fn(engine, &runtime, [&dual], [&dual], |_, index| {
                 value(offset + (2 * index[0] + index[1]) as f64)
@@ -1239,14 +1256,31 @@ where
             .unwrap()
         };
         let (lhs, rhs) = (matrix(1.0), matrix(5.0));
-        // Hand matrix product; the only contracted label is odd X, whose
-        // ordinary supertrace twist is -1 on the dual leg.
-        let oracle = [
+        // Hand matrix product; the unrotated Fermionic row twists odd X
+        // by -1 on the dual contracted leg.
+        let unrotated_oracle = [
             value(1.0) * value(5.0) + value(2.0) * value(7.0),
             value(3.0) * value(5.0) + value(4.0) * value(7.0),
             value(1.0) * value(6.0) + value(2.0) * value(8.0),
             value(3.0) * value(6.0) + value(4.0) * value(8.0),
         ];
+        // Unit-sector rank-2 bends have unit F, dimension and FS factors:
+        // rotating both operands and the output gives (A^T B^T)^T = BA.
+        let oracle = if rotated {
+            let rotated_oracle = [
+                value(5.0) * value(1.0) + value(6.0) * value(3.0),
+                value(7.0) * value(1.0) + value(8.0) * value(3.0),
+                value(5.0) * value(2.0) + value(6.0) * value(4.0),
+                value(7.0) * value(2.0) + value(8.0) * value(4.0),
+            ];
+            assert_ne!(
+                rotated_oracle, unrotated_oracle,
+                "negative control: unrotated AB must differ from rotated BA"
+            );
+            rotated_oracle
+        } else {
+            unrotated_oracle
+        };
         let ordinary_oracle = oracle.map(|x| {
             x * D::from_real(if braiding == BraidingStyleKind::Fermionic {
                 -1.0

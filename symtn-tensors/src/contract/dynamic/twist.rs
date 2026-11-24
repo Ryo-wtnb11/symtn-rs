@@ -44,7 +44,7 @@ pub(crate) fn compile_contract_twist_with<C: DenseBlockScalar, E: From<Operation
     mut theta: impl FnMut(symtn_core::SectorId) -> Result<C, E>,
 ) -> Result<Vec<(usize, C)>, E> {
     let structure = space.structure();
-    let mut scales = Vec::with_capacity(structure.block_count());
+    let mut scales = Vec::new();
     for index in 0..structure.block_count() {
         let block = structure
             .block(index)
