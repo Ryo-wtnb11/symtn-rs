@@ -152,7 +152,7 @@ fn partial_overlap(
 }
 
 /// What: on the partial-overlap fixture at four workers and
-/// flat 100 ns dispatch, each chunk of four groups forms two hull runs, so
+/// forced `Outer` width and flat 100 ns leaf dispatch, each chunk of four groups forms two hull runs, so
 /// its scatter splits over them: each column is offered a two-slot leaf
 /// token, the Single its whole four-slot leaf (the caller's gate rejects
 /// every planned `[3, 32]` column on the caller's token, so no chunk keeps
@@ -168,7 +168,7 @@ fn partially_overlapping_scatters_search_once_per_cost_key() {
             let (dst, src, transform) = partial_overlap(groups, m);
             assert_eq!(transform.layouts().retained_plan_count(), groups + 1);
             assert_eq!(transform.layouts().max_planned_elements(), 2 * m);
-            let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+            let mut engine = flat_engine(4, 100, CpuBatchStrategy::Outer);
             let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
             assert_eq!(counts.scans, 2, "m {m}, {groups} groups");
             assert!(counts.pays <= bound, "m {m}, {groups} groups: {counts:?}");
@@ -183,7 +183,7 @@ fn partially_overlapping_scatters_search_once_per_cost_key() {
 
 /// What (r6 Singles trace): a `[2, m]` transposing Single, two scalar
 /// Singles and two scalar Multis, consecutive, on four workers at flat
-/// 100 ns. The three Singles split as main's recursion (two left on two
+/// 100 ns under forced `Outer`. The three Singles split as main's recursion (two left on two
 /// slots, the right one on two; then one slot each on the left): offers
 /// `[1, 1, 2]` in destination order, so the planned Single runs on one slot
 /// and no gate probes. The two groups' scatter splits two and two.
@@ -213,7 +213,7 @@ fn singles_are_offered_the_tokens_of_mains_recursion() {
     )
     .unwrap();
     assert_eq!(transform.layouts().retained_plan_count(), 1);
-    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Outer);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
     assert_eq!(offers, [1, 1, 2, 2, 2]);
     let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
@@ -222,7 +222,7 @@ fn singles_are_offered_the_tokens_of_mains_recursion() {
 
 /// What (r6 short scatter and P2 trace): two slice-disjoint groups of
 /// `[2, 1666]` and `[2, 1667]` transposes (four pack columns, so four
-/// workers) at flat 100 ns: the chunk's two groups split over four logical
+/// workers) under forced `Outer` at flat 100 ns: the chunk's two groups split over four logical
 /// threads, each offered two slots; the two leaf gates share one cost key,
 /// so one of them scans with main's global bound, making main's `pays`
 /// queries on a two-slot token, and both roles are admitted.
@@ -247,7 +247,7 @@ fn a_short_scatter_phase_follows_mains_recursion_and_gate() {
     .unwrap();
     let bound = transform.layouts().max_planned_elements();
     assert_eq!(bound, 3334);
-    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Outer);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
     assert_eq!(offers, [2, 2]);
     let probes = crate::host_pool::region(
@@ -719,9 +719,10 @@ fn overwritten(
 }
 
 /// What: three slice-disjoint Singles keep main's
-/// split at its width `t_0 = 3` on four flat-cost workers, though the four
+/// split at width `t_0 = 3` under forced `Outer` on four flat-cost workers,
+/// though the four
 /// inactive scalars after them form four runs (run width 4): the Singles
-/// are offered `[2, 1, 1]` in destination order, so the planned `[2, m]`
+/// are offered `[1, 1, 1]` in destination order, so the planned `[2, m]`
 /// Single runs on one slot and no gate searches; the inactive runs split
 /// and the values are the hand oracle's.
 #[test]
@@ -731,9 +732,9 @@ fn inactive_runs_leave_mains_singles_split_alone() {
     let (dst, src, transform, coefficients) = singles_then_inactive(m, true, 4);
     assert_eq!(transform.parallel_schedule().inactive_runs, [0, 1, 2, 3]);
     assert_eq!(transform.parallel_schedule().replay_runnable, 3);
-    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Outer);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
-    assert_eq!(offers, [2, 1, 1]);
+    assert_eq!(offers, [1, 1, 1]);
     let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
     assert_eq!(counts, Counts::default());
     assert_eq!(
@@ -743,7 +744,8 @@ fn inactive_runs_leave_mains_singles_split_alone() {
 }
 
 /// What: one planned `[2, m]` Single and four
-/// inactive scalars, no pack columns: the replay width is one, but the
+/// inactive scalars, no pack columns: under forced `Outer` the replay
+/// width is one, but the
 /// inactive layouts form four runs and split (one parallel movement phase),
 /// while the Single keeps main's inline route on the caller's whole
 /// four-slot token; the values are the hand oracle's.
@@ -752,7 +754,7 @@ fn inactive_runs_split_under_a_serial_replay_width() {
     let m = 8300;
     let (dst, src, transform, coefficients) = singles_then_inactive(m, false, 4);
     assert_eq!(transform.parallel_schedule().replay_runnable, 1);
-    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Outer);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
     assert_eq!(offers, [4]);
     let source = (0..src.required_len().unwrap())
@@ -874,7 +876,7 @@ fn inactive_runs_leave_the_chunk_width_alone() {
 /// What: pairs of `[1, 2]` destinations of stride 2 interleave
 /// at `4 i` and `4 i + 1`, and group `i` writes the second block of pair
 /// `i` and the first of pair `i + 1`, so neighbouring group hulls overlap
-/// and every chunk of four groups is one hull run: each scatter column
+/// and every forced `Outer` chunk of four groups is one hull run: each scatter column
 /// stays inline on the caller's whole four-slot token.
 #[test]
 fn a_chain_of_overlapping_groups_scatters_inline() {
@@ -902,7 +904,7 @@ fn a_chain_of_overlapping_groups_scatters_inline() {
         1.0,
     ));
     let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
-    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Outer);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
     // The two Singles first and last in address order; every scatter
     // column between them inline.
@@ -965,12 +967,12 @@ fn an_admitted_planned_single_keeps_mains_inline_route() {
 
 /// What: when the caller's gate rejects the plan of the largest planned
 /// Single on the caller's token, Singles that are not slice-disjoint split
-/// over their runs: on four flat-cost workers every one of 64 interleaved
+/// over their runs: under forced `Outer` on four flat-cost workers every one of 64 interleaved
 /// pairs of `[2, 64]` Singles is written on a split leaf's smaller token.
 #[test]
 fn a_rejected_planned_single_splits_over_its_runs() {
     let (dst, src, transform) = interleaved_single_pairs(64, 64);
-    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Outer);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
     assert_eq!(offers.len(), 128);
     assert!(offers.iter().all(|&offer| offer < 4), "{offers:?}");

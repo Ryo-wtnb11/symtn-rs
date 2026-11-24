@@ -70,7 +70,8 @@ mod sealed {
 /// The jobs split in two, recursively, over `threads` logical threads: the
 /// left half takes `parallel_split(J, threads)` jobs and `threads / 2`
 /// threads, the right half the rest, and the two halves run as the children
-/// of a two-child fork of the token, which halves it. A part of one thread
+/// of a two-child fork with exactly those shares, narrowed to `threads`
+/// slots at entry (at most the context's budget). A part of one thread
 /// or one job is a leaf, which runs its jobs in order on its own token.
 ///
 /// The call lends its one lane state (`lanes[0]`) to the root part. At each
@@ -276,14 +277,15 @@ where
         if states.is_empty() {
             return Ok(Ok(()));
         }
+        let threads = self.threads.clamp(1, exec.budget());
         let failure = split(
             work,
             &self.split,
-            self.threads,
+            threads,
             0,
             states,
             &mut lanes[0],
-            exec,
+            exec.limit(NonZeroUsize::new(threads).unwrap()),
         );
         Ok(failure.map_or(Ok(()), Err))
     }
@@ -342,6 +344,7 @@ where
     let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
     join(
         exec.into_token(),
+        [left_threads, right_threads],
         |token| {
             let exec = Exec::from_token(token, workspace, policy);
             split(work, divide, left_threads, first, left_states, lane, exec)
@@ -354,13 +357,18 @@ where
     )
 }
 /// Runs `left` and `right` as the two children of one fork of `token`, each
-/// on its half of the token, and returns the left failure, else the right.
+/// on its stated share of the token, and returns the left failure, else the right.
 ///
 /// Why `RwLock` slots, for the closures and their failures alike: `fork`
 /// shares one `Fn` with both children, and each side is a `FnOnce` that owns
 /// its half of the split buffers; a std `Mutex` boxes an OS lock on its
 /// first lock on some targets, while `RwLock` does not allocate.
-fn join<A, B, E>(token: threadteam::Exec<'_>, left: A, right: B) -> Option<(usize, E)>
+fn join<A, B, E>(
+    token: threadteam::Exec<'_>,
+    shares: [usize; 2],
+    left: A,
+    right: B,
+) -> Option<(usize, E)>
 where
     A: FnOnce(threadteam::Exec<'_>) -> Option<(usize, E)> + Send + Sync,
     B: FnOnce(threadteam::Exec<'_>) -> Option<(usize, E)> + Send + Sync,
@@ -368,16 +376,18 @@ where
 {
     let (left, right) = (RwLock::new(Some(left)), RwLock::new(Some(right)));
     let failures = [RwLock::new(None), RwLock::new(None)];
-    token.fork(2, |side, child| {
-        let failure = if side == 0 {
-            take(&left).and_then(|run| run(child))
-        } else {
-            take(&right).and_then(|run| run(child))
-        };
-        *failures[side]
-            .write()
-            .unwrap_or_else(PoisonError::into_inner) = failure;
-    });
+    token
+        .fork_sized(&shares, |side, child| {
+            let failure = if side == 0 {
+                take(&left).and_then(|run| run(child))
+            } else {
+                take(&right).and_then(|run| run(child))
+            };
+            *failures[side]
+                .write()
+                .unwrap_or_else(PoisonError::into_inner) = failure;
+        })
+        .expect("split shares sum to the narrowed token budget");
     let [left, right] = failures.map(|f| f.into_inner().unwrap_or_else(PoisonError::into_inner));
     left.or(right)
 }

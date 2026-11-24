@@ -609,9 +609,9 @@ where
 /// each scale resolved once per role for the whole batch.
 ///
 /// The moves before and after the GEMM each run in one engine entry at the
-/// width [`symtn_dense::lanes::flat_width`] admits over the members: under
-/// `Auto` the engine's width when a copy of the whole batch destination
-/// pays for it, under a forced policy its batch decision, and one under
+/// width [`symtn_dense::lanes::movement_width`] chooses over the members:
+/// under `Auto` calibrated dispatch plus the serial copy estimate divided
+/// by width is minimized; a forced policy keeps its batch decision, one under
 /// `Sequential`. At width one every member moves on the caller's token;
 /// above it the members split into at most that many contiguous ranges,
 /// each moving its members as one member-axis move per role.
@@ -805,8 +805,11 @@ where
     {
         use symtn_dense::lanes;
         let estimate = strided_kernel::execution::KernelClass::Copy.estimate(dst.len());
+        let width = match threads {
+            Some(width) => width,
+            None => lanes::movement_width(engine, estimate, members)?,
+        };
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Strided, |exec| {
-            let width = threads.unwrap_or_else(|| lanes::flat_width(&exec, estimate, members));
             if width <= 1 {
                 let token = exec.into_token();
                 return if scatter {

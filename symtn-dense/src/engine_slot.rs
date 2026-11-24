@@ -1,6 +1,7 @@
-//! One value kept in the caller's CPU engine between calls: an entry of the
-//! engine's extension store (`ExecutionEngine::take_extension_caches`), under
-//! the store's own entry and retained-byte limits.
+//! Values kept in the caller's CPU engine between calls, under the extension
+//! store's own entry and retained-byte limits: eager contraction scratch and
+//! a separate, private movement-dispatch calibration entry. Checkout/checkin
+//! address scratch only; clear and retained_bytes cover both entries.
 //!
 //! Internal and unstable despite being public for `symtn`, which keeps its
 //! eager Host contraction scratch here.
@@ -36,11 +37,9 @@ mod store {
 
     const FAMILY: &str = "symtn.host-scratch.v1";
     const CACHE: &str = "contract";
-    const KEY: ExtensionCacheKey = ExtensionCacheKey::new(FAMILY, CACHE, 0);
-    const SELECTOR: ExtensionCacheSelector = ExtensionCacheSelector::Cache {
-        family_id: FAMILY,
-        cache_name: CACHE,
-    };
+    pub(super) const MOVEMENT: ExtensionCacheKey = ExtensionCacheKey::new(FAMILY, "movement", 0);
+    pub(super) const KEY: ExtensionCacheKey = ExtensionCacheKey::new(FAMILY, CACHE, 0);
+    const SELECTOR: ExtensionCacheSelector = ExtensionCacheSelector::Family { family_id: FAMILY };
 
     /// The entry's value. Why a `Mutex`: the store requires `Sync` values,
     /// and only the byte reporter, which gets `&Slot`, ever locks it; every
@@ -88,19 +87,23 @@ mod store {
         .flatten()
     }
 
-    pub(super) fn checkout<T: Send + 'static>(store: &mut ExtensionCacheStore) -> Option<T> {
+    pub(super) fn checkout<T: Send + 'static>(
+        store: &mut ExtensionCacheStore,
+        key: &ExtensionCacheKey,
+    ) -> Option<T> {
         store
-            .get_mut::<Slot<T>>(&KEY)
+            .get_mut::<Slot<T>>(key)
             .and_then(|slot| held(slot).take())
     }
 
     pub(super) fn checkin<T: Send + 'static>(
         store: &mut ExtensionCacheStore,
+        key: ExtensionCacheKey,
         value: T,
         charge: fn(&T) -> usize,
     ) {
         let ours_now = store
-            .get_mut::<Slot<T>>(&KEY)
+            .get_mut::<Slot<T>>(&key)
             .map(|slot| slot_charge(held(slot).as_ref(), charge));
         let foreign = store
             .stats(ExtensionCacheSelector::All)
@@ -117,10 +120,10 @@ mod store {
         }
         #[cfg(test)]
         super::tests::after_admission();
-        match store.get_mut::<Slot<T>>(&KEY) {
+        match store.get_mut::<Slot<T>>(&key) {
             Some(slot) => *held(slot) = Some(value),
             None => store.put_with_retained_bytes(
-                KEY,
+                key,
                 Slot {
                     value: Mutex::new(Some(value)),
                 },
@@ -145,7 +148,7 @@ mod store {
 /// when nothing is kept.
 pub fn checkout<T: Send + 'static>(engine: &mut dyn Engine) -> Option<T> {
     #[cfg(feature = "tenferro")]
-    return store::with_store(engine, store::checkout::<T>).flatten();
+    return store::with_store(engine, |s| store::checkout::<T>(s, &store::KEY)).flatten();
     #[cfg(not(feature = "tenferro"))]
     {
         let _ = engine;
@@ -158,13 +161,13 @@ pub fn checkout<T: Send + 'static>(engine: &mut dyn Engine) -> Option<T> {
 /// An admitted value replaces any value kept before (the last writer wins).
 pub fn checkin<T: Send + 'static>(engine: &mut dyn Engine, value: T, charge: fn(&T) -> usize) {
     #[cfg(feature = "tenferro")]
-    store::with_store(engine, |s| store::checkin(s, value, charge));
+    store::with_store(engine, |s| store::checkin(s, store::KEY, value, charge));
     #[cfg(not(feature = "tenferro"))]
     let _ = (engine, value, charge);
 }
 
-/// The slot's charge in the engine's store: 0 when there is no slot, its
-/// fixed allocation while it is empty, plus the kept value's charge.
+/// Both slots' charges in the engine's store: each existing slot's fixed
+/// allocation plus its kept value's charge; 0 when neither slot exists.
 pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
     #[cfg(feature = "tenferro")]
     return store::with_store(engine, |s| store::retained_bytes(s)).unwrap_or(0);
@@ -175,7 +178,8 @@ pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
     }
 }
 
-/// Removes the slot and drops the kept value.
+/// Removes both slots and drops their values. The next eligible movement
+/// decision recalibrates; a checked-out scratch value is unaffected.
 pub fn clear(engine: &mut dyn Engine) {
     #[cfg(feature = "tenferro")]
     store::with_store(engine, store::clear);
@@ -185,3 +189,20 @@ pub fn clear(engine: &mut dyn Engine) {
 
 #[cfg(all(test, feature = "tenferro"))]
 pub(crate) mod tests;
+
+#[cfg(feature = "tenferro")]
+pub(crate) fn checkout_movement(engine: &mut dyn Engine) -> Option<crate::lanes::Calibration> {
+    store::with_store(engine, |s| store::checkout(s, &store::MOVEMENT)).flatten()
+}
+
+#[cfg(feature = "tenferro")]
+pub(crate) fn checkin_movement(engine: &mut dyn Engine, value: crate::lanes::Calibration) {
+    store::with_store(engine, |s| {
+        store::checkin(
+            s,
+            store::MOVEMENT,
+            value,
+            crate::lanes::Calibration::retained_bytes,
+        )
+    });
+}

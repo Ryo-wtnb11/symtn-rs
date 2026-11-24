@@ -37,12 +37,11 @@ use crate::transform_structure::{
 /// The direct items of a replay in one engine entry, and the replay width
 /// `t` it admits there, with whether the policy is a forced `Sequential`.
 ///
-/// `t` is [`lanes::flat_width`] of a copy of the whole destination over the
-/// compiled runnable parts (main's `effective_tree_transform_threads`):
-/// under `Auto` the engine's width when that copy pays for it, at most the
-/// runnable parts, else one; a forced policy's decision, at most the runnable
-/// parts. It fixes the chunks of the plan groups, and the Singles' split
-/// when they are slice-disjoint.
+/// `t` is [`lanes::movement_width`] of a copy of the whole destination over
+/// the compiled runnable parts: under `Auto` the minimum modeled time from
+/// calibrated dispatch plus the serial estimate divided by width; a forced
+/// policy's decision, at most the runnable parts. It fixes the chunks of
+/// the plan groups, and the Singles' split when they are slice-disjoint.
 ///
 /// The inactive layouts run first: split over their hull runs when there
 /// are two or more and the run width `t_A` (the same rule over the new run
@@ -86,23 +85,23 @@ where
     } else {
         schedule.single_runs.len()
     };
+    let threads = lanes::movement_width(engine, estimate, schedule.replay_runnable)?;
+    let run_runnable = [inactive_runs, single_runs]
+        .into_iter()
+        .filter(|&runs| runs >= 2)
+        .max()
+        .unwrap_or(0);
+    let run_threads = if run_runnable >= 2 {
+        lanes::movement_width(engine, estimate, run_runnable)?
+    } else {
+        1
+    };
     let admitted = crate::host_pool::lane_region(
         engine,
         crate::host_pool::HostPoolSite::Replay,
         |mut exec| {
             let sequential =
                 exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
-            let threads = lanes::flat_width(&exec, estimate, schedule.replay_runnable);
-            let run_runnable = [inactive_runs, single_runs]
-                .into_iter()
-                .filter(|&runs| runs >= 2)
-                .max()
-                .unwrap_or(0);
-            let run_threads = if run_runnable >= 2 {
-                lanes::flat_width(&exec, estimate, run_runnable)
-            } else {
-                1
-            };
             workspace.prepare_fused_indices(threads.max(run_threads), rank)?;
             workspace.gate_keys.prepare(
                 &mut exec.reborrow().into_token(),

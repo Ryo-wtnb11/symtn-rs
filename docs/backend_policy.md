@@ -369,17 +369,45 @@ scales) only admits the engine, with the Host region's refusals, and takes
 no token from it.
 
 A tree-transform replay follows TensorKit's threaded kernels and main's
-replay. One Host region fixes its width `t`: under `Auto` the engine's
-width, at most the compiled runnable parts (the Singles when their
-destinations are slice-disjoint, else one, or the pack columns, whichever is
-more), when Strided's copy estimate of the whole destination pays for that
-section, and one otherwise; under a forced policy its batch decision
-(`lanes * item_threads`, one for `Sequential`), at most the runnable parts,
-on the caller's whole token. Destinations are grouped into hull runs:
+replay. One internal chooser fixes its movement width `t`: under `Auto` it
+minimizes `D(q) + estimate / q` over integer widths from one through the
+smaller of the engine budget and the compiled runnable parts (the Singles
+when their destinations are slice-disjoint, else one, or the pack columns,
+whichever is more). `estimate` remains Strided's serial copy estimate of the
+whole destination. Ties choose the smaller width, including intermediate
+widths between calibration anchors. Under a forced policy the batch decision
+(`lanes * item_threads`, one for `Sequential`) is capped by the runnable
+parts. A split runs on a token narrowed to that chosen width.
+
+The dispatch ladder is calibrated on the engine's own `limit(q)` prefixes
+at widths 1, 2, 4, ... and the full budget, and linearly interpolated. Each
+anchor above one is the median of five batches of 200 empty sections, with
+one unmeasured warmup section. Measurements are bounded to [0.5, 20] times
+the token's effective threadteam dispatch table; a caller's `PoolBuilder`
+override takes precedence over the default host-class row (zero stays zero).
+An invalid elapsed interval falls back to the table. A nondecreasing envelope
+is used where compatible with those bounds. Width one has no dispatch cost.
+Threadteam 0.5 supplies no prefix node map, so no NUMA boundaries are added;
+bandwidth and topology calibration are deferred to the flat vector operations.
+
+The first Auto decision with multiple runnable parts calibrates only when
+the model using half the table cost can beat width one. Thus serial engines,
+one-part phases and provably tiny phases perform no calibration. The ladder
+is a separate, byte-charged entry in the existing per-engine extension store,
+not a structure cache; a retained entry is reused without measurement.
+Eviction, limits that refuse retention, or `symtn::scratch::trim` cause the
+next eligible decision to recalibrate. Only the small ladder is retained;
+there is no bandwidth buffer. The pure chooser evaluates each interpolated
+interval's endpoints and integer neighbours of its analytic minimum, in
+O(ladder size) time with no allocation per decision. Block-lane placement
+and provider inner-width choice keep their existing cost models. This is a
+scheduling estimate, not a guarantee of measured speedup.
+
+Destinations are grouped into hull runs:
 maximal address-ordered stretches whose bounding slices overlap
 transitively, so distinct runs occupy disjoint address ranges and one
 writer owns each run. In that region the inactive blocks are split over
-their runs when there are two or more and the same copy rule admits more
+their runs when there are two or more and the same chooser admits more
 than one worker for that many runs, otherwise written inline on the
 caller's token in destination address order; then the Singles: at `t > 1`
 with slice-disjoint destinations split over `t` workers, when they are not
@@ -390,8 +418,8 @@ inline: in block order into a caller-provided destination at `t = 1`
 (main's one-worker replay), in address order into an owned output or at
 `t > 1`. A split part of
 `n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
-workers to its left half and forks its token in two (the odd slot to the
-left); a part of one worker or one item is a leaf, which writes its items
+workers to its left half and forks its token with exactly those logical
+shares (the odd slot to the right); a part of one worker or one item is a leaf, which writes its items
 whole on its token. The Multi groups then replay in chunks of `t`
 consecutive groups: each chunk's pack is split the same way over its
 columns, its jobs go to the executor as one grouped GEMM, and its non-empty

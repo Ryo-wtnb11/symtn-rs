@@ -1002,7 +1002,7 @@ where
 
 /// What: on canonical coupled matrices whose trees interleave (Singles that
 /// are not slice-disjoint, groups whose two blocks overlap, inactive trees
-/// beside them), eight cheap-dispatch workers split the Singles, the
+/// beside them), eight workers under forced `Outer` split the Singles, the
 /// inactive trees and each chunk's scatter over their hull runs, which
 /// main wrote inline: the Singles and the inactive trees are each written
 /// by more than one worker and every scatter column is offered fewer than
@@ -1048,7 +1048,7 @@ fn canonical_interleaved_runs_replay_the_dense_oracle() {
         );
     }
 
-    let mut engine = super::recording::flat_engine(8, 1, CpuBatchStrategy::Auto);
+    let mut engine = super::recording::flat_engine(8, 1, CpuBatchStrategy::Outer);
     let (offers, marks) = super::recording::recorded(&mut engine, &real, &structure, &structure);
     assert!(offers.iter().all(|&offer| offer < 8), "{offers:?}");
     let workers = |blocks: &mut dyn Iterator<Item = usize>| {

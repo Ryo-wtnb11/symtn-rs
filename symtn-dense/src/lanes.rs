@@ -15,7 +15,8 @@
 //! `width_for` over `sum t_j` with one section (Auto) or the policy's
 //! `BatchDecision` for `(J, w)` (forced: `lanes * item_threads`); a forced
 //! policy's lane count is `min(decision.lanes, J)`, and Auto's is at most
-//! `L0 = min(S, J, decision.lanes)`. Nothing here is calibrated or timed. A
+//! `L0 = min(S, J, decision.lanes)`. Block placement uses the token's table;
+//! movement phases separately use [`movement_width`]'s calibration. A
 //! single lane (one of the counts is one, or no job) takes every job on all
 //! S slots, before any ordering.
 //!
@@ -79,10 +80,12 @@ pub use tcontract_exec::{BatchPolicy, Exec};
 use tcontract_exec::{BatchQuery, BatchStrategy};
 use tenferro_cpu::threadteam;
 
+mod movement;
 mod placement;
 mod runner;
 
-pub use placement::flat_width;
+pub use movement::movement_width;
+pub(crate) use movement::Calibration;
 pub(crate) use placement::item_time;
 pub(crate) use placement::{allocate, lane_allocations, searchable, slots, LaneAllocationCache};
 use placement::{parallel_split, words, PlaceScratch};

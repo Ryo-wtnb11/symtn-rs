@@ -525,27 +525,17 @@ fn split<E>(threads: usize) -> Split<UnitCut<E>> {
     }
 }
 
-/// `Split` gives every job the token of main's recursive replay split
-/// (`parallel_split`, `threads / 2` logical threads to the left, a two-child
-/// fork halving the token, the odd slot to the left), by hand:
-/// - 6 jobs, 6 threads, budget 6: 3 | 3 on tokens 3 | 3, each half 1 | 2 on
-///   tokens 2 | 1, the two jobs on one slot sharing it: [2, 1, 1, 2, 1, 1];
-/// - 3 jobs, 4 threads, budget 4: 2 | 1 on tokens 2 | 2, the left 1 | 1:
-///   [1, 1, 2];
-/// - 3 jobs, 3 threads, budget 8: 1 | 2 (1 | 2 threads) on tokens 4 | 4, the
-///   right 1 | 1 on tokens 2 | 2: [4, 2, 2];
-/// - 3 jobs, 4 threads, budget 7: 2 | 1 on tokens 4 | 3, the left 1 | 1 on
-///   tokens 2 | 2: [2, 2, 3];
-/// - 1 job, 8 threads, budget 8: a leaf on the whole token: [8].
+/// Split narrows to its chosen width, and each recursive token has exactly
+/// its logical share, including the right-hand odd slot.
 #[test]
-fn split_offers_each_job_the_token_of_mains_recursion() {
+fn split_tokens_match_the_chosen_logical_shares() {
     let mut engine = engine(8, BatchPolicy::default(), row(60));
     for (jobs, threads, budget, expected) in [
-        (6, 6, 6, vec![2, 1, 1, 2, 1, 1]),
+        (6, 6, 6, vec![1, 1, 1, 1, 1, 1]),
         (3, 4, 4, vec![1, 1, 2]),
-        (3, 3, 8, vec![4, 2, 2]),
-        (3, 4, 7, vec![2, 2, 3]),
-        (1, 8, 8, vec![8]),
+        (3, 3, 8, vec![1, 1, 1]),
+        (3, 4, 7, vec![1, 1, 2]),
+        (1, 3, 8, vec![3]),
     ] {
         let spy = one_stage(jobs, &[]);
         let (seen, outcome) = run_assigned(&mut engine, budget, &spy, split(threads), 1);

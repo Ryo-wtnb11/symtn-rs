@@ -11,6 +11,10 @@
 //! contraction on a warm engine therefore allocates no operand or core
 //! scratch, only its owned output.
 //!
+//! Movement phases also retain their small dispatch-calibration ladder in
+//! a separate engine entry. [`retained_bytes`] includes it, and [`trim`]
+//! clears it so the next eligible movement decision recalibrates.
+//!
 //! This is execution workspace, not semantic cache: it changes cost, never
 //! results. It is separate from the process-global structure caches of
 //! [`crate::cache`].
@@ -53,22 +57,19 @@
 //! Only the CPU engine keeps scratch; on any other engine [`retained_bytes`]
 //! is 0 and [`trim`] does nothing. `CpuEngine::reset_buffer_pool` and
 //! `CpuEngine::clear_runtime_caches` neither count nor release this scratch
-//! (tensor4all/tenferro-rs#2587), so release it with [`trim`]. Each call
-//! moves the engine's store out and back, which allocates an empty
-//! placeholder store each time (tensor4all/tenferro-rs#2587).
-//!
-//! While a tenferro runtime run has moved the engine's store out, a
-//! contraction run inside it finds no scratch and its scratch is dropped
-//! with that run's placeholder; neither [`retained_bytes`] nor [`trim`]
-//! reaches the store during that run.
+//! (tensor4all/tenferro-rs#2587), so release it with [`trim`]. Access moves
+//! the engine's store out and restores it without allocating a placeholder.
+//! Access must not nest while another owner has taken the store; tenferro
+//! rejects a second take in debug builds.
 
 use crate::typed::Engine;
 
-/// The bytes of scratch the engine keeps between calls: every kept buffer
-/// at capacity, the box that holds its execution context, the boxes of its
-/// later payload-type lanes, and the fixed slot that holds them. While a contraction has the scratch checked out, and after a
-/// call that failed in planning or whose scratch did not fit, only the fixed
-/// slot is reported. It is 0 when no slot exists (never created, or
+/// The bytes of scratch and movement calibration the engine keeps between
+/// calls: every kept buffer at capacity, the box that holds its execution context, the boxes of its
+/// later payload-type lanes, their fixed slot, and the separately charged
+/// dispatch ladder. While contraction scratch is checked out, or after a
+/// call whose scratch did not fit, its empty slot and any retained
+/// calibration are reported. It is 0 when no slot exists (never created, or
 /// [`trim`]med) and on a non-CPU engine. It is not peak or in-flight memory.
 ///
 /// `&mut` only because the engine's store is reachable solely by moving it
@@ -77,9 +78,10 @@ pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
     symtn_dense::engine_slot::retained_bytes(engine)
 }
 
-/// Releases the scratch the engine keeps, with its slot; the next eligible
-/// contraction is cold. Scratch a contraction has checked out at that moment
-/// is unaffected, and returns under the store's limits. Does nothing on a
+/// Releases the scratch and dispatch calibration the engine keeps, with
+/// their slots; the next eligible contraction is cold and the next eligible
+/// movement decision recalibrates. Scratch a contraction has checked out
+/// at that moment is unaffected, and returns under the store's limits. Does nothing on a
 /// non-CPU engine.
 pub fn trim(engine: &mut dyn Engine) {
     symtn_dense::engine_slot::clear(engine);

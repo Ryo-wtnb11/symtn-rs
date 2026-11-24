@@ -10,6 +10,37 @@ use super::*;
 use symtn_dense::{CpuEngine, Pool};
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
+/// A free two-worker prefix beats serial, while the costly four-worker
+/// prefix cannot: the public Singles replay uses the intermediate width.
+#[test]
+fn singles_replay_uses_the_intermediate_movement_width() {
+    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+    let row = WidthCosts::new([
+        Duration::ZERO,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+    ]);
+    let mut engine = CpuEngine::new(
+        Pool::builder()
+            .threads(4)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap(),
+    );
+    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![4]; 4]).unwrap());
+    let specs = (0..4)
+        .map(|block| TreeTransformBlockSpec::single(block, block, 1.0))
+        .collect::<Vec<_>>();
+    let transform =
+        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+    let (_, marks) = recorded(&mut engine, &transform, &structure, &structure);
+    let workers = marks
+        .iter()
+        .filter_map(|mark| mark.worker)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(workers.len(), 2);
+}
+
 /// `alpha T(src) + beta dst` on `budget` workers under `strategy`.
 #[allow(clippy::too_many_arguments)]
 fn update<E: DenseExecutor>(

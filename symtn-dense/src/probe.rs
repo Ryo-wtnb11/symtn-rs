@@ -35,9 +35,11 @@ pub(crate) enum Event {
     /// The lane-allocation cache key read the token's dispatch cost at one
     /// width.
     PlacementCostRead,
+    /// One cold measurement of the engine's movement dispatch ladder.
+    MovementCalibration,
 }
 
-const EVENTS: usize = Event::PlacementCostRead as usize + 1;
+const EVENTS: usize = Event::MovementCalibration as usize + 1;
 
 #[derive(Default)]
 struct Probe {

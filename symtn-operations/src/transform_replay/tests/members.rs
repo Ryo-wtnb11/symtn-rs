@@ -364,7 +364,7 @@ fn four_singles<C: Copy>(c: C) -> (Arc<BlockStructure>, TreeTransformStructure<C
 }
 
 /// What: when a member-range move fails (the write of member 2's first
-/// Single, injected at the kernel adapter) on four cheap-dispatch workers
+/// Single, injected at the kernel adapter) on four free-dispatch workers
 /// split into four member ranges, the batch returns that error; the
 /// sibling range of member 3 still runs its moves, no grouped GEMM is
 /// submitted and no scatter writes a group destination; the engine stays
@@ -377,7 +377,7 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
     let source = (0..members * src.required_len().unwrap())
         .map(|v| v as f64)
         .collect::<Vec<_>>();
-    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
+    let mut engine = engine(4, CpuBatchStrategy::Auto);
     let mut workspace = TreeTransformWorkspace::default();
     let mut out = vec![f64::NAN; members * len];
     tree_transform_members_overwrite_raw(
@@ -444,7 +444,7 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
 }
 
 /// What: a movement panic in one member range (member 2's Single meets
-/// the source value 40) on four cheap-dispatch workers, split into four
+/// the source value 40) on four free-dispatch workers, split into four
 /// member ranges, unwinds out of the batch after the fork joined and
 /// leaves the engine broken.
 #[test]
@@ -452,7 +452,7 @@ fn a_member_range_panic_breaks_the_engine() {
     let (structure, transform) = four_singles(Panicking(2.0));
     let members = 4;
     let len = structure.required_len().unwrap();
-    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
+    let mut engine = engine(4, CpuBatchStrategy::Auto);
     let mut workspace = TreeTransformWorkspace::default();
     let run =
         |engine: &mut CpuEngine, workspace: &mut TreeTransformWorkspace<f64>, source: &[f64]| {

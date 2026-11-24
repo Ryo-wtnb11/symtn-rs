@@ -70,7 +70,7 @@ pub type symtn_dense::lanes::Work::Job: core::marker::Send
 pub type symtn_dense::lanes::Work::Lane: core::marker::Send
 pub fn symtn_dense::lanes::Work::count(&self) -> usize
 pub fn symtn_dense::lanes::Work::run(&self, usize, &mut Self::Job, &mut Self::Lane, tcontract_exec::exec::Exec<'_>) -> core::result::Result<(), Self::Error>
-pub fn symtn_dense::lanes::flat_width(&tcontract_exec::exec::Exec<'_>, core::time::Duration, usize) -> usize
+pub fn symtn_dense::lanes::movement_width(&mut dyn tenferro_tensor::backend::Engine, core::time::Duration, usize) -> core::result::Result<usize, symtn_dense::DenseError>
 pub fn symtn_dense::lanes::run_native<W: symtn_dense::lanes::Work, A: symtn_dense::lanes::Assignment<W>>(tcontract_exec::exec::Exec<'_>, &W, A, &mut [<W as symtn_dense::lanes::Work>::Job], &mut [<W as symtn_dense::lanes::Work>::Lane]) -> core::result::Result<symtn_dense::lanes::Outcome<<W as symtn_dense::lanes::Work>::Error>, symtn_dense::lanes::Refusal<threadteam::error::Error>>
 pub type symtn_dense::lanes::Outcome<E> = core::result::Result<(), (usize, E)>
 pub enum symtn_dense::DenseBackend
