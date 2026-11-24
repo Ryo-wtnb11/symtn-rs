@@ -237,7 +237,7 @@ where
         return Ok(());
     };
     let braiding = <R::Mode as NetworkModeDispatch<R, D, S>>::braiding_style(first.provider());
-    symtn::typed::admit_braiding::<R::Mode>(symtn::typed::BraidingOp::Contraction, braiding)
+    symtn::typed::admit_braiding(symtn::typed::BraidingOp::Contraction, braiding)
         .map_err(|error| FacadeError::<R>::from(Error::from(error)))
 }
 

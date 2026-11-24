@@ -12,9 +12,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use symtn::expert::{SectorLeg, TensorStorage};
 use symtn::sector::{
-    CheckedFusionAlgebra, CheckedGenericAdmissionMode, CheckedGenericFusion,
-    CheckedGenericRigidSymbols, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols,
-    RuleIdentity, SectorCodec, TypedSectorAdmission,
+    CheckedFusionAlgebra, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
+    MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, RuleIdentity, SectorCodec,
+    TypedSectorAdmission,
 };
 use symtn::typed::__network::{
     self, NetworkDegeneracyRestriction, NetworkPayloadStorage, NetworkReuseClass,

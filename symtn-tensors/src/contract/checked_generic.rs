@@ -3,8 +3,9 @@ use symtn_dense::Engine;
 
 use num_traits::Zero;
 use symtn_core::{
-    BlockStructure, CheckedGenericAdmissionMode, CheckedGenericRigidSymbols, CoreError,
-    FusionTreeHomSpace, PermutedMemoTicket, RuleIdentity, StructurallyValidatedFusionTreeSubset,
+    BlockStructure, BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion,
+    CheckedGenericPivotal, CheckedGenericRigidSymbols, CoreError, FusionTreeHomSpace,
+    PermutedMemoTicket, RuleIdentity, SectorId, StructurallyValidatedFusionTreeSubset,
 };
 #[cfg(test)]
 use symtn_operations::OutputAxisOrder;
@@ -35,9 +36,6 @@ use super::resolution::{CoreMiss, CoreRoute};
 use super::structure::TensorContractAxisPlan;
 use crate::tree_transform::TreeTransformPlanning;
 
-const CHECKED_PLANAR_REQUEST: &str =
-    "the checked Generic planner received a planar contraction request";
-
 #[cfg(test)]
 type CheckedContractResult<P, D> = Result<
     (BoundDynamicFusionMapSpace<P>, Vec<D>),
@@ -55,22 +53,35 @@ type CheckedContractResult<P, D> = Result<
 /// logical layout is the space its view already holds; re-enumerating it
 /// needs the provider, and the multiplicity-free layout primer that derives
 /// it there has no checked counterpart.
-pub(crate) struct CheckedAuthority<'a, P> {
+pub(crate) struct CheckedAuthority<'a, P: CheckedGenericFusion> {
     pub(crate) binding: &'a BoundDynamicFusionMapSpace<P>,
-    twist_free: bool,
+    twist: ContractTwist<P>,
     sides: [CheckedSide<'a>; 2],
 }
+
+pub(crate) enum ContractTwist<P: CheckedGenericFusion> {
+    Unasked,
+    Free,
+    Fermionic(fn(&P, SectorId) -> Result<f64, P::Error>),
+}
+
+impl<P: CheckedGenericFusion> Clone for ContractTwist<P> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<P: CheckedGenericFusion> Copy for ContractTwist<P> {}
 
 /// One operand of a checked request: its storage operand and logical space.
 pub(crate) type CheckedSide<'a> = (FusionOperand<'a>, &'a DynamicFusionMapSpace);
 
 // Why manual: a derive would bound `P: Copy`.
-impl<P> Clone for CheckedAuthority<'_, P> {
+impl<P: CheckedGenericFusion> Clone for CheckedAuthority<'_, P> {
     fn clone(&self) -> Self {
         *self
     }
 }
-impl<P> Copy for CheckedAuthority<'_, P> {}
+impl<P: CheckedGenericFusion> Copy for CheckedAuthority<'_, P> {}
 
 impl<'a, P> CheckedAuthority<'a, P>
 where
@@ -79,43 +90,42 @@ where
     /// Canonical composition (TensorKit `mul!`) crosses no legs, so it never
     /// asks the twist question and the authority holds no answer: asked, it
     /// fails closed.
-    pub(crate) fn composition(
+    pub(crate) fn crossing_free(
         binding: &'a BoundDynamicFusionMapSpace<P>,
         sides: [CheckedSide<'a>; 2],
     ) -> Self {
         Self {
             binding,
-            twist_free: false,
+            twist: ContractTwist::Unasked,
             sides,
         }
     }
 
-    /// General contraction may braid and twist; the checked engine
-    /// implements neither TensorKit `blas_contract!`'s fermionic supertrace
-    /// branch nor non-symmetric braiding, so the shared admission owner
-    /// admits Bosonic braiding only, read once from the left provider.
-    ///
-    /// Why a release-active error rather than a debug assertion behind the
-    /// facade gate: this lower entry is public, and `twist_free = true` would
-    /// let a Fermionic lower call skip the contraction twist.
+    /// Ordinary contraction admits symmetric braiding and captures the
+    /// provider's Fermionic twist before staging any destination.
     pub(crate) fn contraction(
         binding: &'a BoundDynamicFusionMapSpace<P>,
         sides: [CheckedSide<'a>; 2],
-    ) -> Result<Self, CheckedGenericPlanError<P::Error>> {
-        crate::admission::admit_braiding::<CheckedGenericAdmissionMode>(
-            BraidingOp::Contraction,
-            binding.provider().braiding_style(),
-        )?;
+    ) -> Result<Self, CheckedGenericPlanError<P::Error>>
+    where
+        P: CheckedGenericPivotal<Scalar = f64>,
+    {
+        let style = binding.provider().braiding_style();
+        crate::admission::admit_braiding(BraidingOp::Contraction, style)?;
+        let twist = if style == BraidingStyleKind::Fermionic {
+            ContractTwist::Fermionic(P::try_twist_scalar)
+        } else {
+            ContractTwist::Free
+        };
         Ok(Self {
             binding,
-            twist_free: true,
+            twist,
             sides,
         })
     }
 
-    /// Whether the entry established that no contraction twist exists.
-    pub(crate) fn twist_free(self) -> bool {
-        self.twist_free
+    pub(crate) fn twist(self) -> ContractTwist<P> {
+        self.twist
     }
 
     /// The logical space of a request operand. Both operands may be one
@@ -154,7 +164,7 @@ fn unknown_operand() -> OperationError {
 }
 
 #[cfg(test)]
-impl<'a, P> PlanTarget<'a, P, CheckedAuthority<'a, P>> {
+impl<'a, P: CheckedGenericFusion> PlanTarget<'a, P, CheckedAuthority<'a, P>> {
     /// The checked destination `space` (a staged preview) planned under
     /// `authority`, whose binding's provider is the rule.
     pub(crate) fn checked(
@@ -306,7 +316,7 @@ where
 /// logical spaces.
 impl<P> ContractStaging<P> for CheckedGenericAdmissionMode
 where
-    P: CheckedGenericRigidSymbols<Scalar = f64>,
+    P: CheckedGenericPivotal<Scalar = f64>,
 {
     /// The staged destination and the preview the planner targets.
     type ContractStage = (PreparedCheckedGenericDynamicSpace, DynamicFusionMapSpace);
@@ -326,6 +336,11 @@ where
             ContractRequest::Contract {
                 axes,
                 codomain_rank,
+            }
+            | ContractRequest::Planar {
+                axes,
+                codomain_rank,
+                ..
             } => (axes, codomain_rank),
             ContractRequest::Compose => {
                 let lhs_nout = lhs.space().nout();
@@ -338,24 +353,15 @@ where
                     lhs_nout,
                 )
             }
-            // The facade admits checked planar contraction for Bosonic
-            // braiding only and runs it as the ordinary contraction, so no
-            // planar request reaches this planner.
-            ContractRequest::Planar { .. } => {
-                return Err(OperationError::Internal {
-                    message: CHECKED_PLANAR_REQUEST,
-                }
-                .into())
-            }
         };
         let axis_plan = validate_contract_local(lhs_side, rhs_side, axes, codomain_rank)?;
         let provider = crate::admission::admit_checked_generic_pair(lhs, rhs)?;
         let sides = [(lhs_operand, lhs.space()), (rhs_operand, rhs.space())];
         let authority = match request {
-            ContractRequest::Contract { .. } | ContractRequest::Planar { .. } => {
-                CheckedAuthority::contraction(lhs, sides)?
+            ContractRequest::Contract { .. } => CheckedAuthority::contraction(lhs, sides)?,
+            ContractRequest::Compose | ContractRequest::Planar { .. } => {
+                CheckedAuthority::crossing_free(lhs, sides)
             }
-            ContractRequest::Compose => CheckedAuthority::composition(lhs, sides),
         };
         let destination = lhs.prepare_final_homspace_generic_from_checked(provider, || {
             FusionTreeHomSpace::try_tensorcontract_homspace_generic_checked(
@@ -420,7 +426,7 @@ where
 ///
 /// Internal and unstable despite being public for `symtn`.
 #[doc(hidden)]
-pub struct CheckedContractStage<'a, P>(
+pub struct CheckedContractStage<'a, P: CheckedGenericFusion>(
     StagedContraction<
         (PreparedCheckedGenericDynamicSpace, DynamicFusionMapSpace),
         CheckedAuthority<'a, P>,
@@ -430,7 +436,7 @@ pub struct CheckedContractStage<'a, P>(
 
 impl<'a, P> ContractStageParts<'a, P> for CheckedContractStage<'a, P>
 where
-    P: CheckedGenericRigidSymbols<Scalar = f64> + 'a,
+    P: CheckedGenericPivotal<Scalar = f64> + 'a,
 {
     type M = CheckedGenericAdmissionMode;
     fn wrap(parts: StageParts<'a, P, Self::M>) -> Self {
@@ -449,17 +455,14 @@ where
 
 impl<'a, P> StagedContract<'a, P, CheckedContractStage<'a, P>>
 where
-    P: CheckedGenericRigidSymbols<Scalar = f64> + 'a,
+    P: CheckedGenericPivotal<Scalar = f64> + 'a,
 {
     /// Admits checked Generic operands and stages the destination of
     /// `request`; operands as in [`StagedContract::multiplicity_free`]. The
     /// staging validates the stored lengths.
     ///
-    /// An ordinary contraction admits braiding through
-    /// [`crate::admit_braiding`] (Bosonic only) after pair admission; a
-    /// refusal is `CheckedGenericPlanError::Operation`. A planar request is
-    /// unsupported in checked Generic mode for every style; the facade runs a
-    /// Bosonic planar contraction as the ordinary contraction.
+    /// Ordinary contraction admits Bosonic and Fermionic braiding after pair
+    /// admission; planar contraction and composition admit every style.
     #[allow(clippy::type_complexity)]
     pub fn checked_generic(
         lhs: (FusionSource<'a, P>, usize),
@@ -555,7 +558,7 @@ where
         codomain_rank: usize,
     ) -> CheckedContractResult<P, D>
     where
-        P: CheckedGenericRigidSymbols<Scalar = f64>,
+        P: CheckedGenericPivotal<Scalar = f64>,
     {
         self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(
             engine,
@@ -587,7 +590,7 @@ where
         rhs: (FusionSource<'_, P>, &[D]),
     ) -> CheckedContractResult<P, D>
     where
-        P: CheckedGenericRigidSymbols<Scalar = f64>,
+        P: CheckedGenericPivotal<Scalar = f64>,
     {
         self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(
             engine,
@@ -849,6 +852,12 @@ mod tests {
             } else {
                 Ok(symbol)
             }
+        }
+    }
+
+    impl CheckedGenericPivotal for CheckedGenericSpy {
+        fn try_twist_scalar(&self, _: SectorId) -> Result<f64, Self::Error> {
+            Err(SpyError(Query::Rigidity))
         }
     }
 
@@ -1804,20 +1813,16 @@ mod tests {
         }
     }
 
-    /// What: general checked contraction with a non-Bosonic provider
+    /// What: general checked contraction with non-symmetric braiding
     /// returns the typed braiding refusal carrying the provider's style
     /// after the pair
     /// admission and one braiding read, before any structural query;
     /// canonical composition crosses no legs and stays admitted.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
-    fn checked_contraction_requires_bosonic_braiding_and_compose_does_not() {
+    fn checked_contraction_requires_symmetric_braiding_and_compose_does_not() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        for braiding in [
-            BraidingStyleKind::Fermionic,
-            BraidingStyleKind::Anyonic,
-            BraidingStyleKind::NoBraiding,
-        ] {
+        for braiding in [BraidingStyleKind::Anyonic, BraidingStyleKind::NoBraiding] {
             let (left, lhs, right, rhs) = bound_pair(1, 1);
             left.braiding.set(braiding);
             right.braiding.set(braiding);
@@ -1857,38 +1862,6 @@ mod tests {
                 .unwrap();
             assert!(data.iter().any(|&value| value != 0.0), "{braiding:?}");
         }
-    }
-
-    /// What: the checked planner has no planar route, so even a Bosonic
-    /// planar request is an internal error before pair admission.
-    #[test]
-    fn checked_planar_request_is_internal_for_bosonic_braiding() {
-        let (left, lhs, right, rhs) = bound_pair(1, 1);
-        let len = lhs.space().required_len().unwrap();
-        let orders =
-            crate::PlanarContractOrders::validate((1, 2), (1, 2), &[1], &[0], &[0, 1], 1).unwrap();
-        let error = StagedContract::checked_generic(
-            (FusionSource::Direct(&lhs), len),
-            (FusionSource::Direct(&rhs), len),
-            ContractRequest::Planar {
-                axes: TensorContractSpec::with_default_output_order(&[1], &[0]),
-                codomain_rank: 1,
-                orders: &orders,
-            },
-        )
-        .err()
-        .unwrap();
-        assert!(
-            matches!(
-                error,
-                CheckedGenericPlanError::Operation(OperationError::Internal {
-                    message: CHECKED_PLANAR_REQUEST,
-                })
-            ),
-            "{error:?}"
-        );
-        assert!(left.events.borrow().is_empty());
-        assert!(right.events.borrow().is_empty());
     }
 
     /// What: a staged space the planned route does not replay over, as a

@@ -1,6 +1,6 @@
 mod backend;
 mod checked_generic;
-pub(crate) use checked_generic::{CheckedAuthority, CheckedContractTxn};
+pub(crate) use checked_generic::{CheckedAuthority, CheckedContractTxn, ContractTwist};
 mod context;
 pub(crate) use context::{
     compile_prelowered_dynamic_tree, compile_stored_dynamic_tree, PlanTarget,
@@ -10,9 +10,9 @@ mod dynamic;
 #[doc(hidden)]
 pub use dynamic::cuda::CudaContractScratch;
 pub(crate) use dynamic::{
-    compile_contract_twist, compile_core_dst, compile_transformed_source,
-    source_is_storage_adjoint, storage_layout_is_canonical, DynamicFusionCoreDstEntry,
-    DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact,
+    compile_contract_twist, compile_contract_twist_with, compile_core_dst,
+    compile_transformed_source, source_is_storage_adjoint, storage_layout_is_canonical,
+    DynamicFusionCoreDstEntry, DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact,
 };
 #[cfg(test)]
 pub(crate) use dynamic::{
@@ -87,7 +87,7 @@ pub use dynamic_space::{
 };
 #[cfg(test)]
 pub(crate) use fusion::contracted_fusion_tree_basis_matches;
-pub(crate) use fusion::rhs_contract_twist_factor_oriented;
+pub(crate) use fusion::uniform_contract_twist;
 pub use fusion::{
     prepare_tensorcontract_fusion_plan_dyn, tensorcontract_fusion_block_specs, FusionContractPlan,
 };

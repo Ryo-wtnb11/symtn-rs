@@ -233,11 +233,22 @@ a checked Generic `LieGroupFusionRule` over `GroupId::su(2)` does. Declaring `Un
 selects a lowering that silently drops terms. `Bosonic`/`Fermionic` assert
 symmetric braiding; `Anyonic` and
 `NoBraiding` do not, so ordinary `contract` (and network contraction) rejects
-them, as TensorKit `blas_contract!` does, while `compose` admits every style.
-The checked Generic engine has no supertrace twist and no planar route, so it
-admits ordinary and planar contraction for `Bosonic` braiding only; every
-other style is refused with `UnsupportedContractionBraiding`, which carries
-the operation and the style, whatever the operands' storage form.
+them, as TensorKit `blas_contract!` does. Both modes admit `Bosonic` and
+`Fermionic` ordinary contraction; `compose` and `planar_contract` admit every
+style. Checked contraction, composition and planar contraction require
+`CheckedGenericPivotal<Scalar = f64>`; ordinary Fermionic contraction queries
+its `try_twist_scalar` for the supertrace twist. Planar contraction uses
+braid-free transposes and composition with no twist or R-symbol queries.
+`UnsupportedContractionBraiding` carries the operation and style for
+non-symmetric ordinary contraction or trace, whatever the storage form.
+
+Checked contraction supports Host storage and real f64 categorical
+coefficients, with `TensorScalar` payloads (f32, f64, Complex32 or Complex64). Complex-coefficient providers
+(`TableRule` and products containing it) remain outside this contraction
+lane. On this lane production Fermionic providers include SU(3) × fZ2 with
+outer multiplicity; Anyonic and NoBraiding planar admission currently has
+only synthetic-provider coverage. A provider twist failure is
+`CheckedGenericPlanError::Provider`, before replay or publication.
 
 `fusion_channels` order is part of the convention. Keep it stable; table
 rules use table object order.

@@ -166,7 +166,7 @@ where
         );
         let (space, resolution) = match spec {
             Some(spec) => {
-                symtn_tensors::admit_braiding::<symtn_core::MultiplicityFreeAdmissionMode>(
+                symtn_tensors::admit_braiding(
                     symtn_tensors::BraidingOp::Contraction,
                     lhs.space.provider().braiding_style(),
                 )?;

@@ -14,7 +14,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use symtn::sector::{
-    BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion,
+    BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
     CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
     SectorId, SectorVec, TypedSectorAdmission,
 };
@@ -177,6 +177,12 @@ impl CheckedGenericRigidSymbols for GenericToy {
             size,
             size,
         ))
+    }
+}
+
+impl CheckedGenericPivotal for GenericToy {
+    fn try_twist_scalar(&self, _: SectorId) -> Result<f64, Self::Error> {
+        Err(GenericError)
     }
 }
 

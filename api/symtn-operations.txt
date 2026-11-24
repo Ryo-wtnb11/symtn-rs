@@ -613,7 +613,6 @@ pub fn symtn_operations::TreeTransformStructure<T>::fmt(&self, &mut core::fmt::F
 pub fn symtn_operations::transform_structure::validate_destination_layouts_injective(&symtn_core::block_structure::structure::BlockStructure, &'static str) -> core::result::Result<(), symtn_operations::OperationError>
 pub enum symtn_operations::BraidingOp
 pub symtn_operations::BraidingOp::Contraction
-pub symtn_operations::BraidingOp::PlanarContraction
 pub symtn_operations::BraidingOp::Trace
 impl core::clone::Clone for symtn_operations::BraidingOp
 pub fn symtn_operations::BraidingOp::clone(&self) -> symtn_operations::BraidingOp

@@ -470,6 +470,12 @@ impl CheckedGenericRigidSymbols for CheckedOnlyToy {
     }
 }
 
+impl symtn::sector::CheckedGenericPivotal for CheckedOnlyToy {
+    fn try_twist_scalar(&self, _: SectorId) -> Result<f64, Self::Error> {
+        Err(ToyError::Algebra)
+    }
+}
+
 impl TypedSectorAdmission for CheckedOnlyToy {
     type Sector = Label;
     type Error = ToyError;

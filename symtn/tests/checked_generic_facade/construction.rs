@@ -696,7 +696,7 @@ fn check_generic_structural_constructors<R>(
     R: TypedSectorAdmission<
             Error = <R as CheckedGenericFusion>::Error,
             Mode = CheckedGenericAdmissionMode,
-        > + CheckedGenericRigidSymbols<Scalar = f64>,
+        > + symtn::sector::CheckedGenericPivotal<Scalar = f64>,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // The fixture must carry a subblock whose trees differ only in their

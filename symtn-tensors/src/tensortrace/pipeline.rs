@@ -24,7 +24,7 @@ use symtn_core::{
 };
 
 /// What the trace preflight asks of an admission mode.
-pub(super) trait TracePreflightMode<R>: crate::admission::BraidingAdmission {
+pub(super) trait TracePreflightMode<R> {
     type Error;
 
     fn operation(error: OperationError) -> Self::Error;
@@ -66,11 +66,8 @@ where
     M::validate_source(src)?;
     // TensorKit `trace_permute!` gates the braiding first: a trace is defined
     // only for symmetric braiding.
-    crate::admission::admit_braiding::<M>(
-        crate::BraidingOp::Trace,
-        M::braiding_style(src.provider()),
-    )
-    .map_err(M::operation)?;
+    crate::admission::admit_braiding(crate::BraidingOp::Trace, M::braiding_style(src.provider()))
+        .map_err(M::operation)?;
     let orientation = if axes.source_conjugate() {
         FusionTreePairOrientation::Adjoint
     } else {

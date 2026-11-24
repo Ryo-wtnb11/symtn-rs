@@ -1117,7 +1117,8 @@ pub trait CheckedGenericRigidSymbols: CheckedGenericFusion {
     }
 }
 
-/// Checked provider-owned pivotal/twist data for categorical traces.
+/// Checked provider-owned pivotal/twist data for categorical traces and
+/// Fermionic contraction.
 ///
 /// This is deliberately separate from [`CheckedGenericRigidSymbols`]: a
 /// Frobenius--Schur phase and a ribbon twist are distinct categorical data,

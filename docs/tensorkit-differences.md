@@ -71,3 +71,33 @@ this page records intentional differences.
   or crossing-free `transpose`, `compose` and `planar_contract` where symmetric
   braiding is required; see
   [provider boundaries](provider_interface.md#current-typed-api-boundaries).
+
+### Checked Fermionic and planar contraction
+
+On Host storage, checked Generic contraction follows TensorKit
+`blas_contract!`: ordinary contraction admits symmetric braiding and applies
+provider-owned θ to dual contracted legs, while `planar_contract` uses
+`transpose`, `compose`, and an optional output transpose, with no θ or R
+queries. Checked contraction requires `CheckedGenericPivotal<Scalar = f64>`;
+`TensorScalar` payloads (f32, f64, Complex32 or Complex64) are supported. Complex categorical coefficients
+remain unsupported on this checked lane, including `TableRule` products.
+
+The checked planner replans every eager call, warm or cold. For `B_t`
+tree-pair blocks and `k_d` dual contracted core-right legs, transform scales
+require `B_t k_d` θ queries through the captured provider function pointer,
+one vector allocation of at most `B_t` entries, an `O(B_t log B_t)` worst-case
+sort, and validation over Multi-block destination layouts. The shared MF loop
+uses a statically dispatched θ closure. No loop allocation or additional
+payload pass is needed for the twist. Unlike TensorKit's separate `twist!`
+pass over the copied operand, θ is fused into source-transform destination
+scales. The uniform core case queries `Σ_c T_c k_d` twists for `T_c` RHS row
+trees and folds one alpha per coupled sector into GEMM, avoiding a copy.
+GEMM work stays `Σ_c m_c n_c k_c`.
+
+The checked Fermionic identity-source shortcut currently builds a transformer
+for both identity operands: warm calls look up each completed transformer;
+cold calls build it in `O(blocks)`. Multiplicity increases `B_t` but leaves
+per-block θ cost unchanged. No θ cache or negligible-overhead claim is made;
+these costs have not been benchmarked. Planar contraction has no θ work and
+uses two source transposes (each over its recoupling terms), sector GEMMs,
+and an optional output transpose, as in TensorKit `planarcontract!`.

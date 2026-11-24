@@ -789,7 +789,7 @@ where
     R: TypedSectorAdmission<
             Error = <R as CheckedGenericFusion>::Error,
             Mode = CheckedGenericAdmissionMode,
-        > + CheckedGenericRigidSymbols<Scalar = f64>,
+        > + CheckedGenericPivotal<Scalar = f64>,
     D: TensorScalar,
 {
     fn contract<S: ContractExec<R, D>>(
@@ -871,7 +871,7 @@ where
     R: TypedSectorAdmission<
             Error = <R as CheckedGenericFusion>::Error,
             Mode = CheckedGenericAdmissionMode,
-        > + CheckedGenericRigidSymbols<Scalar = f64>,
+        > + CheckedGenericPivotal<Scalar = f64>,
     D: TensorScalar,
     S: ContractExec<R, D>,
 {

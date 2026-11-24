@@ -220,7 +220,7 @@ pub struct symtn_tensors::PreparedCheckedGenericRoot<R>
 impl<R> symtn_tensors::PreparedCheckedGenericRoot<R>
 pub fn symtn_tensors::PreparedCheckedGenericRoot<R>::sector_structure(&self) -> &symtn_core::block_structure::sector_structure::SectorStructure
 pub struct symtn_tensors::StagedContract<'a, R, St>
-impl<'a, P> symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>> where P: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64> + 'a
+impl<'a, P> symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>> where P: symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64> + 'a
 pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::checked_generic((symtn_tensors::FusionSource<'a, P>, usize), (symtn_tensors::FusionSource<'a, P>, usize), symtn_tensors::ContractRequest<'a>) -> core::result::Result<Self, symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
 pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::commit(self, &symtn_tensors::StorageContractResolution<f64>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
 pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::destination(&self) -> &symtn_tensors::DynamicFusionMapSpace
@@ -370,12 +370,6 @@ impl core::fmt::Debug for symtn_tensors::ValidatedDynamicFusionLayout
 pub fn symtn_tensors::ValidatedDynamicFusionLayout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::hash::Hash for symtn_tensors::ValidatedDynamicFusionLayout
 pub fn symtn_tensors::ValidatedDynamicFusionLayout::hash<H: core::hash::Hasher>(&self, &mut H)
-pub trait symtn_tensors::BraidingAdmission: symtn_tensors::admission::sealed::Sealed
-pub fn symtn_tensors::BraidingAdmission::admits(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
-impl symtn_tensors::BraidingAdmission for symtn_sectors::algebra::CheckedGenericAdmissionMode
-pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::admits(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
-impl symtn_tensors::BraidingAdmission for symtn_sectors::algebra::MultiplicityFreeAdmissionMode
-pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::admits(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> bool
 pub trait symtn_tensors::CoefficientAlgebra<R>: symtn_tensors::mode::sealed::Sealed
 pub type symtn_tensors::CoefficientAlgebra::Coeff
 pub type symtn_tensors::CoefficientAlgebra::Error: core::convert::From<symtn_operations::error::OperationError>
@@ -424,7 +418,7 @@ pub type R::Key = symtn_sectors::rule_identity::RuleIdentity
 pub fn R::tree_transform_rule_cache_key(&self) -> Self::Key
 pub fn symtn_tensors::adjoint_bound_dyn<R, D>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &[D]) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, D: symtn_tensors::adjoint::AdjointScalar
 pub fn symtn_tensors::adjoint_bound_space_dyn<R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
-pub fn symtn_tensors::admit_braiding<M: symtn_tensors::BraidingAdmission>(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::admit_braiding(symtn_operations::error::BraidingOp, symtn_sectors::BraidingStyleKind) -> core::result::Result<(), symtn_operations::error::OperationError>
 pub fn symtn_tensors::admit_checked_generic_pair<'a, P>(&'a symtn_tensors::BoundDynamicFusionMapSpace<P>, &symtn_tensors::BoundDynamicFusionMapSpace<P>) -> core::result::Result<&'a P, symtn_core::error::CoreError> where P: symtn_sectors::algebra::CheckedGenericFusion
 pub fn symtn_tensors::admit_exact_tree_pair_layout<T>(&symtn_sectors::rule_identity::RuleIdentity, &symtn_operations::transform_key::TreeTransformOperation, &symtn_core::block_structure::structure::BlockStructure, &symtn_core::block_structure::structure::BlockStructure, (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3]), (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3])) -> bool where T: 'static + core::marker::Send + core::marker::Sync
 pub fn symtn_tensors::build_all_codomain_tree_transform_group_plan<R>(&R, symtn_operations::transform_key::TreeTransformOperation, &symtn_core::block_structure::structure::BlockStructure) -> core::result::Result<symtn_operations::transform_plan::TreeTransformGroupPlan<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeFusionSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + num_traits::identities::Zero

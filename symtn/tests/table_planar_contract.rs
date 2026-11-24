@@ -754,3 +754,136 @@ fn fermionic_planar_contract_into_is_alpha_steps_plus_beta() {
         "the destination form is the planar morphism, not contract's"
     );
 }
+
+#[cfg(feature = "cgc-gen")]
+mod checked_fermionic {
+    use super::*;
+    use crate::checked_core_region_oracle::fermionic::{
+        compare, filled, label_entries, su2_spaces, su3_space, FermionMode,
+    };
+    use crate::numerics;
+    use symtn::sector::TypedSectorAdmission;
+    use symtn::typed::TensorScalar;
+
+    fn rows<R, D>(
+        v: &GradedSpace<R>,
+        value: impl Fn(f64, f64) -> D + Copy,
+    ) -> (TensorMap<R, D>, usize)
+    where
+        R: TypedSectorAdmission,
+        R::Mode: FermionMode<R, D>,
+        D: TensorScalar + numerics::Numeric,
+    {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let a = filled(engine, &runtime, &[v, v], &[v, v], 23, value);
+        let b = filled(engine, &runtime, &[v, v], &[v, v], 31, value);
+        // Every output entry is bilinear in these original source entries.
+        let terms = a.dense_data().unwrap().len() * b.dense_data().unwrap().len();
+        let composition = a.planar_contract(engine, &b, &G1).unwrap();
+        compare(
+            "checked planar composition",
+            &composition,
+            &a.compose(engine, &b).unwrap(),
+            terms,
+        );
+
+        let cyclic = spec(&[1, 3], &[3, 1], &[0, 3], &[1, 2]);
+        let bp = b.transpose(engine, &[1, 3], &[0, 2]).unwrap();
+        let steps = a
+            .transpose(engine, &[2, 0], &[3, 1])
+            .unwrap()
+            .compose(engine, &bp)
+            .unwrap()
+            .transpose(engine, &[1, 3], &[0, 2])
+            .unwrap();
+        let got = a.planar_contract(engine, &b, &cyclic).unwrap();
+        compare("checked planar rotated transposes", &got, &steps, terms);
+        let ordinary = a.contract(engine, &b, &cyclic).unwrap();
+        assert!(
+            got.dense_data()
+                .unwrap()
+                .iter()
+                .zip(ordinary.dense_data().unwrap())
+                .any(|(p, c)| (p.wide() - c.wide()).norm() > 1e-6),
+            "the odd dual contracted leg distinguishes planar from ordinary contraction"
+        );
+        let parent = a.adjoint(engine).unwrap().materialize(engine).unwrap();
+        let lazy = parent.adjoint(engine).unwrap();
+        compare(
+            "checked planar lazy operand",
+            &lazy.planar_contract(engine, &b, &cyclic).unwrap(),
+            &steps,
+            terms,
+        );
+        (got, terms)
+    }
+
+    fn su3<D>(value: impl Fn(f64, f64) -> D + Copy)
+    where
+        D: TensorScalar + numerics::Numeric,
+    {
+        let v = su3_space();
+        rows(&v, value);
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let a = filled(engine, &runtime, &[&v, &v], &[&v, &v], 41, value);
+        let b = filled(engine, &runtime, &[&v, &v], &[&v, &v], 43, value);
+        // Independent closed loop: sum_c dim(c) tr(A_c B_c), using the
+        // SU(3) Weyl dimension formula (p+1)(q+1)(p+q+2)/2 and dim(fZ2)=1.
+        let mut expected = D::from_real(0.0);
+        for (sector, left) in a.blocks().unwrap() {
+            let right = b.block(&sector).unwrap();
+            let mut labels = sector.left().dynkin();
+            let (p, q) = (labels.next().unwrap() as f64, labels.next().unwrap() as f64);
+            let dim = (p + 1.0) * (q + 1.0) * (p + q + 2.0) / 2.0;
+            for i in 0..left.rows() {
+                for k in 0..left.cols() {
+                    expected +=
+                        D::from_real(dim) * left.get(i, k).unwrap() * right.get(k, i).unwrap();
+                }
+            }
+        }
+        let got = a.planar_contract(engine, &b, &G4).unwrap();
+        let terms = a.dense_data().unwrap().len() * b.dense_data().unwrap().len();
+        numerics::assert_close(
+            "checked planar closed loop",
+            got.dense_data().unwrap()[0],
+            expected,
+            terms,
+        );
+    }
+
+    #[test]
+    fn checked_fermionic_planar_is_twist_free_transpose_composition_and_closed_loop() {
+        // What: checked multiplicity-two Fermionic planar contraction follows
+        // crossing-free transpose/compose, including a lazy source and a closed loop.
+        su3(|x, _| x);
+        su3(Complex64::new);
+    }
+
+    fn cross_mode<D>(value: impl Fn(f64, f64) -> D + Copy)
+    where
+        D: TensorScalar + numerics::Numeric,
+    {
+        let (mf, checked) = su2_spaces();
+        let (mf, terms) = rows(&mf, value);
+        let (checked, _) = rows(&checked, value);
+        let (mf, checked) = (label_entries(&mf), label_entries(&checked));
+        assert_eq!(
+            mf.keys().collect::<Vec<_>>(),
+            checked.keys().collect::<Vec<_>>()
+        );
+        for (key, expected) in mf {
+            numerics::assert_slices_close(&key, &checked[&key], &expected, terms);
+        }
+    }
+
+    #[test]
+    fn fermionic_planar_rotated_output_agrees_across_modes_by_labels() {
+        // What: fZ2 x SU(2) has the same planar value in both modes for real
+        // and complex payloads, through non-identity input and output transposes.
+        cross_mode(|x, _| x);
+        cross_mode(Complex64::new);
+    }
+}

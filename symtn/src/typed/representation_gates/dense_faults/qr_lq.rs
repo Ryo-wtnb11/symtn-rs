@@ -119,6 +119,12 @@ impl<R: symtn::sector::FusionRule> CheckedGenericRigidSymbols for CheckedAbelian
     }
 }
 
+impl<R: symtn::sector::FusionRule> symtn::sector::CheckedGenericPivotal for CheckedAbelian<R> {
+    fn try_twist_scalar(&self, _: SectorId) -> Result<f64, ToyError> {
+        Err(ToyError::Algebra)
+    }
+}
+
 impl<R: symtn::sector::SectorCodec> TypedSectorAdmission for CheckedAbelian<R> {
     type Sector = R::Sector;
     type Error = ToyError;

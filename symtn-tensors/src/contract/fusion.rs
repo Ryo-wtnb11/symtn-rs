@@ -19,7 +19,7 @@ pub(crate) use plan::{
 pub(crate) use block_specs::contracted_fusion_tree_basis_matches;
 pub use block_specs::tensorcontract_fusion_block_specs;
 pub(crate) use block_specs::{
-    external_axis_is_dual, rhs_contract_twist_factor, rhs_contract_twist_factor_oriented,
+    contract_twist_factor, external_axis_is_dual, uniform_contract_twist,
 };
 #[cfg(test)]
 pub(crate) use plan::prepare_tensorcontract_fusion_plan_dyn_raw;
