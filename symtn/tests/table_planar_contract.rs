@@ -771,7 +771,7 @@ mod checked_fermionic {
     ) -> (TensorMap<R, D>, usize)
     where
         R: TypedSectorAdmission,
-        R::Mode: FermionMode<R, D>,
+        R::Mode: FermionMode<R, D> + symtn::typed::TypedAdjointSpace<R>,
         D: TensorScalar + numerics::Numeric,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
@@ -821,7 +821,7 @@ mod checked_fermionic {
 
     fn su3<D>(value: impl Fn(f64, f64) -> D + Copy)
     where
-        D: TensorScalar + numerics::Numeric,
+        D: TensorScalar + numerics::Numeric + std::ops::AddAssign,
     {
         let v = su3_space();
         rows(&v, value);

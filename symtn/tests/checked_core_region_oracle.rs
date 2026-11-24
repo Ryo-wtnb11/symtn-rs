@@ -495,7 +495,7 @@ pub(crate) mod fermionic {
 
     fn canonical<D>(value: impl Fn(f64, f64) -> D + Copy)
     where
-        D: TensorScalar + numerics::Numeric,
+        D: TensorScalar + numerics::Numeric + std::ops::AddAssign,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
@@ -585,7 +585,7 @@ pub(crate) mod fermionic {
     ) -> Vec<(TensorMap<R, D>, usize)>
     where
         R: TypedSectorAdmission,
-        R::Mode: FermionMode<R, D>,
+        R::Mode: FermionMode<R, D> + symtn::typed::TypedAdjointSpace<R>,
         D: TensorScalar + numerics::Numeric,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
