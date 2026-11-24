@@ -539,10 +539,10 @@ pub(crate) mod fermionic {
                 let (rows, inner, cols) = (left.rows(), left.cols(), right.cols());
                 let mut expected = vec![D::from_real(0.0); rows * cols];
                 for j in 0..cols {
-                    for k in 0..inner {
+                    for (k, &theta_k) in theta.iter().enumerate().take(inner) {
                         for i in 0..rows {
                             expected[i + rows * j] += left.get(i, k).unwrap()
-                                * D::from_real(theta[k])
+                                * D::from_real(theta_k)
                                 * right.get(k, j).unwrap();
                         }
                     }
@@ -593,6 +593,7 @@ pub(crate) mod fermionic {
         let dual = v.try_dual().unwrap();
         let spaces = [v, &dual];
         // TensorKit copyA/copyB cases followed by mixed-side, reordered contractions.
+        #[allow(clippy::type_complexity)]
         let geometries: [(
             &[usize],
             &[usize],
@@ -742,6 +743,7 @@ pub(crate) mod fermionic {
         reference_rows(&v, Complex64::new);
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn su2_spaces() -> (
         GradedSpace<
             ProductFusionRule<
