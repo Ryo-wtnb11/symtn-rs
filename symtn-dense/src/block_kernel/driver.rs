@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use tcontract_exec::{BatchQuery, BatchStrategy, Exec, WorkModel};
+use tcontract_exec::{BatchQuery, Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
 use crate::lanes::{self, Grant, GrantKey, JobModel, LaneAllocationCache, LaneTables};
@@ -296,12 +296,18 @@ fn on_lanes<B: BlockOp>(
         } else {
             cost(B::KIND, work, model)
         };
-        let share = if exec.batch_policy().strategy == BatchStrategy::Auto {
-            exec.token_ref().width_for(serial, 1).get()
-        } else {
-            let decision = exec.batch_decision(&BatchQuery::new(1, work));
-            decision.lanes * decision.item_threads
-        };
+        let share = lanes::slots(exec, &[serial], || {
+            exec.batch_decision(&BatchQuery::new(1, work))
+        });
+        if share > exec.budget() {
+            return Err(tenferro_tensor::Error::backend_source(
+                "Exec::fork_sized",
+                lanes::Refusal::Context(tenferro_cpu::threadteam::Error::SharesExceedBudget {
+                    budget: exec.budget(),
+                    sum: share,
+                }),
+            ));
+        }
         let lane_exec = exec
             .reborrow()
             .limit(std::num::NonZeroUsize::new(share).unwrap_or(std::num::NonZeroUsize::MIN));

@@ -1,6 +1,6 @@
 use num_complex::{Complex32, Complex64};
 
-use crate::executor::{batch_offset, strided_batch_run_len};
+use crate::executor::batch_offset;
 use crate::fresh::{dispatch_fresh, FreshParts, FRESH_OP};
 use crate::layout::strides_to_isize;
 use crate::{

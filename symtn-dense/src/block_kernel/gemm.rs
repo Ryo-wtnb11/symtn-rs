@@ -186,7 +186,6 @@ pub(crate) fn cached_plan<T: Scalar>(
 /// The plan of `geometry` at scalar type `T` from the process-global
 /// geometry-plan cache, type-erased for a caller whose jobs are not generic
 /// over the scalar.
-#[cfg_attr(not(feature = "cpu-faer"), allow(dead_code))]
 pub(crate) fn erased_plan<T: Scalar>(geometry: Geometry) -> Result<Arc<ErasedPlan>, DenseError> {
     let plan: Arc<ErasedPlan> = cached_plan::<T>(gemm_plans(), geometry)
         .map_err(|err| grouped_error(format!("plan: {err}")))?;
