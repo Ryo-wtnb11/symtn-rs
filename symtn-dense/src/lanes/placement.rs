@@ -7,7 +7,7 @@ use symtn_core::{
     ErasedStructureCacheControl, StructureCache, StructureCacheEquivalent, StructureCacheInfo,
     StructureCacheKind,
 };
-use tcontract_exec::WorkModel;
+use tcontract_exec::{BatchDecision, WorkModel};
 
 use crate::block_kernel::driver::OpKind;
 use crate::block_kernel::gemm::ENTRY_OVERHEAD_BYTES;
@@ -161,6 +161,23 @@ pub(crate) fn allocate(
     scratch.keys = keys;
 }
 
+/// The slots reserved by Auto's total serial time or the forced decision.
+pub(crate) fn slots(
+    exec: &Exec<'_>,
+    times: &[Duration],
+    decision: impl FnOnce() -> BatchDecision,
+) -> usize {
+    if exec.batch_policy().strategy == BatchStrategy::Auto {
+        let total = times
+            .iter()
+            .fold(Duration::ZERO, |sum, &t| sum.saturating_add(t));
+        exec.token_ref().width_for(total, 1).get()
+    } else {
+        let decision = decision();
+        decision.lanes * decision.item_threads
+    }
+}
+
 fn place(
     exec: &Exec<'_>,
     times: &[Duration],
@@ -175,17 +192,11 @@ fn place(
     if jobs == 0 {
         return;
     }
-    let (slots, lanes) = if exec.batch_policy().strategy == BatchStrategy::Auto {
-        let total = times
-            .iter()
-            .fold(Duration::ZERO, |sum, &t| sum.saturating_add(t));
-        let slots = exec.token_ref().width_for(total, 1).get();
-        (slots, slots.min(jobs).min(decision.lanes))
+    let slots = slots(exec, times, || decision);
+    let lanes = if exec.batch_policy().strategy == BatchStrategy::Auto {
+        slots.min(jobs).min(decision.lanes)
     } else {
-        (
-            decision.lanes * decision.item_threads,
-            decision.lanes.min(jobs),
-        )
+        decision.lanes.min(jobs)
     };
     let lanes = lanes.max(1);
     if lanes == 1 {

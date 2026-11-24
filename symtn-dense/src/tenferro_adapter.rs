@@ -1,11 +1,7 @@
 use num_complex::{Complex32, Complex64};
 
-use core::mem::MaybeUninit;
-
-use crate::executor::{batch_offset, strided_batch_run_len};
-use crate::fresh::{
-    dispatch_fresh, split_single_fresh_segment, zero_piece, FreshParts, FreshScalar, FRESH_OP,
-};
+use crate::executor::batch_offset;
+use crate::fresh::{dispatch_fresh, FreshParts, FRESH_OP};
 use crate::layout::strides_to_isize;
 use crate::{
     DenseBackend, DenseDotConfig, DenseError, DenseExecutor, DenseFreshSegments, DenseGemmBatchJob,
@@ -225,8 +221,8 @@ impl DefaultDenseExecutor {
     /// malformed partition cannot skip or over-index a job).
     ///
     /// Why not send one job to the grouped kernel too: a grouped submission
-    /// stages its job records, geometry index and lane table and enters the
-    /// scheduler, so a recoupling replay that submits one GEMM per Multi
+    /// stages its job records and geometry index, so a recoupling replay
+    /// that submits one GEMM per Multi
     /// block would pay that per block (#2184), and an eager operation's
     /// executor, built per call, allocates the staging; the strided entry
     /// allocates nothing once its engine cache is warm.
@@ -1042,23 +1038,10 @@ impl DenseExecutor for DefaultDenseExecutor {
 }
 
 impl DefaultDenseExecutor {
-    /// The fresh batch, routed as [`Self::matmul_batch_axpby_route_typed`]
-    /// routes the same batch, so a fresh destination changes no kernel
-    /// choice except where stated:
-    ///
-    /// - one job, or one self-disjoint affine run whose outputs are gapless
-    ///   and inside one segment, takes the initialized strided call it takes
-    ///   today on its piece, zero-filled first through the carrier (the
-    ///   strided entry has no uninitialized form);
-    /// - an affine run with gaps between its outputs goes grouped: separate
-    ///   pieces cannot form the one rank-3 destination view;
-    /// - everything else goes grouped: the block kernel's lanes with
-    ///   tcontract's fresh entry.
-    ///
-    /// On every route `alpha == 0` gives zero outputs whatever the operands
-    /// hold.
+    /// Every fresh batch uses the block kernel's uninitialized GEMM entry.
+    /// `alpha == 0` gives zero outputs whatever the operands hold.
     #[allow(clippy::too_many_arguments)]
-    fn matmul_batch_fresh_typed<'a, T: GroupedScalar + FreshScalar>(
+    fn matmul_batch_fresh_typed<'a, T: GroupedScalar>(
         &mut self,
         cpu: &mut CpuEngine,
         parts: FreshParts<'_, 'a, T>,
@@ -1073,97 +1056,8 @@ impl DefaultDenseExecutor {
                 "alpha dtype differs from the operands".to_string(),
             ));
         };
-        let Some(&first) = jobs.first() else {
+        if jobs.is_empty() {
             return Ok(());
-        };
-        let beta = T::scalar(T::default());
-        let identity = ops == [MatrixOp::Identity; 2];
-        if jobs.len() == 1 {
-            // Why not `split_fresh_segments`: its staged order would be this
-            // route's only allocation on a per-call executor.
-            let Some(piece) = split_single_fresh_segment(parts.segments, &first)? else {
-                (parts.written)(0, &mut []);
-                return Ok(());
-            };
-            let output = zero_piece(parts.zeroed, piece)?;
-            let (shape, strides) = ([output.len()], [1]);
-            self.matmul_batch_initialized_typed(
-                cpu,
-                &mut DenseViewMut::new(&mut *output, &shape, &strides, 0)?,
-                lhs,
-                rhs,
-                &[DenseGemmBatchJob {
-                    dst_offset: 0,
-                    ..first
-                }],
-                &[1],
-                ops,
-                alpha,
-                beta,
-            )?;
-            (parts.written)(0, output);
-            return Ok(());
-        }
-        let block = first.rows.checked_mul(first.cols);
-        let gapless_run = strided_batch_run_len(jobs, 0) == jobs.len()
-            && block.is_some_and(|block| block != 0)
-            && jobs[1].dst_offset.checked_sub(first.dst_offset) == block;
-        if let (true, Some(block)) = (gapless_run, block) {
-            let len = block
-                .checked_mul(jobs.len())
-                .ok_or(DenseError::ElementCountOverflow)?;
-            let start = first.dst_offset;
-            let layout = StridedBatchRunLayout {
-                dst_job_offset: 0,
-                ..self.strided_batch_run_layout(jobs, ops[0], ops[1])?
-            };
-            let segment = parts.segments.iter().position(|(base, memory)| {
-                start >= *base
-                    && (start - base)
-                        .checked_add(len)
-                        .is_some_and(|end| end <= memory.len())
-            });
-            let admitted = |memory: &[MaybeUninit<T>]| {
-                identity
-                    || first.rows != 0
-                        && first.contracted != 0
-                        && first.cols != 0
-                        && self.strided_batch_run_layout_admitted((memory, 0), lhs, rhs, &layout)
-            };
-            if let Some(segment) = segment.filter(|&segment| {
-                let (base, memory) = &parts.segments[segment];
-                admitted(&memory[start - base..start - base + len])
-            }) {
-                let (base, memory) = &mut parts.segments[segment];
-                let (_, rest) = std::mem::take(memory).split_at_mut(start - *base);
-                let output = zero_piece(parts.zeroed, rest.split_at_mut(len).0)?;
-                let (shape, strides) = ([len], [1]);
-                let cache_slot =
-                    descriptor_slot::<T>(cpu, &layout, [lhs.offset(), rhs.offset(), 0], ops);
-                self.matmul_strided_batch_run_layout_typed(
-                    cpu,
-                    &mut DenseViewMut::new(&mut *output, &shape, &strides, 0)?,
-                    lhs,
-                    rhs,
-                    layout,
-                    cache_slot,
-                    ops[0],
-                    ops[1],
-                    alpha,
-                    beta,
-                    if identity {
-                        "strided_batch_gemm"
-                    } else {
-                        "matmul_batch_axpby_with_ops_into"
-                    },
-                    T::write,
-                    T::read,
-                )?;
-                for (j, piece) in output.chunks_exact_mut(block).enumerate() {
-                    (parts.written)(j, piece);
-                }
-                return Ok(());
-            }
         }
         #[cfg(test)]
         {
@@ -1181,39 +1075,7 @@ impl DefaultDenseExecutor {
             typed_alpha,
         )
     }
-
-    /// The initialized batch route of [`Self::matmul_batch_axpby_with_ops_into`]
-    /// for typed operands.
-    #[allow(clippy::too_many_arguments)]
-    fn matmul_batch_initialized_typed<T: GroupedScalar + FreshScalar>(
-        &mut self,
-        cpu: &mut CpuEngine,
-        output: &mut DenseViewMut<'_, T>,
-        lhs: DenseView<'_, T>,
-        rhs: DenseView<'_, T>,
-        jobs: &[DenseGemmBatchJob],
-        runs: &[usize],
-        ops: [MatrixOp; 2],
-        alpha: DenseScalar,
-        beta: DenseScalar,
-    ) -> Result<(), DenseError> {
-        self.matmul_batch_axpby_route_typed(
-            cpu,
-            output,
-            lhs,
-            rhs,
-            jobs,
-            runs,
-            ops,
-            alpha,
-            beta,
-            T::write,
-            T::read,
-        )
-    }
 }
-
-impl DefaultDenseExecutor {}
 
 /// The four GEMM dtypes of the grouped route, with their [`DenseScalar`]
 /// projection (a mismatched coefficient dtype is refused before any write).

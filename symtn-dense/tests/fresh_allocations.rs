@@ -105,3 +105,37 @@ fn warm_fresh_op_bearing_batch_allocates_no_more_than_the_initialized_one() {
         "fresh {fresh_allocs:?} against initialized {initialized_allocs:?}"
     );
 }
+
+/// A new executor must not allocate single-job staging once the engine and
+/// geometry plan are warm.
+#[test]
+fn warm_single_job_fresh_batch_with_a_new_executor_allocates_nothing() {
+    let _serial = counting_alloc::serial();
+    let engine = &mut CpuEngine::serial();
+    let jobs = [job((2, 3, 2), 0, 0, 0)];
+    let (lhs, rhs) = ([1.0; 6], [2.0; 6]);
+    let mut call = || {
+        let mut buffer = [MaybeUninit::<f64>::uninit(); 4];
+        let mut parts = [(0, &mut buffer[..])];
+        DefaultDenseExecutor::new()
+            .matmul_batch_fresh(
+                engine,
+                DenseFreshSegments::F64 {
+                    segments: &mut parts,
+                    zeroed,
+                    written: &mut |_, _| {},
+                },
+                DenseRead::F64(DenseView::new(&lhs, &[6], &[1], 0).unwrap()),
+                DenseRead::F64(DenseView::new(&rhs, &[6], &[1], 0).unwrap()),
+                &jobs,
+                [MatrixOp::Identity; 2],
+                DenseScalar::F64(1.0),
+            )
+            .unwrap();
+    };
+    for _ in 0..3 {
+        call();
+    }
+    let ((), allocations) = counting_alloc::measure(call);
+    assert_eq!(allocations.calls, 0);
+}

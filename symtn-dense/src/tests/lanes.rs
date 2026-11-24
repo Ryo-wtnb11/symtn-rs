@@ -56,6 +56,76 @@ fn place(exec: &Exec<'_>, times: &[Duration], tables: &mut LaneTables) {
     );
 }
 
+/// Purpose: the single-job driver gives lane setup and execution Auto's
+/// paid width or the forced policy's reservation.
+#[test]
+fn single_job_driver_reserves_the_policy_slots() {
+    use crate::block_kernel::driver::{self, BlockOp, Entry, LaneMembers};
+    use crate::lanes::{Grant, GrantKey};
+    use tcontract_exec::WorkModel;
+
+    struct WidthSpy(Duration);
+    impl BlockOp for WidthSpy {
+        type Job = (usize, usize);
+        type Lane = usize;
+        const ENTRY: Entry = Entry::Contraction;
+        const KIND: OpKind = OpKind::Gemm;
+        const LABEL: &'static str = "grouped_gemm";
+
+        fn work(&self, _: usize, _: &Self::Job) -> f64 {
+            1.0
+        }
+        fn serial(&self, _: usize, _: &Self::Job, _: &WorkModel, _: f64) -> Duration {
+            self.0
+        }
+        fn grant(&self, _: usize, _: &Self::Job, _: &Exec<'_>, _: usize, _: Duration) -> Grant {
+            crate::lanes::single(1)
+        }
+        fn grant_key(&self, _: usize, _: &Self::Job) -> GrantKey {
+            [0; 3]
+        }
+        fn lane(&self, _: &mut LaneMembers<'_, Self::Job>, exec: &Exec<'_>) -> usize {
+            exec.budget()
+        }
+        fn run(
+            &self,
+            _: usize,
+            job: &mut Self::Job,
+            lane: &mut usize,
+            exec: Exec<'_>,
+        ) -> Result<(), DenseError> {
+            *job = (*lane, exec.budget());
+            Ok(())
+        }
+    }
+
+    let budget = 4;
+    for (strategy, serial, expected) in [
+        (BatchStrategy::Auto, Duration::ZERO, 1),
+        (BatchStrategy::Auto, Duration::from_secs(1), budget),
+        (BatchStrategy::Outer, Duration::ZERO, 1),
+        (BatchStrategy::Inner, Duration::ZERO, budget),
+        (BatchStrategy::Sequential, Duration::ZERO, 1),
+        (
+            BatchStrategy::Split {
+                lanes: NonZeroUsize::new(2).unwrap(),
+            },
+            Duration::ZERO,
+            budget,
+        ),
+    ] {
+        let mut job = [(0, 0)];
+        driver::drive(
+            &mut engine(budget, BatchPolicy::new(strategy), row(100)),
+            &WidthSpy(serial),
+            &mut job,
+            &mut LaneTables::default(),
+        )
+        .unwrap();
+        assert_eq!(job, [(expected, expected)], "{strategy:?}");
+    }
+}
+
 /// `count` jobs of `ns` each.
 fn uniform(count: usize, ns: u64) -> Vec<Duration> {
     vec![Duration::from_nanos(ns); count]

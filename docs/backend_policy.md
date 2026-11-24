@@ -21,8 +21,8 @@ With feature `cuda`, a device operation runs on the caller's `CudaEngine`
 (`CudaEngine::open(CudaDeviceId::from_ordinal(n))`), passed like any other
 engine; a `Runtime` is not tied to a device.
 
-On the native provider a Host GEMM batch that is neither one job nor one
-affine run, with or without transposed or adjoint operands, runs on symtn's
+On the native provider an initialized Host GEMM batch that is neither one job
+nor one affine run, with or without transposed or adjoint operands, runs on symtn's
 block GEMM kernel: one `tcontract::Plan` per distinct block geometry (scalar
 type, extents, effective strides, conjugation). The plans live in the
 process-global structure cache `StructureCacheKind::GemmPlans`, shared by
@@ -41,19 +41,23 @@ the entry overhead; with a budget of zero,
 or for an entry the budget rejects, every call prepares its plans as before
 with the same results. For initialized destinations this holds for the faer
 provider and the four payload scalars only; CUDA builds prepare as
-before, and single-job or affine batches use Tenferro's binary-plan cache,
-outside this cache.
+before, and initialized single-job or affine batches use Tenferro's binary-plan
+cache, outside this cache.
 
 The dense executor also has a hidden fresh entry that writes a batch into
-uninitialized destination memory, for owned outputs. It keeps the
-initialized route's choices. A single job or a gapless affine run inside one
-destination segment is zero-filled and then takes its initialized strided
-call. An affine run with gaps between its outputs goes grouped. On the faer
-provider a grouped fresh batch runs the same lanes, geometry-plan cache and
-executor staging as an initialized one, through tcontract's fresh entry.
-That entry still zero-fills each output block on its lane before the product
-(tcontract's faer strategy initializes a fresh destination itself), so the
-fill moves from one serial pass into the lanes rather than disappearing.
+uninitialized destination memory, for owned Host outputs. Every batch on the
+faer provider, including one job and gapless affine runs, uses the block
+kernel's geometry-plan cache and tcontract's `execute_uninit_slices` entry.
+Identical geometries share one plan per scalar type. A single job stages its
+plan handle and destination on the stack; larger batches reuse the executor's
+staging. The same lane driver distributes independent blocks across lanes,
+with each lane's share available for the provider's inner threads. No symtn
+caller-side output fill precedes the GEMM: the computing workers first-write
+their destinations. tcontract's faer fresh entry uses an overwrite-only
+uninitialized kernel, which skips its initialization pass on x86_64 with AVX2
+or AVX-512. Other architectures may initialize inside the provider. The trait's
+default implementation for custom executors still zero-fills each block through
+the carrier before its initialized overwrite call.
 
 An owned eager Host contraction (`contract`, `planar_contract`, `compose`,
 in both modes) allocates its output without zeroing it when the route's core

@@ -84,7 +84,7 @@ mod runner;
 
 pub use placement::flat_width;
 pub(crate) use placement::item_time;
-pub(crate) use placement::{allocate, lane_allocations, searchable, LaneAllocationCache};
+pub(crate) use placement::{allocate, lane_allocations, searchable, slots, LaneAllocationCache};
 use placement::{parallel_split, words, PlaceScratch};
 pub(crate) use runner::recycle;
 use runner::Arena;
