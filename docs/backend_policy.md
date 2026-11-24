@@ -205,7 +205,8 @@ outcomes, then that refusal, reach the operation in block order, where the
 operation applies its error precedence, and nothing is returned on error.
 Compact SVD checks each delivered sector's output, gauge and spectrum before
 staging the next, so the lowest-indexed failing sector's error is reported;
-the enclosing linear-algebra scope's refusal takes precedence over that error.
+the operation's own linear-algebra scope's refusal takes precedence over that error.
+Full EIGH, polar and exp also report the lowest failing sector.
 The solver-first destination routes (full SVD, QR/LQ, null bases and inverse)
 instead let a later solver failure override an earlier malformed output.
 Two costs differ from a block-by-block loop
