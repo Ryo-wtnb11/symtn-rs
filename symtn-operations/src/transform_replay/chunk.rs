@@ -85,14 +85,15 @@ where
     } else {
         schedule.single_runs.len()
     };
-    let threads = lanes::movement_width(engine, estimate, schedule.replay_runnable)?;
+    let threads = lanes::movement_width(engine, estimate, schedule.replay_runnable)
+        .map_err(OperationError::Dense)?;
     let run_runnable = [inactive_runs, single_runs]
         .into_iter()
         .filter(|&runs| runs >= 2)
         .max()
         .unwrap_or(0);
     let run_threads = if run_runnable >= 2 {
-        lanes::movement_width(engine, estimate, run_runnable)?
+        lanes::movement_width(engine, estimate, run_runnable).map_err(OperationError::Dense)?
     } else {
         1
     };

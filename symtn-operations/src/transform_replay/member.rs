@@ -807,7 +807,9 @@ where
         let estimate = strided_kernel::execution::KernelClass::Copy.estimate(dst.len());
         let width = match threads {
             Some(width) => width,
-            None => lanes::movement_width(engine, estimate, members)?,
+            None => {
+                lanes::movement_width(engine, estimate, members).map_err(OperationError::Dense)?
+            }
         };
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Strided, |exec| {
             if width <= 1 {
