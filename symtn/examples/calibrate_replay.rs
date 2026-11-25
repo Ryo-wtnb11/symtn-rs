@@ -433,7 +433,43 @@ impl ItemClass {
     }
 }
 
-type RealItems = Vec<(String, usize, BTreeMap<ItemClass, usize>)>;
+type RealItems = Vec<(String, Res<(usize, BTreeMap<ItemClass, usize>)>)>;
+
+fn single_classes(
+    structure: &TreeTransformStructure<f64>,
+) -> Res<(BTreeMap<ItemClass, usize>, usize, usize)> {
+    let diagnostics = structure.layout_diagnostics();
+    let mut classes = BTreeMap::new();
+    let mut multi_blocks = 0;
+    let mut multi_elements = 0;
+    for block in structure.blocks() {
+        let dst_layout = match *block {
+            TreeTransformBlock::Single { dst_layout, .. } => dst_layout,
+            TreeTransformBlock::Multi {
+                dst_count,
+                element_count,
+                ..
+            } => {
+                multi_blocks += 1;
+                multi_elements += dst_count * element_count;
+                continue;
+            }
+        };
+        let layout = diagnostics
+            .entry(dst_layout)
+            .ok_or("missing real Single geometry")?;
+        let class = ItemClass {
+            dims: layout.dims.to_vec(),
+            dst: layout.block_strides.to_vec(),
+            src: layout
+                .partner_strides
+                .ok_or("missing real source geometry")?
+                .to_vec(),
+        };
+        *classes.entry(class).or_insert(0) += 1;
+    }
+    Ok((classes, multi_blocks, multi_elements))
+}
 
 fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
     let runtime = Runtime::builder().build()?;
@@ -489,9 +525,17 @@ fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
                 &symtn_tensors::TreeTransformOperation::permute([0, 3], [2, 1]),
             )?;
             let structure = staged.structure();
-            if structure.has_pack_gemm_scatter_blocks() {
-                return Err("real held-out fixture contains a Multi".into());
-            }
+            let (classes, multi_blocks, multi_elements) = single_classes(structure)?;
+            let single_items: usize = classes.values().sum();
+            let single_elements: usize = classes.iter().map(|(class, count)| class.elements() * count).sum();
+            let destination_elements = single_elements + multi_elements;
+            let multi_share = if destination_elements == 0 { 0.0 } else { multi_elements as f64 / destination_elements as f64 };
+            let working_set = (x.dense_data()?.len() + y.dense_data()?.len()) * 8;
+            println!(
+                "real permute {}: items={} single_items={single_items} multi_blocks={multi_blocks} multi_destination_elements={multi_elements} active_destination_elements={destination_elements} multi_element_share={multi_share:.6} phase_working_set_bytes={working_set}; held-out uses isolated Singles only",
+                $label,
+                structure.blocks().len()
+            );
             // This also checks that the staged compiler is the public permute's execution path.
             let mut replay = Fixture {
                 structure: staged.destination_structure().clone(),
@@ -504,84 +548,67 @@ fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
                 elements: 0,
                 rank: 4,
             };
-            assert_eq!(replay.replay(engine, None)?, y.dense_data()?);
-            let diagnostics = structure.layout_diagnostics();
-            let mut classes = BTreeMap::new();
-            for block in structure.blocks() {
-                let TreeTransformBlock::Single { dst_layout, .. } = *block else {
-                    unreachable!()
-                };
-                let layout = diagnostics
-                    .entry(dst_layout)
-                    .ok_or("missing real Single geometry")?;
-                let class = ItemClass {
-                    dims: layout.dims.to_vec(),
-                    dst: layout.block_strides.to_vec(),
-                    src: layout
-                        .partner_strides
-                        .ok_or("missing real source geometry")?
-                        .to_vec(),
-                };
-                *classes.entry(class).or_insert(0) += 1;
+            if replay.replay(engine, None)? != y.dense_data()? {
+                return Err("staged replay differs from public permute".into());
             }
-            let working_set = (x.dense_data()?.len() + y.dense_data()?.len()) * 8;
-            println!(
-                "real permute {}: items={} phase_working_set_bytes={working_set}",
-                $label,
-                structure.blocks().len()
-            );
-            fixtures.push(($label.to_owned(), working_set, classes));
+            if classes.is_empty() {
+                return Err("no Single items to evaluate".into());
+            }
+            Ok((working_set, classes))
         }};
     }
     for dominant in [false, true] {
-        let w = (-100..=100)
-            .map(|q| {
-                Ok((
-                    U1Irrep::new(q)?,
-                    if dominant {
-                        if q == 0 {
-                            768
+        let label = if dominant { "U1-dom" } else { "U1-small" };
+        let result = (|| -> Res<_> {
+            let w = (-100..=100)
+                .map(|q| {
+                    Ok((
+                        U1Irrep::new(q)?,
+                        if dominant {
+                            if q == 0 {
+                                768
+                            } else {
+                                48
+                            }
                         } else {
-                            48
-                        }
-                    } else {
-                        16
-                    },
-                ))
-            })
-            .collect::<Res<Vec<_>>>()?;
-        let p = if dominant {
-            vec![(U1Irrep::new(0)?, 1)]
-        } else {
-            (-1..=1)
-                .map(|q| Ok((U1Irrep::new(q)?, 1)))
-                .collect::<Res<Vec<_>>>()?
-        };
-        collect!(
-            if dominant { "U1-dom" } else { "U1-small" },
-            U1FusionRule,
-            w,
-            p
-        );
-        let rule = LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(GroupId::su(2)?)?;
-        let w = (0..=99)
-            .map(|j| {
-                Ok((
-                    rule.category().irrep(&[j])?,
-                    if dominant {
-                        if j == 0 {
-                            768
+                            16
+                        },
+                    ))
+                })
+                .collect::<Res<Vec<_>>>()?;
+            let p = if dominant {
+                vec![(U1Irrep::new(0)?, 1)]
+            } else {
+                (-1..=1)
+                    .map(|q| Ok((U1Irrep::new(q)?, 1)))
+                    .collect::<Res<Vec<_>>>()?
+            };
+            collect!(label, U1FusionRule, w, p)
+        })();
+        fixtures.push((label.to_owned(), result));
+        let label = if dominant { "SU2-dom" } else { "SU2-small" };
+        let result = (|| -> Res<_> {
+            let rule = LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(GroupId::su(2)?)?;
+            let w = (0..=99)
+                .map(|j| {
+                    Ok((
+                        rule.category().irrep(&[j])?,
+                        if dominant {
+                            if j == 0 {
+                                768
+                            } else {
+                                48
+                            }
                         } else {
-                            48
-                        }
-                    } else {
-                        16
-                    },
-                ))
-            })
-            .collect::<Res<Vec<_>>>()?;
-        let p = vec![(rule.category().irrep(&[if dominant { 0 } else { 1 }])?, 1)];
-        collect!(if dominant { "SU2-dom" } else { "SU2-small" }, rule, w, p);
+                            16
+                        },
+                    ))
+                })
+                .collect::<Res<Vec<_>>>()?;
+            let p = vec![(rule.category().irrep(&[if dominant { 0 } else { 1 }])?, 1)];
+            collect!(label, rule, w, p)
+        })();
+        fixtures.push((label.to_owned(), result));
     }
     Ok(fixtures)
 }
@@ -1191,16 +1218,44 @@ fn main() -> Res<()> {
         "unavailable: serial token cannot admit a planned kernel".into(),
     );
     let heldout_cold = Instant::now();
-    let real = real_items(&mut serial)?;
+    let real = match real_items(&mut serial) {
+        Ok(real) => real,
+        Err(reason) => {
+            println!("real held-out unavailable: {reason}");
+            accepted = false;
+            Vec::new()
+        }
+    };
     serial_cold_s += heldout_cold.elapsed().as_secs_f64();
-    for (label, phase_w, classes) in real {
+    for (label, result) in real {
+        let (phase_w, classes) = match result {
+            Ok(fixture) => fixture,
+            Err(reason) => {
+                println!("held-out {label}: skipped: {reason}");
+                accepted = false;
+                continue;
+            }
+        };
         payload_peak = payload_peak.max(2 * phase_w);
         for (index, (class, original_roles)) in classes.iter().enumerate() {
             let cold = Instant::now();
-            let mut held = Fixture::geometry(&class.dims, &class.dst, &class.src)?;
-            payload_peak = payload_peak.max(held.payload_bytes()?);
-            let setup = cold.elapsed().as_secs_f64();
-            let time = measure(|| Ok(Some(held.phase(&mut serial)?)), 256)?;
+            let result = (|| -> Res<_> {
+                let mut held = Fixture::geometry(&class.dims, &class.dst, &class.src)?;
+                let payload_bytes = held.payload_bytes()?;
+                payload_peak = payload_peak.max(payload_bytes);
+                let setup = cold.elapsed().as_secs_f64();
+                let time = measure(|| Ok(Some(held.phase(&mut serial)?)), 256)?;
+                Ok((held, payload_bytes, setup, time))
+            })();
+            let (held, payload_bytes, setup, time) = match result {
+                Ok(measurement) => measurement,
+                Err(reason) => {
+                    println!("held-out {label}.{index}: skipped: {reason}");
+                    accepted = false;
+                    serial_cold_s += cold.elapsed().as_secs_f64();
+                    continue;
+                }
+            };
             serial_cold_s += setup + time.cold;
             let working_set = held.roles * held.elements * 16;
             let kind = class.kind();
@@ -1211,8 +1266,8 @@ fn main() -> Res<()> {
             let error = (predicted - per_item).abs() / per_item.abs();
             let valid = error.is_finite() && per_item > 0.0 && error <= TOLERANCE;
             accepted &= valid;
-            print_samples(&format!("held-out {label}.{index} k={} elements={} runs={} dims={:?} dst_strides={:?} src_strides={:?} original_items={original_roles} original_phase_W={phase_w} isolated_items={} isolated_W={working_set} payload_bytes={}", KINDS[kind], class.elements(), class.runs(), class.dims, class.dst, class.src, held.roles, held.payload_bytes()?), time);
-            println!("held-out {label}.{index}: measured_ns_per_item={per_item:.3} predicted_ns_per_item={predicted:.3} relative_error={error:.6} within_25_percent={valid}; isolated exact geometry, not the original phase cache state");
+            print_samples(&format!("held-out {label}.{index} k={} elements={} runs={} dims={:?} dst_strides={:?} src_strides={:?} original_items={original_roles} original_phase_W={phase_w} isolated_items={} isolated_W={working_set} payload_bytes={}", KINDS[kind], class.elements(), class.runs(), class.dims, class.dst, class.src, held.roles, payload_bytes), time);
+            println!("held-out {label}.{index}: measured_ns_per_item={per_item:.3} predicted_ns_per_item={predicted:.3} relative_error={error:.6} within_25_percent={valid}; isolated exact Single geometry, excludes Multi work; not the original phase cache state");
             for (field, value) in [
                 ("measured_ns_per_item", per_item),
                 ("predicted_ns_per_item", predicted),
@@ -1230,7 +1285,7 @@ fn main() -> Res<()> {
         if accepted {
             "held-out accepted; no trusted campaign reference"
         } else {
-            "rejected: unresolved/nonfinite/negative constant or per-class held-out error exceeds 25%"
+            "rejected: unresolved/nonfinite/negative constant, skipped held-out coverage, or per-class held-out error exceeds 25%"
         }
         .into(),
     );
@@ -1458,6 +1513,36 @@ fn main() -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mixed_replay_summary_separates_singles_from_multi_destination_work() {
+        // Purpose: Multi destinations contribute to the share, never to Single geometry classes.
+        let fixture = Fixture::new(3, &[2, 1, 3, 1], &[0, 1, 2, 3], false).unwrap();
+        let transform = TreeTransformStructure::compile_structures(
+            &fixture.structure,
+            &fixture.source,
+            &[
+                TreeTransformBlockSpec::single(0, 0, 1.0),
+                TreeTransformBlockSpec::multi(vec![1, 2], vec![1, 2], vec![1.0, 0.0, 0.0, 1.0]),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            single_classes(&transform).unwrap(),
+            (
+                BTreeMap::from([(
+                    ItemClass {
+                        dims: vec![6],
+                        dst: vec![1],
+                        src: vec![1]
+                    },
+                    1
+                )]),
+                1,
+                12
+            )
+        );
+    }
 
     #[test]
     fn paired_differences_identify_run_cost_without_element_columns() {

@@ -431,7 +431,11 @@ independently fitted role/run overhead before entering the additive model.
 Held-out classes use exact compiled Single geometry from public U1/SU2 small
 and dominant permutations. Each class is replayed in a minimal complete
 padding tiling, with its isolated working set reported separately from the
-original phase; acceptance requires at most 25% relative error per class.
+original phase. Real replays may contain Multi blocks; the tool reports their
+count and share of active destination elements, and evaluates only Singles in
+these isolated class replays, excluding Multi work. An unevaluable fixture or
+class prints its reason and continues; skipped coverage prevents acceptance.
+Acceptance requires at most 25% relative error per class.
 Three batches suffice when their spread is at most 5%, otherwise five are
 measured. The tool targets 60 seconds at width four and prints a width-96
 projection from its fixed serial cost and per-width ladder measurements;
