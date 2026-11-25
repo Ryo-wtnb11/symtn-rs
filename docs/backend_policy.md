@@ -429,8 +429,11 @@ O(sum_c log(1 + H_c) + Q). The plan-group chunk decision visits G groups at
 each candidate width, O(G*Q) time and constant extra storage, to price its
 actual consecutive batches; it retains no group job hulls or per-width tables.
 One effective width returns before cost preparation or element-count reads.
-Scratch maxima are computed once for the chosen chunk width. A one-slot replay does no model or
-calibration work.
+Scratch maxima are computed once for the chosen chunk width. Single-tensor
+one-slot, Sequential and Inner replays bypass the movement model and calibration,
+using the serial item and plan-group sequence; Inner keeps the whole token for
+inline kernels. Wider Auto replays retain independently priced pack and scatter
+phases even when the chosen group chunk width is one.
 
 The same chooser selects direct fill and Single widths, the plan-group chunk
 width, and each chunk's pack and scatter widths. A q-way split divides the

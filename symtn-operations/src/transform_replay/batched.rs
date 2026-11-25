@@ -3,8 +3,9 @@ use super::*;
 use crate::kernel_adapter::movement::with_conjugation;
 use crate::transform_structure::TreeTransformDirectItem;
 
-/// Replay direct fills and Singles, then chunks of plan groups. Every
-/// movement phase and the group chunk width use the same chooser; the group's
+/// Replay direct fills and Singles, then plan groups. One-slot, Sequential and
+/// Inner replays use the serial sequence. Wider Auto replays price every
+/// movement phase and the group chunk width with the same chooser; the group's
 /// GEMM time comes from the dense provider's cost estimate. Inline items keep the caller's
 /// whole token (one slot under Sequential), and split leaves get balanced
 /// shares of that whole token. The first failure stops replay.
@@ -33,11 +34,11 @@ where
     let mut gate = LeafGate::new(layouts.max_planned_elements());
     let start = profile.as_ref().map(|_| std::time::Instant::now());
     #[cfg(feature = "tenferro")]
-    let (threads, sequential, pooled) = super::chunk::direct(
+    let (threads, sequential, modeled) = super::chunk::direct(
         engine, workspace, task, schedule, dst, src, writer, kernels, &mut gate,
     )?;
     #[cfg(not(feature = "tenferro"))]
-    let (threads, sequential, pooled) = {
+    let (threads, sequential, modeled) = {
         workspace.prepare_fused_indices(1, layouts.max_fused_rank())?;
         let HostTreeTransformWorkspace {
             zero_strides,
@@ -70,7 +71,7 @@ where
     if task.recoupling_plan().is_empty() {
         return Ok(());
     }
-    if !sequential && pooled {
+    if threads > 1 || modeled {
         #[cfg(feature = "tenferro")]
         return super::chunk::groups(
             engine, dense, workspace, task, schedule, dst, src, writer, kernels, &mut gate,

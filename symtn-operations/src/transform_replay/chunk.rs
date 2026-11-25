@@ -15,8 +15,10 @@ use crate::transform_structure::{
     TreeTransformDirectItem, TreeTransformGroupSpan, TreeTransformPackReplay,
 };
 
-/// Direct fills, Singles, and plan-group chunk size use the same movement model.
-/// The execution gates still decide whether one inline item fans out internally.
+/// One-slot, Sequential and Inner replays use the serial item loop without the
+/// movement model; only Sequential narrows its token. Wider Auto replays price
+/// direct fills, Singles, and plan-group chunk size. Other forced policies keep
+/// their widths, and execution gates decide whether one inline item fans out.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn direct<W, T, D, C>(
     engine: &mut dyn Engine,
@@ -37,8 +39,60 @@ where
 {
     let layouts = task.layouts();
     let rank = layouts.max_fused_rank();
+    let serial = tenferro_cpu::with_cpu_engine(engine, |cpu| {
+        let strategy = cpu.batch_policy().strategy;
+        let sequential = strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
+        if cpu.num_threads() > 1 && !sequential && strategy != tenferro_cpu::CpuBatchStrategy::Inner
+        {
+            return None;
+        }
+        Some(crate::host_pool::enter_cpu(
+            cpu,
+            crate::host_pool::HostPoolSite::Replay,
+            true,
+            |mut exec| {
+                workspace.prepare_fused_indices(1, rank)?;
+                workspace.gate_keys.prepare(
+                    &mut exec.reborrow().into_token(),
+                    layouts.max_planned_elements(),
+                );
+                #[cfg(test)]
+                workspace.gate_keys.watch_as(gate);
+                let HostTreeTransformWorkspace {
+                    zero_strides,
+                    fused_indices,
+                    ..
+                } = &mut *workspace;
+                let token = exec.reborrow().into_token();
+                let token = if sequential {
+                    token.limit(core::num::NonZeroUsize::MIN)
+                } else {
+                    token
+                };
+                inline_direct(
+                    token,
+                    schedule,
+                    true,
+                    InlineSingles::ordered(W::FIRST_TOUCH, task, 1),
+                    dst,
+                    src,
+                    writer,
+                    kernels,
+                    zero_strides,
+                    fused_indices,
+                    gate,
+                )?;
+                Ok::<_, OperationError>((1, sequential, false))
+            },
+        ))
+    })
+    .flatten();
+    if let Some(serial) = serial {
+        return serial?;
+    }
     let admitted = movement::region(engine, |mut exec, constants| {
-        let pooled = exec.budget() > 1;
+        let modeled = exec.budget() > 1
+            && exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Auto;
         let sequential = exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
         let (threads, singles_width, inactive_width) = if exec.budget() == 1 {
             (1, 1, 1)
@@ -162,7 +216,12 @@ where
                 fused_indices,
             )?;
         }
-        Ok::<_, OperationError>((threads, sequential, split_inactive || split_singles, pooled))
+        Ok::<_, OperationError>((
+            threads,
+            sequential,
+            split_inactive || split_singles,
+            modeled,
+        ))
     })??;
     #[cfg(any(test, feature = "testing"))]
     if admitted.0 > 1 || admitted.2 {

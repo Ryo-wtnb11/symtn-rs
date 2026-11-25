@@ -726,7 +726,14 @@ fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &m
     // ponytail: replace this interim measurement with the threadteam calibration hook
     // (tensor4all/threadteam-rs#92);
     // delete it when threadteam can calibrate a running pool.
-    for q in 2..=exec.budget() {
+    let budget = exec.budget();
+    for (q, slot) in constants
+        .dispatch
+        .iter_mut()
+        .enumerate()
+        .take(budget + 1)
+        .skip(2)
+    {
         if Instant::now() >= deadline {
             return;
         }
@@ -748,7 +755,7 @@ fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &m
             return;
         }
         samples.sort_unstable();
-        constants.dispatch[q] = validated_dispatch(samples[2], table);
+        *slot = validated_dispatch(samples[2], table);
     }
 }
 

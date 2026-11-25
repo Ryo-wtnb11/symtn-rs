@@ -4,6 +4,7 @@
 use super::*;
 use crate::kernel_adapter::movement::{Store, Write};
 use crate::transform_structure::TreeTransformDirectItem;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread::ThreadId;
 use symtn_dense::CpuEngine;
@@ -38,6 +39,7 @@ impl Store<f64> for Record {
 pub(super) struct Recorder<'a, const FIRST_TOUCH: bool = false> {
     pub(super) parts: ReplayParts<'a, f64>,
     pub(super) offers: Mutex<Vec<(isize, usize)>>,
+    pub(super) model_prepared: AtomicBool,
 }
 
 impl<'a> Recorder<'a> {
@@ -51,6 +53,7 @@ impl<'a, const FIRST_TOUCH: bool> Recorder<'a, FIRST_TOUCH> {
         Self {
             parts: ReplayParts::new(task),
             offers: Mutex::new(Vec::new()),
+            model_prepared: AtomicBool::new(false),
         }
     }
 
@@ -72,6 +75,11 @@ impl<'a, const FIRST_TOUCH: bool> Recorder<'a, FIRST_TOUCH> {
 impl<const FIRST_TOUCH: bool> DestinationWriter<Mark, f64> for Recorder<'_, FIRST_TOUCH> {
     type Kernels = ();
     const FIRST_TOUCH: bool = FIRST_TOUCH;
+
+    fn reads_destination(&self) -> bool {
+        self.model_prepared.store(true, Ordering::Relaxed);
+        false
+    }
 
     fn kernels(&self) {}
 

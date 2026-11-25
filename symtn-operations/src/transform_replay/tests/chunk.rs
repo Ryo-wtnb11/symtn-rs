@@ -246,6 +246,42 @@ fn one_worker_singles_follow_the_destination_kinds_order() {
     }
 }
 
+/// Purpose: serial, Sequential and Inner direct replay skip movement-model
+/// preparation; a wider Auto replay is the control that prepares the model.
+#[test]
+fn serial_replay_skips_movement_model_preparation() {
+    let (dst, src, transform) = two_lane_fixture();
+    let task = transform.task_view().unwrap();
+    let source = vec![1.0; src.required_len().unwrap()];
+    for (budget, strategy) in [
+        (1, CpuBatchStrategy::Auto),
+        (4, CpuBatchStrategy::Sequential),
+        (4, CpuBatchStrategy::Inner),
+        (4, CpuBatchStrategy::Auto),
+    ] {
+        let mut workspace = TreeTransformWorkspace::default();
+        let recorder = Recorder::new(task);
+        super::super::chunk::direct(
+            &mut engine(budget, strategy),
+            &mut workspace,
+            task,
+            transform.parallel_schedule(),
+            &mut vec![Mark::default(); dst.required_len().unwrap()],
+            &source,
+            &recorder,
+            &mut (),
+            &mut LeafGate::new(task.layouts().max_planned_elements()),
+        )
+        .unwrap();
+        assert_eq!(
+            recorder
+                .model_prepared
+                .load(std::sync::atomic::Ordering::Relaxed),
+            budget > 1 && strategy == CpuBatchStrategy::Auto,
+        );
+    }
+}
+
 /// What: two of three Multi groups' GEMMs fail. On one worker and on two,
 /// three and four (`Auto` on free dispatch: chunks of two, three and three
 /// groups), the replay stops at the first failing GEMM in plan order: the
