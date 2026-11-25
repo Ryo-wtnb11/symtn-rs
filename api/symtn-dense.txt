@@ -9,7 +9,6 @@ pub fn symtn_dense::engine_slot::clear(&mut dyn tenferro_tensor::backend::Engine
 pub fn symtn_dense::engine_slot::retained_bytes(&mut dyn tenferro_tensor::backend::Engine) -> usize
 pub mod symtn_dense::lanes
 pub use symtn_dense::lanes::BatchPolicy
-pub use symtn_dense::lanes::BatchQuery
 pub use symtn_dense::lanes::Exec
 pub enum symtn_dense::lanes::Refusal<R>
 pub symtn_dense::lanes::Refusal::Context(R)
@@ -71,6 +70,7 @@ pub type symtn_dense::lanes::Work::Job: core::marker::Send
 pub type symtn_dense::lanes::Work::Lane: core::marker::Send
 pub fn symtn_dense::lanes::Work::count(&self) -> usize
 pub fn symtn_dense::lanes::Work::run(&self, usize, &mut Self::Job, &mut Self::Lane, tcontract_exec::exec::Exec<'_>) -> core::result::Result<(), Self::Error>
+pub fn symtn_dense::lanes::forced_width(&tcontract_exec::exec::Exec<'_>, usize) -> core::option::Option<usize>
 pub fn symtn_dense::lanes::run_native<W: symtn_dense::lanes::Work, A: symtn_dense::lanes::Assignment<W>>(tcontract_exec::exec::Exec<'_>, &W, A, &mut [<W as symtn_dense::lanes::Work>::Job], &mut [<W as symtn_dense::lanes::Work>::Lane]) -> core::result::Result<symtn_dense::lanes::Outcome<<W as symtn_dense::lanes::Work>::Error>, symtn_dense::lanes::Refusal<threadteam::error::Error>>
 pub type symtn_dense::lanes::Outcome<E> = core::result::Result<(), (usize, E)>
 pub enum symtn_dense::DenseBackend

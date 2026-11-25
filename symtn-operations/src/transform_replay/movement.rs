@@ -284,27 +284,53 @@ pub(super) fn components(counts: &[Counts; CLASSES], costs: &Costs) -> (f64, f64
 
 pub(super) fn fixed(phase: &Summary, costs: &Costs) -> impl Fn(usize) -> (f64, f64) {
     let (setup, work) = components(&phase.counts, costs);
-    let largest = phase
-        .jobs
-        .iter()
-        .map(|job| {
-            let (setup, work) = components(job, costs);
-            setup + work
-        })
-        .fold(0.0, f64::max);
+    // Fused ownership jobs can mix strides: summing independent class maxima
+    // bounds M above, so the conservative estimate may select fewer leaves.
+    let largest = phase.maxima.as_ref().map_or(0.0, |maxima| {
+        maxima
+            .hulls
+            .iter()
+            .zip(&maxima.setups)
+            .zip(costs)
+            .map(|((hull, &k), &(a, r, e))| a * k + maximum(hull, r, e))
+            .sum()
+    });
     move |_| (setup + work, largest)
 }
 
 /// Each group's pack columns have equal element counts, so each class hull
 /// contains at most one point and a chunk aggregates these maxima in O(t).
 pub(super) fn pack_maximum(phase: &Summary, costs: &Costs) -> f64 {
-    phase
-        .hulls
+    phase.maxima.as_ref().map_or(0.0, |maxima| {
+        maxima
+            .hulls
+            .iter()
+            .zip(costs)
+            .filter(|(hull, _)| !hull.is_empty())
+            .map(|(hull, &(a, r, e))| a + maximum(hull, r, e))
+            .fold(0.0, f64::max)
+    })
+}
+
+pub(super) fn pack_phase(
+    summary: &Summary,
+    groups: &[Summary],
+    costs: &Costs,
+    columns: usize,
+    fill: Option<usize>,
+) -> impl Fn(usize) -> (f64, f64) {
+    let (setup, work) = components(&summary.counts, costs);
+    let largest = groups
         .iter()
-        .zip(costs)
-        .filter(|(hull, _)| !hull.is_empty())
-        .map(|(hull, &(a, r, e))| a + maximum(hull, r, e))
-        .fold(0.0, f64::max)
+        .map(|phase| pack_maximum(phase, costs))
+        .fold(0.0, f64::max);
+    let (a, r, e) = costs[2];
+    move |q| {
+        let (fill_sum, fill_max) = fill.map_or((0.0, 0.0), |elements| {
+            fill_cost(q, elements, columns, a, r, e)
+        });
+        (setup + work + fill_sum, largest + fill_max)
+    }
 }
 
 pub(super) fn member_phase(
@@ -326,17 +352,12 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
     prepare: impl FnOnce(&Costs) -> F,
 ) -> usize {
     let budget = exec.budget();
-    if budget == 1 {
+    if budget.min(jobs) <= 1 {
         return 1;
     }
     let jobs = jobs.max(1);
-    if exec.batch_policy().strategy != tenferro_cpu::CpuBatchStrategy::Auto {
-        let decision = exec.batch_decision(&lanes::BatchQuery::new(jobs, 0.0));
-        return decision
-            .lanes
-            .saturating_mul(decision.item_threads)
-            .clamp(1, budget.max(1))
-            .min(jobs);
+    if let Some(width) = lanes::forced_width(exec, jobs) {
+        return width;
     }
     let reference;
     let constants = match constants {
@@ -773,60 +794,185 @@ mod tests {
         assert_eq!(fill_cost(4, 4, 4, 1.0, 1.0, 1.0), (12.0, 3.0));
     }
 
-    /// Purpose: an ownership job sums all its roles and setups across classes;
-    /// changing the coefficients can change which whole job is the largest.
-    #[test]
-    fn mixed_class_jobs_keep_their_joint_maximum_and_setups() {
-        use crate::movement::Point;
+    fn compiled_jobs(jobs: &[[Counts; CLASSES]]) -> Summary {
         let mut phase = Summary::default();
+        for job in jobs {
+            for (count, &other) in phase.counts.iter_mut().zip(job) {
+                *count = count.add(other).unwrap();
+            }
+            phase.record_job(job).unwrap();
+        }
+        phase.finish().unwrap();
         phase
-            .push(
-                0,
-                Point {
-                    runs: 2,
-                    elements: 3,
+    }
+
+    fn linear_job_costs(jobs: &[[Counts; CLASSES]], costs: &Costs) -> (f64, f64) {
+        jobs.iter()
+            .map(|job| {
+                job.iter()
+                    .zip(costs)
+                    .map(|(count, &(a, r, e))| {
+                        a * count.items as f64 + r * count.runs as f64 + e * count.elements as f64
+                    })
+                    .sum::<f64>()
+            })
+            .fold((0.0, 0.0_f64), |(sum, largest), job| {
+                (sum + job, largest.max(job))
+            })
+    }
+
+    /// Purpose: independent class maxima bound mixed executed jobs above while
+    /// exact compiled totals preserve S, including zero-cost coefficients.
+    #[test]
+    fn compiled_bound_covers_random_mixed_jobs() {
+        let mut seed = 17u64;
+        for len in 1..30 {
+            let jobs = (0..len)
+                .map(|_| {
+                    core::array::from_fn(|_| {
+                        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        let items = (seed >> 32) % 4;
+                        Counts {
+                            items,
+                            runs: items * (1 + seed % 19),
+                            elements: items * (1 + seed % 31),
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            let phase = compiled_jobs(&jobs);
+            for rate in 0..20 {
+                let costs = core::array::from_fn(|c| {
+                    (
+                        (rate % 5) as f64,
+                        ((rate + c) % 7) as f64,
+                        ((rate + 2 * c) % 11) as f64,
+                    )
+                });
+                let exact = linear_job_costs(&jobs, &costs);
+                let (sum, bound) = super::fixed(&phase, &costs)(1);
+                assert_eq!(sum, exact.0);
+                assert!(bound >= exact.1);
+            }
+        }
+    }
+
+    /// Purpose: a single class with a fixed setup count has an exact maximum;
+    /// varying setup counts are the control requiring a conservative bound.
+    #[test]
+    fn single_class_fixed_setups_have_an_exact_maximum() {
+        for items in [1, 2] {
+            let jobs = [
+                [
+                    Counts {
+                        items,
+                        runs: 4,
+                        elements: 8,
+                    },
+                    Counts::default(),
+                    Counts::default(),
+                    Counts::default(),
+                ],
+                [
+                    Counts {
+                        items,
+                        runs: 1,
+                        elements: 100,
+                    },
+                    Counts::default(),
+                    Counts::default(),
+                    Counts::default(),
+                ],
+            ];
+            for costs in [[(100.0, 0.0, 1.0); CLASSES], [(1.0, 100.0, 0.0); CLASSES]] {
+                assert_eq!(
+                    super::fixed(&compiled_jobs(&jobs), &costs)(1),
+                    linear_job_costs(&jobs, &costs)
+                );
+            }
+        }
+        let jobs = [
+            [
+                Counts {
+                    items: 2,
+                    runs: 4,
+                    elements: 8,
                 },
-            )
-            .unwrap();
-        phase
-            .push(
-                1,
-                Point {
+                Counts::default(),
+                Counts::default(),
+                Counts::default(),
+            ],
+            [
+                Counts {
+                    items: 1,
                     runs: 1,
-                    elements: 4,
+                    elements: 100,
                 },
-            )
-            .unwrap();
-        phase
-            .push(
-                0,
-                Point {
-                    runs: 1,
-                    elements: 1,
-                },
-            )
-            .unwrap();
-        phase
-            .push(
-                0,
-                Point {
-                    runs: 8,
-                    elements: 1,
-                },
-            )
-            .unwrap();
-        let costs = [
-            (2.0, 3.0, 5.0),
-            (7.0, 11.0, 13.0),
-            (0.0, 0.0, 0.0),
-            (0.0, 0.0, 0.0),
+                Counts::default(),
+                Counts::default(),
+                Counts::default(),
+            ],
         ];
-        assert_eq!(super::fixed(&phase, &costs)(1), (134.0, 70.0));
-        phase.fuse_jobs(&[0, 3]).unwrap();
-        assert_eq!(super::fixed(&phase, &costs)(1), (134.0, 103.0));
-        let mut costs = costs;
-        costs[0] = (0.0, 100.0, 0.0);
-        assert_eq!(super::fixed(&phase, &costs)(1), (1170.0, 800.0));
+        let costs = [(100.0, 0.0, 1.0); CLASSES];
+        assert_eq!(linear_job_costs(&jobs, &costs), (408.0, 208.0));
+        assert_eq!(
+            super::fixed(&compiled_jobs(&jobs), &costs)(1),
+            (408.0, 300.0)
+        );
+    }
+
+    /// Purpose: a pack leaf pays for its column work and cold-fill share
+    /// together; warm scratch is the control with no fill price.
+    #[test]
+    fn pack_columns_and_cold_fill_share_add_their_prices() {
+        let column = [
+            Counts {
+                items: 1,
+                runs: 1,
+                elements: 3,
+            },
+            Counts::default(),
+            Counts::default(),
+            Counts::default(),
+        ];
+        let groups = [compiled_jobs(&[column; 4])];
+        let summary = Summary::totals(&groups).unwrap();
+        let costs = [(1.0, 1.0, 1.0); CLASSES];
+        assert_eq!(
+            pack_phase(&summary, &groups, &costs, 4, Some(8))(2),
+            (32.0, 11.0)
+        );
+        assert_eq!(
+            pack_phase(&summary, &groups, &costs, 4, None)(2),
+            (20.0, 5.0)
+        );
+    }
+
+    /// Purpose: one runnable job bypasses preparation even on a wider token;
+    /// one slot is the matching control for a phase with multiple jobs.
+    #[test]
+    fn effective_single_width_skips_cost_preparation() {
+        for (slots, jobs) in [(8, 1), (1, 8)] {
+            let mut engine = tenferro_cpu::CpuEngine::new(
+                tenferro_cpu::Pool::builder()
+                    .threads(slots)
+                    .build()
+                    .unwrap(),
+            );
+            crate::host_pool::lane_region(
+                &mut engine,
+                crate::host_pool::HostPoolSite::Replay,
+                |exec| {
+                    assert_eq!(
+                        width::<f64, _>(&exec, None, jobs, 0, 0, |_| -> fn(usize) -> (f64, f64) {
+                            panic!("cost preparation")
+                        }),
+                        1
+                    );
+                },
+            )
+            .unwrap();
+        }
     }
 
     /// Purpose: widths between measured knots retain the bandwidth roof;
@@ -869,53 +1015,6 @@ mod tests {
             2.0 * 0.3517858496209 / 0.1558782935818,
         );
         assert_ne!(element.at(134217728.0), 2.0);
-    }
-
-    /// Purpose: forced policies use the engine's batch decision without
-    /// reading model data, and the executed-job cap still applies.
-    #[test]
-    fn forced_width_delegates_to_the_engine_and_caps_jobs() {
-        use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
-        for strategy in [
-            CpuBatchStrategy::Sequential,
-            CpuBatchStrategy::Inner,
-            CpuBatchStrategy::Outer,
-            CpuBatchStrategy::Split {
-                lanes: NonZeroUsize::new(3).unwrap(),
-            },
-        ] {
-            let mut engine = tenferro_cpu::CpuEngine::new(
-                tenferro_cpu::Pool::builder().threads(8).build().unwrap(),
-            )
-            .with_batch_policy(CpuBatchPolicy::new(strategy));
-            region_with(
-                &mut engine,
-                |_, _, _| panic!("forced calibration"),
-                |exec, constants| {
-                    assert!(constants.is_none());
-                    for jobs in [1, 3, 12] {
-                        let decision = exec.batch_decision(&lanes::BatchQuery::new(jobs, 0.0));
-                        let expected = decision
-                            .lanes
-                            .saturating_mul(decision.item_threads)
-                            .clamp(1, exec.budget())
-                            .min(jobs);
-                        assert_eq!(
-                            width::<f64, _>(
-                                &exec,
-                                constants,
-                                jobs,
-                                0,
-                                0,
-                                |_| -> fn(usize) -> (f64, f64) { panic!("forced model") }
-                            ),
-                            expected
-                        );
-                    }
-                },
-            )
-            .unwrap();
-        }
     }
 
     /// Purpose: admission reserves ladder bytes without allocating, and never undercharges actual capacity.

@@ -39,6 +39,33 @@ fn on<R>(engine: &mut CpuEngine, budget: usize, f: impl FnOnce(Exec<'_>) -> R) -
         .unwrap()
 }
 
+/// Purpose: forced widths count executed-job leaves, preserving inner token
+/// shares; Auto is the control that leaves the caller's model in charge.
+#[test]
+fn forced_width_counts_job_leaves_and_caps_runnable_jobs() {
+    for (strategy, expected) in [
+        (BatchStrategy::Auto, [None, None, None, None]),
+        (BatchStrategy::Sequential, [Some(1); 4]),
+        (BatchStrategy::Inner, [Some(1); 4]),
+        (BatchStrategy::Outer, [Some(1), Some(1), Some(3), Some(8)]),
+        (
+            BatchStrategy::Split {
+                lanes: NonZeroUsize::new(3).unwrap(),
+            },
+            [Some(1), Some(1), Some(3), Some(3)],
+        ),
+    ] {
+        let mut engine = engine(8, BatchPolicy::new(strategy), row(60));
+        on(&mut engine, 8, |exec| {
+            assert_eq!(
+                [0, 1, 3, 12].map(|jobs| crate::lanes::forced_width(&exec, jobs)),
+                expected,
+                "{strategy:?}"
+            );
+        });
+    }
+}
+
 /// The baseline placement of jobs of serial times `times` into `tables`:
 /// no grant, so no candidate is scored.
 fn place(exec: &Exec<'_>, times: &[Duration], tables: &mut LaneTables) {
@@ -548,18 +575,6 @@ fn split_leaf_shares_cover_the_whole_token_and_are_balanced() {
     let (seen, outcome) = run_assigned(&mut engine, p, &one_stage(1, &[]), split(1), 1);
     assert_eq!(outcome, Ok(Ok(())));
     assert_eq!(offered(&seen), [p]);
-}
-
-/// Idle leaves still reserve their token shares; the one active leaf receives
-/// its balanced share rather than silently using the entire token.
-#[test]
-fn split_with_idle_leaves_keeps_the_selected_share() {
-    let mut engine = engine(8, BatchPolicy::default(), row(60));
-    let (seen, outcome) = run_assigned(&mut engine, 8, &one_stage(1, &[]), split(3), 1);
-    assert_eq!(outcome, Ok(Ok(())));
-    assert_eq!(offered(&seen), [3]);
-    let (seen, _) = run_assigned(&mut engine, 8, &one_stage(1, &[]), split(1), 1);
-    assert_eq!(offered(&seen), [8]);
 }
 
 /// Six jobs over two threads split into leaves [0, 1, 2] and [3, 4, 5]:

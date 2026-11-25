@@ -804,8 +804,8 @@ where
                 &exec,
                 constants,
                 members,
-                summary.working_set * members as u128,
-                summary.traffic * members as u128,
+                summary.working_set as u128 * members as u128,
+                summary.traffic as u128 * members as u128,
                 |costs| super::movement::member_phase(summary, costs, members),
             );
             if width <= 1 {

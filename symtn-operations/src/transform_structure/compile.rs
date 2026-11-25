@@ -356,8 +356,8 @@ impl<T: Copy> TreeTransformStructure<T> {
         // Every structural proof above read the raw table; the retained
         // table keeps only the compiled roles replay executes.
         let extents = (0..layouts.entry_count())
-            .map(|index| super::ownership::destination_span(&layouts, index))
-            .collect::<Vec<_>>();
+            .map(|index| super::schedule::layout_index_range(&layouts, index))
+            .collect::<Result<Vec<_>, _>>()?;
         let layouts = layouts.finish(&blocks, &inactive_dst_layouts)?;
         super::ownership::compile_movement(&mut parallel_schedule, &blocks, &layouts, &extents)?;
 

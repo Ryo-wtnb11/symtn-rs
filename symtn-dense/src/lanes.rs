@@ -75,8 +75,8 @@ use std::num::NonZeroUsize;
 use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
-use tcontract_exec::BatchStrategy;
-pub use tcontract_exec::{BatchPolicy, BatchQuery, Exec};
+pub use tcontract_exec::{BatchPolicy, Exec};
+use tcontract_exec::{BatchQuery, BatchStrategy};
 use tenferro_cpu::threadteam;
 
 mod placement;
@@ -89,6 +89,19 @@ pub(crate) use runner::recycle;
 use runner::Arena;
 pub(crate) use runner::Placed;
 pub use runner::{run_native, Assignment, Cut, Each, Outcome, Refusal, Split, Work};
+
+/// The forced policy's executed-job leaves, capped by the token and jobs.
+/// `Auto` leaves width selection to the caller's model.
+#[doc(hidden)]
+pub fn forced_width(exec: &Exec<'_>, jobs: usize) -> Option<usize> {
+    (exec.batch_policy().strategy != BatchStrategy::Auto).then(|| {
+        // Inner threads remain inside each job's token; they are not more leaves.
+        exec.batch_decision(&BatchQuery::new(jobs, 0.0))
+            .lanes
+            .clamp(1, exec.budget().max(1))
+            .min(jobs.max(1))
+    })
+}
 
 /// What a job's model depends on besides its serial time, the execution
 /// context and its op's kind: jobs with equal keys and equal serial times get

@@ -13,9 +13,9 @@ pub(crate) struct Point {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Counts {
-    pub items: u128,
-    pub runs: u128,
-    pub elements: u128,
+    pub items: u64,
+    pub runs: u64,
+    pub elements: u64,
 }
 
 impl Counts {
@@ -28,81 +28,91 @@ impl Counts {
     }
 }
 
-fn add(a: u128, b: u128) -> Result<u128, OperationError> {
+fn add(a: u64, b: u64) -> Result<u64, OperationError> {
     a.checked_add(b).ok_or(OperationError::ElementCountOverflow)
 }
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Maxima {
+    pub hulls: [Vec<Point>; CLASSES],
+    // Counts convert once at compile time, never during the width search.
+    pub setups: [f64; CLASSES],
+    pub jobs: usize,
+}
+
+// Setups are finite, nonnegative conversions of integer structural counts.
+impl Eq for Maxima {}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Summary {
     pub counts: [Counts; CLASSES],
-    pub hulls: [Vec<Point>; CLASSES],
+    /// Only fixed phases and pack columns need compiled maxima.
+    pub maxima: Option<Box<Maxima>>,
     /// Payload elements touched, source and destination included.
-    pub working_set: u128,
-    pub traffic: u128,
-    pub destination_reads: u128,
-    /// Executed jobs retain their joint class counts, including every role setup.
-    pub jobs: Vec<[Counts; CLASSES]>,
+    pub working_set: u64,
+    pub traffic: u64,
+    pub destination_reads: u64,
     // Per-buffer address envelopes: exact when coalesced, otherwise upper bounds.
-    extents: [Option<(i128, i128)>; 4],
+    extents: [Option<(isize, isize)>; 4],
 }
 
 impl Summary {
-    pub(crate) fn push(&mut self, class: usize, point: Point) -> Result<(), OperationError> {
-        self.counts[class] = self.counts[class].add(Counts {
+    pub(crate) fn push(&mut self, class: usize, point: Point) -> Result<Counts, OperationError> {
+        let count = Counts {
             items: 1,
-            runs: point.runs as u128,
-            elements: point.elements as u128,
-        })?;
-        self.hulls[class].push(point);
-        let mut job = [Counts::default(); CLASSES];
-        job[class] = Counts {
-            items: 1,
-            runs: point.runs as u128,
-            elements: point.elements as u128,
+            runs: u64::try_from(point.runs).map_err(|_| OperationError::ElementCountOverflow)?,
+            elements: u64::try_from(point.elements)
+                .map_err(|_| OperationError::ElementCountOverflow)?,
         };
-        self.jobs.push(job);
-        let touched = (point.elements as u128)
+        self.counts[class] = self.counts[class].add(count)?;
+        let touched = count
+            .elements
             .checked_mul([2, 2, 1, 1][class])
             .ok_or(OperationError::ElementCountOverflow)?;
-        self.working_set = add(self.working_set, touched)?;
         self.traffic = add(self.traffic, touched)?;
+        Ok(count)
+    }
+
+    /// Retain only each executed job's per-class hull points and maximum setup.
+    pub(crate) fn record_job(&mut self, job: &[Counts; CLASSES]) -> Result<(), OperationError> {
+        if job.iter().all(|count| count.items == 0) {
+            return Ok(());
+        }
+        let maxima = self.maxima.get_or_insert_with(Default::default);
+        maxima.jobs += 1;
+        for (class, count) in job.iter().enumerate().filter(|(_, count)| count.items != 0) {
+            maxima.setups[class] = maxima.setups[class].max(count.items as f64);
+            maxima.hulls[class].push(Point {
+                runs: usize::try_from(count.runs)
+                    .map_err(|_| OperationError::ElementCountOverflow)?,
+                elements: usize::try_from(count.elements)
+                    .map_err(|_| OperationError::ElementCountOverflow)?,
+            });
+        }
         Ok(())
     }
 
     pub(crate) fn finish(&mut self) -> Result<(), OperationError> {
         // Both whole-call destination modes must have representable traffic.
         add(self.traffic, self.destination_reads)?;
-        for points in &mut self.hulls {
-            *points = upper_hull(core::mem::take(points));
+        if let Some(maxima) = &mut self.maxima {
+            for points in &mut maxima.hulls {
+                *points = upper_hull(core::mem::take(points));
+            }
         }
         self.working_set = self
             .extents
             .iter()
             .flatten()
-            .try_fold(0, |sum, &(lo, hi)| add(sum, (hi - lo + 1) as u128))?;
+            .try_fold(0, |sum, &(lo, hi)| {
+                let span = u64::try_from(hi as i128 - lo as i128 + 1)
+                    .map_err(|_| OperationError::ElementCountOverflow)?;
+                add(sum, span)
+            })?;
         Ok(())
     }
 
-    pub(crate) fn merge(&self, rhs: &Self) -> Result<Self, OperationError> {
-        Self::merge_all([self, rhs])
-    }
-
-    pub(crate) fn merge_all<'a>(
-        summaries: impl IntoIterator<Item = &'a Self>,
-    ) -> Result<Self, OperationError> {
-        let mut result = Self::default();
-        for summary in summaries {
-            result.add_totals(summary)?;
-            for c in 0..CLASSES {
-                result.hulls[c].extend_from_slice(&summary.hulls[c]);
-            }
-            result.jobs.extend_from_slice(&summary.jobs);
-        }
-        result.finish()?;
-        Ok(result)
-    }
-
-    /// Stack-only aggregation for a chunk; no hull rebuilding or job copying.
+    /// Stack-only aggregation for a chunk; no hull rebuilding or copying.
     pub(crate) fn totals<'a>(
         summaries: impl IntoIterator<Item = &'a Self>,
     ) -> Result<Self, OperationError> {
@@ -114,9 +124,9 @@ impl Summary {
         Ok(result)
     }
 
-    fn add_totals(&mut self, rhs: &Self) -> Result<(), OperationError> {
-        for c in 0..CLASSES {
-            self.counts[c] = self.counts[c].add(rhs.counts[c])?;
+    pub(crate) fn add_totals(&mut self, rhs: &Self) -> Result<(), OperationError> {
+        for (count, &other) in self.counts.iter_mut().zip(&rhs.counts) {
+            *count = count.add(other)?;
         }
         self.traffic = add(self.traffic, rhs.traffic)?;
         self.destination_reads = add(self.destination_reads, rhs.destination_reads)?;
@@ -128,35 +138,19 @@ impl Summary {
         Ok(())
     }
 
-    /// Each ownership run is indivisible; its roles all execute on one leaf.
-    pub(crate) fn fuse_jobs(&mut self, starts: &[u32]) -> Result<(), OperationError> {
-        let mut jobs = Vec::with_capacity(starts.len());
-        for (i, &start) in starts.iter().enumerate() {
-            let end = starts
-                .get(i + 1)
-                .map_or(self.jobs.len(), |&end| end as usize);
-            let mut total = [Counts::default(); CLASSES];
-            for job in &self.jobs[start as usize..end] {
-                for c in 0..CLASSES {
-                    total[c] = total[c].add(job[c])?;
-                }
-            }
-            jobs.push(total);
-        }
-        self.jobs = jobs;
-        Ok(())
-    }
-
     pub(crate) fn retained_bytes(&self) -> usize {
-        self.hulls
-            .iter()
-            .map(|h| h.capacity() * core::mem::size_of::<Point>())
-            .sum::<usize>()
-            + self.jobs.capacity() * core::mem::size_of::<[Counts; CLASSES]>()
+        self.maxima.as_ref().map_or(0, |maxima| {
+            core::mem::size_of::<Maxima>()
+                + maxima
+                    .hulls
+                    .iter()
+                    .map(|h| h.capacity() * core::mem::size_of::<Point>())
+                    .sum::<usize>()
+        })
     }
 
-    pub(crate) fn logical_traffic(&self, read_destination: bool) -> u128 {
-        self.traffic + u128::from(read_destination) * self.destination_reads
+    pub(crate) fn logical_traffic(&self, read_destination: bool) -> u64 {
+        self.traffic + u64::from(read_destination) * self.destination_reads
     }
 
     pub(crate) fn add_role(
@@ -164,25 +158,25 @@ impl Summary {
         layouts: &TreeTransformLayoutTable,
         layout: usize,
         inactive: bool,
-        dst: (u8, i128, i128),
-        src: (u8, i128, i128),
-    ) -> Result<(), OperationError> {
+        dst: (u8, isize, isize),
+        src: (u8, isize, isize),
+    ) -> Result<(usize, Counts), OperationError> {
         let (class, point) = role(layouts, layout, inactive)?;
         if point.elements == 0 {
-            return Ok(());
+            return Ok((class, Counts::default()));
         }
-        self.push(class, point)?;
+        let count = self.push(class, point)?;
         if dst.0 == 1 {
-            self.destination_reads = add(self.destination_reads, point.elements as u128)?;
+            self.destination_reads = add(self.destination_reads, count.elements)?;
         }
         self.touch(dst);
         if !inactive {
             self.touch(src);
         }
-        Ok(())
+        Ok((class, count))
     }
 
-    fn touch(&mut self, (buffer, lo, hi): (u8, i128, i128)) {
+    fn touch(&mut self, (buffer, lo, hi): (u8, isize, isize)) {
         let extent = &mut self.extents[buffer as usize];
         *extent = Some(match *extent {
             Some((a, b)) => (a.min(lo), b.max(hi)),
@@ -397,9 +391,9 @@ mod tests {
         let combined = Summary::totals(phases).unwrap();
         assert_eq!(combined.working_set, 18);
         assert_eq!(combined.traffic, 24);
-        for chunk in 0..2 {
-            assert_eq!(phases[chunk].working_set, 12);
-            assert_eq!(phases[chunk].traffic, 12);
+        for phase in phases {
+            assert_eq!(phase.working_set, 12);
+            assert_eq!(phase.traffic, 12);
         }
     }
 }

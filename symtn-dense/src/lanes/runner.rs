@@ -69,7 +69,7 @@ mod sealed {
 
 /// The jobs split recursively over `threads` leaves. The whole token is
 /// divided into balanced nonzero shares (remainder slots to the first leaves),
-/// including idle leaves when there are fewer jobs. Each nonempty leaf runs
+/// stopping at a single job instead of creating idle leaves. Each leaf runs
 /// its jobs in order on its share.
 ///
 /// The call lends its one lane state (`lanes[0]`) to the root part. At each
@@ -318,29 +318,11 @@ where
     W::Error: Sync,
     F: Fn(&mut W::Lane, Cut) -> Result<W::Lane, W::Error> + Sync,
 {
-    if threads <= 1 {
+    if threads <= 1 || states.len() <= 1 {
         return states
             .iter_mut()
             .enumerate()
             .find_map(|(i, state)| run_job(work, first + i, state, lane, &mut exec));
-    }
-    if states.len() <= 1 {
-        let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
-        let supply = RwLock::new(Some((states, lane)));
-        let failure = RwLock::new(None);
-        exec.into_token().fork(threads, |leaf, token| {
-            if leaf == 0 {
-                if let Some((states, lane)) = take(&supply) {
-                    let mut exec = Exec::from_token(token, workspace, policy);
-                    let result = states
-                        .iter_mut()
-                        .enumerate()
-                        .find_map(|(i, state)| run_job(work, first + i, state, lane, &mut exec));
-                    *failure.write().unwrap_or_else(PoisonError::into_inner) = result;
-                }
-            }
-        });
-        return failure.into_inner().unwrap_or_else(PoisonError::into_inner);
     }
     let middle = parallel_split(states.len(), threads);
     let (left_states, right_states) = states.split_at_mut(middle);

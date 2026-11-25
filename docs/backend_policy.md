@@ -374,9 +374,10 @@ range. Every role in a job contributes its setup, run and element costs:
 
 ```text
 t_i = sum_c(k_ic * a[c] + r[c](W) * runs_ic + e[c](W) * elements_ic)
-S = sum(t_i)                     M = max(t_i)
+S = sum(t_i)
+M_bound = sum_c(a[c] * max_i(k_ic) + max_hull_c(r[c] * runs + e[c] * elements))
 T(1) = S
-T(q) = D(q) + max(M, S/q, X/B(q))       (2 <= q <= min(p, J))
+T(q) = D(q) + max(M_bound, S/q, X/B(q))       (2 <= q <= min(p, J))
 q* = argmin T(q), with ties to smaller q
 ```
 
@@ -394,18 +395,30 @@ Beyond the last online knot, an online curve keeps the reference curve's shape,
 scaled to meet that knot. GEMM work belongs to the dense provider and is
 outside this model.
 
-The schedule compiles exact role counts, logical traffic, per-job class counts,
-and per-group pack hulls. Address extents merge by buffer in constant space:
+The schedule compiles exact role totals and logical traffic. Fixed phases
+retain per-class upper hulls of executed-job run/element totals and maximum
+setup counts, converted to f64 at compile time. M_bound is an upper bound on
+max(t_i): fused jobs can mix strides, whose separate maxima need not belong to
+the same job. Even within one class, the setup and work maxima may differ
+when jobs contain different numbers of roles. The bound is exact for a
+single class with a fixed setup count, including unfused single-role jobs;
+otherwise it can overestimate M and select fewer leaves. S remains exact.
+Pack groups retain column hulls for their maximum lookup; scatter groups
+and member summaries retain only totals, with no job arrays or hulls.
+A pack leaf's column work and its cold-fill share add to its price.
+Address extents merge by buffer in constant space:
 W is exact for coalesced blocks and an upper bound with gaps or strides.
 No payload elements are visited during compilation. With I role intervals,
 B blocks, and F total axis metadata, compilation takes O(I log I + B + F)
 time and retains O(I + G) movement metadata, including O(G) summaries for G
 groups (O(I) when every group has a role).
-All capacities are charged in retained bytes. Preparing a direct phase scans
-its J executed jobs to find the exact maximum of their joint class costs;
-preparing a chunk aggregates its t group summaries in O(t). The shared chooser
-then scans widths 1 through min(p, J), without allocation. Scratch maxima are
-computed once for the chosen chunk width. A one-slot replay does no model or
+All capacities are charged in retained bytes. For H_c retained hull points of
+class c, a fixed phase computes its maximum bound by binary search in
+O(sum_c log(1 + H_c)), with no pass over J executed jobs. A chunk aggregates
+its t group summaries in O(t). The shared chooser then scans Q = min(p, J)
+widths without allocation, so a fixed decision costs
+O(sum_c log(1 + H_c) + Q). One effective width returns before cost preparation.
+Scratch maxima are computed once for the chosen chunk width. A one-slot replay does no model or
 calibration work.
 
 The same chooser selects direct fill and Single widths, the plan-group chunk

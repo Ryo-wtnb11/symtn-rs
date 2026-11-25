@@ -374,6 +374,26 @@ fn a_parallel_replay_fills_its_destination_scratch_once_in_its_phases() {
     let threads = 4;
     let largest_chunk = threads.min(GROUPS) * 2 * ROWS * COLS;
     let (structure, transform) = ten_identity_groups();
+    // Auto may choose a different chunk width after calibration; only the
+    // initialized scratch length is contractual, not its scheduling choice.
+    let mut auto = TreeTransformWorkspace::default();
+    overwrite(
+        threads,
+        CpuBatchStrategy::Auto,
+        &mut auto,
+        &transform,
+        &structure,
+    );
+    let cold_fills = auto.destination_fills();
+    assert_eq!(cold_fills, auto.destination_len());
+    overwrite(
+        threads,
+        CpuBatchStrategy::Auto,
+        &mut auto,
+        &transform,
+        &structure,
+    );
+    assert_eq!(auto.destination_fills(), cold_fills);
     let mut workspace = TreeTransformWorkspace::default();
     let call = |workspace: &mut TreeTransformWorkspace<f64>| {
         let fills = workspace.destination_fills();

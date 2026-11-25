@@ -48,9 +48,9 @@ where
                 movement::width::<D, _>(
                     &exec,
                     constants,
-                    summary.jobs.len(),
-                    summary.working_set,
-                    summary.logical_traffic(read_destination),
+                    summary.maxima.as_ref().map_or(0, |maxima| maxima.jobs),
+                    summary.working_set as u128,
+                    summary.logical_traffic(read_destination) as u128,
                     |costs| movement::fixed(summary, costs),
                 )
             };
@@ -298,14 +298,17 @@ where
         let runs = &runs[..];
         movement::region(engine, |exec, constants| {
             let summaries = &schedule.scatter_movement;
-            let summary =
-                crate::movement::Summary::totals(groups.iter().map(|&group| &summaries[group]))?;
+            let summary = if exec.budget().min(runs.len()) > 1 {
+                crate::movement::Summary::totals(groups.iter().map(|&group| &summaries[group]))?
+            } else {
+                crate::movement::Summary::default()
+            };
             let width = movement::width::<D, _>(
                 &exec,
                 constants,
                 runs.len(),
-                summary.working_set,
-                summary.logical_traffic(writer.reads_destination()),
+                summary.working_set as u128,
+                summary.logical_traffic(writer.reads_destination()) as u128,
                 |costs| {
                     let (mut sum, mut largest) = (0.0, 0.0_f64);
                     for (i, &start) in runs.iter().enumerate() {
@@ -463,30 +466,26 @@ where
     let (source, destination) = packed.split_mut();
     let mut run = |writer: PackColumnWriter<'_, D>, fill: Option<PackColumnWriter<'_, D>>| {
         movement::region(engine, |exec, constants| {
-            let summary = crate::movement::Summary::totals(summaries)?;
+            let summary = if exec.budget().min(columns.len()) > 1 {
+                crate::movement::Summary::totals(summaries)?
+            } else {
+                crate::movement::Summary::default()
+            };
             let extra = fill.as_ref().map_or(0, |fill| fill.len());
-            let filling = fill.is_some();
             let threads = movement::width::<D, _>(
                 &exec,
                 constants,
                 columns.len(),
-                summary.working_set + extra as u128,
-                summary.traffic + extra as u128,
+                summary.working_set as u128 + extra as u128,
+                summary.traffic as u128 + extra as u128,
                 |costs| {
-                    let (setup, work) = movement::components(&summary.counts, costs);
-                    let largest = summaries
-                        .iter()
-                        .map(|phase| movement::pack_maximum(phase, costs))
-                        .fold(0.0, f64::max);
-                    let (a, r, e) = costs[2];
-                    move |q| {
-                        let (fill_sum, fill_max) = if filling {
-                            movement::fill_cost(q, extra, columns.len(), a, r, e)
-                        } else {
-                            (0.0, 0.0)
-                        };
-                        (setup + work + fill_sum, largest.max(fill_max))
-                    }
+                    movement::pack_phase(
+                        &summary,
+                        summaries,
+                        costs,
+                        columns.len(),
+                        fill.as_ref().map(|fill| fill.len()),
+                    )
                 },
             );
             let work = Pack {

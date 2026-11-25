@@ -134,7 +134,7 @@ pub(super) fn compile_parallel_schedule(
     singles.extend(ranges.iter().map(|&(_, _, block)| block));
     let mut inactive = Vec::with_capacity(inactive_dst_layouts.len());
     for &layout in inactive_dst_layouts {
-        if let Some(span) = destination_span(layouts, layout) {
+        if let Some(span) = layout_index_range(layouts, layout)? {
             inactive.push((span, checked_u32(layout)?));
         }
     }
@@ -182,51 +182,73 @@ pub(super) fn compile_movement(
     schedule: &mut TreeTransformParallelSchedule,
     blocks: &[TreeTransformBlock],
     layouts: &TreeTransformLayoutTable,
-    extents: &[Option<(i128, i128)>],
+    extents: &[Option<(isize, isize)>],
 ) -> Result<(), OperationError> {
-    use crate::movement::Summary;
+    use crate::movement::{Counts, Summary, CLASSES};
     let extent = |buffer, layout: usize| {
         let (lo, hi) = extents[layout].unwrap_or((0, -1));
         (buffer, lo, hi)
     };
     let packed = |buffer, offset: usize, elements: usize| {
-        (
-            buffer,
-            offset as i128,
-            offset as i128 + elements as i128 - 1,
-        )
+        let lo = isize::try_from(offset).map_err(|_| OperationError::ElementCountOverflow)?;
+        let hi = offset
+            .checked_add(elements)
+            .and_then(|end| end.checked_sub(1))
+            .and_then(|end| isize::try_from(end).ok())
+            .ok_or(OperationError::ElementCountOverflow)?;
+        Ok::<_, OperationError>((buffer, lo, hi))
     };
     let mut singles = Summary::default();
-    for &index in &schedule.singles {
-        let TreeTransformBlock::Single {
-            dst_layout,
-            src_layout,
-            ..
-        } = blocks[index as usize]
-        else {
-            unreachable!("compiled Single list")
-        };
-        singles.add_role(
-            layouts,
-            dst_layout,
-            false,
-            extent(1, dst_layout),
-            extent(0, src_layout),
-        )?;
+    for (run, &start) in schedule.single_runs.iter().enumerate() {
+        let end = schedule
+            .single_runs
+            .get(run + 1)
+            .map_or(schedule.singles.len(), |&end| end as usize);
+        let mut job = [Counts::default(); CLASSES];
+        for &index in &schedule.singles[start as usize..end] {
+            let TreeTransformBlock::Single {
+                dst_layout,
+                src_layout,
+                ..
+            } = blocks[index as usize]
+            else {
+                unreachable!("compiled Single list")
+            };
+            let (class, count) = singles.add_role(
+                layouts,
+                dst_layout,
+                false,
+                extent(1, dst_layout),
+                extent(0, src_layout),
+            )?;
+            job[class] = job[class].add(count)?;
+        }
+        singles.record_job(&job)?;
     }
     singles.finish()?;
     let mut inactive = Summary::default();
-    for &layout in &schedule.inactive {
-        let layout = layout as usize;
-        inactive.add_role(layouts, layout, true, extent(1, layout), (0, 0, -1))?;
+    for (run, &start) in schedule.inactive_runs.iter().enumerate() {
+        let end = schedule
+            .inactive_runs
+            .get(run + 1)
+            .map_or(schedule.inactive.len(), |&end| end as usize);
+        let mut job = [Counts::default(); CLASSES];
+        for &layout in &schedule.inactive[start as usize..end] {
+            let layout = layout as usize;
+            let (class, count) =
+                inactive.add_role(layouts, layout, true, extent(1, layout), (0, 0, -1))?;
+            job[class] = job[class].add(count)?;
+        }
+        inactive.record_job(&job)?;
     }
     inactive.finish()?;
     let mut packs = Vec::with_capacity(schedule.scatter_groups.len());
     let mut scatters = Vec::with_capacity(schedule.scatter_groups.len());
+    let mut groups = Summary::default();
     for group in &schedule.scatter_groups {
         let mut pack = Summary::default();
         for column in &schedule.pack_columns[group.pack.clone()] {
-            pack.add_role(
+            let (class, count) = pack.add_role(
                 layouts,
                 column.src_layout,
                 false,
@@ -234,12 +256,14 @@ pub(super) fn compile_movement(
                     2,
                     column.packed_offset,
                     layouts.entry(column.src_layout).element_count,
-                ),
+                )?,
                 extent(0, column.src_layout),
             )?;
+            let mut job = [Counts::default(); CLASSES];
+            job[class] = count;
+            pack.record_job(&job)?;
         }
         pack.finish()?;
-        packs.push(pack);
         let mut scatter = Summary::default();
         for column in &schedule.scatter_columns[group.columns.clone()] {
             scatter.add_role(
@@ -251,27 +275,25 @@ pub(super) fn compile_movement(
                     3,
                     column.packed_offset,
                     layouts.entry(column.dst_layout).element_count,
-                ),
+                )?,
             )?;
         }
         scatter.finish()?;
+        groups.add_totals(&pack)?;
+        groups.add_totals(&scatter)?;
+        let mut job = pack.counts;
+        for (count, &other) in job.iter_mut().zip(&scatter.counts) {
+            *count = count.add(other)?;
+        }
+        groups.record_job(&job)?;
+        packs.push(pack);
         scatters.push(scatter);
     }
-    let all_pack = Summary::merge_all(&packs)?;
-    let all_scatter = Summary::merge_all(&scatters)?;
-    schedule.member_pack_movement = Summary::merge_all([&inactive, &singles, &all_pack])?;
-    schedule.member_scatter_movement = all_scatter.clone();
-    let mut groups = Vec::with_capacity(packs.len());
-    for (pack, scatter) in packs.iter().zip(&scatters) {
-        let mut group = pack.merge(scatter)?;
-        if !group.jobs.is_empty() {
-            group.fuse_jobs(&[0])?;
-        }
-        groups.push(group);
-    }
-    schedule.group_movement = Summary::merge_all(&groups)?;
-    singles.fuse_jobs(&schedule.single_runs)?;
-    inactive.fuse_jobs(&schedule.inactive_runs)?;
+    groups.finish()?;
+    schedule.member_pack_movement =
+        Summary::totals([&inactive, &singles].into_iter().chain(&packs))?;
+    schedule.member_scatter_movement = Summary::totals(&scatters)?;
+    schedule.group_movement = groups;
     schedule.pack_movement = packs;
     schedule.scatter_movement = scatters;
     schedule.single_movement = singles;
@@ -300,34 +322,6 @@ fn hull_runs<N: Copy + Ord>(ranges: impl IntoIterator<Item = (N, N)>) -> Vec<u32
     }
     starts.shrink_to_fit();
     starts
-}
-
-/// The first and last element a destination `layout` writes, or `None` when
-/// it is empty. Exact: destination strides are nonnegative and every address
-/// lies below the destination's `usize` required length, so each partial sum
-/// stays below `2^64`.
-pub(super) fn destination_span(
-    layouts: &RawLayoutTable,
-    layout_index: usize,
-) -> Option<(i128, i128)> {
-    let layout = layouts.entry(layout_index);
-    if layout.element_count == 0 {
-        return None;
-    }
-    let (mut lo, mut hi) = (layout.offset as i128, layout.offset as i128);
-    for (&extent, &stride) in layouts
-        .shape(layout_index)
-        .iter()
-        .zip(layouts.strides(layout_index))
-    {
-        let span = (extent as i128 - 1) * stride as i128;
-        if span < 0 {
-            lo += span;
-        } else {
-            hi += span;
-        }
-    }
-    Some((lo, hi))
 }
 
 #[cfg(test)]
