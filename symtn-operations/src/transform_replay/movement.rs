@@ -275,7 +275,12 @@ pub(super) fn decision_key<D>(
 pub(super) fn dispatch_key<'a>(
     exec: &'a lanes::Exec<'_>,
 ) -> impl Iterator<Item = Duration> + Clone + 'a {
-    (2..=exec.budget()).map(|q| {
+    let budget = if exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Auto {
+        exec.budget()
+    } else {
+        1
+    };
+    (2..=budget).map(|q| {
         exec.token_ref()
             .dispatch_cost(NonZeroUsize::new(q).unwrap())
     })

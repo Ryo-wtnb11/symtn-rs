@@ -441,11 +441,12 @@ The workspace retains one decision entry, replacing it on a key change. Its key
 includes the compiled structure identity, slot budget, constants generation,
 full batch strategy, dtype size, destination-read and plan-replay flags,
 destination scratch length/capacity, and member count. Token team authority
-and the exact dispatch costs at widths 2 through p complete the key: these
-also determine `gate_keys.admits`, together with the compiled plan bound.
+and, under Auto, the exact dispatch costs at widths 2 through p complete the
+key: these also determine `gate_keys.admits`, together with the compiled plan bound.
 Gate admission therefore participates in memoization rather than being
 assumed constant across engines. Forced strategies, including their parameters,
 are part of the key; `forced_width` still resolves before model evaluation.
+Forced policies retain no dispatch-cost row because their widths do not use it.
 When a cold replay needs a packed-destination fill, the same decision pass
 also prices that pack without the fill. A successful replay installs the warm
 pack width and records the resulting scratch length/capacity, so the second
@@ -454,7 +455,7 @@ identical replay evaluates no model. A failed replay does not advance the key.
 For P phases the width payload is `P * size_of::<usize>()` bytes (8P on a
 64-bit target): three direct/group decisions plus two per selected chunk, or
 two member decisions. Its allocation charge uses the vector's actual capacity.
-The exact dispatch key adds `capacity * size_of::<Duration>()` bytes. Retained
+The Auto dispatch key adds `capacity * size_of::<Duration>()` bytes. Retained
 chunk order/run tables charge `capacity * size_of::<ChunkMovement>()` for the
 outer vector, plus each group's `capacity * size_of::<usize>()` and each run
 list's `capacity * size_of::<u32>()`. Each chunk's inline size includes one
@@ -466,7 +467,8 @@ Gate keys retain direct budget indices
 the existing O(p) preparation pass makes each admission lookup O(1).
 On a key hit each phase reads its width in O(1), without model evaluation,
 summary construction, sorting or an engine-extension lookup. The operation's
-exact dispatch-key comparison costs O(p). On a miss, a fixed chooser costs
+exact dispatch-key comparison costs O(p) under Auto and O(1) under forced
+policies. On a miss, a fixed chooser costs
 O(sum_candidate q), with constant-size class arithmetic per leaf and O(log q)
 recursion depth. The plan-group decision visits G groups per candidate to
 price actual batch barriers, and each chunk combines t group summaries once

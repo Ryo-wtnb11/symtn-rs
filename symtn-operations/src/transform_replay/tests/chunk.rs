@@ -507,8 +507,8 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
 }
 
 /// Purpose: a one-column inline pack keeps the serial column loop and its
-/// scatter keeps the movement runner; a public Outer policy splits a
-/// multi-column pack through the pack runner instead.
+/// scatter keeps the movement runner; a public Split policy over two groups
+/// splits a multi-column pack through the pack runner instead.
 #[test]
 fn inline_pack_and_scatter_keep_their_item_paths() {
     let structure = |columns| {
@@ -526,31 +526,33 @@ fn inline_pack_and_scatter_keep_their_item_paths() {
         .unwrap()
     };
     let destination = structure(2);
-    for (columns, strategy, matrix, expected) in [
+    for (columns, strategy, specs, expected) in [
         (
             1,
             CpuBatchStrategy::Auto,
-            vec![2.0, -1.0],
+            vec![TreeTransformBlockSpec::multi(
+                vec![0, 1],
+                vec![0],
+                vec![2.0, -1.0],
+            )],
             [2.0, 4.0, -1.0, -2.0],
         ),
         (
             2,
-            CpuBatchStrategy::Outer,
-            vec![2.0, 3.0, -1.0, 4.0],
+            CpuBatchStrategy::Split {
+                lanes: core::num::NonZeroUsize::new(2).unwrap(),
+            },
+            vec![
+                TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![2.0, 3.0]),
+                TreeTransformBlockSpec::multi(vec![1], vec![0, 1], vec![-1.0, 4.0]),
+            ],
             [11.0, 16.0, 11.0, 14.0],
         ),
     ] {
         let source_structure = structure(columns);
-        let transform = TreeTransformStructure::compile_structures(
-            &destination,
-            &source_structure,
-            &[TreeTransformBlockSpec::multi(
-                vec![0, 1],
-                (0..columns).collect(),
-                matrix,
-            )],
-        )
-        .unwrap();
+        let transform =
+            TreeTransformStructure::compile_structures(&destination, &source_structure, &specs)
+                .unwrap();
         let source = (1..=2 * columns)
             .map(|value| value as f64)
             .collect::<Vec<_>>();
