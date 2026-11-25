@@ -370,7 +370,8 @@ no token from it.
 
 A tree-transform replay chooses the direct Singles and inactive movement
 widths separately from plan-group chunking. Compilation retains integer
-role, run and element totals by contiguous-run or strided-inner traversal,
+role, run and element totals by contiguous-run or strided-inner traversal and
+identity/scaled map class,
 hull-run maxima, and the phase's distinct source-plus-destination working
 set in elements. Scalar size converts that working set to bytes at execution.
 These summaries contain no host timing constants and are included in retained
@@ -414,13 +415,25 @@ One shared 10 ms planned deadline includes dispatch, replay fixture creation,
 allocation, first stores, sampling and validation. Dispatch has a 2 ms allowance;
 replay receives the remaining time. A deadline check precedes every fixture
 build. The online working-set ladder is 64 KiB, 1 MiB and 4 MiB; one source and
-one uninitialized destination allocation, each 4 MiB, serve all copy/fill kinds
+one uninitialized destination allocation, each 4 MiB, serve all copy/scale/fill kinds
 and run geometries, including source stride padding. No separate warm-up runs
 at 1 MiB or above. Two measured samples at those sizes retain the lower reused
 buffer result; smaller fixtures use three batches after one warm-up. The
 cache-resident one/many-run difference must exceed twenty times the measured
 timer/batch jitter before it supplies a flat online r curve. Large-W run
 dependence remains unmeasured and belongs to offline calibration.
+Scaled copies use the real structural map at scale `-0.75` on the same buffers.
+To keep the shared 10 ms deadline, only the 64 KiB point is measured: 4096
+addressed elements, one run and 2048 runs, independently for contiguous and
+strided inner traversal. Each scaled `r` and `e` at this point supplies its
+ratio to the corresponding copy rate; that ratio multiplies the copy curve.
+The role setup `a` remains shared. This is an approximation away from the
+cache point; no second scaled working-set ladder is measured. Diagnostics
+print raw samples, scaled rates, the two ratios and rejected signal/jitter.
+The five extra fixtures reuse the existing 8 MiB of payload buffers; they
+add no source or destination payload allocation. On a 64-bit target the
+fixed calibration payload grows from 336 to 656 bytes. All added summaries
+and payload bytes are included in the existing inline retention charges.
 Finite, nonnegative constants are required; element curves may decrease by at
 most 10% between points before a monotone envelope is applied for split search.
 Raw samples and signed fit values remain available from the testing-only
@@ -444,13 +457,19 @@ error. Placement must remain stable for the retained entry's lifetime; trim
 after changing it.
 
 Uncalibrated scalar, writer or map classes use the base all-or-one rule.
-The measured classes are built-in CPU `f64` owned identity copies and owned
-zero fill, with separate rates. Categorical structure compilation records an
-exact `f64` identity-coefficient check before publishing the core. Generic
-expert Singles without that classification, initialized updates, complex
-payloads, nonidentity Single maps, scalar/broadcast traversals and custom
-adapters retain the base route. Inactive owned zero fill is admitted
-independently of Single coefficients.
+The measured classes are built-in CPU `f64` owned identity copies, real
+scaled copies and owned zero fill. Categorical structure compilation classifies
+finite nonzero `f64` coefficients and retains separate counts for identity and
+scaled Singles, including the largest role's class. With identity alpha, mixed
+phases sum both classes exactly within the cost model. A finite nonzero runtime
+alpha uses the scaled class for every Single when alpha differs from one.
+This also prices a folded exact identity as scaled; resolving those cancellations
+without an item scan would require coefficient-indexed summaries. A minimum
+coefficient magnitude check rejects alpha products that underflow to zero.
+Generic expert Singles without classification, initialized updates, complex
+payloads, conjugated Singles, zero/nonfinite coefficients or alpha,
+scalar/broadcast traversals and custom adapters retain the base route.
+Inactive owned zero fill is admitted independently of Single coefficients.
 Under `Auto`, the original budget's dispatch cost must pay back three times
 against the whole destination's Strided Copy estimate, then the width is
 clamped to runnable parts; otherwise it is one. The original shared hull-run

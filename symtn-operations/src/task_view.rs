@@ -78,8 +78,10 @@ impl<'a, C: Copy> TreeTransformTaskView<'a, C> {
 
     #[inline]
     #[cfg(feature = "tenferro")]
-    pub(crate) fn single_coefficients_are_identity(self) -> bool {
-        self.structure.single_coefficients_are_identity()
+    pub(crate) fn single_movement(
+        self,
+    ) -> Option<(f64, crate::transform_structure::MovementSummary)> {
+        self.structure.single_movement()
     }
 
     /// A Multi block's shared `U[dst, src]` matrix, read in place.

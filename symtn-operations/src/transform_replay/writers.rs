@@ -15,7 +15,7 @@ pub(super) struct ReplayParts<'a, C> {
     pub single_coefficients: &'a [C],
     pub storage_conjugate: bool,
     #[cfg(feature = "tenferro")]
-    pub single_coefficients_are_identity: bool,
+    pub single_movement: Option<(f64, crate::transform_structure::MovementSummary)>,
 }
 
 impl<'a, C: Copy> ReplayParts<'a, C> {
@@ -26,7 +26,7 @@ impl<'a, C: Copy> ReplayParts<'a, C> {
             single_coefficients: task.single_coefficients(),
             storage_conjugate: task.storage_conjugate(),
             #[cfg(feature = "tenferro")]
-            single_coefficients_are_identity: task.single_coefficients_are_identity(),
+            single_movement: task.single_movement(),
         }
     }
 }
@@ -75,10 +75,13 @@ pub(super) trait DestinationWriter<T, D>: Sync {
     /// for the first time (an owned output), not a caller-provided one.
     const FIRST_TOUCH: bool;
 
-    /// Whether this writer uses the measured owned f64 copy/fill maps.
+    /// Measured phase summaries; `None` keeps that phase on the base route.
     #[cfg(feature = "tenferro")]
-    fn movement_eligible(&self) -> [bool; 2] {
-        [false; 2]
+    fn movement_phases(
+        &self,
+        _: &TreeTransformParallelSchedule,
+    ) -> [Option<crate::transform_structure::MovementSummary>; 2] {
+        [None; 2]
     }
 
     /// A fresh worker's kernel state.
@@ -269,14 +272,28 @@ where
     const FIRST_TOUCH: bool = true;
 
     #[cfg(feature = "tenferro")]
-    fn movement_eligible(&self) -> [bool; 2] {
-        let f64 = std::any::TypeId::of::<D>() == std::any::TypeId::of::<f64>();
-        [
-            f64 && self.alpha.is_one()
-                && !self.task.storage_conjugate
-                && self.task.single_coefficients_are_identity,
-            f64,
-        ]
+    fn movement_phases(
+        &self,
+        schedule: &TreeTransformParallelSchedule,
+    ) -> [Option<crate::transform_structure::MovementSummary>; 2] {
+        let alpha = (&self.alpha as &dyn std::any::Any).downcast_ref::<f64>();
+        let singles = alpha
+            .filter(|alpha| alpha.is_finite() && **alpha != 0.0 && !self.task.storage_conjugate)
+            .and_then(|alpha| {
+                self.task
+                    .single_movement
+                    .filter(|(minimum, _)| alpha.abs() * minimum != 0.0)
+                    .map(|(_, phase)| {
+                        // ponytail: folded identities use scaled pricing; exact cancellation
+                        // pricing needs coefficient-indexed summaries.
+                        if *alpha == 1.0 {
+                            phase
+                        } else {
+                            phase.scaled()
+                        }
+                    })
+            });
+        [singles, alpha.map(|_| schedule.inactive_movement)]
     }
 
     fn kernels(&self) {}

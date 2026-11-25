@@ -45,14 +45,14 @@ impl<const N: usize> Curve<N> {
 #[derive(Clone, Copy)]
 struct Rates {
     setup: f64,
-    runs: [Curve<2>; 2],
-    elements: [Curve<3>; 2],
+    runs: [Curve<2>; 4],
+    elements: [Curve<3>; 4],
 }
 
 impl Rates {
     fn cost(&self, counts: MovementCounts, bytes: f64) -> f64 {
         self.setup * counts.roles.iter().sum::<usize>() as f64
-            + (0..2)
+            + (0..4)
                 .map(|k| {
                     self.runs[k].at(bytes) * counts.runs[k] as f64
                         + self.elements[k].at(bytes) * counts.elements[k] as f64
@@ -69,7 +69,7 @@ impl Rates {
 }
 
 /// One fixed-size payload type is used for the engine's movement slot.
-/// Copy and zero-fill have independent measurements; unavailable maps use base.
+/// Copy, scaled copy and zero-fill are measured; unavailable maps use base.
 pub(super) struct Calibration {
     copy: Rates,
     fill: Rates,
@@ -119,7 +119,7 @@ fn choose(
     admits_largest: bool,
 ) -> usize {
     if budget <= 1
-        || phase.total.roles == [0; 2]
+        || phase.total.roles == [0; 4]
         || !phase.exact_working_set
         || !phase.supported_span
     {
@@ -135,7 +135,7 @@ fn choose(
         budget,
         admits_largest,
     );
-    let mut cuts = [2usize; usize::BITS as usize + 32];
+    let mut cuts = [2usize; usize::BITS as usize + 3 + 2 * 4 * (2 + 3)];
     let mut count = 0;
     let mut add = |q: usize| {
         cuts[count] = q.clamp(2, budget);
@@ -146,7 +146,7 @@ fn choose(
     for &(q, _) in dispatch {
         add(q);
     }
-    for k in 0..2 {
+    for k in 0..4 {
         for w in rates.runs[k]
             .points
             .iter()
@@ -195,25 +195,20 @@ fn choose(
 pub(super) fn widths(
     calibration: &Calibration,
     dispatch: &[(usize, Duration)],
-    schedule: &TreeTransformParallelSchedule,
+    singles: MovementSummary,
+    inactive: MovementSummary,
     budget: usize,
     admits_largest_single: bool,
 ) -> [usize; 2] {
     [
         choose(
             &calibration.copy,
-            schedule.single_movement,
+            singles,
             dispatch,
             budget,
             admits_largest_single,
         ),
-        choose(
-            &calibration.fill,
-            schedule.inactive_movement,
-            dispatch,
-            budget,
-            false,
-        ),
+        choose(&calibration.fill, inactive, dispatch, budget, false),
     ]
 }
 
@@ -241,10 +236,19 @@ fn calibrate_report(
     let timer_jitter = (0..8)
         .map(|_| Instant::now().elapsed().as_secs_f64() * 1e9)
         .fold(0.0, f64::max);
-    let copy = measure(
+    let mut copy = measure(
         exec,
         deadline,
         false,
+        &source,
+        &mut destination,
+        timer_jitter,
+        &mut report,
+    )?;
+    measure_scaled(
+        exec,
+        deadline,
+        &mut copy,
         &source,
         &mut destination,
         timer_jitter,
@@ -294,7 +298,13 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new(elements: usize, runs: usize, kind: usize, fill: bool) -> Result<Self, OperationError> {
+    fn new(
+        elements: usize,
+        runs: usize,
+        kind: usize,
+        fill: bool,
+        scale: f64,
+    ) -> Result<Self, OperationError> {
         use symtn_core::BlockSpec;
         let inner = elements / runs;
         let step = kind + 1;
@@ -314,7 +324,7 @@ impl Fixture {
         let specs = if fill {
             vec![]
         } else {
-            vec![crate::TreeTransformBlockSpec::single(0, 0, 1.0)]
+            vec![crate::TreeTransformBlockSpec::single(0, 0, scale)]
         };
         let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs)?;
         if elements > 0 {
@@ -404,6 +414,7 @@ fn measured(
     runs: usize,
     kind: usize,
     fill: bool,
+    scale: f64,
     source: &[f64],
     destination: &mut Vec<f64>,
     report: &mut Option<&mut String>,
@@ -411,7 +422,7 @@ fn measured(
     if Instant::now() >= deadline {
         return None;
     }
-    let fixture = Fixture::new(elements, runs, kind, fill).ok()?;
+    let fixture = Fixture::new(elements, runs, kind, fill, scale).ok()?;
     let working_set = elements * if fill { 8 } else { 16 };
     let repetitions = if elements <= 16 {
         128
@@ -437,7 +448,13 @@ fn measured(
         let _ = writeln!(
             report,
             "{} kind={kind} n={elements} runs={runs} repetitions={repetitions} samples_ns={:?}",
-            if fill { "fill" } else { "copy" },
+            if fill {
+                "fill"
+            } else if scale == 1.0 {
+                "copy"
+            } else {
+                "scaled"
+            },
             &samples[..sample_count]
         );
     }
@@ -467,15 +484,21 @@ fn measure(
             runs,
             kind,
             fill,
+            1.0,
             source,
             destination,
             report,
         )
     };
     let empty = sample(0, 1, 0, report)?.ns;
-    let mut run_points = [[(0, 0.0); 2]; 2];
-    let mut one_run = [[0.0; 3]; 2];
-    for (k, points) in run_points.iter_mut().enumerate().skip(usize::from(fill)) {
+    let mut run_points = [[(0, 0.0); 2]; 4];
+    let mut one_run = [[0.0; 3]; 4];
+    for (k, points) in run_points
+        .iter_mut()
+        .enumerate()
+        .take(2)
+        .skip(usize::from(fill))
+    {
         let n = elements_at(WORKING_SETS[0], fill);
         let one = sample(n, 1, k, report)?;
         let many_runs = n / 2;
@@ -499,15 +522,18 @@ fn measure(
     if fill {
         run_points[0] = run_points[1];
     }
+    run_points[2] = run_points[0];
+    run_points[3] = run_points[1];
     let runs = run_points.map(|points| Curve { points });
     let low = sample(2, 1, 0, report)?.ns;
     let high = sample(16, 1, 0, report)?.ns;
     let slope = (high - low) / 14.0;
     let setup = low - empty - slope * 2.0 - runs[0].points[0].1;
-    let mut element_points = [[(0, 0.0); 3]; 2];
+    let mut element_points = [[(0, 0.0); 3]; 4];
     for (k, points) in element_points
         .iter_mut()
         .enumerate()
+        .take(2)
         .skip(usize::from(fill))
     {
         for (j, w) in WORKING_SETS.into_iter().enumerate() {
@@ -519,6 +545,8 @@ fn measure(
     if fill {
         element_points[0] = element_points[1];
     }
+    element_points[2] = element_points[0];
+    element_points[3] = element_points[1];
     let mut rates = Rates {
         setup,
         runs,
@@ -553,17 +581,89 @@ fn measure(
     Some(rates)
 }
 
+/// ponytail: one cache-resident scale point supplies ratios for the copy curve;
+/// a second full ladder needs separate offline validation and a larger budget.
+#[allow(clippy::too_many_arguments)]
+fn measure_scaled(
+    exec: &mut symtn_dense::lanes::Exec<'_>,
+    deadline: Instant,
+    rates: &mut Rates,
+    source: &[f64],
+    destination: &mut Vec<f64>,
+    timer_jitter: f64,
+    report: &mut Option<&mut String>,
+) -> Option<()> {
+    let mut sample = |elements, runs, kind, report: &mut Option<&mut String>| {
+        measured(
+            exec,
+            deadline,
+            elements,
+            runs,
+            kind,
+            false,
+            -0.75,
+            source,
+            destination,
+            report,
+        )
+    };
+    let empty = sample(0, 1, 0, report)?.ns;
+    let w = WORKING_SETS[0];
+    let n = elements_at(w, false);
+    for kind in 0..2 {
+        let one = sample(n, 1, kind, report)?;
+        let many_runs = n / 2;
+        let many = sample(n, many_runs, kind, report)?;
+        let signal = many.ns - one.ns;
+        let jitter = timer_jitter.max(one.jitter + many.jitter);
+        if let Some(report) = report.as_deref_mut() {
+            let _ = writeln!(
+                report,
+                "scaled kind={kind} r_signal_ns={signal} jitter_ns={jitter} accepted={}",
+                signal.is_finite() && signal >= 20.0 * jitter
+            );
+        }
+        if !signal.is_finite() || signal < 20.0 * jitter {
+            return None;
+        }
+        let run = signal / (many_runs - 1) as f64;
+        let element = (one.ns - empty - rates.setup - run) / n as f64;
+        let r_ratio = run / rates.runs[kind].at(w as f64);
+        let e_ratio = element / rates.elements[kind].at(w as f64);
+        if let Some(report) = report.as_deref_mut() {
+            let _ = writeln!(report,
+                "scaled kind={kind} W={w} scale=-0.75 r_ns_per_run={run} e_ns_per_element={element} r_ratio={r_ratio} e_ratio={e_ratio} signal_ns={signal} jitter_ns={jitter}");
+        }
+        if !r_ratio.is_finite() || r_ratio < 0.0 || !e_ratio.is_finite() || e_ratio < 0.0 {
+            return None;
+        }
+        rates.runs[kind + 2] = Curve {
+            points: rates.runs[kind].points.map(|(w, r)| (w, r * r_ratio)),
+        };
+        rates.elements[kind + 2] = Curve {
+            points: rates.elements[kind].points.map(|(w, e)| (w, e * e_ratio)),
+        };
+    }
+    rates.valid().then_some(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn measured_rates() -> Rates {
+    pub(super) fn measured_rates() -> Rates {
         Rates {
             setup: 9.0,
             runs: [Curve {
                 points: [(65536, 1.3), (16777216, 1.6)],
-            }; 2],
+            }; 4],
             elements: [
+                Curve {
+                    points: [(65536, 0.07), (8388608, 0.21), (16777216, 0.22)],
+                },
+                Curve {
+                    points: [(65536, 0.23), (8388608, 0.27), (16777216, 0.43)],
+                },
                 Curve {
                     points: [(65536, 0.07), (8388608, 0.21), (16777216, 0.22)],
                 },
@@ -604,7 +704,7 @@ mod tests {
         }
     }
 
-    fn ladder(anchors: &[(usize, f64)]) -> Vec<(usize, Duration)> {
+    pub(super) fn ladder(anchors: &[(usize, f64)]) -> Vec<(usize, Duration)> {
         anchors
             .iter()
             .map(|&(q, ns)| (q, Duration::from_secs_f64(ns * 1e-9)))
@@ -630,6 +730,84 @@ mod tests {
         assert!(choose(&rates, phase, &dispatch, 96, true) > 1);
         let free = ladder(&[(1, 0.0), (96, 0.0)]);
         assert_eq!(choose(&rates, phase, &free, 96, true), 1);
+    }
+
+    /// Scaled dominant Singles use their own measured curves; expensive dispatch
+    /// is the negative control retaining the whole-token inline route.
+    #[test]
+    fn scaled_dominant_phase_splits() {
+        let rates = measured_rates();
+        let phase = summary(589824, 2304, 99, 1, 0).scaled();
+        let dispatch = ladder(&[
+            (1, 0.0),
+            (2, 647.5),
+            (4, 894.0),
+            (8, 1429.0),
+            (16, 2435.0),
+            (32, 8927.5),
+            (64, 30267.5),
+            (96, 44956.5),
+        ]);
+        assert!(choose(&rates, phase, &dispatch, 96, true) > 1);
+        assert_eq!(
+            choose(&rates, phase, &ladder(&[(1, 0.0), (96, 1e12)]), 96, true),
+            1
+        );
+    }
+
+    /// Mixed Singles add one cost from each map class, while removing scale
+    /// applications is the negative control returning the copy-only price.
+    #[test]
+    fn mixed_singles_sum_copy_and_scale_costs() {
+        let mut rates = measured_rates();
+        rates.setup = 1.0;
+        rates.runs = [Curve {
+            points: [(1, 2.0), (2, 2.0)],
+        }; 4];
+        rates.elements = [Curve {
+            points: [(1, 3.0), (2, 3.0), (3, 3.0)],
+        }; 4];
+        rates.runs[2] = Curve {
+            points: [(1, 5.0), (2, 5.0)],
+        };
+        rates.elements[2] = Curve {
+            points: [(1, 7.0), (2, 7.0), (3, 7.0)],
+        };
+        let mixed = MovementCounts {
+            roles: [1, 0, 1, 0],
+            runs: [1, 0, 2, 0],
+            elements: [4, 0, 6, 0],
+        };
+        assert_eq!(rates.cost(mixed, 1.0), 2.0 + 2.0 + 12.0 + 10.0 + 42.0);
+        let copy = MovementCounts {
+            roles: [2, 0, 0, 0],
+            runs: [3, 0, 0, 0],
+            elements: [10, 0, 0, 0],
+        };
+        assert_eq!(rates.cost(copy, 1.0), 2.0 + 6.0 + 30.0);
+    }
+
+    /// The full machine-word dispatch ladder fits the stack cut buffer;
+    /// a two-width budget is the control with the same free-cost inline tie.
+    #[test]
+    fn all_dispatch_anchors_fit_with_scaled_curve_knots() {
+        let rates = Rates {
+            setup: 0.0,
+            runs: [Curve {
+                points: [(1, 0.0), (2, 0.0)],
+            }; 4],
+            elements: [Curve {
+                points: [(1, 0.0), (2, 0.0), (3, 0.0)],
+            }; 4],
+        };
+        let dispatch: Vec<_> = std::iter::successors(Some(1usize), |&width| {
+            (width < usize::MAX).then(|| width.saturating_mul(2))
+        })
+        .map(|width| (width, Duration::ZERO))
+        .collect();
+        let phase = summary(4, 2, 1, 1, 0).scaled();
+        assert_eq!(choose(&rates, phase, &dispatch, usize::MAX, true), 1);
+        assert_eq!(choose(&rates, phase, &dispatch[..2], 2, true), 1);
     }
 
     /// The larger population of small items splits with cheap dispatch;
@@ -681,10 +859,10 @@ mod tests {
             setup: 1.0,
             runs: [Curve {
                 points: [(1, 1.0), (2, 1.0)],
-            }; 2],
+            }; 4],
             elements: [Curve {
                 points: [(1, 1.0), (2, 1.0), (3, 1.0)],
-            }; 2],
+            }; 4],
         };
         let phase = summary(1000, 2, 3, 1, 0);
         let actual = inline_time(&rates, phase, 1.0, 10.0, 4, true);
@@ -703,10 +881,10 @@ mod tests {
             setup: 1.0,
             runs: [Curve {
                 points: [(1, 1.0), (2, 1.0)],
-            }; 2],
+            }; 4],
             elements: [Curve {
                 points: [(1, 1.0), (2, 1.0), (3, 1.0)],
-            }; 2],
+            }; 4],
         };
         let phase = summary(1000, 2, 10, 1, 1);
         let dispatch = ladder(&[(1, 0.0), (2, 10.0), (4, 10.0)]);
@@ -723,16 +901,16 @@ mod tests {
             setup: 1.0,
             runs: [Curve {
                 points: [(1, 1.0), (2, 1.0)],
-            }; 2],
+            }; 4],
             elements: [Curve {
                 points: [(1, 1.0), (2, 1.0), (3, 1.0)],
-            }; 2],
+            }; 4],
         };
         let mut phase = summary(1000, 2, 3, 1, 0);
         phase.total = MovementCounts {
-            roles: [1, 3],
-            runs: [1, 3],
-            elements: [1000, 6],
+            roles: [1, 3, 0, 0],
+            runs: [1, 3, 0, 0],
+            elements: [1000, 6, 0, 0],
         };
         phase.max.roles[1] = 1;
         phase.max.runs[1] = 1;
@@ -811,10 +989,10 @@ mod tests {
             setup: 1.0,
             runs: [Curve {
                 points: [(1, 1.0), (2, 1.0)],
-            }; 2],
+            }; 4],
             elements: [Curve {
                 points: [(1, 1.0), (2, 1.0), (3, 1.0)],
-            }; 2],
+            }; 4],
         };
         let dispatch = ladder(&[(1, 0.0), (4, 0.0)]);
         assert_eq!(
@@ -843,20 +1021,137 @@ mod tests {
 mod calibration_tests {
     use super::*;
 
+    /// A dominant-role shape with real recoupling factors reaches scale pricing;
+    /// prohibitive dispatch is the control keeping its calibrated width inline.
+    #[test]
+    fn nonidentity_coefficient_schedule_admits_scaled_dominant_phase() {
+        let shapes = std::iter::once(vec![589824]).chain((0..99).map(|_| vec![2304]));
+        let space = BlockStructure::packed_column_major(1, shapes).unwrap();
+        let specs: Vec<_> = (0..100)
+            .map(|block| crate::TreeTransformBlockSpec::single(block, block, -0.75))
+            .collect();
+        let transform = TreeTransformStructure::compile_structures(&space, &space, &specs)
+            .unwrap()
+            .classify_single_coefficients();
+        let writer = OwnedWriter {
+            task: ReplayParts::new(transform.task_view().unwrap()),
+            alpha: 1.0,
+        };
+        let [phase, _] = writer.movement_phases(transform.parallel_schedule());
+        let phase = phase.expect("finite real scaled Singles are eligible");
+        assert_eq!(phase.total.roles, [0, 0, specs.len(), 0]);
+        let rates = super::tests::measured_rates();
+        let dispatch = super::tests::ladder(&[
+            (1, 0.0),
+            (2, 647.5),
+            (4, 894.0),
+            (8, 1429.0),
+            (16, 2435.0),
+            (32, 8927.5),
+            (64, 30267.5),
+            (96, 44956.5),
+        ]);
+        assert!(choose(&rates, phase, &dispatch, 96, true) > 1);
+        assert_eq!(
+            choose(
+                &rates,
+                phase,
+                &super::tests::ladder(&[(1, 0.0), (96, 1e12)]),
+                96,
+                true
+            ),
+            1
+        );
+    }
+
+    /// The real direct replay records model eligibility for real scales;
+    /// conjugation and complex payloads are controls staying on the base route.
+    #[test]
+    fn conjugated_and_complex_owned_singles_trace_base_routes() {
+        use num_complex::Complex64;
+        let space = Arc::new(BlockStructure::packed_column_major(1, [vec![32], vec![32]]).unwrap());
+        let specs = [
+            crate::TreeTransformBlockSpec::single(0, 0, -0.75),
+            crate::TreeTransformBlockSpec::single(1, 1, 1.0),
+        ];
+        let mut engine =
+            tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(2).build().unwrap());
+        let mut dense = symtn_dense::DefaultDenseExecutor::new();
+        for conjugate in [false, true] {
+            let transform = TreeTransformStructure::compile_structures_with_storage_conjugation(
+                &space, &space, &specs, conjugate,
+            )
+            .unwrap()
+            .classify_single_coefficients();
+            if !conjugate {
+                for (alpha, expected) in [
+                    (1.0, Some([1, 0, 1, 0])),
+                    (-2.0, Some([0, 0, 2, 0])),
+                    (0.0, None),
+                ] {
+                    let writer = OwnedWriter {
+                        task: ReplayParts::new(transform.task_view().unwrap()),
+                        alpha,
+                    };
+                    assert_eq!(
+                        writer.movement_phases(transform.parallel_schedule())[0]
+                            .map(|phase| phase.total.roles),
+                        expected
+                    );
+                }
+            }
+            let mut real = TreeTransformWorkspace::<f64>::default();
+            try_tree_transform_structure_overwrite_owned_raw(
+                &mut engine,
+                &mut dense,
+                &mut real,
+                &transform,
+                &space,
+                &space,
+                1,
+                &[2.0; 64],
+                1.0,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(real.direct_routes[0].0, !conjugate);
+            if conjugate {
+                assert_eq!(real.direct_routes[0], (false, None));
+            }
+            let mut complex = TreeTransformWorkspace::<Complex64>::default();
+            try_tree_transform_structure_overwrite_owned_raw(
+                &mut engine,
+                &mut dense,
+                &mut complex,
+                &transform,
+                &space,
+                &space,
+                1,
+                &[Complex64::new(2.0, 1.0); 64],
+                Complex64::new(1.0, 0.0),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(complex.direct_routes[0], (false, None));
+        }
+    }
+
     /// Every tiny, one-run and cache-resident many-run fixture must retain
     /// the traversal class checked by Fixture::new after normalization.
     #[test]
     fn online_ladder_geometry_preserves_traversal_classes() {
         for fill in [false, true] {
             for n in [0, 2, 16] {
-                Fixture::new(n, 1, 0, fill).unwrap();
+                Fixture::new(n, 1, 0, fill, 1.0).unwrap();
             }
             for kind in usize::from(fill)..2 {
                 for w in WORKING_SETS {
-                    Fixture::new(elements_at(w, fill), 1, kind, fill).unwrap();
+                    Fixture::new(elements_at(w, fill), 1, kind, fill, 1.0).unwrap();
                 }
                 let n = elements_at(WORKING_SETS[0], fill);
-                Fixture::new(n, n / 2, kind, fill).unwrap();
+                Fixture::new(n, n / 2, kind, fill, 1.0).unwrap();
             }
         }
     }

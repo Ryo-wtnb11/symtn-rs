@@ -198,8 +198,10 @@ pub(super) fn record_planned(
     layouts: &TreeTransformLayoutTable,
     source_tiled: bool,
 ) -> Result<(), OperationError> {
-    schedule.single_movement = movement_summary(schedule, blocks, layouts, true, source_tiled)?;
-    schedule.inactive_movement = movement_summary(schedule, blocks, layouts, false, true)?;
+    schedule.single_movement =
+        movement_summary(schedule, blocks, layouts, true, source_tiled, |_| false)?;
+    schedule.inactive_movement =
+        movement_summary(schedule, blocks, layouts, false, true, |_| false)?;
     let planned = |layout: usize| -> Result<usize, OperationError> {
         Ok(if layouts.role(layout)?.plan.is_some() {
             layouts.entry(layout).element_count
@@ -224,12 +226,13 @@ pub(super) fn record_planned(
     Ok(())
 }
 
-fn movement_summary(
+pub(super) fn movement_summary(
     schedule: &TreeTransformParallelSchedule,
     blocks: &[TreeTransformBlock],
     layouts: &TreeTransformLayoutTable,
     singles: bool,
     source_tiled: bool,
+    scaled: impl Fn(usize) -> bool,
 ) -> Result<MovementSummary, OperationError> {
     let (list, jobs) = if singles {
         (&schedule.singles, &schedule.single_runs)
@@ -246,18 +249,18 @@ fn movement_summary(
         let end = jobs.get(job + 1).map_or(list.len(), |&v| v as usize);
         let mut counts = MovementCounts::default();
         for &item in &list[start as usize..end] {
-            let (layout, source) = if singles {
+            let (layout, source, scaled) = if singles {
                 let TreeTransformBlock::Single {
                     dst_layout,
                     src_layout,
-                    ..
+                    coefficient,
                 } = blocks[item as usize]
                 else {
                     unreachable!("compiled Single list")
                 };
-                (dst_layout, Some(src_layout))
+                (dst_layout, Some(src_layout), scaled(coefficient))
             } else {
-                (item as usize, None)
+                (item as usize, None, false)
             };
             let elements = layouts.entry(layout).element_count;
             if elements == 0 {
@@ -275,6 +278,7 @@ fn movement_summary(
                 result.supported_span &= strides[0] != 0;
                 (dims[0], 1)
             };
+            let kind = kind + 2 * usize::from(scaled);
             let runs = elements
                 .checked_div(inner)
                 .ok_or(OperationError::ElementCountOverflow)?;
@@ -298,7 +302,7 @@ fn movement_summary(
                 };
             }
         }
-        for kind in 0..2 {
+        for kind in 0..4 {
             result.total.roles[kind] = result.total.roles[kind]
                 .checked_add(counts.roles[kind])
                 .ok_or(OperationError::ElementCountOverflow)?;
@@ -485,15 +489,15 @@ mod tests {
             let schedule = transform.parallel_schedule();
             let expected = if transpose {
                 MovementCounts {
-                    roles: [1, 1],
-                    runs: [1, 2],
-                    elements: [4, 4],
+                    roles: [1, 1, 0, 0],
+                    runs: [1, 2, 0, 0],
+                    elements: [4, 4, 0, 0],
                 }
             } else {
                 MovementCounts {
-                    roles: [2, 0],
-                    runs: [2, 0],
-                    elements: [8, 0],
+                    roles: [2, 0, 0, 0],
+                    runs: [2, 0, 0, 0],
+                    elements: [8, 0, 0, 0],
                 }
             };
             assert_eq!(schedule.single_movement.total, expected);
@@ -502,9 +506,9 @@ mod tests {
                 expected
             } else {
                 MovementCounts {
-                    roles: [1, 0],
-                    runs: [1, 0],
-                    elements: [4, 0],
+                    roles: [1, 0, 0, 0],
+                    runs: [1, 0, 0, 0],
+                    elements: [4, 0, 0, 0],
                 }
             };
             assert_eq!(schedule.single_movement.max, max);
@@ -519,9 +523,9 @@ mod tests {
             assert_eq!(
                 schedule.inactive_movement.total,
                 MovementCounts {
-                    roles: [0, 1],
-                    runs: [0, 1],
-                    elements: [0, 4]
+                    roles: [0, 1, 0, 0],
+                    runs: [0, 1, 0, 0],
+                    elements: [0, 4, 0, 0]
                 }
             );
             assert_eq!(schedule.inactive_movement.working_set_elements, 4);

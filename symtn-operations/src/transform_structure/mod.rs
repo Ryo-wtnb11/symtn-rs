@@ -82,7 +82,7 @@ pub struct TreeTransformReplay<T> {
     blocks: Vec<TreeTransformBlock>,
     layouts: TreeTransformLayoutTable,
     coefficients: Arc<TreeTransformCoefficients<T>>,
-    single_coefficients_are_identity: bool,
+    single_movement: Option<(f64, MovementSummary)>,
     inactive_dst_layouts: Vec<usize>,
     physical_overwrite_len: Option<usize>,
     recoupling_plan: TreeTransformRecouplingPlan,
@@ -99,7 +99,7 @@ impl<T: PartialEq> PartialEq for TreeTransformReplay<T> {
             blocks,
             layouts,
             coefficients,
-            single_coefficients_are_identity: _,
+            single_movement: _,
             inactive_dst_layouts,
             physical_overwrite_len,
             recoupling_plan,
@@ -181,7 +181,7 @@ impl<T> TreeTransformReplay<T> {
 }
 
 impl<T> TreeTransformStructure<T> {
-    /// Classifies an exclusively owned, newly compiled core's f64 Single coefficients.
+    /// Classifies an exclusively owned core's finite, nonzero f64 Single maps.
     /// Shared cores retain their existing classification without scanning or copying.
     #[doc(hidden)]
     pub fn classify_single_coefficients(mut self) -> Self
@@ -189,10 +189,26 @@ impl<T> TreeTransformStructure<T> {
         T: 'static,
     {
         if let Some(core) = Arc::get_mut(&mut self.core) {
-            core.single_coefficients_are_identity = core.coefficients.singles.iter().all(|value| {
-                (value as &dyn std::any::Any)
-                    .downcast_ref::<f64>()
-                    .is_some_and(|value| *value == 1.0)
+            let real = |index: usize| {
+                (&core.coefficients.singles[index] as &dyn std::any::Any).downcast_ref::<f64>()
+            };
+            let minimum =
+                (0..core.coefficients.singles.len()).try_fold(f64::INFINITY, |minimum, index| {
+                    real(index)
+                        .filter(|value| value.is_finite() && **value != 0.0)
+                        .map(|value| minimum.min(value.abs()))
+                });
+            core.single_movement = minimum.and_then(|minimum| {
+                ownership::movement_summary(
+                    &core.parallel_schedule,
+                    &core.blocks,
+                    &core.layouts,
+                    true,
+                    core.parallel_schedule.single_movement.exact_working_set,
+                    |index| real(index).is_some_and(|value| *value != 1.0),
+                )
+                .ok()
+                .map(|summary| (minimum, summary))
             });
         }
         self
@@ -327,8 +343,8 @@ impl<T: Copy> TreeTransformStructure<T> {
 
     #[inline]
     #[cfg(any(feature = "tenferro", test))]
-    pub(crate) fn single_coefficients_are_identity(&self) -> bool {
-        self.core.single_coefficients_are_identity
+    pub(crate) fn single_movement(&self) -> Option<(f64, MovementSummary)> {
+        self.core.single_movement
     }
 
     /// Length of the logical coefficient payload the block offsets index.
@@ -546,8 +562,8 @@ mod tests {
     use symtn_core::{BlockKey, BlockSpec};
 
     #[test]
-    fn coefficient_classification_admits_only_verified_f64_identity() {
-        // Purpose: only exclusively compiled f64 unit maps gain the copy-model proof.
+    fn coefficient_classification_admits_only_verified_real_maps() {
+        // Purpose: only exclusively compiled finite nonzero f64 maps gain a measured class.
         let space = BlockStructure::packed_column_major(1, [vec![2]]).unwrap();
         let compile = |value| {
             TreeTransformStructure::compile_structures(
@@ -557,21 +573,23 @@ mod tests {
             )
             .unwrap()
         };
-        for (value, expected) in [(1.0, true), (-1.0, false), (f64::NAN, false)] {
+        for (value, expected) in [(1.0, true), (-1.0, true), (0.0, false), (f64::NAN, false)] {
             let transform = compile(value);
-            assert!(!transform.single_coefficients_are_identity());
+            assert!(transform.single_movement().is_none());
             assert_eq!(
                 transform
                     .classify_single_coefficients()
-                    .single_coefficients_are_identity(),
+                    .single_movement()
+                    .is_some(),
                 expected
             );
         }
         let shared = compile(1.0);
         let other = shared.clone();
-        assert!(!shared
+        assert!(shared
             .classify_single_coefficients()
-            .single_coefficients_are_identity());
+            .single_movement()
+            .is_none());
         drop(other);
         let single = TreeTransformStructure::compile_structures(
             &space,
@@ -579,9 +597,59 @@ mod tests {
             &[TreeTransformBlockSpec::single(0, 0, 1.0_f32)],
         )
         .unwrap();
-        assert!(!single
+        assert!(single
             .classify_single_coefficients()
-            .single_coefficients_are_identity());
+            .single_movement()
+            .is_none());
+    }
+
+    /// A mixed schedule counts each map independently without altering its
+    /// geometric schedule; all-identity coefficients are the copy-only control.
+    #[test]
+    fn mixed_coefficient_summary_retains_map_classes_and_geometry() {
+        let space = BlockStructure::packed_column_major(1, [vec![4], vec![6]]).unwrap();
+        for coefficient in [-0.75, 1.0] {
+            let transform = TreeTransformStructure::compile_structures(
+                &space,
+                &space,
+                &[
+                    TreeTransformBlockSpec::single(0, 0, 1.0),
+                    TreeTransformBlockSpec::single(1, 1, coefficient),
+                ],
+            )
+            .unwrap();
+            let geometry = transform.parallel_schedule().clone();
+            let transform = transform.classify_single_coefficients();
+            assert_eq!(transform.parallel_schedule(), &geometry);
+            let (_, phase) = transform.single_movement().unwrap();
+            let (roles, runs, elements, max_elements, largest_kind) = if coefficient == 1.0 {
+                ([2, 0, 0, 0], [2, 0, 0, 0], [10, 0, 0, 0], [6, 0, 0, 0], 0)
+            } else {
+                ([1, 0, 1, 0], [1, 0, 1, 0], [4, 0, 6, 0], [4, 0, 6, 0], 2)
+            };
+            assert_eq!(
+                phase.total,
+                MovementCounts {
+                    roles,
+                    runs,
+                    elements
+                }
+            );
+            let max_roles = if coefficient == 1.0 {
+                [1, 0, 0, 0]
+            } else {
+                [1, 0, 1, 0]
+            };
+            assert_eq!(
+                phase.max,
+                MovementCounts {
+                    roles: max_roles,
+                    runs: max_roles,
+                    elements: max_elements
+                }
+            );
+            assert_eq!(phase.largest.kind, largest_kind);
+        }
     }
 
     /// Independent hand normalization of a two-sided role: drop extent-1

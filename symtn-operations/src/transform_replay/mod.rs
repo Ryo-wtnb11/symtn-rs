@@ -185,6 +185,8 @@ pub struct HostTreeTransformWorkspace<T> {
     destination_fills: usize,
     #[cfg(any(test, feature = "testing"))]
     movement_phases: usize,
+    #[cfg(test)]
+    direct_routes: [(bool, Option<usize>); 2],
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     // One chunk's non-empty scatter groups, in destination order.
@@ -220,6 +222,8 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             destination_fills: 0,
             #[cfg(any(test, feature = "testing"))]
             movement_phases: 0,
+            #[cfg(test)]
+            direct_routes: [(false, None); 2],
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),

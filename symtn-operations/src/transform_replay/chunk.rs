@@ -35,7 +35,7 @@ use crate::transform_structure::{
 };
 
 /// Replays inactive writes and direct Singles in one guarded CPU entry.
-/// Eligible owned f64 identity copies/zero-fill use replay-calibrated phase
+/// Eligible owned f64 real copies/scales and zero-fill use replay-calibrated phase
 /// costs. Width one keeps the whole caller token; unsupported or failed
 /// calibration uses the original all-or-one rule and planned-leaf admission.
 /// The returned width is independently the base plan-group chunk width.
@@ -79,11 +79,14 @@ where
         .filter(|&runs| runs >= 2)
         .max()
         .unwrap_or(0);
-    let [copy_eligible, fill_eligible] = writer.movement_eligible();
+    let [single_phase, inactive_phase] = writer.movement_phases(schedule);
+    let copy_eligible = single_phase.is_some();
+    let fill_eligible = inactive_phase.is_some();
+    let single_phase = single_phase.unwrap_or(schedule.single_movement);
     let eligible = (copy_eligible
         && schedule.single_runs.len() > 1
-        && schedule.single_movement.exact_working_set
-        && schedule.single_movement.supported_span)
+        && single_phase.exact_working_set
+        && single_phase.supported_span)
         || (fill_eligible
             && schedule.inactive_runs.len() > 1
             && schedule.inactive_movement.supported_span);
@@ -116,21 +119,19 @@ where
             let mut calibrated_singles = false;
             let mut calibrated_inactive = false;
             if let Some((rates, dispatch)) = calibration {
-                let largest = schedule.single_movement.largest;
+                let largest = single_phase.largest;
                 let admits_largest = copy_eligible
                     && largest.planned
                     && inline_admits(gate, exec.token_ref(), largest.elements);
                 let [single_width, fill_width] = super::movement::widths(
                     rates,
                     dispatch,
-                    schedule,
+                    single_phase,
+                    schedule.inactive_movement,
                     exec.budget(),
                     admits_largest,
                 );
-                if copy_eligible
-                    && schedule.single_movement.exact_working_set
-                    && schedule.single_movement.supported_span
-                {
+                if copy_eligible && single_phase.exact_working_set && single_phase.supported_span {
                     singles_width = single_width;
                     split_singles = single_width > 1 && schedule.single_runs.len() > 1;
                     calibrated_singles = true;
@@ -139,6 +140,13 @@ where
                     inactive_width = fill_width;
                     calibrated_inactive = true;
                 }
+            }
+            #[cfg(test)]
+            {
+                workspace.direct_routes = [
+                    (copy_eligible, calibrated_singles.then_some(singles_width)),
+                    (fill_eligible, calibrated_inactive.then_some(inactive_width)),
+                ];
             }
             workspace
                 .prepare_fused_indices(threads.max(singles_width).max(inactive_width), rank)?;

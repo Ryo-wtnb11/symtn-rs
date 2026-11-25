@@ -52,12 +52,12 @@ pub(crate) enum TreeTransformDirectItem {
     Single { block: u32 },
 }
 
-/// Host-independent role counts, grouped by the executed span traversal.
+/// Host-independent counts: copy contiguous/strided, then scaled contiguous/strided.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct MovementCounts {
-    pub roles: [usize; 2],
-    pub runs: [usize; 2],
-    pub elements: [usize; 2],
+    pub roles: [usize; 4],
+    pub runs: [usize; 4],
+    pub elements: [usize; 4],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -78,6 +78,24 @@ pub(crate) struct MovementSummary {
     pub working_set_elements: usize,
     pub exact_working_set: bool,
     pub supported_span: bool,
+}
+
+impl MovementSummary {
+    /// Runtime nonidentity alpha uses the scaled class without scanning items.
+    pub(crate) fn scaled(mut self) -> Self {
+        for counts in [&mut self.total, &mut self.max] {
+            for kind in 0..2 {
+                counts.roles[kind + 2] += counts.roles[kind];
+                counts.runs[kind + 2] += counts.runs[kind];
+                counts.elements[kind + 2] += counts.elements[kind];
+                counts.roles[kind] = 0;
+                counts.runs[kind] = 0;
+                counts.elements[kind] = 0;
+            }
+        }
+        self.largest.kind = self.largest.kind % 2 + 2;
+        self
+    }
 }
 
 /// The replay schedule of a compiled structure, built eagerly with it and

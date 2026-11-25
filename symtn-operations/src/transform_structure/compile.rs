@@ -371,7 +371,7 @@ impl<T: Copy> TreeTransformStructure<T> {
                 blocks,
                 layouts,
                 coefficients: shared,
-                single_coefficients_are_identity: false,
+                single_movement: None,
                 inactive_dst_layouts,
                 physical_overwrite_len,
                 recoupling_plan,
