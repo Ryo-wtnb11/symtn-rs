@@ -395,7 +395,9 @@ classes distinguish contiguous or strided inner traversal, and inactive fill
 from real maps. Copy and non-identity real scale share a class; runtime alpha
 and destination scales never alter the compiled classes. Rows are indexed by
 structural class only; unmeasured fill rows use the same-stride real-map row.
-Reference curves interpolate in log W and remain flat outside their knots.
+An unlisted `HostClass` uses the checked-in AMD EPYC 9V45 CI rows, the same
+fallback as `X86_64Avx512`; these seeds are not validated predictions for that
+host. Reference curves interpolate in log W and remain flat outside their knots.
 Beyond the last online knot, an online curve keeps the reference curve's shape,
 scaled to meet that knot.
 
@@ -424,7 +426,7 @@ saturated prefix stays conservative. Fixed phases retain cumulative job
 components, and pack columns share one compiled prefix in column order.
 Scatter ownership runs depend on the chosen group chunk. On a decision-key
 miss, the workspace orders each selected chunk's groups, builds its ownership
-runs and temporary movement prefix, and combines its pack/scatter summaries
+runs and reusable movement prefix, and combines its pack/scatter summaries
 before evaluating widths. These aggregates depend on the runtime group width;
 the plan-only counts, extents, planned minimums and pack/job prefixes remain
 compiled with the structure. Each modeled leaf reads two prefix entries in
@@ -437,8 +439,15 @@ For J_s Single jobs, J_z inactive jobs and C pack columns, the new prefix
 payload is `size_of::<Job>() * (J_s + J_z + C)` bytes (192 bytes per entry:
 two arrays of four `(items,runs,elements)` u64 triples). Actual capacities are
 charged, together with every Summary and its inline planned totals.
-The workspace retains one decision entry, replacing it on a key change. Its key
-includes the compiled structure identity, slot budget, constants generation,
+Each per-dtype workspace in the engine's retained context keeps decisions for
+at most 16 compiled structures. Entries are ordered by most recent use (LRU);
+a missing structure reuses a dead Weak identity first, then an unused slot,
+then the least recently used live entry. A changed decision key replaces that
+structure's entry. Replacement reuses the width, dispatch and chunk vector
+capacities, including each chunk's order, run and prefix buffers. Spare chunks
+stay allocated for reuse. The existing `symtn::scratch::trim` drops the retained
+context and all these decisions. The key includes the compiled structure's Weak
+identity, slot budget, constants generation,
 full batch strategy, dtype size, destination-read and plan-replay flags,
 destination scratch length/capacity, and member count. Token team authority
 and, under Auto, the exact dispatch costs at widths 2 through p complete the
@@ -452,24 +461,28 @@ also prices that pack without the fill. A successful replay installs the warm
 pack width and records the resulting scratch length/capacity, so the second
 identical replay evaluates no model. A failed replay does not advance the key.
 
-For P phases the width payload is `P * size_of::<usize>()` bytes (8P on a
-64-bit target): three direct/group decisions plus two per selected chunk, or
+For each entry with P phases the width payload is `P * size_of::<usize>()`
+bytes (8P on a 64-bit target): three direct/group decisions plus two per selected chunk, or
 two member decisions. Its allocation charge uses the vector's actual capacity.
 The Auto dispatch key adds `capacity * size_of::<Duration>()` bytes. Retained
 chunk order/run tables charge `capacity * size_of::<ChunkMovement>()` for the
 outer vector, plus each group's `capacity * size_of::<usize>()` and each run
-list's `capacity * size_of::<u32>()`. Each chunk's inline size includes one
-additional `usize` for its warm pack width. Temporary aggregate summaries and scatter
-prefixes are dropped after deciding. All these capacities are included in
-`HostTreeTransformWorkspace::retained_bytes`; old decision keys are not kept.
+list's `capacity * size_of::<u32>()` and scatter prefix's
+`capacity * size_of::<Job>()`. Each chunk's inline size includes one additional
+`usize` for its warm pack width. Temporary aggregate summaries are dropped
+after deciding. The store additionally charges
+`entry_capacity * size_of::<WidthDecision>()`; every initialized entry and
+spare chunk contributes all of its vector capacities. Each initialized entry
+also conservatively charges the Weak marker's two-usize Arc control block,
+even while the structure shares it. All these charges are included in `HostTreeTransformWorkspace::retained_bytes`.
 Gate keys retain direct budget indices
 (`size_of::<usize>() * capacity`) plus their existing distinct cost/scan slots;
 the existing O(p) preparation pass makes each admission lookup O(1).
 On a key hit each phase reads its width in O(1), without model evaluation,
 summary construction, sorting or an engine-extension lookup. The operation's
-exact dispatch-key comparison costs O(p) under Auto and O(1) under forced
-policies. On a miss, a fixed chooser costs
-O(sum_candidate q), with constant-size class arithmetic per leaf and O(log q)
+structure lookup checks at most 16 Weak identities; its exact dispatch-key
+comparison costs O(p) under Auto and O(1) under forced policies. On a miss,
+a fixed chooser costs O(sum_candidate q), with constant-size class arithmetic per leaf and O(log q)
 recursion depth. The plan-group decision visits G groups per candidate to
 price actual batch barriers, and each chunk combines t group summaries once
 in O(t). One effective width returns before cost preparation or element-count

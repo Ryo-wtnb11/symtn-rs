@@ -709,8 +709,8 @@ fn unique_planning_scratch_is_charged_and_released() {
     assert!(ledger(missed).0 > 0);
 }
 
-/// Purpose: repeated public permutes reuse movement widths even after the
-/// first replay fills scratch; trimming the engine forces fresh decisions.
+/// Purpose: alternating public permutes retain both movement decisions;
+/// trimming the engine forces fresh decisions.
 #[cfg(feature = "cpu-faer")]
 #[test]
 fn repeated_permute_reuses_movement_decisions() {
@@ -737,13 +737,60 @@ fn repeated_permute_reuses_movement_decisions() {
     .unwrap();
     let take = symtn_operations::take_movement_model_evaluations;
     take();
-    drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
-    assert!(take() > 0, "cold permute evaluates the model");
-    drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
-    assert_eq!(take(), 0, "warm permute");
+    for (codomain, domain) in [([0, 2], [1, 3]), ([1, 3], [0, 2])] {
+        drop(source.permute(&mut engine, &codomain, &domain).unwrap());
+        assert!(take() > 0, "each cold structure evaluates the model");
+    }
+    for (codomain, domain) in [([0, 2], [1, 3]), ([1, 3], [0, 2])] {
+        drop(source.permute(&mut engine, &codomain, &domain).unwrap());
+        assert_eq!(take(), 0, "alternating warm structures");
+    }
     crate::scratch::trim(&mut engine);
     drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
     assert!(take() > 0, "trim invalidates retained decisions");
     drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
     assert_eq!(take(), 0, "warm after trim");
+}
+
+/// Purpose: seventeen live public transform structures exceed the sixteen
+/// decision slots; the least recently used decision is rebuilt, then warm.
+#[cfg(feature = "cpu-faer")]
+#[test]
+fn movement_decisions_evict_the_least_recently_used_structure() {
+    if crate::test_cache::run_isolated_or_return(
+        "SYMTN_PERMUTE_MOVEMENT_EVICTION_ISOLATED",
+        "runtime::tests::movement_decisions_evict_the_least_recently_used_structure",
+    ) {
+        return;
+    }
+    let runtime = Runtime::builder().build().unwrap();
+    let setup = &mut symtn_dense::CpuEngine::serial();
+    let sources: Vec<TensorMap<symtn_core::U1FusionRule, f64>> = (1..=17)
+        .map(|charge| {
+            let space = GradedSpace::try_new(
+                Arc::new(symtn_core::U1FusionRule),
+                [-charge, 0, charge].map(|charge| (symtn_core::U1Irrep::new(charge).unwrap(), 2)),
+            )
+            .unwrap();
+            TensorMap::rand_with_seed(setup, &runtime, [&space, &space], [&space, &space], 173)
+                .unwrap()
+        })
+        .collect();
+    let mut engine = symtn_operations::host_pool::eager_test_engine(2);
+    let take = symtn_operations::take_movement_model_evaluations;
+    take();
+    for source in &sources {
+        drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+        assert!(take() > 0, "each distinct structure is cold");
+    }
+    // The other sixteen slots survive; touching them leaves the evicted first
+    // structure as the negative control, rather than an incidental key change.
+    for source in &sources[1..] {
+        drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+        assert_eq!(take(), 0, "the retained structures remain warm");
+    }
+    drop(sources[0].permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+    assert!(take() > 0, "the seventeenth structure evicted the oldest");
+    drop(sources[0].permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+    assert_eq!(take(), 0, "the replacement is warm");
 }

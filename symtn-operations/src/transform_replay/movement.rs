@@ -201,51 +201,107 @@ pub(super) struct DecisionKey {
     pub members: usize,
 }
 
-/// A single schedule/key, with one usize per phase; no old key survives replacement.
+/// At most sixteen structures, most recently used first; dead identities are
+/// reused before live entries. Each replacement keeps its vector capacities.
 #[derive(Clone, Debug, Default)]
 pub(super) struct WidthMemo {
+    entries: Vec<WidthDecision>,
+}
+
+const MAX_DECISIONS: usize = 16;
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct WidthDecision {
     key: Option<DecisionKey>,
     identity: Weak<()>,
     dispatch: Vec<Duration>,
     pub widths: Vec<usize>,
+    pub chunks: Vec<chunk::ChunkMovement>,
 }
 
 impl WidthMemo {
+    pub fn current(&self) -> &WidthDecision {
+        &self.entries[0]
+    }
+
+    pub fn current_mut(&mut self) -> &mut WidthDecision {
+        &mut self.entries[0]
+    }
+
     pub fn update(
         &mut self,
         key: DecisionKey,
         identity: Weak<()>,
         dispatch: impl Iterator<Item = Duration> + Clone,
-        build: impl FnOnce(&mut Vec<usize>) -> Result<(), OperationError>,
+        build: impl FnOnce(
+            &mut Vec<usize>,
+            &mut Vec<chunk::ChunkMovement>,
+        ) -> Result<(), OperationError>,
     ) -> Result<(), OperationError> {
-        if self.key == Some(key)
-            && self.identity.ptr_eq(&identity)
-            && self.dispatch.iter().copied().eq(dispatch.clone())
+        let index = if let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.identity.ptr_eq(&identity))
+        {
+            index
+        } else if let Some(index) = self
+            .entries
+            .iter()
+            .position(|entry| entry.identity.strong_count() == 0)
+        {
+            index
+        } else if self.entries.len() < MAX_DECISIONS {
+            if self.entries.is_empty() {
+                self.entries.reserve_exact(MAX_DECISIONS);
+            }
+            self.entries.push(WidthDecision::default());
+            self.entries.len() - 1
+        } else {
+            self.entries.len() - 1
+        };
+        self.entries[..=index].rotate_right(1);
+        let entry = self.current_mut();
+        if entry.key == Some(key)
+            && entry.identity.ptr_eq(&identity)
+            && entry.dispatch.iter().copied().eq(dispatch.clone())
         {
             return Ok(());
         }
-        self.key = None;
-        self.widths.clear();
-        build(&mut self.widths)?;
-        self.widths.shrink_to_fit();
-        self.dispatch.clear();
-        self.dispatch.extend(dispatch);
-        self.dispatch.shrink_to_fit();
-        self.identity = identity;
-        self.key = Some(key);
+        entry.key = None;
+        entry.widths.clear();
+        build(&mut entry.widths, &mut entry.chunks)?;
+        entry.dispatch.clear();
+        entry.dispatch.extend(dispatch);
+        entry.identity = identity;
+        entry.key = Some(key);
         Ok(())
     }
 
     pub fn finish_destination(&mut self, len: usize, capacity: usize) {
-        if let Some(key) = self.key.as_mut() {
+        if let Some(key) = self.current_mut().key.as_mut() {
             key.destination_len = len;
             key.destination_capacity = capacity;
         }
     }
 
     pub fn retained_bytes(&self) -> usize {
-        self.widths.capacity() * core::mem::size_of::<usize>()
-            + self.dispatch.capacity() * core::mem::size_of::<Duration>()
+        self.entries.capacity() * core::mem::size_of::<WidthDecision>()
+            + self
+                .entries
+                .iter()
+                .map(|entry| {
+                    // A dead Weak can be the last owner of its marker's Arc control block.
+                    2 * core::mem::size_of::<usize>()
+                        + entry.widths.capacity() * core::mem::size_of::<usize>()
+                        + entry.dispatch.capacity() * core::mem::size_of::<Duration>()
+                        + entry.chunks.capacity() * core::mem::size_of::<chunk::ChunkMovement>()
+                        + entry
+                            .chunks
+                            .iter()
+                            .map(chunk::ChunkMovement::retained_bytes)
+                            .sum::<usize>()
+                })
+                .sum::<usize>()
     }
 }
 
@@ -1266,7 +1322,7 @@ mod tests {
                     key,
                     Arc::downgrade(&identity),
                     core::iter::once(Duration::ZERO),
-                    |widths| {
+                    |widths, _| {
                         widths.extend(
                             phases
                                 .iter()
@@ -1276,7 +1332,7 @@ mod tests {
                     },
                 )
                 .unwrap();
-                assert_eq!(memo.widths, expected);
+                assert_eq!(memo.current().widths, expected);
             }
         }
         assert!(split && inline);
@@ -1325,7 +1381,7 @@ mod tests {
                     key,
                     Arc::downgrade(&identity),
                     core::iter::once(Duration::ZERO),
-                    |widths| {
+                    |widths, _| {
                         for phase in &phases {
                             evaluations.set(evaluations.get() + 1);
                             widths.push(direct_phase_width(phase, &constants, key));
@@ -1340,21 +1396,21 @@ mod tests {
                 );
             }
             assert_eq!(
-                memo.widths,
+                memo.current().widths,
                 phases
                     .iter()
                     .map(|phase| direct_phase_width(phase, &constants, key))
                     .collect::<Vec<_>>()
             );
             if let Some(previous) = previous {
-                assert_ne!(memo.widths, previous);
+                assert_ne!(memo.current().widths, previous);
             }
-            previous = Some(memo.widths.clone());
+            previous = Some(memo.current().widths.clone());
         }
     }
 
     /// Purpose: schedule, gate, policy, scalar, writer, fill and member inputs
-    /// invalidate the single entry; each unchanged input is the warm control.
+    /// invalidate that structure's entry; unchanged inputs are the warm control.
     #[test]
     fn memo_invalidates_every_other_decision_input() {
         let constants = Constants::reference(HostClass::Generic);
@@ -1405,23 +1461,126 @@ mod tests {
                 base,
                 Arc::downgrade(&identity),
                 core::iter::once(Duration::ZERO),
-                |widths| {
+                |widths, _| {
                     widths.push(1);
                     Ok(())
                 },
             )
             .unwrap();
-            memo.update(key, Arc::downgrade(id), core::iter::once(cost), |widths| {
-                widths.push(2);
-                Ok(())
-            })
+            memo.update(
+                key,
+                Arc::downgrade(id),
+                core::iter::once(cost),
+                |widths, _| {
+                    widths.push(2);
+                    Ok(())
+                },
+            )
             .unwrap();
-            assert_eq!(memo.widths, [2]);
-            memo.update(key, Arc::downgrade(id), core::iter::once(cost), |_| {
+            assert_eq!(memo.current().widths, [2]);
+            memo.update(key, Arc::downgrade(id), core::iter::once(cost), |_, _| {
                 panic!("warm key rebuilt")
             })
             .unwrap();
         }
+    }
+
+    /// Purpose: a hit promotes its structure before bounded LRU replacement;
+    /// the untouched least-recent entry is the eviction control.
+    #[test]
+    fn memo_promotes_hits_before_evicting_the_lru_structure() {
+        let key = memo_key(&Constants::reference(HostClass::Generic));
+        let identities: Vec<_> = (0..=MAX_DECISIONS).map(|_| Arc::new(())).collect();
+        let mut memo = WidthMemo::default();
+        for (index, identity) in identities[..MAX_DECISIONS].iter().enumerate() {
+            memo.update(
+                key,
+                Arc::downgrade(identity),
+                core::iter::empty(),
+                |widths, _| {
+                    widths.push(index);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        }
+        memo.update(
+            key,
+            Arc::downgrade(&identities[0]),
+            core::iter::empty(),
+            |_, _| panic!("live structure rebuilt"),
+        )
+        .unwrap();
+        memo.update(
+            key,
+            Arc::downgrade(&identities[MAX_DECISIONS]),
+            core::iter::empty(),
+            |widths, _| {
+                widths.push(MAX_DECISIONS);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(memo.entries.len(), MAX_DECISIONS);
+        memo.update(
+            key,
+            Arc::downgrade(&identities[0]),
+            core::iter::empty(),
+            |_, _| panic!("promoted structure evicted"),
+        )
+        .unwrap();
+        let rebuilt = Cell::new(false);
+        memo.update(
+            key,
+            Arc::downgrade(&identities[1]),
+            core::iter::empty(),
+            |_, _| {
+                rebuilt.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(rebuilt.get());
+    }
+
+    /// Purpose: a dead structure is replaced before a live LRU structure.
+    #[test]
+    fn memo_reuses_dead_structure_before_live_lru() {
+        let key = memo_key(&Constants::reference(HostClass::Generic));
+        let mut identities: Vec<_> = (0..MAX_DECISIONS).map(|_| Some(Arc::new(()))).collect();
+        let mut memo = WidthMemo::default();
+        for identity in &identities {
+            memo.update(
+                key,
+                Arc::downgrade(identity.as_ref().unwrap()),
+                core::iter::empty(),
+                |widths, _| {
+                    widths.push(1);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        }
+        identities[MAX_DECISIONS - 1] = None;
+        let replacement = Arc::new(());
+        memo.update(
+            key,
+            Arc::downgrade(&replacement),
+            core::iter::empty(),
+            |widths, _| {
+                widths.push(1);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(memo.entries.len(), MAX_DECISIONS);
+        memo.update(
+            key,
+            Arc::downgrade(identities[0].as_ref().unwrap()),
+            core::iter::empty(),
+            |_, _| panic!("live LRU evicted before dead structure"),
+        )
+        .unwrap();
     }
 
     fn compiled_jobs(jobs: &[Job], minimum: usize) -> Summary {
@@ -1457,26 +1616,10 @@ mod tests {
         }
     }
 
-    fn reference_choice(phase: &Summary, budget: usize, traffic: f64, admit: bool) -> usize {
-        let mut constants = Constants::reference(HostClass::Generic);
-        constants.bandwidth = vec![
-            5.303316889,
-            5.303316889,
-            6.580693628,
-            7.873770916,
-            9.166848204,
-        ];
-        let costs = core::array::from_fn(|c| {
-            let row = constants.row(c);
-            (row.a, row.r.at(traffic), row.e.at(traffic))
-        });
-        let dispatch = |q| [0.0, 0.0, 110.0, 200.0, 290.0][q];
-        let bandwidth = phase_bandwidth(
-            traffic,
-            traffic,
-            phase.counts.map(|count| count.elements as f64),
-            &constants,
-        );
+    fn synthetic_choice(phase: &Summary, budget: usize, admit: bool) -> (usize, Vec<f64>) {
+        let costs = [(0.0, 0.0, 1.0); CLASSES];
+        let dispatch = |_| 1.0;
+        let bandwidth = |_| f64::INFINITY;
         let admits = |_, _| admit;
         let prices = Prices {
             bytes: 8.0,
@@ -1485,14 +1628,18 @@ mod tests {
             admits: &admits,
         };
         let model = super::fixed(phase, &costs);
-        choose(
+        let chosen = choose(
             budget,
             phase.prefix.len(),
-            traffic,
+            0.0,
             |q| model(q, budget, &prices),
             dispatch,
             &bandwidth,
-        )
+        );
+        let times = (1..=budget.min(phase.prefix.len()))
+            .map(|q| if q > 1 { 1.0 } else { 0.0 } + model(q, budget, &prices))
+            .collect();
+        (chosen, times)
     }
 
     /// Purpose: large admitted roles keep leaves with inner fan-out; withholding
@@ -1500,15 +1647,33 @@ mod tests {
     #[test]
     fn large_planned_roles_choose_leaves_with_inner_fanout() {
         let phase = compiled_jobs(
-            &[1, 4, 9, 4, 1].map(|items| uniform_job(items, 65536, 256, true)),
-            65536,
+            &[1, 4, 9, 4, 1].map(|items| uniform_job(items, 24, 0, true)),
+            24,
         );
-        let traffic = 19.0 * 65536.0 * 16.0;
-        for budget in [2, 4] {
-            let chosen = reference_choice(&phase, budget, traffic, true);
-            assert!(budget / chosen >= 2);
-            assert_eq!(reference_choice(&phase, budget, traffic, false), budget);
-        }
+        assert_eq!(
+            synthetic_choice(&phase, 2, true),
+            (1, vec![19.0 + 456.0 / 2.0, 1.0 + 336.0])
+        );
+        assert_eq!(
+            synthetic_choice(&phase, 4, true),
+            (
+                1,
+                vec![
+                    19.0 + 456.0 / 4.0,
+                    1.0 + 14.0 + 336.0 / 2.0,
+                    1.0 + 312.0,
+                    1.0 + 216.0
+                ]
+            )
+        );
+        assert_eq!(
+            synthetic_choice(&phase, 2, false),
+            (2, vec![456.0, 1.0 + 336.0])
+        );
+        assert_eq!(
+            synthetic_choice(&phase, 4, false),
+            (4, vec![456.0, 1.0 + 336.0, 1.0 + 312.0, 1.0 + 216.0])
+        );
     }
 
     /// Purpose: distributed serial work still pays for outer splitting; dispatch
@@ -1547,32 +1712,57 @@ mod tests {
     /// work still splits at four slots; serial item pricing exhausts outer slots.
     #[test]
     fn dominant_admitted_roles_keep_a_split_with_inner_fanout() {
-        let mut jobs = vec![uniform_job(1, 2304, 1, true); 201];
-        jobs[0] = uniform_job(1, 589824, 1, true);
-        let phase = compiled_jobs(&jobs, 2304);
-        assert_eq!(reference_choice(&phase, 2, 16809984.0, true), 1);
-        assert_eq!(reference_choice(&phase, 4, 16809984.0, true), 3);
-        assert_eq!(reference_choice(&phase, 4, 16809984.0, false), 4);
+        let mut jobs = vec![uniform_job(1, 20, 0, true); 12];
+        jobs[0] = uniform_job(1, 100, 0, true);
+        let phase = compiled_jobs(&jobs, 20);
+        assert_eq!(
+            synthetic_choice(&phase, 2, true),
+            (1, vec![12.0 + 320.0 / 2.0, 1.0 + 200.0])
+        );
+        assert_eq!(
+            synthetic_choice(&phase, 4, true),
+            (
+                3,
+                vec![
+                    12.0 + 320.0 / 4.0,
+                    1.0 + 6.0 + 200.0 / 2.0,
+                    1.0 + (4.0_f64 + 160.0 / 2.0).max(80.0),
+                    1.0 + 140.0
+                ]
+            )
+        );
+        assert_eq!(
+            synthetic_choice(&phase, 4, false),
+            (4, vec![320.0, 1.0 + 200.0, 1.0 + 160.0, 1.0 + 140.0])
+        );
     }
 
-    /// Purpose: small gated roles use every outer slot on the measured cache
-    /// curve; a single ownership job is the indivisible control.
+    /// Purpose: small gated roles use every outer slot; a single ownership
+    /// job is the indivisible control.
     #[test]
     fn small_roles_choose_the_budget_without_inner_credit() {
-        let mut jobs = vec![uniform_job(3, 256, 16, true); 597];
-        jobs.extend([uniform_job(2, 256, 16, true); 4]);
-        jobs.extend([uniform_job(1, 256, 16, true); 2]);
-        let phase = compiled_jobs(&jobs, 256);
+        let phase = compiled_jobs(&[uniform_job(1, 24, 0, true); 8], 24);
         for budget in [2, 4] {
-            assert_eq!(reference_choice(&phase, budget, 7376896.0, false), budget);
             assert_eq!(
-                reference_choice(
-                    &compiled_jobs(&[uniform_job(1801, 256, 16, true)], 256),
+                synthetic_choice(&phase, budget, false),
+                (
                     budget,
-                    7376896.0,
+                    [
+                        8.0 * 24.0,
+                        1.0 + 4.0 * 24.0,
+                        1.0 + 3.0 * 24.0,
+                        1.0 + 2.0 * 24.0
+                    ][..budget]
+                        .to_vec()
+                )
+            );
+            assert_eq!(
+                synthetic_choice(
+                    &compiled_jobs(&[uniform_job(8, 24, 0, true)], 24),
+                    budget,
                     false
                 ),
-                1
+                (1, vec![8.0 * 24.0])
             );
         }
     }
@@ -1682,17 +1872,76 @@ mod tests {
         }
     }
 
-    /// Purpose: recursive splits use the executor's uneven job boundaries and
-    /// whole-token remainders, rather than equally sized flat job chunks.
+    /// Purpose: modeled ownership ranges and slot shares match actual Split
+    /// leaves; flat job chunks are the uneven-boundary negative control.
     #[test]
     fn leaf_partition_matches_recursive_ownership_boundaries() {
-        let observed = std::cell::RefCell::new(Vec::new());
-        leaf_max(0, 7, 8, 3, 0, &|range, slots, _| {
-            observed.borrow_mut().push((range, slots));
-            0.0
-        });
-        assert_eq!(*observed.borrow(), [(0..3, 3), (3..5, 3), (5..7, 2)]);
-        assert_ne!(*observed.borrow(), [(0..3, 3), (3..6, 3), (6..7, 2)]);
+        use core::ops::Range;
+        struct Observe(usize);
+        impl lanes::Work for Observe {
+            type Job = (Range<usize>, usize);
+            type Lane = Range<usize>;
+            type Error = ();
+
+            fn count(&self) -> usize {
+                self.0
+            }
+
+            fn run(
+                &self,
+                _: usize,
+                state: &mut Self::Job,
+                lane: &mut Self::Lane,
+                exec: lanes::Exec<'_>,
+            ) -> Result<(), Self::Error> {
+                *state = (lane.clone(), exec.budget());
+                Ok(())
+            }
+        }
+
+        for p in 1..=9 {
+            let mut engine = tenferro_cpu::CpuEngine::new(
+                tenferro_cpu::Pool::builder().threads(p).build().unwrap(),
+            );
+            for jobs in 1..=17 {
+                for q in 1..=p {
+                    let mut observed = vec![(0..0, 0); jobs];
+                    crate::host_pool::lane_region(
+                        &mut engine,
+                        crate::host_pool::HostPoolSite::Replay,
+                        |exec| {
+                            lanes::run_native(
+                                exec,
+                                &Observe(jobs),
+                                lanes::Split {
+                                    threads: q,
+                                    split: |left: &mut Range<usize>, cut: lanes::Cut| {
+                                        let right = cut.job..left.end;
+                                        left.end = cut.job;
+                                        Ok(right)
+                                    },
+                                },
+                                &mut observed,
+                                &mut [0..jobs],
+                            )
+                            .unwrap()
+                            .unwrap();
+                        },
+                    )
+                    .unwrap();
+                    observed.dedup();
+                    let modeled = std::cell::RefCell::new(Vec::new());
+                    leaf_max(0, jobs, p, q, 0, &|range, slots, _| {
+                        modeled.borrow_mut().push((range, slots));
+                        0.0
+                    });
+                    assert_eq!(*modeled.borrow(), observed, "jobs={jobs}, q={q}, p={p}");
+                    if (jobs, q, p) == (7, 3, 8) {
+                        assert_ne!(observed, [(0..3, 3), (3..6, 3), (6..7, 2)]);
+                    }
+                }
+            }
+        }
     }
 
     /// Purpose: the total-slot bandwidth floor applies equally to inline and
@@ -1922,14 +2171,26 @@ mod tests {
     /// the memory roof prematurely is the slower negative control.
     #[test]
     fn cache_resident_bandwidth_uses_the_element_curve() {
-        let traffic = 7376896.0;
+        let traffic = 128.0 * 16.0;
         let mut constants = Constants::reference(HostClass::Generic);
-        constants.bandwidth = vec![60.0; 5];
-        let elements = [traffic / 16.0, 0.0, 0.0, 0.0];
+        // Synthetic cache and memory rows: e=2 through 2048 bytes, then e=8.
+        constants.rows = [Row {
+            a: 0.0,
+            r: Curve {
+                points: [(1, 0.0), (2, 0.0), (4, 0.0)],
+                online: None,
+            },
+            e: Curve {
+                points: core::array::from_fn(|i| (64 << i, if i < 6 { 2.0 } else { 8.0 })),
+                online: None,
+            },
+        }; CLASSES];
+        constants.memory_knees = constants.rows.map(|row| row.e.memory_knee());
+        constants.bandwidth = vec![16.0; 5];
+        let elements = [128.0, 0.0, 0.0, 0.0];
         let bandwidth = phase_bandwidth(traffic, traffic, elements, &constants);
-        let element_time = traffic / 16.0 * 0.15972158132790892;
-        assert!((traffic / bandwidth(4) - element_time / 4.0).abs() < 1e-9);
-        assert!(bandwidth(2) > traffic / 288719.0);
+        assert_eq!(traffic / bandwidth(4), 128.0 * 2.0 / 4.0);
+        assert!(traffic / constants.bandwidth[4] > traffic / bandwidth(4));
     }
 
     /// Purpose: memory-resident phases stop gaining width above the measured

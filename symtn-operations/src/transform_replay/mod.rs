@@ -184,8 +184,6 @@ pub struct HostTreeTransformWorkspace<T> {
     movement_phases: usize,
     #[cfg(feature = "tenferro")]
     movement_memo: movement::WidthMemo,
-    #[cfg(feature = "tenferro")]
-    movement_chunks: Vec<chunk::ChunkMovement>,
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     // The call's prepared gate cost keys, shared by its split leaves.
@@ -219,8 +217,6 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             movement_phases: 0,
             #[cfg(feature = "tenferro")]
             movement_memo: movement::WidthMemo::default(),
-            #[cfg(feature = "tenferro")]
-            movement_chunks: Vec::new(),
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             gate_keys: GateKeys::default(),
@@ -274,12 +270,6 @@ impl<T> HostTreeTransformWorkspace<T> {
         #[cfg(feature = "tenferro")]
         {
             self.movement_memo.retained_bytes()
-                + self.movement_chunks.capacity() * core::mem::size_of::<chunk::ChunkMovement>()
-                + self
-                    .movement_chunks
-                    .iter()
-                    .map(chunk::ChunkMovement::retained_bytes)
-                    .sum::<usize>()
         }
         #[cfg(not(feature = "tenferro"))]
         {

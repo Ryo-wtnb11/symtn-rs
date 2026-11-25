@@ -93,7 +93,6 @@ where
     let admitted = movement::region(engine, |mut exec, constants| {
         let modeled = exec.budget() > 1
             && exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Auto;
-        let sequential = exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
         workspace.gate_keys.prepare(
             &mut exec.reborrow().into_token(),
             layouts.max_planned_elements(),
@@ -101,7 +100,8 @@ where
         #[cfg(test)]
         workspace.gate_keys.watch_as(gate);
         prepare_decisions::<W, T, D, C>(workspace, task, schedule, writer, &exec, constants)?;
-        let [threads, singles_width, inactive_width] = workspace.movement_memo.widths[..3]
+        let [threads, singles_width, inactive_width] = workspace.movement_memo.current().widths
+            [..3]
             .try_into()
             .expect("direct phases");
         workspace.prepare_fused_indices(threads.max(singles_width).max(inactive_width), rank)?;
@@ -134,11 +134,6 @@ where
             )?;
         }
         let token = exec.reborrow().into_token();
-        let token = if sequential {
-            token.limit(core::num::NonZeroUsize::MIN)
-        } else {
-            token
-        };
         let inline = if split_singles {
             InlineSingles::None
         } else {
@@ -177,12 +172,7 @@ where
                 fused_indices,
             )?;
         }
-        Ok::<_, OperationError>((
-            threads,
-            sequential,
-            split_inactive || split_singles,
-            modeled,
-        ))
+        Ok::<_, OperationError>((threads, false, split_inactive || split_singles, modeled))
     })??;
     #[cfg(any(test, feature = "testing"))]
     if admitted.0 > 1 || admitted.2 {
@@ -193,10 +183,11 @@ where
 
 /// Only the selected group width fixes chunk boundaries, so these tables are
 /// rebuilt on a decision-key change, never on a warm replay.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct ChunkMovement {
     groups: Vec<usize>,
     runs: Vec<u32>,
+    prefix: Vec<crate::movement::Job>,
     warm_pack_width: usize,
 }
 
@@ -204,6 +195,7 @@ impl ChunkMovement {
     pub fn retained_bytes(&self) -> usize {
         self.groups.capacity() * core::mem::size_of::<usize>()
             + self.runs.capacity() * core::mem::size_of::<u32>()
+            + self.prefix.capacity() * core::mem::size_of::<crate::movement::Job>()
     }
 }
 
@@ -232,7 +224,6 @@ where
     );
     let HostTreeTransformWorkspace {
         movement_memo,
-        movement_chunks,
         gate_keys,
         ..
     } = workspace;
@@ -240,7 +231,7 @@ where
         key,
         task.admission_identity(),
         movement::dispatch_key(exec),
-        |widths| {
+        |widths, movement_chunks| {
             let fixed = |summary: &crate::movement::Summary| {
                 movement::width::<D, _>(
                     exec,
@@ -283,7 +274,6 @@ where
             let (_, destination_len) = chunk_scratch(jobs, threads)?;
             let mut fill =
                 key.destination_len < destination_len && key.destination_capacity < destination_len;
-            movement_chunks.clear();
             for (index, chunk) in jobs.chunks(threads).enumerate() {
                 let first_group = index * threads;
                 let last_group = first_group + chunk.len() - 1;
@@ -326,18 +316,29 @@ where
                 } else {
                     cold_pack_width
                 };
-                let mut groups: Vec<_> = (first_group..=last_group)
-                    .filter(|&group| !schedule.scatter_groups[group].columns.is_empty())
-                    .collect();
+                if index == movement_chunks.len() {
+                    movement_chunks.push(ChunkMovement::default());
+                }
+                let ChunkMovement {
+                    groups,
+                    runs,
+                    prefix,
+                    warm_pack_width: retained_warm_width,
+                } = &mut movement_chunks[index];
+                *retained_warm_width = warm_pack_width;
+                groups.clear();
+                groups.extend(
+                    (first_group..=last_group)
+                        .filter(|&group| !schedule.scatter_groups[group].columns.is_empty()),
+                );
                 groups.sort_unstable_by_key(|&group| schedule.group_spans[group].lo);
-                let mut runs = Vec::new();
-                group_runs(&groups, &schedule.group_spans, &mut runs);
+                group_runs(groups, &schedule.group_spans, runs);
                 let summary = crate::movement::Summary::totals(
                     groups
                         .iter()
                         .map(|&group| &schedule.scatter_movement[group]),
                 )?;
-                let mut prefix = Vec::with_capacity(runs.len());
+                prefix.clear();
                 let mut cumulative = crate::movement::Job::default();
                 for (run, &start) in runs.iter().enumerate() {
                     let end = runs.get(run + 1).map_or(groups.len(), |&end| end as usize);
@@ -366,13 +367,7 @@ where
                     },
                 );
                 widths.extend([cold_pack_width, scatter_width]);
-                movement_chunks.push(ChunkMovement {
-                    groups,
-                    runs,
-                    warm_pack_width,
-                });
             }
-            movement_chunks.shrink_to_fit();
             Ok(())
         },
     )
@@ -404,13 +399,7 @@ where
 {
     let layouts = task.layouts();
     let jobs = task.recoupling_plan().jobs();
-    let scratch_width = if crate::host_pool::batch_policy(engine).strategy
-        == tenferro_cpu::CpuBatchStrategy::Sequential
-    {
-        1
-    } else {
-        crate::host_pool::threads(engine)
-    };
+    let scratch_width = crate::host_pool::threads(engine);
     workspace.prepare_fused_indices(scratch_width, layouts.max_fused_rank())?;
     let (source_len, scratch_destination) = chunk_scratch(jobs, threads)?;
     workspace.packed.source_mut().reserve_overwrite(source_len);
@@ -459,7 +448,7 @@ where
         let pack = &schedule.pack_columns[schedule.scatter_groups[first_group].pack.start
             ..schedule.scatter_groups[last_group].pack.end];
         let filled = (fill && !pack.is_empty()).then_some(scratch_destination);
-        let pack_width = workspace.movement_memo.widths[3 + index * 2];
+        let pack_width = workspace.movement_memo.current().widths[3 + index * 2];
         pack_chunk(
             engine,
             workspace,
@@ -506,13 +495,13 @@ where
             fused_indices,
             gate_keys,
             movement_memo,
-            movement_chunks,
             ..
         } = &mut *workspace;
         let packed = &packed.destination().as_slice()[..destination_len];
-        let groups = &movement_chunks[index].groups[..];
-        let runs = &movement_chunks[index].runs[..];
-        let width = movement_memo.widths[4 + index * 2];
+        let movement = movement_memo.current();
+        let groups = &movement.chunks[index].groups[..];
+        let runs = &movement.chunks[index].runs[..];
+        let width = movement.widths[4 + index * 2];
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
             let items = Items::Groups {
                 groups,
@@ -541,8 +530,9 @@ where
             profile.multi_scatter += start.elapsed();
         }
     }
-    for (index, chunk) in workspace.movement_chunks.iter().enumerate() {
-        workspace.movement_memo.widths[3 + index * 2] = chunk.warm_pack_width;
+    let movement = workspace.movement_memo.current_mut();
+    for index in 0..jobs.chunks(threads).len() {
+        movement.widths[3 + index * 2] = movement.chunks[index].warm_pack_width;
     }
     workspace.movement_memo.finish_destination(
         workspace.packed.destination().len(),
@@ -1072,5 +1062,67 @@ pub(super) mod replay_paths {
 
     pub fn take() -> (usize, usize) {
         COUNTS.with(|counts| counts.replace((0, 0)))
+    }
+}
+
+#[cfg(test)]
+mod memo_capacity_tests {
+    use super::*;
+
+    /// Purpose: evicting a same-sized structure reuses every decision buffer
+    /// without allocating, freeing buffers, or growing its capacity charge.
+    #[test]
+    fn movement_eviction_reuses_chunk_buffer_capacities() {
+        let _serial = crate::counting_alloc::serial();
+        let identities: Vec<_> = (0..=16).map(|_| Arc::new(())).collect();
+        let key = movement::DecisionKey {
+            budget: 2,
+            carries_team: true,
+            generation: 0,
+            strategy: tenferro_cpu::CpuBatchStrategy::Auto,
+            bytes: core::mem::size_of::<f64>(),
+            reads_destination: false,
+            replays_plans: false,
+            destination_len: 0,
+            destination_capacity: 0,
+            members: 1,
+        };
+        let build = |widths: &mut Vec<usize>, chunks: &mut Vec<ChunkMovement>| {
+            widths.extend([1, 2, 3]);
+            if chunks.is_empty() {
+                chunks.push(ChunkMovement::default());
+            }
+            let chunk = &mut chunks[0];
+            chunk.groups.clear();
+            chunk.groups.extend([0, 1]);
+            chunk.runs.clear();
+            chunk.runs.extend([0, 1]);
+            chunk.prefix.clear();
+            chunk.prefix.extend([crate::movement::Job::default(); 2]);
+            Ok(())
+        };
+        let mut memo = movement::WidthMemo::default();
+        for identity in &identities[..identities.len() - 1] {
+            memo.update(
+                key,
+                Arc::downgrade(identity),
+                core::iter::once(std::time::Duration::ZERO),
+                build,
+            )
+            .unwrap();
+        }
+        let retained = memo.retained_bytes();
+        let ((), allocations) = crate::counting_alloc::measure(|| {
+            memo.update(
+                key,
+                Arc::downgrade(identities.last().unwrap()),
+                core::iter::once(std::time::Duration::ZERO),
+                build,
+            )
+            .unwrap();
+        });
+        assert_eq!(allocations.calls, 0);
+        assert_eq!(allocations.frees, 0);
+        assert_eq!(memo.retained_bytes(), retained);
     }
 }

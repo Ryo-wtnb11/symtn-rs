@@ -710,8 +710,6 @@ where
         member_scratch,
         #[cfg(feature = "tenferro")]
         movement_memo,
-        #[cfg(feature = "tenferro")]
-        movement_chunks,
         ..
     } = &mut *workspace;
     let lens = MemberLens {
@@ -737,8 +735,6 @@ where
         #[cfg(feature = "tenferro")]
         movement_memo,
         #[cfg(feature = "tenferro")]
-        movement_chunks,
-        #[cfg(feature = "tenferro")]
         task.admission_identity(),
     )?;
     if !workspace.chunk_jobs.is_empty() {
@@ -759,8 +755,6 @@ where
         member_scratch,
         #[cfg(feature = "tenferro")]
         movement_memo,
-        #[cfg(feature = "tenferro")]
-        movement_chunks,
         ..
     } = &mut *workspace;
     member_moves(
@@ -781,8 +775,6 @@ where
         &structure.parallel_schedule().member_pack_movement,
         #[cfg(feature = "tenferro")]
         movement_memo,
-        #[cfg(feature = "tenferro")]
-        movement_chunks,
         #[cfg(feature = "tenferro")]
         task.admission_identity(),
     )?;
@@ -814,7 +806,6 @@ fn member_moves<A, D, C>(
     summary: &crate::movement::Summary,
     other_summary: &crate::movement::Summary,
     #[cfg(feature = "tenferro")] memo: &mut super::movement::WidthMemo,
-    #[cfg(feature = "tenferro")] chunks: &mut Vec<super::chunk::ChunkMovement>,
     #[cfg(feature = "tenferro")] identity: Weak<()>,
 ) -> Result<usize, OperationError>
 where
@@ -834,9 +825,7 @@ where
                     key,
                     identity,
                     super::movement::dispatch_key(&exec),
-                    |widths| {
-                        chunks.clear();
-                        chunks.shrink_to_fit();
+                    |widths, _| {
                         for summary in [summary, other_summary] {
                             widths.push(super::movement::width::<D, _>(
                                 &exec,
@@ -857,7 +846,7 @@ where
                     },
                 )?;
             }
-            let width = memo.widths[usize::from(scatter)];
+            let width = memo.current().widths[usize::from(scatter)];
             if width <= 1 {
                 let sequential =
                     exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;

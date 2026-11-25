@@ -103,13 +103,22 @@ where
     let mut retained = (symtn_operations::host_pool::threads(engine) > 1)
         .then(|| crate::runtime::ContextLease::checkout(engine));
     let context = retained.as_mut().map_or(context, |lease| lease.context());
-    let result = L::lane(context)?
-        .replay_tree_transform_dyn_owned(engine, structure, destination, source, nout, data, alpha)
-        .map_err(TransformExecError::Replay);
+    let result = L::lane(context).map(|lane| {
+        lane.replay_tree_transform_dyn_owned(
+            engine,
+            structure,
+            destination,
+            source,
+            nout,
+            data,
+            alpha,
+        )
+        .map_err(TransformExecError::Replay)
+    });
     if let Some(lease) = retained {
         lease.checkin(engine);
     }
-    result
+    result?
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -134,8 +143,8 @@ where
     let mut retained = (symtn_operations::host_pool::threads(engine) > 1)
         .then(|| crate::runtime::ContextLease::checkout(engine));
     let context = retained.as_mut().map_or(context, |lease| lease.context());
-    let result = L::lane(context)?
-        .replay_tree_transform_dyn_into(
+    let result = L::lane(context).map(|lane| {
+        lane.replay_tree_transform_dyn_into(
             engine,
             structure,
             destination,
@@ -145,11 +154,12 @@ where
             alpha,
             beta,
         )
-        .map_err(TransformExecError::Replay);
+        .map_err(TransformExecError::Replay)
+    });
     if let Some(lease) = retained {
         lease.checkin(engine);
     }
-    result
+    result?
 }
 
 /// One staged tree-transform replay, handed to the storage kernel by value:
