@@ -10,10 +10,11 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
+use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
     GroupId, LieGroupFusionRule, MultiplicityFreeAdmissionMode, SectorId, U1FusionRule, U1Irrep,
 };
-use symtn::typed::{CpuEngine, GradedSpace, Pool, Runtime, TensorMap, TypedSectorAdmission};
+use symtn::typed::{CpuEngine, GradedSpace, Pool, Runtime, TensorMap};
 use symtn_core::{
     BlockSpec, BlockStructure, FusionProductSpace, FusionTreeHomSpace, FusionTreePairKey,
     RuleIdentity, SectorLeg,
