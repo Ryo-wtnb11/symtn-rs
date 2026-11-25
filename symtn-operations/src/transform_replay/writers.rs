@@ -71,6 +71,11 @@ pub(super) trait DestinationWriter<T, D>: Sync {
     /// for the first time (an owned output), not a caller-provided one.
     const FIRST_TOUCH: bool;
 
+    /// Whether this call logically reads each output before updating it.
+    fn reads_destination(&self) -> bool {
+        false
+    }
+
     /// A fresh worker's kernel state.
     fn kernels(&self) -> Self::Kernels;
 
@@ -134,6 +139,10 @@ where
 {
     type Kernels = A;
     const FIRST_TOUCH: bool = false;
+
+    fn reads_destination(&self) -> bool {
+        matches!(self.mode, DestinationMode::Axpby(beta) if !beta.is_zero())
+    }
 
     fn kernels(&self) -> A {
         self.prototype.clone()

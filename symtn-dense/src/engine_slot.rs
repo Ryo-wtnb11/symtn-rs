@@ -1,9 +1,9 @@
-//! One value kept in the caller's CPU engine between calls: an entry of the
-//! engine's extension store (`ExecutionEngine::take_extension_caches`), under
-//! the store's own entry and retained-byte limits.
+//! One value per payload type kept in the caller's CPU engine between calls:
+//! entries of the engine's extension store (`ExecutionEngine::take_extension_caches`),
+//! under the store's own entry and retained-byte limits.
 //!
-//! Internal and unstable despite being public for `symtn`, which keeps its
-//! eager Host contraction scratch here.
+//! Internal and unstable despite being public for sibling crates, which keep
+//! eager Host contraction scratch and movement calibration here.
 //!
 //! The store is reachable only by taking it out of the engine and restoring
 //! it. Every access runs inside one transaction that restores the store on
@@ -26,6 +26,9 @@ use tenferro_tensor::Engine;
 
 #[cfg(feature = "tenferro")]
 mod store {
+    use std::any::{type_name, TypeId};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     use std::sync::{Mutex, PoisonError};
 
     use tenferro_cpu::{with_cpu_engine, CpuEngine};
@@ -35,12 +38,14 @@ mod store {
     use tenferro_tensor::Engine;
 
     const FAMILY: &str = "symtn.host-scratch.v1";
-    const CACHE: &str = "contract";
-    const KEY: ExtensionCacheKey = ExtensionCacheKey::new(FAMILY, CACHE, 0);
-    const SELECTOR: ExtensionCacheSelector = ExtensionCacheSelector::Cache {
-        family_id: FAMILY,
-        cache_name: CACHE,
-    };
+    const SELECTOR: ExtensionCacheSelector = ExtensionCacheSelector::Family { family_id: FAMILY };
+
+    fn key<T: 'static>() -> ExtensionCacheKey {
+        let mut discriminator = DefaultHasher::new();
+        TypeId::of::<T>().hash(&mut discriminator);
+        // A key collision still fails the typed lookup; it cannot return another payload.
+        ExtensionCacheKey::new(FAMILY, type_name::<T>(), discriminator.finish())
+    }
 
     /// The entry's value. Why a `Mutex`: the store requires `Sync` values,
     /// and only the byte reporter, which gets `&Slot`, ever locks it; every
@@ -90,7 +95,7 @@ mod store {
 
     pub(super) fn checkout<T: Send + 'static>(store: &mut ExtensionCacheStore) -> Option<T> {
         store
-            .get_mut::<Slot<T>>(&KEY)
+            .get_mut::<Slot<T>>(&key::<T>())
             .and_then(|slot| held(slot).take())
     }
 
@@ -99,8 +104,9 @@ mod store {
         value: T,
         charge: fn(&T) -> usize,
     ) {
+        let key = key::<T>();
         let ours_now = store
-            .get_mut::<Slot<T>>(&KEY)
+            .get_mut::<Slot<T>>(&key)
             .map(|slot| slot_charge(held(slot).as_ref(), charge));
         let foreign = store
             .stats(ExtensionCacheSelector::All)
@@ -117,10 +123,10 @@ mod store {
         }
         #[cfg(test)]
         super::tests::after_admission();
-        match store.get_mut::<Slot<T>>(&KEY) {
+        match store.get_mut::<Slot<T>>(&key) {
             Some(slot) => *held(slot) = Some(value),
             None => store.put_with_retained_bytes(
-                KEY,
+                key,
                 Slot {
                     value: Mutex::new(Some(value)),
                 },
@@ -141,8 +147,8 @@ mod store {
     }
 }
 
-/// Takes the kept value out of the engine, leaving its slot empty; `None`
-/// when nothing is kept.
+/// Takes the kept value of type `T` out of the engine, leaving its slot empty;
+/// `None` when no value of that type is kept.
 pub fn checkout<T: Send + 'static>(engine: &mut dyn Engine) -> Option<T> {
     #[cfg(feature = "tenferro")]
     return store::with_store(engine, store::checkout::<T>).flatten();
@@ -155,7 +161,8 @@ pub fn checkout<T: Send + 'static>(engine: &mut dyn Engine) -> Option<T> {
 
 /// Keeps `value`, whose retained bytes are `charge(value)`, in the engine if
 /// the store's limits admit it with every other entry; otherwise drops it.
-/// An admitted value replaces any value kept before (the last writer wins).
+/// An admitted value replaces any value of type `T` kept before (the last
+/// writer of that type wins); other payload types keep their own slots.
 pub fn checkin<T: Send + 'static>(engine: &mut dyn Engine, value: T, charge: fn(&T) -> usize) {
     #[cfg(feature = "tenferro")]
     store::with_store(engine, |s| store::checkin(s, value, charge));
@@ -163,8 +170,8 @@ pub fn checkin<T: Send + 'static>(engine: &mut dyn Engine, value: T, charge: fn(
     let _ = (engine, value, charge);
 }
 
-/// The slot's charge in the engine's store: 0 when there is no slot, its
-/// fixed allocation while it is empty, plus the kept value's charge.
+/// The sum of the slots' charges in the engine's store: each slot's fixed
+/// allocation, even while empty, plus its kept value's charge; 0 without slots.
 pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
     #[cfg(feature = "tenferro")]
     return store::with_store(engine, |s| store::retained_bytes(s)).unwrap_or(0);
@@ -175,7 +182,7 @@ pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
     }
 }
 
-/// Removes the slot and drops the kept value.
+/// Removes every payload type's slot and drops the kept values.
 pub fn clear(engine: &mut dyn Engine) {
     #[cfg(feature = "tenferro")]
     store::with_store(engine, store::clear);

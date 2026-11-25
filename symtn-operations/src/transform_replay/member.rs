@@ -608,13 +608,9 @@ where
 /// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`],
 /// each scale resolved once per role for the whole batch.
 ///
-/// The moves before and after the GEMM each run in one engine entry at the
-/// width [`symtn_dense::lanes::flat_width`] admits over the members: under
-/// `Auto` the engine's width when a copy of the whole batch destination
-/// pays for it, under a forced policy its batch decision, and one under
-/// `Sequential`. At width one every member moves on the caller's token;
-/// above it the members split into at most that many contiguous ranges,
-/// each moving its members as one member-axis move per role.
+/// Both movement phases use the common width model over their executed
+/// member ranges. At width q each range fuses its members into one move per
+/// role, while the whole token is divided into q balanced slot shares.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn tree_transform_members_overwrite_raw<A, E, D, C>(
@@ -718,7 +714,7 @@ where
         dst: dst_len,
         packed_src: plan.source_len(),
     };
-    let threads = member_moves(
+    member_moves(
         engine,
         &MemberMoves {
             alpha: member_alpha,
@@ -731,7 +727,8 @@ where
         &[],
         lens,
         members,
-        None,
+        false,
+        &structure.parallel_schedule().member_pack_movement,
     )?;
     if !workspace.chunk_jobs.is_empty() {
         let (source, destination) = workspace.packed.source_and_destination_mut();
@@ -764,7 +761,8 @@ where
         packed.destination().as_slice(),
         lens,
         members,
-        Some(threads),
+        true,
+        &structure.parallel_schedule().member_scatter_movement,
     )?;
     Ok(())
 }
@@ -776,12 +774,9 @@ struct MemberLens {
     packed_src: usize,
 }
 
-/// One member phase in one engine entry: the pack phase when `packed_dst`
-/// is empty and `threads` is `None` (which admits the width and returns
-/// it), the scatter phase from `packed_dst` at that width otherwise. At
-/// width one every member moves on the caller's token with the caller's
-/// kernels; above it, the members split into `min(threads, members)`
-/// contiguous ranges over a [`lanes::Split`] of `threads`.
+/// Execute pack or scatter over the model's selected member ranges. Each
+/// range fuses its members into one call per role, and receives its balanced
+/// share of the caller's whole token.
 #[allow(clippy::too_many_arguments)]
 fn member_moves<A, D, C>(
     engine: &mut dyn Engine,
@@ -793,22 +788,36 @@ fn member_moves<A, D, C>(
     packed_dst: &[D],
     lens: MemberLens,
     members: usize,
-    threads: Option<usize>,
+    scatter: bool,
+    summary: &crate::movement::Summary,
 ) -> Result<usize, OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    let scatter = threads.is_some();
     #[cfg(feature = "tenferro")]
     {
         use symtn_dense::lanes;
-        let estimate = strided_kernel::execution::KernelClass::Copy.estimate(dst.len());
-        crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Strided, |exec| {
-            let width = threads.unwrap_or_else(|| lanes::flat_width(&exec, estimate, members));
+        super::movement::region(engine, |exec, constants| {
+            let width = super::movement::width::<D>(
+                &exec,
+                constants,
+                summary,
+                moves.parts.storage_conjugate,
+                Some(members),
+                None,
+                false,
+            );
             if width <= 1 {
+                let sequential =
+                    exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
                 let token = exec.into_token();
+                let token = if sequential {
+                    token.limit(core::num::NonZeroUsize::MIN)
+                } else {
+                    token
+                };
                 return if scatter {
                     moves.scatter(token, kernels, &mut scratch[0], dst, packed_dst, 0, members)
                 } else {
@@ -819,7 +828,7 @@ where
             if scratch.len() < width {
                 scratch.resize_with(width, MemberScratch::default);
             }
-            let ranges = width.min(members);
+            let ranges = width;
             let work = MemberPhase {
                 moves,
                 packed_dst,
@@ -850,7 +859,7 @@ where
     }
     #[cfg(not(feature = "tenferro"))]
     {
-        let _ = (packed_dst, lens);
+        let _ = (packed_dst, lens, summary);
         crate::host_pool::with_exec(engine, |exec| {
             if scatter {
                 moves.scatter(exec, kernels, &mut scratch[0], dst, packed_dst, 0, members)

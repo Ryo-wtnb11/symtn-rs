@@ -67,11 +67,10 @@ mod sealed {
     }
 }
 
-/// The jobs split in two, recursively, over `threads` logical threads: the
-/// left half takes `parallel_split(J, threads)` jobs and `threads / 2`
-/// threads, the right half the rest, and the two halves run as the children
-/// of a two-child fork of the token, which halves it. A part of one thread
-/// or one job is a leaf, which runs its jobs in order on its own token.
+/// The jobs split recursively over `threads` leaves. The whole token is
+/// divided into balanced nonzero shares (remainder slots to the first leaves),
+/// including idle leaves when there are fewer jobs. Each nonempty leaf runs
+/// its jobs in order on its share.
 ///
 /// The call lends its one lane state (`lanes[0]`) to the root part. At each
 /// fork `split` divides the part's lane: it shrinks it to the left half's
@@ -279,7 +278,7 @@ where
         let failure = split(
             work,
             &self.split,
-            self.threads,
+            self.threads.clamp(1, exec.budget()),
             0,
             states,
             &mut lanes[0],
@@ -319,16 +318,36 @@ where
     W::Error: Sync,
     F: Fn(&mut W::Lane, Cut) -> Result<W::Lane, W::Error> + Sync,
 {
-    if threads <= 1 || states.len() <= 1 {
+    if threads <= 1 {
         return states
             .iter_mut()
             .enumerate()
             .find_map(|(i, state)| run_job(work, first + i, state, lane, &mut exec));
     }
+    if states.len() <= 1 {
+        let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
+        let supply = RwLock::new(Some((states, lane)));
+        let failure = RwLock::new(None);
+        exec.into_token().fork(threads, |leaf, token| {
+            if leaf == 0 {
+                if let Some((states, lane)) = take(&supply) {
+                    let mut exec = Exec::from_token(token, workspace, policy);
+                    let result = states
+                        .iter_mut()
+                        .enumerate()
+                        .find_map(|(i, state)| run_job(work, first + i, state, lane, &mut exec));
+                    *failure.write().unwrap_or_else(PoisonError::into_inner) = result;
+                }
+            }
+        });
+        return failure.into_inner().unwrap_or_else(PoisonError::into_inner);
+    }
     let middle = parallel_split(states.len(), threads);
     let (left_states, right_states) = states.split_at_mut(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
+    let budget = exec.budget();
+    let left_slots = (budget / threads) * left_threads + (budget % threads).min(left_threads);
     let right = first + middle;
     let cut = Cut {
         job: right,
@@ -342,6 +361,7 @@ where
     let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
     join(
         exec.into_token(),
+        [left_slots, budget - left_slots],
         |token| {
             let exec = Exec::from_token(token, workspace, policy);
             split(work, divide, left_threads, first, left_states, lane, exec)
@@ -354,13 +374,18 @@ where
     )
 }
 /// Runs `left` and `right` as the two children of one fork of `token`, each
-/// on its half of the token, and returns the left failure, else the right.
+/// on its reserved share of the token, and returns the left failure, else right.
 ///
 /// Why `RwLock` slots, for the closures and their failures alike: `fork`
 /// shares one `Fn` with both children, and each side is a `FnOnce` that owns
 /// its half of the split buffers; a std `Mutex` boxes an OS lock on its
 /// first lock on some targets, while `RwLock` does not allocate.
-fn join<A, B, E>(token: threadteam::Exec<'_>, left: A, right: B) -> Option<(usize, E)>
+fn join<A, B, E>(
+    token: threadteam::Exec<'_>,
+    shares: [usize; 2],
+    left: A,
+    right: B,
+) -> Option<(usize, E)>
 where
     A: FnOnce(threadteam::Exec<'_>) -> Option<(usize, E)> + Send + Sync,
     B: FnOnce(threadteam::Exec<'_>) -> Option<(usize, E)> + Send + Sync,
@@ -368,16 +393,18 @@ where
 {
     let (left, right) = (RwLock::new(Some(left)), RwLock::new(Some(right)));
     let failures = [RwLock::new(None), RwLock::new(None)];
-    token.fork(2, |side, child| {
-        let failure = if side == 0 {
-            take(&left).and_then(|run| run(child))
-        } else {
-            take(&right).and_then(|run| run(child))
-        };
-        *failures[side]
-            .write()
-            .unwrap_or_else(PoisonError::into_inner) = failure;
-    });
+    token
+        .fork_sized(&shares, |side, child| {
+            let failure = if side == 0 {
+                take(&left).and_then(|run| run(child))
+            } else {
+                take(&right).and_then(|run| run(child))
+            };
+            *failures[side]
+                .write()
+                .unwrap_or_else(PoisonError::into_inner) = failure;
+        })
+        .expect("positive split shares sum to the token budget");
     let [left, right] = failures.map(|f| f.into_inner().unwrap_or_else(PoisonError::into_inner));
     left.or(right)
 }

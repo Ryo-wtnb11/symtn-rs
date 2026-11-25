@@ -3,26 +3,12 @@ use super::*;
 use crate::kernel_adapter::movement::with_conjugation;
 use crate::transform_structure::TreeTransformDirectItem;
 
-/// Replays a validated task into `dst` through `writer` (main's replay):
-///
-/// - first the direct items, in one engine entry that also fixes the replay
-///   width `t` ([`super::chunk::direct`]): the inactive layouts, split over
-///   their hull runs or inline, then the Singles, split over `t` workers when
-///   they are slice-disjoint, over their hull runs when they form several
-///   and inline would not fan out a planned Single, and inline otherwise;
-/// - then the plan groups: at `t > 1` in chunks of `t` consecutive groups
-///   ([`super::chunk::groups`]), each a parallel pack, one grouped GEMM and
-///   a scatter split over `t` workers when the chunk's groups are
-///   slice-disjoint, or form two or more hull runs and inline would not fan
-///   out a planned column (inline otherwise); at `t = 1` one group at a time
-///   ([`replay_serial_groups`]).
-///
-/// Every inline move runs on the caller's whole token (one slot under a
-/// forced `Sequential`) and is admitted through one caller gate; a split
-/// leaf builds its own. The first failure stops the replay.
-///
-/// Its callers refuse a forced policy `dense` cannot honor first
-/// ([`refuse_unhonored_policy`]), before any coefficient preparation.
+/// Replay direct fills and Singles, then chunks of plan groups. Every
+/// movement phase and the group chunk width use the same cost model; GEMM
+/// remains the dense provider's responsibility. Inline items keep the caller's
+/// whole token (one slot under Sequential), and split leaves get balanced
+/// shares of that whole token. The first failure stops replay.
+/// Callers first refuse a forced policy their executor cannot honor.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay<E, W, T, D, C>(
     engine: &mut dyn Engine,
@@ -47,11 +33,11 @@ where
     let mut gate = LeafGate::new(layouts.max_planned_elements());
     let start = profile.as_ref().map(|_| std::time::Instant::now());
     #[cfg(feature = "tenferro")]
-    let (threads, sequential) = super::chunk::direct(
+    let (threads, sequential, pooled) = super::chunk::direct(
         engine, workspace, task, schedule, dst, src, writer, kernels, &mut gate,
     )?;
     #[cfg(not(feature = "tenferro"))]
-    let (threads, sequential) = {
+    let (threads, sequential, pooled) = {
         workspace.prepare_fused_indices(1, layouts.max_fused_rank())?;
         let HostTreeTransformWorkspace {
             zero_strides,
@@ -73,7 +59,7 @@ where
                 &mut gate,
             )
         })?;
-        (1, false)
+        (1, false, false)
     };
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
         let elapsed = start.elapsed();
@@ -84,7 +70,7 @@ where
     if task.recoupling_plan().is_empty() {
         return Ok(());
     }
-    if threads > 1 {
+    if !sequential && pooled {
         #[cfg(feature = "tenferro")]
         return super::chunk::groups(
             engine, dense, workspace, task, schedule, dst, src, writer, kernels, &mut gate,

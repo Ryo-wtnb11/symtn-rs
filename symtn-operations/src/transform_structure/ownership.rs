@@ -1,9 +1,8 @@
 use super::*;
 
-/// Compiles the pack and scatter replay columns and main's replay dispatch
-/// metadata from the raw layout table: the Direct lists in destination
-/// address order with their hull runs, each plan group's scatter hull, and
-/// the runnable clamp. O(I log I + B) time and O(I) retained metadata for I
+/// Compiles pack/scatter columns and replay ownership metadata from the raw
+/// layouts: address-ordered Direct lists, hull runs and each group's scatter
+/// hull. O(I log I + B) time and O(I) retained metadata for I
 /// intervals and B blocks: one sort of the Singles, one of the inactive
 /// layouts and one per group's columns, and one linear sweep per list.
 pub(super) fn compile_parallel_schedule(
@@ -128,10 +127,9 @@ pub(super) fn compile_parallel_schedule(
         });
     }
 
-    // Main's replay metadata: the Direct lists in address order with their
-    // hull runs, each group's hull, and the runnable clamp.
+    // Replay ownership metadata: the Direct lists in address order with their
+    // hull runs, each group's hull, and the compiled movement phases.
     let single_runs = hull_runs(ranges.iter().map(|&(lo, hi, _)| (lo, hi)));
-    let singles_slice_disjoint = single_runs.len() == ranges.len();
     let mut singles = Vec::with_capacity(ranges.len());
     singles.extend(ranges.iter().map(|&(_, _, block)| block));
     let mut inactive = Vec::with_capacity(inactive_dst_layouts.len());
@@ -151,19 +149,10 @@ pub(super) fn compile_parallel_schedule(
             let ranges = columns.iter().map(|&(range, _)| range);
             TreeTransformGroupSpan {
                 lo: columns.first().map_or(0, |&((lo, _), _)| lo),
-                hi: ranges.clone().map(|(_, hi)| hi).max().unwrap_or(-1),
-                slice_disjoint: slice_disjoint(ranges),
-                planned: 0,
+                hi: ranges.map(|(_, hi)| hi).max().unwrap_or(-1),
             }
         })
         .collect();
-    let singles_runnable = if singles_slice_disjoint {
-        singles.len()
-    } else {
-        usize::from(!singles.is_empty())
-    };
-    let replay_runnable = singles_runnable.max(pack_columns.len()).max(1);
-
     let scatter_columns = scatter_spans
         .into_iter()
         .map(|(_, column)| column)
@@ -177,9 +166,8 @@ pub(super) fn compile_parallel_schedule(
         inactive_runs,
         singles,
         single_runs,
-        singles_planned: 0,
         group_spans,
-        replay_runnable,
+        ..Default::default()
     })
 }
 
@@ -187,49 +175,121 @@ fn checked_u32(value: usize) -> Result<u32, OperationError> {
     u32::try_from(value).map_err(|_| OperationError::ElementCountOverflow)
 }
 
-/// Records, from the retained layout table, the largest planned Single and
-/// each group's largest planned scatter column of `schedule`: a role is
-/// planned when the table retains a Strided plan for it.
-pub(super) fn record_planned(
+/// Counts come from the final normalized roles on every construction path.
+/// Temporary address unions count reused/overlapping sources once in W;
+/// X still charges every read and write. No address metadata survives compile.
+pub(super) fn compile_movement(
     schedule: &mut TreeTransformParallelSchedule,
     blocks: &[TreeTransformBlock],
     layouts: &TreeTransformLayoutTable,
+    plan: &TreeTransformRecouplingPlan,
 ) -> Result<(), OperationError> {
-    let planned = |layout: usize| -> Result<usize, OperationError> {
-        Ok(if layouts.role(layout)?.plan.is_some() {
-            layouts.entry(layout).element_count
-        } else {
-            0
-        })
-    };
-    let mut singles = 0;
-    for &block in &schedule.singles {
-        if let TreeTransformBlock::Single { dst_layout, .. } = blocks[block as usize] {
-            singles = singles.max(planned(dst_layout)?);
+    use crate::movement::{Ranges, Summary};
+    let offset = |n| isize::try_from(n).map_err(|_| OperationError::ElementCountOverflow);
+    let mut singles = Summary::default();
+    for &index in &schedule.singles {
+        let TreeTransformBlock::Single {
+            dst_layout,
+            src_layout,
+            ..
+        } = blocks[index as usize]
+        else {
+            unreachable!("compiled Single list")
+        };
+        singles.add_role(
+            layouts,
+            dst_layout,
+            false,
+            (1, layouts.entry(dst_layout).offset),
+            (0, layouts.entry(src_layout).offset),
+        )?;
+    }
+    singles.finish()?;
+    let mut inactive = Summary::default();
+    for &layout in &schedule.inactive {
+        let layout = layout as usize;
+        inactive.add_role(
+            layouts,
+            layout,
+            true,
+            (1, layouts.entry(layout).offset),
+            (0, 0),
+        )?;
+    }
+    inactive.finish()?;
+    let mut packs = Vec::with_capacity(schedule.scatter_groups.len());
+    let mut scatters = Vec::with_capacity(schedule.scatter_groups.len());
+    for group in &schedule.scatter_groups {
+        let mut pack = Summary::default();
+        for column in &schedule.pack_columns[group.pack.clone()] {
+            pack.add_role(
+                layouts,
+                column.src_layout,
+                false,
+                (2, offset(column.packed_offset)?),
+                (0, layouts.entry(column.src_layout).offset),
+            )?;
         }
+        pack.finish()?;
+        packs.push(pack);
+        let mut scatter = Summary::default();
+        for column in &schedule.scatter_columns[group.columns.clone()] {
+            scatter.add_role(
+                layouts,
+                column.dst_layout,
+                false,
+                (1, layouts.entry(column.dst_layout).offset),
+                (3, offset(column.packed_offset)?),
+            )?;
+        }
+        scatter.finish()?;
+        scatters.push(scatter);
     }
-    schedule.singles_planned = singles;
-    for (group, span) in schedule.group_spans.iter_mut().enumerate() {
-        let columns = schedule.scatter_groups[group].columns.clone();
-        span.planned = schedule.scatter_columns[columns]
-            .iter()
-            .map(|column| planned(column.dst_layout))
-            .try_fold(0, |max, planned| planned.map(|planned| max.max(planned)))?;
+    let all_pack = Summary::merge_all(&packs)?;
+    let all_scatter = Summary::merge_all(&scatters)?;
+    schedule.member_pack_movement = Summary::merge_all([&inactive, &singles, &all_pack])?;
+    schedule.member_scatter_movement = all_scatter.clone();
+    schedule.group_movement = all_pack.merge(&all_scatter)?;
+    for width in 1..=plan.jobs().len() {
+        let mut largest = (0, 0);
+        for chunk in plan.jobs().chunks(width) {
+            let first = &chunk[0];
+            let last = &chunk[chunk.len() - 1];
+            let span = |start, offset: usize, rows: usize, cols: usize| {
+                offset
+                    .checked_add(rows.checked_mul(cols)?)
+                    .and_then(|end| end.checked_sub(start))
+            };
+            largest.0 = largest.0.max(
+                span(
+                    first.lhs_offset,
+                    last.lhs_offset,
+                    last.rows,
+                    last.contracted,
+                )
+                .ok_or(OperationError::ElementCountOverflow)?,
+            );
+            largest.1 = largest.1.max(
+                span(first.dst_offset, last.dst_offset, last.rows, last.cols)
+                    .ok_or(OperationError::ElementCountOverflow)?,
+            );
+        }
+        schedule.chunk_scratch.push(largest);
     }
+    schedule.pack_movement = Ranges::new(packs)?;
+    schedule.scatter_movement = Ranges::new(scatters)?;
+    for summary in [
+        &mut singles,
+        &mut inactive,
+        &mut schedule.group_movement,
+        &mut schedule.member_pack_movement,
+        &mut schedule.member_scatter_movement,
+    ] {
+        summary.freeze();
+    }
+    schedule.single_movement = singles;
+    schedule.inactive_movement = inactive;
     Ok(())
-}
-
-/// Whether the inclusive destination ranges, in their order, are
-/// slice-disjoint: each nonnegative and starting after the previous one ends.
-fn slice_disjoint(ranges: impl IntoIterator<Item = (isize, isize)>) -> bool {
-    let mut previous_hi = None;
-    for (lo, hi) in ranges {
-        if lo < 0 || hi < lo || previous_hi.is_some_and(|previous| previous >= lo) {
-            return false;
-        }
-        previous_hi = Some(hi);
-    }
-    true
 }
 
 /// The start index of each hull run of the inclusive destination ranges,

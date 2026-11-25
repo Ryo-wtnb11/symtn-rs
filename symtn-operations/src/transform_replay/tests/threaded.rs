@@ -319,7 +319,6 @@ fn replay_metadata_lists_direct_items_in_address_order() {
         .collect();
     assert_eq!(spans, [(96, 119), (48, 95)]);
     assert_eq!(schedule.inactive_runs, [0]);
-    assert_eq!(schedule.replay_runnable, 4);
 }
 
 /// Explicit-index oracle for [`recoupling_fixture`]: column-major blocks of

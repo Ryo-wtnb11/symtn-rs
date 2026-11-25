@@ -29,17 +29,12 @@ pub(crate) struct TreeTransformScatterGroupReplay {
     pub columns: Range<usize>,
 }
 
-/// The destination hull of one plan group's scatter columns: its first and
-/// last written element, whether its columns are slice-disjoint (each starts
-/// after the previous one ends), and the element count of its largest column
-/// whose role retains a Strided plan (zero when none does). A group without
-/// columns spans `(0, -1)`, disjoint.
+/// The inclusive destination hull of one plan group's scatter columns.
+/// A group without columns spans `(0, -1)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TreeTransformGroupSpan {
     pub lo: isize,
     pub hi: isize,
-    pub slice_disjoint: bool,
-    pub planned: usize,
 }
 
 /// A destination write that does not go through a packed GEMM column.
@@ -55,7 +50,7 @@ pub(crate) enum TreeTransformDirectItem {
 /// The replay schedule of a compiled structure, built eagerly with it and
 /// immutable afterwards, so derived equality compares every field: the pack
 /// and scatter columns, the address-ordered direct lists and their hull
-/// runs, the group spans and the runnable clamp.
+/// runs, the group spans and movement summaries.
 ///
 /// A hull run is a maximal stretch of consecutive items of an address-ordered
 /// list whose destination hulls overlap transitively (each item starts at or
@@ -64,6 +59,14 @@ pub(crate) enum TreeTransformDirectItem {
 /// may cut the destination at run starts and give each part one writer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TreeTransformParallelSchedule {
+    pub single_movement: crate::movement::Summary,
+    pub inactive_movement: crate::movement::Summary,
+    pub group_movement: crate::movement::Summary,
+    pub member_pack_movement: crate::movement::Summary,
+    pub member_scatter_movement: crate::movement::Summary,
+    pub pack_movement: crate::movement::Ranges,
+    pub scatter_movement: crate::movement::Ranges,
+    pub chunk_scratch: Vec<(usize, usize)>,
     pub pack_columns: Vec<TreeTransformPackReplay>,
     pub scatter_columns: Vec<TreeTransformScatterReplay>,
     pub scatter_groups: Vec<TreeTransformScatterGroupReplay>,
@@ -78,26 +81,18 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub inactive_runs: Vec<u32>,
     /// The start, in `singles`, of each of its hull runs.
     pub single_runs: Vec<u32>,
-    /// The element count of the largest Single whose role retains a
-    /// Strided plan (zero when none does).
-    pub singles_planned: usize,
     /// Per plan group, its scatter columns' destination span.
     pub group_spans: Vec<TreeTransformGroupSpan>,
-    /// The most workers a replay can keep busy on one phase: the Singles
-    /// when they are slice-disjoint (else one, if any), or the pack columns,
-    /// whichever is more, and at least one.
-    pub replay_runnable: usize,
 }
 
 impl TreeTransformParallelSchedule {
-    /// Whether the Singles' destinations are slice-disjoint in `singles`
-    /// order (every run one Single), so main's Singles split applies.
+    /// Whether every ownership run contains exactly one Single.
+    #[cfg(test)]
     pub(crate) fn singles_slice_disjoint(&self) -> bool {
         self.single_runs.len() == self.singles.len()
     }
 
-    /// The bytes of the vectors this schedule retains, each allocated at its
-    /// exact length.
+    /// The capacity charge of every vector and movement hull retained here.
     pub(crate) fn retained_bytes(&self) -> usize {
         let bytes = |capacity: usize, size: usize| capacity.saturating_mul(size);
         bytes(
@@ -121,6 +116,17 @@ impl TreeTransformParallelSchedule {
         .saturating_add(bytes(
             self.group_spans.capacity(),
             core::mem::size_of::<TreeTransformGroupSpan>(),
+        ))
+        .saturating_add(self.single_movement.retained_bytes())
+        .saturating_add(self.inactive_movement.retained_bytes())
+        .saturating_add(self.group_movement.retained_bytes())
+        .saturating_add(self.member_pack_movement.retained_bytes())
+        .saturating_add(self.member_scatter_movement.retained_bytes())
+        .saturating_add(self.pack_movement.retained_bytes())
+        .saturating_add(self.scatter_movement.retained_bytes())
+        .saturating_add(bytes(
+            self.chunk_scratch.capacity(),
+            core::mem::size_of::<(usize, usize)>(),
         ))
     }
 }

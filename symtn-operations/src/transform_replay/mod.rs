@@ -35,6 +35,8 @@ mod coefficients;
 mod entry;
 mod kernels;
 mod member;
+#[cfg(feature = "tenferro")]
+mod movement;
 mod owned;
 #[cfg(test)]
 mod tests;
@@ -278,8 +280,8 @@ impl<T> HostTreeTransformWorkspace<T> {
 
     #[cfg(test)]
     /// Packed-destination elements this workspace's parallel replays have
-    /// initialized: a fresh or grown scratch inside the first chunk's pack,
-    /// a short one's tail on the caller; a warm replay initializes none.
+    /// initialized: a fresh or grown scratch inside the first nonempty
+    /// chunk's pack; a warm replay initializes none.
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn destination_fills(&self) -> usize {
         self.destination_fills

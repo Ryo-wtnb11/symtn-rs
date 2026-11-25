@@ -368,67 +368,76 @@ without inactive blocks to initialize, a transform without destination
 scales) only admits the engine, with the Host region's refusals, and takes
 no token from it.
 
-A tree-transform replay follows TensorKit's threaded kernels and main's
-replay. One Host region fixes its width `t`: under `Auto` the engine's
-width, at most the compiled runnable parts (the Singles when their
-destinations are slice-disjoint, else one, or the pack columns, whichever is
-more), when Strided's copy estimate of the whole destination pays for that
-section, and one otherwise; under a forced policy its batch decision
-(`lanes * item_threads`, one for `Sequential`), at most the runnable parts,
-on the caller's whole token. Destinations are grouped into hull runs:
-maximal address-ordered stretches whose bounding slices overlap
-transitively, so distinct runs occupy disjoint address ranges and one
-writer owns each run. In that region the inactive blocks are split over
-their runs when there are two or more and the same copy rule admits more
-than one worker for that many runs, otherwise written inline on the
-caller's token in destination address order; then the Singles: at `t > 1`
-with slice-disjoint destinations split over `t` workers, when they are not
-slice-disjoint but form two or more runs split over those runs unless the
-caller's gate would admit the largest Single with a retained Strided plan
-on the caller's token (then inline, where that plan fans the move out), otherwise
-inline: in block order into a caller-provided destination at `t = 1`
-(main's one-worker replay), in address order into an owned output or at
-`t > 1`. A split part of
-`n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
-workers to its left half and forks its token in two (the odd slot to the
-left); a part of one worker or one item is a leaf, which writes its items
-whole on its token. The Multi groups then replay in chunks of `t`
-consecutive groups: each chunk's pack is split the same way over its
-columns, its jobs go to the executor as one grouped GEMM, and its non-empty
-groups, ordered by destination, are scattered split by group when every
-group's columns and every pair of groups are slice-disjoint, over their hull
-runs when they form two or more and the caller's gate would not admit the
-chunk's largest planned column on the caller's token, and inline on the
-caller's token otherwise. At `t = 1` each group is packed,
-multiplied and scattered in plan order. Every inline move is offered the
-caller's whole token (one slot under a forced `Sequential`), so Strided's
-own rule decides whether one large block's move fans out; an overwrite of a
-block whose role retains a Strided plan writes through that plan when
-Strided's rule (`execution::parallel_width` for a copy of its elements)
-gives it more than one worker. One leaf gate per call on the caller, and
-one per split leaf, answers that rule exactly, scanning the token's
-dispatch costs once and searching widths only for a role at or above the
-smallest paying size; the split leaves of one call share that smallest
-size per cost of their cheapest width, which the caller prepares for every
-leaf budget before the first split, so each such cost is searched at most
-once per call among the leaves, and only when a leaf needs it (the
-caller's own gate may search once more, as before). A leaf stops at its first failure, a split runs both
-halves and returns the left failure first, and the first failing phase or
-GEMM stops the replay. The packed destination of the chunks is sized once
-for the largest chunk; when it must grow it is zero-initialized inside the
-first chunk's pack, each split part its own range.
-A fixed-stride member batch (several members of one transform)
-admits every member's ranges before any write and resolves each
-destination scale once per role, then moves its members (the member axis
-one more strided dimension of each move) around one dense submission of
-every member's GEMMs, ordered plan job outer, member inner, and returns
-the first failure in that order. Each move phase takes the width the
-replay rule admits over the members (under `Auto` the engine's width when
-Strided's copy estimate of the whole batch destination pays for it, under
-a forced policy its batch decision): at one every member moves on the
-caller's token, above it the members split into at most that many
-contiguous ranges, each moving its members as one move per role. An executor that cannot honor a forced
-batch policy (every custom executor) refuses a
+Tree-transform movement uses one item cost for every Single, inactive fill,
+pack column, scatter column, and member range:
+
+```text
+t_i = a[c] + r[c](W) * runs_i + e[c](W) * elements_i
+S = sum(t_i)                     M = max(t_i)
+T(1) = S
+T(q) = D(q) + max(M, S/q, X/B(q))       (2 <= q <= p)
+q* = argmin T(q), with ties to smaller q
+```
+
+Here p is the caller token's slot budget, W is the whole phase's distinct
+source and destination bytes, and X counts structural logical reads and
+writes, including destination reads for nonzero-beta accumulation. Runtime
+zero or identity elisions can make this count conservative. Structural
+classes distinguish contiguous or strided inner traversal, and inactive fill
+from real maps. Copy and non-identity real scale share a class; runtime alpha
+and destination scales never alter the compiled classes. Whole-call scalar
+type and storage conjugation select constant-table rows without traversing
+items. Coefficient curves interpolate in log W and remain flat outside their
+knots. GEMM work belongs to the dense provider and is outside this model.
+
+The schedule compiles exact run and element counts, class sums, working sets,
+logical traffic, and an upper hull of (runs, elements) for each class. M is evaluated
+exactly by binary search on those hulls. Reused and overlapping sources count
+once in W, every invocation in X. Exact address unions are temporary compile
+work: contiguous inner spans are merged as intervals, while a strided inner
+span can require visiting every element. Pack and scatter summaries for every
+possible aligned group-chunk width retain O(G log G) summaries and at most
+O(I G) hull points for G groups and I columns; scratch maxima for each width
+are compiled too. All capacities are charged in retained bytes. Each decision
+queries the hulls once and scans integer widths 1 through p without allocation
+or an item pass. A one-slot replay does no model or calibration work.
+
+The same chooser selects direct fill and Single widths, the plan-group chunk
+width, and each chunk's pack and scatter widths. A q-way split divides the
+whole token into q nonzero leaf shares summing to p and differing by at most
+one; remainder slots go to the first leaves. It never narrows the token to q.
+Each destination ownership run (a maximal address-ordered stretch of
+transitively overlapping hulls) stays with one writer, so leaves with no
+ownership run remain idle. Inline items retain the whole token; the existing
+Strided gate may still fan out an inline item internally. The chooser credits
+no inner fan-out in T(1). A leaf stops at its first error; the lowest failing
+job and the first failing phase or GEMM determine replay's error.
+
+Movement constants are retained separately in the caller CPU engine's bounded
+extension store. Online measurement is attempted once per retained entry,
+through the real replay writer using shared buffers, within a 10 ms budget
+including dispatch probes and fixture construction. The deadline is checked
+before every fixture. Failed or unfinished entries keep the next source and
+are not retried before eviction or `scratch::trim`. Each row uses, in order,
+its online measurement, the checked-in reference for threadteam's HostClass,
+or the slowest available row with the same inner stride. The reference table
+records the CI CPU, date and run provenance. D(q) starts from threadteam's
+dispatch table; a measured value replaces it only at or below 20 times that
+table. B(q) is measured replay bandwidth; unknown bandwidth is infinity, so
+that term drops out. Source selection never changes the formula or chooser.
+
+A fixed-stride member batch admits all member ranges before writing, resolves
+destination scales once per role, and moves its members around one dense
+submission (plan group outer, member inner). For N members, let A be the sum
+of setup costs per role and P the per-member sum of run and element costs.
+Its executed q ranges give S(q)=q*A+N*P and M(q)=A+ceil(N/q)*P; T(1)=A+N*P.
+These expressions feed the same chooser. A cold packed-destination fill is
+also priced by its executed contiguous leaf ranges, and first-written by the
+pack workers; a warm destination needs no fill. Sequential uses one slot,
+Inner leaves items inline on the whole token, Outer distributes independent
+items, and Split uses the requested lane count within the caller's budget.
+An executor that cannot honor a forced
+batch policy refuses a
 tree-transform replay, owned overwrite or member batch under a forced
 `Inner`, `Outer` or `Split` policy with a typed `Unsupported` before any
 coefficient preparation, write or executor call; `Auto` and `Sequential` run. Accumulating updates
@@ -454,7 +463,9 @@ contractions and every network step): its contraction lanes are one entry of
 the caller's `CpuEngine` extension store, kept between calls under that
 store's entry and byte limits (64 MiB by default) and released by
 [`symtn::scratch::trim`](../symtn/src/scratch.rs); a ledger that does not
-fit is dropped, so that workload allocates its scratch per call. Structural
+fit is dropped, so that workload allocates its scratch per call. Movement
+constants use another typed entry under the same bounded store and trim
+lifecycle; retaining either payload never replaces the other. Structural
 and plan caches take short lookup and publication locks.
 
 A CUDA operation borrows the caller's `CudaEngine` for its duration and

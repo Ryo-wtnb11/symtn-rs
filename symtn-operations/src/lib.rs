@@ -40,6 +40,7 @@ pub mod host_pool;
 mod host_scalar_kernels;
 pub mod host_scratch;
 pub mod kernel_adapter;
+mod movement;
 mod placement;
 pub mod replay_backend;
 mod scalar;

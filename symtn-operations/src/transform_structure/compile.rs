@@ -356,7 +356,12 @@ impl<T: Copy> TreeTransformStructure<T> {
         // Every structural proof above read the raw table; the retained
         // table keeps only the compiled roles replay executes.
         let layouts = layouts.finish(&blocks, &inactive_dst_layouts)?;
-        super::ownership::record_planned(&mut parallel_schedule, &blocks, &layouts)?;
+        super::ownership::compile_movement(
+            &mut parallel_schedule,
+            &blocks,
+            &layouts,
+            &recoupling_plan,
+        )?;
 
         Ok(Self::from_replay_core(
             Arc::new(TreeTransformReplay {

@@ -82,7 +82,6 @@ use tenferro_cpu::threadteam;
 mod placement;
 mod runner;
 
-pub use placement::flat_width;
 pub(crate) use placement::item_time;
 pub(crate) use placement::{allocate, lane_allocations, searchable, slots, LaneAllocationCache};
 use placement::{parallel_split, words, PlaceScratch};

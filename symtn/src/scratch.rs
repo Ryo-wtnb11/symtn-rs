@@ -1,5 +1,5 @@
-//! Execution scratch that eager Host contractions keep in the caller's CPU
-//! engine between calls.
+//! Execution scratch and movement calibration kept in the caller's CPU engine
+//! between calls.
 //!
 //! An eager Host contraction ([`TensorMap::contract`](crate::typed::TensorMap::contract),
 //! `contract_into`, `compose`, the planar contractions, and every step of a
@@ -11,6 +11,10 @@
 //! contraction on a warm engine therefore allocates no operand or core
 //! scratch, only its owned output.
 //!
+//! Movement width selection keeps its calibration result, including a failed
+//! attempt, in a separate typed slot. [`trim`] releases both scratch and
+//! calibration, so the next eligible movement phase calibrates again.
+//!
 //! This is execution workspace, not semantic cache: it changes cost, never
 //! results. It is separate from the process-global structure caches of
 //! [`crate::cache`].
@@ -18,8 +22,9 @@
 //! # Bound
 //!
 //! Each buffer keeps the largest size it has needed since the last [`trim`].
-//! The scratch is one entry of the engine's extension store and is charged
-//! against that store's limits (by default 256 entries and 64 MiB in all).
+//! The scratch and movement calibration occupy separate entries of the engine's
+//! extension store and are charged against that store's limits (by default 256
+//! entries and 64 MiB in all).
 //! When a contraction returns, its scratch is kept only if its whole ledger
 //! fits those limits next to every other entry; otherwise it is dropped, and
 //! that workload stays correct and cold (it allocates its scratch on every
@@ -51,24 +56,20 @@
 //! # Scope
 //!
 //! Only the CPU engine keeps scratch; on any other engine [`retained_bytes`]
-//! is 0 and [`trim`] does nothing. `CpuEngine::reset_buffer_pool` and
-//! `CpuEngine::clear_runtime_caches` neither count nor release this scratch
-//! (tensor4all/tenferro-rs#2587), so release it with [`trim`]. Each call
-//! moves the engine's store out and back, which allocates an empty
-//! placeholder store each time (tensor4all/tenferro-rs#2587).
-//!
-//! While a tenferro runtime run has moved the engine's store out, a
-//! contraction run inside it finds no scratch and its scratch is dropped
-//! with that run's placeholder; neither [`retained_bytes`] nor [`trim`]
-//! reaches the store during that run.
+//! is 0 and [`trim`] does nothing. `CpuEngine::reset_buffer_pool` leaves these
+//! entries intact; `CpuEngine::clear_runtime_caches` releases the entire
+//! extension store, including scratch and calibration. Slot access moves the
+//! store out and restores it before entering numerical execution; taking a
+//! store already lent to another runtime violates the engine's borrow contract.
 
 use crate::typed::Engine;
 
-/// The bytes of scratch the engine keeps between calls: every kept buffer
+/// The bytes of scratch and movement calibration the engine keeps between calls:
+/// every kept buffer
 /// at capacity, the box that holds its execution context, the boxes of its
-/// later payload-type lanes, and the fixed slot that holds them. While a contraction has the scratch checked out, and after a
-/// call that failed in planning or whose scratch did not fit, only the fixed
-/// slot is reported. It is 0 when no slot exists (never created, or
+/// later payload-type lanes, calibration constants, and the fixed slots that
+/// hold them. A checked-out slot reports only its fixed allocation; other
+/// slots still report their kept values. It is 0 when no slot exists (never created, or
 /// [`trim`]med) and on a non-CPU engine. It is not peak or in-flight memory.
 ///
 /// `&mut` only because the engine's store is reachable solely by moving it
@@ -77,10 +78,10 @@ pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
     symtn_dense::engine_slot::retained_bytes(engine)
 }
 
-/// Releases the scratch the engine keeps, with its slot; the next eligible
-/// contraction is cold. Scratch a contraction has checked out at that moment
-/// is unaffected, and returns under the store's limits. Does nothing on a
-/// non-CPU engine.
+/// Releases retained scratch and movement calibration with their slots; the
+/// next eligible contraction is cold and the next eligible movement phase
+/// calibrates again. Checked-out values are unaffected and return under the
+/// store's limits. Does nothing on a non-CPU engine.
 pub fn trim(engine: &mut dyn Engine) {
     symtn_dense::engine_slot::clear(engine);
 }
