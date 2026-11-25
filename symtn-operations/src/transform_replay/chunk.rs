@@ -357,7 +357,7 @@ where
                     |slots, elements| key.replays_plans && gate_keys.admits(slots, elements),
                     |costs| {
                         movement::prefix_phase(
-                            &prefix,
+                            prefix,
                             0,
                             runs.len(),
                             summary.planned_min,
