@@ -377,7 +377,7 @@ t_i = sum_c(k_ic * a[c] + r[c](W) * runs_ic + e[c](W) * elements_ic)
 S = sum(t_i)
 M_bound = sum_c(a[c] * max_i(k_ic) + max_hull_c(r[c] * runs + e[c] * elements))
 T(1) = S
-T(q) = D(q) + max(M_bound, S/q, X/B(q))       (2 <= q <= min(p, J))
+T(q) = D(q) + max(M_bound, S/q, X/B(q, W))    (2 <= q <= min(p, J))
 q* = argmin T(q), with ties to smaller q
 ```
 
@@ -443,10 +443,36 @@ or the slowest available row with the same inner stride. The reference table
 records the CI CPU, date and run provenance; that run's fit-acceptance flag was
 false, so these rows are measured seeds, not validated phase predictions.
 D(q) comes only from threadteam's `Exec::dispatch_cost`, including the pool
-creator's overrides. B(q) interpolates measured replay bandwidth linearly in q
-between measured widths, using the nearest measured endpoint outside them;
-it is infinity only when no bandwidth was measured. Source selection never
-changes the formula or chooser.
+creator's overrides. Bandwidth uses the same element costs as the serial model:
+E(W) = sum_c(elements_c * e[c](W)), b1(W) = X/E(W), and
+B(q, W) = min(q*b1(W), B_sat(q, W)). Setup and run costs remain in S, rather
+than being charged again in E. Logical destination reads, fused member ranges
+and cold fills contribute their existing element counts and traffic.
+
+The terminal value of each measured element curve defines its memory plateau;
+its knee is the first knot after the curve's minimum that reaches that value.
+Online knots and the scaled reference tail both participate. B_sat is infinity
+below the largest knee of the phase's active classes, so a mixed phase uses the
+memory cap only after every active curve has reached its plateau. The knees are
+computed once per retained constants entry. Four element-only preparations
+recover the phase's class weights without adding retained metadata or allocating;
+they have the same asymptotic cost as its normal preparation.
+
+Bandwidth fixtures are at least the contiguous curve's knee in size and use
+exactly the same q-slot prefix when measuring q, regardless of the caller's
+budget. Each ladder knot is attempted once per retained entry. Measurements
+below the fixture's single-thread memory rate or below the previous accepted
+knot are rejected before linear interpolation in q. Missing widths use the
+nearest accepted endpoint outside the measured range; no accepted measurement
+means infinity. A phase also rejects a prefix below either its own b1(memory W)
+or b1(W), using the nearest accepted endpoint at or above both rates, or
+infinity if none exists. The current-W check covers noise after the knee.
+The row-calibration buffers occupy 8 MiB; they are released before bandwidth
+buffers are allocated lazily, requesting combined payload capacity at most the
+contiguous knee plus 16*(p+1) bytes. Their destination pages are first written by workers.
+The deadline is checked again before each fixture and after each sample;
+unfinished measurements leave the cap unknown. Source selection never changes
+the formula or chooser.
 
 A fixed-stride member batch admits all member ranges before writing, resolves
 destination scales once per role, and moves its members around one dense
@@ -457,8 +483,8 @@ These expressions feed the same chooser. A cold packed-destination fill is
 also priced by its executed contiguous leaf ranges, and first-written by the
 pack workers; a warm destination needs no fill. Growth within retained capacity
 fills only the missing tail. Forced policies delegate to Tenferro's batch
-decision: the product of lanes and item threads is clamped to the caller's
-budget and runnable jobs, as for other flat phases.
+decision: its lane count is clamped to the caller's budget and runnable jobs;
+item threads stay inside each leaf token.
 An executor that cannot honor a forced
 batch policy refuses a
 tree-transform replay, owned overwrite or member batch under a forced

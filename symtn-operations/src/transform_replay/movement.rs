@@ -42,6 +42,19 @@ impl<const N: usize> Curve<N> {
             None => interpolate(&self.points, bytes),
         }
     }
+
+    fn memory_knee(&self) -> f64 {
+        let knots = || self.points.iter().chain(self.online.iter().flatten());
+        let minimum = knots()
+            .min_by(|a, b| self.at(a.0 as f64).total_cmp(&self.at(b.0 as f64)))
+            .map_or(0, |point| point.0);
+        let plateau = self.at(f64::INFINITY);
+        knots()
+            .filter(|&&(bytes, _)| bytes >= minimum && self.at(bytes as f64) >= plateau)
+            .map(|point| point.0)
+            .min()
+            .map_or(f64::INFINITY, |bytes| bytes as f64)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -117,6 +130,7 @@ const REFERENCES: [(HostClass, [Row; 2]); 1] = [(HostClass::X86_64Avx512, CI_ROW
 /// Structural table: unmeasured inactive rows use their same-stride real-map source.
 pub(super) struct MovementConstants {
     rows: [Row; CLASSES],
+    memory_knees: [f64; CLASSES],
     bandwidth: Vec<f64>,
     reserved_entries: usize,
     attempted: bool,
@@ -132,6 +146,7 @@ impl MovementConstants {
             .map_or(CI_ROWS, |(_, rows)| *rows);
         Self {
             rows: [rows[0], rows[1], rows[0], rows[1]],
+            memory_knees: core::array::from_fn(|c| rows[c % 2].e.memory_knee()),
             bandwidth: Vec::new(),
             reserved_entries: 0,
             attempted: false,
@@ -147,10 +162,6 @@ impl MovementConstants {
     fn retained_bytes(&self) -> usize {
         // The slot already charges its inline value, including the rows.
         self.bandwidth.capacity().max(self.reserved_entries) * std::mem::size_of::<f64>()
-    }
-
-    fn bandwidth(&self, q: usize) -> f64 {
-        self.bandwidth.get(q).copied().unwrap_or(f64::INFINITY)
     }
 }
 
@@ -203,6 +214,13 @@ fn region_with<R>(
                         &mut exec,
                         deadline.unwrap_or_else(|| Instant::now() + ONLINE_BUDGET),
                         constants,
+                    );
+                    constants.memory_knees =
+                        core::array::from_fn(|c| constants.rows[c].e.memory_knee());
+                    validate_bandwidth(
+                        &mut constants.bandwidth,
+                        (2 * std::mem::size_of::<f64>()) as f64
+                            / constants.rows[0].e.at(f64::INFINITY),
                     );
                     interpolate_bandwidth(&mut constants.bandwidth);
                 }
@@ -349,7 +367,7 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
     jobs: usize,
     working_set: u128,
     traffic: u128,
-    prepare: impl FnOnce(&Costs) -> F,
+    prepare: impl Fn(&Costs) -> F,
 ) -> usize {
     let budget = exec.budget();
     if budget.min(jobs) <= 1 {
@@ -373,9 +391,14 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
         let row = constants.row(c);
         (row.a, row.r.at(working_set), row.e.at(working_set))
     });
+    let elements = core::array::from_fn(|class| {
+        let basis = core::array::from_fn(|c| (0.0, 0.0, f64::from(c == class)));
+        prepare(&basis)(1).0
+    });
+    let traffic = traffic as f64 * bytes;
     choose(
         budget.min(jobs),
-        traffic as f64 * bytes,
+        traffic,
         prepare(&costs),
         |q| {
             exec.token_ref()
@@ -383,12 +406,69 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
                 .as_secs_f64()
                 * 1e9
         },
-        |q| constants.bandwidth(q),
+        phase_bandwidth(working_set, traffic, elements, constants),
     )
 }
 
-/// Fill every unmeasured width once, linearly between measured q knots and
-/// flat outside them. Infinity remains only when the ladder has no measurement.
+fn phase_bandwidth<'a>(
+    working_set: f64,
+    traffic: f64,
+    elements: [f64; CLASSES],
+    constants: &'a Constants,
+) -> impl Fn(usize) -> f64 + 'a {
+    let rows = &constants.rows;
+    let measured = &constants.bandwidth;
+    let element_time = |bytes| {
+        elements
+            .iter()
+            .zip(rows)
+            .map(|(n, row)| n * row.e.at(bytes))
+            .sum::<f64>()
+    };
+    let rate = |time: f64| {
+        if time > 0.0 {
+            traffic / time
+        } else {
+            f64::INFINITY
+        }
+    };
+    let single = rate(element_time(working_set));
+    let memory = rate(element_time(f64::INFINITY));
+    // A mixed phase uses the memory roof only after every active curve reaches its plateau.
+    let knee = elements
+        .iter()
+        .zip(constants.memory_knees)
+        .filter(|(n, _)| **n > 0.0)
+        .map(|(_, knee)| knee)
+        .fold(0.0, f64::max);
+    let first = measured
+        .iter()
+        .copied()
+        .find(|value| value.is_finite() && *value >= memory.max(single))
+        .unwrap_or(f64::INFINITY);
+    move |q| {
+        let saturated = if working_set >= knee {
+            measured.get(q).copied().unwrap_or(f64::INFINITY).max(first)
+        } else {
+            f64::INFINITY
+        };
+        (q as f64 * single).min(saturated)
+    }
+}
+
+/// A slower-than-serial or descending sample is not a saturated bandwidth estimate.
+fn validate_bandwidth(values: &mut [f64], minimum: f64) {
+    let mut previous = minimum;
+    for value in values {
+        if value.is_finite() && *value > 0.0 && *value >= previous {
+            previous = *value;
+        } else {
+            *value = f64::INFINITY;
+        }
+    }
+}
+
+/// Fill missing widths between accepted q knots, flat outside them.
 fn interpolate_bandwidth(values: &mut [f64]) {
     let Some(mut left) = values.iter().position(|x| x.is_finite() && *x > 0.0) else {
         return;
@@ -592,6 +672,12 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
     if Instant::now() >= deadline {
         return;
     }
+    drop(source);
+    drop(destination);
+    let memory_bytes = constants.rows[0].e.memory_knee() as usize;
+    let elements = memory_bytes.div_ceil(2 * std::mem::size_of::<f64>());
+    let source = vec![1.0; elements + p];
+    let mut destination = Vec::<f64>::with_capacity(elements + p);
     for q in std::iter::successors(Some(2.min(p)), |&q| (q < p).then(|| (q * 2).min(p))) {
         if Instant::now() >= deadline {
             return;
@@ -601,7 +687,7 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
             .dispatch_cost(NonZeroUsize::new(q).unwrap())
             .as_secs_f64()
             * 1e9;
-        let n = (BUFFER_ELEMENTS / 2 / q).max(1);
+        let n = elements.div_ceil(q).max(1);
         let Some(fixture) = Fixture::new(n, 1, 0).ok() else {
             continue;
         };
@@ -615,19 +701,22 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
             return;
         }
         let start = Instant::now();
-        exec.reborrow().into_token().fork(q, |i, token| {
-            let mut piece = pieces[i].lock().unwrap_or_else(PoisonError::into_inner);
-            if fixture
-                .run(
-                    lanes::Exec::from_token(token, workspace, policy),
-                    &source[i * n..(i + 1) * n],
-                    &mut piece,
-                )
-                .is_err()
-            {
-                failed.store(true, Ordering::Relaxed);
-            }
-        });
+        exec.reborrow()
+            .limit(NonZeroUsize::new(q).unwrap())
+            .into_token()
+            .fork(q, |i, token| {
+                let mut piece = pieces[i].lock().unwrap_or_else(PoisonError::into_inner);
+                if fixture
+                    .run(
+                        lanes::Exec::from_token(token, workspace, policy),
+                        &source[i * n..(i + 1) * n],
+                        &mut piece,
+                    )
+                    .is_err()
+                {
+                    failed.store(true, Ordering::Relaxed);
+                }
+            });
         let elapsed = start.elapsed().as_secs_f64() * 1e9 - table;
         if Instant::now() < deadline
             && !failed.load(Ordering::Relaxed)
@@ -991,6 +1080,138 @@ mod tests {
         let mut empty = [f64::INFINITY; 3];
         interpolate_bandwidth(&mut empty);
         assert_eq!(empty, [f64::INFINITY; 3]);
+    }
+
+    /// Purpose: a cache-resident phase scales its element rate at both budgets;
+    /// the ungated memory measurement is the control that keeps two slots inline.
+    #[test]
+    fn cache_resident_many_items_split_at_the_budget() {
+        let (sum, largest, traffic) = (136531.0, 227.0, 7376896.0);
+        let mut constants = Constants::reference(HostClass::Generic);
+        constants.bandwidth = vec![60.0; 5];
+        let elements = [traffic / 16.0, 0.0, 0.0, 0.0];
+        let dispatch = |q| [0.0, 0.0, 600.0, 650.0, 700.0][q];
+        for budget in [2, 4] {
+            assert_eq!(
+                choose(
+                    budget,
+                    traffic,
+                    |_| (sum, largest),
+                    dispatch,
+                    phase_bandwidth(traffic, traffic, elements, &constants)
+                ),
+                budget
+            );
+        }
+        assert_eq!(
+            choose(
+                2,
+                traffic,
+                |_| (sum, largest),
+                dispatch,
+                |_| traffic / 288719.0
+            ),
+            1
+        );
+        let element_time = traffic / 16.0 * 0.15972158132790892;
+        let bandwidth = phase_bandwidth(traffic, traffic, elements, &constants);
+        assert!((traffic / bandwidth(4) - element_time / 4.0).abs() < 1e-9);
+    }
+
+    /// Purpose: memory-resident phases stop gaining width above the measured
+    /// aggregate plateau; cache-resident work is the control without this cap.
+    #[test]
+    fn memory_resident_bandwidth_stops_at_saturation() {
+        let mut constants = Constants::reference(HostClass::Generic);
+        constants.bandwidth = vec![
+            f64::INFINITY,
+            f64::INFINITY,
+            60.0,
+            80.0,
+            80.0,
+            80.0,
+            80.0,
+            80.0,
+            80.0,
+        ];
+        let traffic = (128 << 20) as f64;
+        let elements = [traffic / 16.0, 0.0, 0.0, 0.0];
+        let bandwidth = phase_bandwidth(traffic, traffic, elements, &constants);
+        assert_eq!(bandwidth(4), 80.0);
+        let sum = elements[0] * constants.rows[0].e.at(traffic);
+        assert_eq!(choose(8, traffic, |_| (sum, 0.0), |_| 0.0, bandwidth), 3);
+        assert!(phase_bandwidth((4 << 20) as f64, traffic, elements, &constants)(4) > 80.0);
+    }
+
+    /// Purpose: a too-slow or decreasing measurement is rejected before interpolation;
+    /// a ladder meeting the same minimum and order is retained.
+    #[test]
+    fn invalid_saturated_measurements_are_rejected() {
+        let mut values = [f64::INFINITY, f64::INFINITY, 40.0, 100.0, 80.0, 120.0];
+        validate_bandwidth(&mut values, 50.0);
+        assert_eq!(values[2], f64::INFINITY);
+        assert_eq!(values[4], f64::INFINITY);
+        interpolate_bandwidth(&mut values);
+        assert_eq!(values, [100.0, 100.0, 100.0, 100.0, 110.0, 120.0]);
+        let mut valid = [f64::INFINITY, f64::INFINITY, 60.0, 100.0, 100.0, 120.0];
+        validate_bandwidth(&mut valid, 50.0);
+        assert_eq!(&valid[2..], &[60.0, 100.0, 100.0, 120.0]);
+    }
+
+    /// Purpose: only active element curves determine the cache knee, and a
+    /// phase-specific minimum rejects low prefix knots while retaining later ones.
+    #[test]
+    fn saturation_uses_active_curves_and_their_memory_rate() {
+        let mut constants = Constants::reference(HostClass::Generic);
+        assert_eq!(
+            constants.memory_knees[..2],
+            [(64 << 20) as f64, (32 << 20) as f64]
+        );
+        constants.bandwidth = vec![10.0, 10.0, 10.0, 80.0, 80.0];
+        let elements = [0.0, 1000.0, 0.0, 0.0];
+        assert_eq!(
+            phase_bandwidth((48 << 20) as f64, 16000.0, elements, &constants)(4),
+            80.0
+        );
+        assert!(phase_bandwidth((24 << 20) as f64, 16000.0, elements, &constants)(4) > 80.0);
+        assert_eq!(
+            phase_bandwidth((48 << 20) as f64, 16000.0, elements, &constants)(3),
+            80.0
+        );
+        constants.bandwidth[3..].fill(10.0);
+        assert!(phase_bandwidth((48 << 20) as f64, 16000.0, elements, &constants)(3) > 10.0);
+    }
+
+    /// Purpose: noise after the knee must not admit a cap below the current
+    /// single-thread rate; a cap above that rate remains usable.
+    #[test]
+    fn saturated_cap_cannot_undercut_a_faster_curve_knot() {
+        let mut constants = Constants::reference(HostClass::Generic);
+        constants.bandwidth = vec![27.0; 5];
+        let elements = [0.0, 1000.0, 0.0, 0.0];
+        let actual = phase_bandwidth((64 << 20) as f64, 16000.0, elements, &constants)(4);
+        assert!(actual > 27.0);
+        constants.bandwidth.fill(40.0);
+        assert_eq!(
+            phase_bandwidth((64 << 20) as f64, 16000.0, elements, &constants)(4),
+            40.0
+        );
+    }
+
+    /// Purpose: mixed classes and logical read traffic use the same weighted
+    /// element time as the serial model; a one-class phase is the control.
+    #[test]
+    fn mixed_curves_weight_the_serial_element_rate() {
+        let constants = Constants::reference(HostClass::Generic);
+        let working_set = 7376896.0;
+        let elements = [100.0, 200.0, 300.0, 400.0];
+        let traffic = 24000.0;
+        let expected = 400.0 * constants.rows[0].e.at(working_set)
+            + 600.0 * constants.rows[1].e.at(working_set);
+        let actual = phase_bandwidth(working_set, traffic, elements, &constants)(4);
+        assert!((traffic / actual - expected / 4.0).abs() < 1e-12);
+        let one = phase_bandwidth(working_set, traffic, [1000.0, 0.0, 0.0, 0.0], &constants)(4);
+        assert_ne!(actual, one);
     }
 
     /// Purpose: online run and element curves keep measured knots and follow
