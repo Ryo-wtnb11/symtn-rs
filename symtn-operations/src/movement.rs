@@ -13,13 +13,13 @@ pub(crate) struct Point {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Counts {
-    pub items: usize,
-    pub runs: usize,
-    pub elements: usize,
+    pub items: u128,
+    pub runs: u128,
+    pub elements: u128,
 }
 
 impl Counts {
-    fn add(self, rhs: Self) -> Result<Self, OperationError> {
+    pub(crate) fn add(self, rhs: Self) -> Result<Self, OperationError> {
         Ok(Self {
             items: add(self.items, rhs.items)?,
             runs: add(self.runs, rhs.runs)?,
@@ -28,7 +28,7 @@ impl Counts {
     }
 }
 
-fn add(a: usize, b: usize) -> Result<usize, OperationError> {
+fn add(a: u128, b: u128) -> Result<u128, OperationError> {
     a.checked_add(b).ok_or(OperationError::ElementCountOverflow)
 }
 
@@ -37,23 +37,31 @@ pub(crate) struct Summary {
     pub counts: [Counts; CLASSES],
     pub hulls: [Vec<Point>; CLASSES],
     /// Payload elements touched, source and destination included.
-    pub working_set: usize,
-    pub traffic: usize,
-    pub destination_reads: usize,
-    // Compile-only address union; discarded after every range has been baked.
-    touches: Vec<(u8, isize, isize)>,
+    pub working_set: u128,
+    pub traffic: u128,
+    pub destination_reads: u128,
+    /// Executed jobs retain their joint class counts, including every role setup.
+    pub jobs: Vec<[Counts; CLASSES]>,
+    // Per-buffer address envelopes: exact when coalesced, otherwise upper bounds.
+    extents: [Option<(i128, i128)>; 4],
 }
 
 impl Summary {
     pub(crate) fn push(&mut self, class: usize, point: Point) -> Result<(), OperationError> {
         self.counts[class] = self.counts[class].add(Counts {
             items: 1,
-            runs: point.runs,
-            elements: point.elements,
+            runs: point.runs as u128,
+            elements: point.elements as u128,
         })?;
         self.hulls[class].push(point);
-        let touched = point
-            .elements
+        let mut job = [Counts::default(); CLASSES];
+        job[class] = Counts {
+            items: 1,
+            runs: point.runs as u128,
+            elements: point.elements as u128,
+        };
+        self.jobs.push(job);
+        let touched = (point.elements as u128)
             .checked_mul([2, 2, 1, 1][class])
             .ok_or(OperationError::ElementCountOverflow)?;
         self.working_set = add(self.working_set, touched)?;
@@ -67,22 +75,11 @@ impl Summary {
         for points in &mut self.hulls {
             *points = upper_hull(core::mem::take(points));
         }
-        self.touches.sort_unstable();
-        let mut merged: Vec<(u8, isize, isize)> = Vec::new();
-        for &(buffer, lo, hi) in &self.touches {
-            match merged.last_mut() {
-                Some(last) if last.0 == buffer && lo <= last.2.saturating_add(1) => {
-                    last.2 = last.2.max(hi)
-                }
-                _ => merged.push((buffer, lo, hi)),
-            }
-        }
-        if !merged.is_empty() {
-            self.working_set = merged.iter().try_fold(0, |sum, &(_, lo, hi)| {
-                add(sum, (hi as i128 - lo as i128 + 1) as usize)
-            })?;
-        }
-        self.touches = merged;
+        self.working_set = self
+            .extents
+            .iter()
+            .flatten()
+            .try_fold(0, |sum, &(lo, hi)| add(sum, (hi - lo + 1) as u128))?;
         Ok(())
     }
 
@@ -95,17 +92,59 @@ impl Summary {
     ) -> Result<Self, OperationError> {
         let mut result = Self::default();
         for summary in summaries {
+            result.add_totals(summary)?;
             for c in 0..CLASSES {
-                result.counts[c] = result.counts[c].add(summary.counts[c])?;
                 result.hulls[c].extend_from_slice(&summary.hulls[c]);
             }
-            result.working_set = add(result.working_set, summary.working_set)?;
-            result.traffic = add(result.traffic, summary.traffic)?;
-            result.destination_reads = add(result.destination_reads, summary.destination_reads)?;
-            result.touches.extend_from_slice(&summary.touches);
+            result.jobs.extend_from_slice(&summary.jobs);
         }
         result.finish()?;
         Ok(result)
+    }
+
+    /// Stack-only aggregation for a chunk; no hull rebuilding or job copying.
+    pub(crate) fn totals<'a>(
+        summaries: impl IntoIterator<Item = &'a Self>,
+    ) -> Result<Self, OperationError> {
+        let mut result = Self::default();
+        for summary in summaries {
+            result.add_totals(summary)?;
+        }
+        result.finish()?;
+        Ok(result)
+    }
+
+    fn add_totals(&mut self, rhs: &Self) -> Result<(), OperationError> {
+        for c in 0..CLASSES {
+            self.counts[c] = self.counts[c].add(rhs.counts[c])?;
+        }
+        self.traffic = add(self.traffic, rhs.traffic)?;
+        self.destination_reads = add(self.destination_reads, rhs.destination_reads)?;
+        for (buffer, extent) in rhs.extents.iter().enumerate() {
+            if let Some((lo, hi)) = *extent {
+                self.touch((buffer as u8, lo, hi));
+            }
+        }
+        Ok(())
+    }
+
+    /// Each ownership run is indivisible; its roles all execute on one leaf.
+    pub(crate) fn fuse_jobs(&mut self, starts: &[u32]) -> Result<(), OperationError> {
+        let mut jobs = Vec::with_capacity(starts.len());
+        for (i, &start) in starts.iter().enumerate() {
+            let end = starts
+                .get(i + 1)
+                .map_or(self.jobs.len(), |&end| end as usize);
+            let mut total = [Counts::default(); CLASSES];
+            for job in &self.jobs[start as usize..end] {
+                for c in 0..CLASSES {
+                    total[c] = total[c].add(job[c])?;
+                }
+            }
+            jobs.push(total);
+        }
+        self.jobs = jobs;
+        Ok(())
     }
 
     pub(crate) fn retained_bytes(&self) -> usize {
@@ -113,15 +152,11 @@ impl Summary {
             .iter()
             .map(|h| h.capacity() * core::mem::size_of::<Point>())
             .sum::<usize>()
-            + self.touches.capacity() * core::mem::size_of::<(u8, isize, isize)>()
+            + self.jobs.capacity() * core::mem::size_of::<[Counts; CLASSES]>()
     }
 
-    pub(crate) fn freeze(&mut self) {
-        self.touches = Vec::new();
-    }
-
-    pub(crate) fn logical_traffic(&self, read_destination: bool) -> usize {
-        self.traffic + usize::from(read_destination) * self.destination_reads
+    pub(crate) fn logical_traffic(&self, read_destination: bool) -> u128 {
+        self.traffic + u128::from(read_destination) * self.destination_reads
     }
 
     pub(crate) fn add_role(
@@ -129,8 +164,8 @@ impl Summary {
         layouts: &TreeTransformLayoutTable,
         layout: usize,
         inactive: bool,
-        dst: (u8, isize),
-        src: (u8, isize),
+        dst: (u8, i128, i128),
+        src: (u8, i128, i128),
     ) -> Result<(), OperationError> {
         let (class, point) = role(layouts, layout, inactive)?;
         if point.elements == 0 {
@@ -138,48 +173,21 @@ impl Summary {
         }
         self.push(class, point)?;
         if dst.0 == 1 {
-            self.destination_reads = add(self.destination_reads, point.elements)?;
+            self.destination_reads = add(self.destination_reads, point.elements as u128)?;
         }
-        if inactive {
-            let (dims, strides) = layouts.inactive_role(layout)?;
-            self.touch(dst, dims, strides)?;
-        } else {
-            let role = layouts.role(layout)?;
-            self.touch(dst, role.dims(), role.dst_strides())?;
-            self.touch(src, role.dims(), role.src_strides())?;
+        self.touch(dst);
+        if !inactive {
+            self.touch(src);
         }
         Ok(())
     }
 
-    fn touch(
-        &mut self,
-        (buffer, offset): (u8, isize),
-        dims: &[usize],
-        strides: &[isize],
-    ) -> Result<(), OperationError> {
-        let inner = if strides[0].unsigned_abs() == 1 {
-            dims[0]
-        } else {
-            1
-        };
-        let elements = dims
-            .iter()
-            .try_fold(1usize, |n, &d| n.checked_mul(d))
-            .ok_or(OperationError::ElementCountOverflow)?;
-        for start in (0..elements).step_by(inner) {
-            let (mut linear, mut at) = (start, offset as i128);
-            for (&dim, &stride) in dims.iter().zip(strides) {
-                at += (linear % dim) as i128 * stride as i128;
-                linear /= dim;
-            }
-            let end = at + (inner - 1) as i128 * strides[0] as i128;
-            let lo =
-                isize::try_from(at.min(end)).map_err(|_| OperationError::ElementCountOverflow)?;
-            let hi =
-                isize::try_from(at.max(end)).map_err(|_| OperationError::ElementCountOverflow)?;
-            self.touches.push((buffer, lo, hi));
-        }
-        Ok(())
+    fn touch(&mut self, (buffer, lo, hi): (u8, i128, i128)) {
+        let extent = &mut self.extents[buffer as usize];
+        *extent = Some(match *extent {
+            Some((a, b)) => (a.min(lo), b.max(hi)),
+            None => (lo, hi),
+        });
     }
 }
 
@@ -256,45 +264,6 @@ pub(crate) fn role(
             elements,
         },
     ))
-}
-
-/// The exact phases executed by every possible plan-group chunk width.
-/// A width above the group count executes the one whole chunk.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Ranges {
-    widths: Vec<Vec<Summary>>,
-}
-
-impl Ranges {
-    pub(crate) fn new(leaves: Vec<Summary>) -> Result<Self, OperationError> {
-        let mut widths = Vec::with_capacity(leaves.len());
-        for width in 1..=leaves.len() {
-            let mut chunks = Vec::with_capacity(leaves.len().div_ceil(width));
-            for chunk in leaves.chunks(width) {
-                let mut sum = Summary::merge_all(chunk)?;
-                sum.freeze();
-                chunks.push(sum);
-            }
-            widths.push(chunks);
-        }
-        Ok(Self { widths })
-    }
-
-    pub(crate) fn get(&self, width: usize, chunk: usize) -> &Summary {
-        &self.widths[width.min(self.widths.len()) - 1][chunk]
-    }
-
-    pub(crate) fn retained_bytes(&self) -> usize {
-        self.widths.capacity() * core::mem::size_of::<Vec<Summary>>()
-            + self
-                .widths
-                .iter()
-                .map(|chunks| {
-                    chunks.capacity() * core::mem::size_of::<Summary>()
-                        + chunks.iter().map(Summary::retained_bytes).sum::<usize>()
-                })
-                .sum::<usize>()
-    }
 }
 
 #[cfg(test)]
@@ -374,11 +343,11 @@ mod tests {
         .clone()
     }
 
-    /// Reusing a strided source changes W but not repeated traffic X; a
-    /// distinct source block is the control with the larger working set.
+    /// Source envelopes collapse reuse and conservatively include stride gaps;
+    /// a distinct source is the control with the larger working set.
     #[test]
-    fn working_set_unions_repeated_strided_sources() {
-        for (second_source, working_set) in [(0, 6), (1, 8)] {
+    fn working_set_bounds_repeated_strided_sources() {
+        for (second_source, working_set) in [(0, 7), (1, 11)] {
             let phase = paired_strided_singles(second_source);
             assert_eq!(phase.working_set, working_set);
             assert_eq!(phase.traffic, 8);
@@ -407,8 +376,8 @@ mod tests {
         assert_eq!(phase.logical_traffic(false), 8);
     }
 
-    /// Aligned chunk summaries union repeated pack sources across groups;
-    /// separate chunks are the control touching the source once each.
+    /// Per-group envelopes combine without retaining a summary for every width;
+    /// separate groups are the control touching their own packed destinations.
     #[test]
     fn chunk_summaries_use_whole_phase_source_unions() {
         use crate::{TreeTransformBlockSpec, TreeTransformStructure};
@@ -425,11 +394,12 @@ mod tests {
         )
         .unwrap();
         let phases = &transform.parallel_schedule().pack_movement;
-        assert_eq!(phases.get(2, 0).working_set, 18);
-        assert_eq!(phases.get(2, 0).traffic, 24);
+        let combined = Summary::totals(phases).unwrap();
+        assert_eq!(combined.working_set, 18);
+        assert_eq!(combined.traffic, 24);
         for chunk in 0..2 {
-            assert_eq!(phases.get(1, chunk).working_set, 12);
-            assert_eq!(phases.get(1, chunk).traffic, 12);
+            assert_eq!(phases[chunk].working_set, 12);
+            assert_eq!(phases[chunk].traffic, 12);
         }
     }
 }

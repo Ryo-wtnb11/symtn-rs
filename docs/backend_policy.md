@@ -368,63 +368,72 @@ without inactive blocks to initialize, a transform without destination
 scales) only admits the engine, with the Host region's refusals, and takes
 no token from it.
 
-Tree-transform movement uses one item cost for every Single, inactive fill,
-pack column, scatter column, and member range:
+Tree-transform movement prices the jobs it executes: a destination hull run
+for Singles or inactive fills, a pack column, a scatter group run, or a member
+range. Every role in a job contributes its setup, run and element costs:
 
 ```text
-t_i = a[c] + r[c](W) * runs_i + e[c](W) * elements_i
+t_i = sum_c(k_ic * a[c] + r[c](W) * runs_ic + e[c](W) * elements_ic)
 S = sum(t_i)                     M = max(t_i)
 T(1) = S
-T(q) = D(q) + max(M, S/q, X/B(q))       (2 <= q <= p)
+T(q) = D(q) + max(M, S/q, X/B(q))       (2 <= q <= min(p, J))
 q* = argmin T(q), with ties to smaller q
 ```
 
-Here p is the caller token's slot budget, W is the whole phase's distinct
-source and destination bytes, and X counts structural logical reads and
-writes, including destination reads for nonzero-beta accumulation. Runtime
+Here p is the caller token's slot budget, J the number of runnable jobs, and
+k_ic the number of roles of class c executed by job i. W bounds the phase's
+source and destination address extents, and X counts structural logical reads
+and writes, including destination reads for nonzero-beta accumulation. Runtime
 zero or identity elisions can make this count conservative. Structural
 classes distinguish contiguous or strided inner traversal, and inactive fill
 from real maps. Copy and non-identity real scale share a class; runtime alpha
-and destination scales never alter the compiled classes. Whole-call scalar
-type and storage conjugation select constant-table rows without traversing
-items. Coefficient curves interpolate in log W and remain flat outside their
-knots. GEMM work belongs to the dense provider and is outside this model.
+and destination scales never alter the compiled classes. Rows are indexed by
+structural class only; unmeasured fill rows use the same-stride real-map row.
+Reference curves interpolate in log W and remain flat outside their knots.
+Beyond the last online knot, an online curve keeps the reference curve's shape,
+scaled to meet that knot. GEMM work belongs to the dense provider and is
+outside this model.
 
-The schedule compiles exact run and element counts, class sums, working sets,
-logical traffic, and an upper hull of (runs, elements) for each class. M is evaluated
-exactly by binary search on those hulls. Reused and overlapping sources count
-once in W, every invocation in X. Exact address unions are temporary compile
-work: contiguous inner spans are merged as intervals, while a strided inner
-span can require visiting every element. Pack and scatter summaries for every
-possible aligned group-chunk width retain O(G log G) summaries and at most
-O(I G) hull points for G groups and I columns; scratch maxima for each width
-are compiled too. All capacities are charged in retained bytes. Each decision
-queries the hulls once and scans integer widths 1 through p without allocation
-or an item pass. A one-slot replay does no model or calibration work.
+The schedule compiles exact role counts, logical traffic, per-job class counts,
+and per-group pack hulls. Address extents merge by buffer in constant space:
+W is exact for coalesced blocks and an upper bound with gaps or strides.
+No payload elements are visited during compilation. With I role intervals,
+B blocks, and F total axis metadata, compilation takes O(I log I + B + F)
+time and retains O(I + G) movement metadata, including O(G) summaries for G
+groups (O(I) when every group has a role).
+All capacities are charged in retained bytes. Preparing a direct phase scans
+its J executed jobs to find the exact maximum of their joint class costs;
+preparing a chunk aggregates its t group summaries in O(t). The shared chooser
+then scans widths 1 through min(p, J), without allocation. Scratch maxima are
+computed once for the chosen chunk width. A one-slot replay does no model or
+calibration work.
 
 The same chooser selects direct fill and Single widths, the plan-group chunk
 width, and each chunk's pack and scatter widths. A q-way split divides the
 whole token into q nonzero leaf shares summing to p and differing by at most
 one; remainder slots go to the first leaves. It never narrows the token to q.
 Each destination ownership run (a maximal address-ordered stretch of
-transitively overlapping hulls) stays with one writer, so leaves with no
-ownership run remain idle. Inline items retain the whole token; the existing
-Strided gate may still fan out an inline item internally. The chooser credits
+transitively overlapping hulls) stays with one writer; the width cannot exceed
+the number of runs. Inline items retain the whole token; the existing Strided
+gate may still fan out an inline item internally. The chooser credits
 no inner fan-out in T(1). A leaf stops at its first error; the lowest failing
 job and the first failing phase or GEMM determine replay's error.
 
 Movement constants are retained separately in the caller CPU engine's bounded
 extension store. Online measurement is attempted once per retained entry,
 through the real replay writer using shared buffers, within a 10 ms budget
-including dispatch probes and fixture construction. The deadline is checked
-before every fixture. Failed or unfinished entries keep the next source and
+including fixture construction. The deadline is checked before every fixture.
+Failed or unfinished entries keep the next source and
 are not retried before eviction or `scratch::trim`. Each row uses, in order,
 its online measurement, the checked-in reference for threadteam's HostClass,
 or the slowest available row with the same inner stride. The reference table
-records the CI CPU, date and run provenance. D(q) starts from threadteam's
-dispatch table; a measured value replaces it only at or below 20 times that
-table. B(q) is measured replay bandwidth; unknown bandwidth is infinity, so
-that term drops out. Source selection never changes the formula or chooser.
+records the CI CPU, date and run provenance; that run's fit-acceptance flag was
+false, so these rows are measured seeds, not validated phase predictions.
+D(q) comes only from threadteam's `Exec::dispatch_cost`, including the pool
+creator's overrides. B(q) interpolates measured replay bandwidth linearly in q
+between measured widths, using the nearest measured endpoint outside them;
+it is infinity only when no bandwidth was measured. Source selection never
+changes the formula or chooser.
 
 A fixed-stride member batch admits all member ranges before writing, resolves
 destination scales once per role, and moves its members around one dense
@@ -433,9 +442,10 @@ of setup costs per role and P the per-member sum of run and element costs.
 Its executed q ranges give S(q)=q*A+N*P and M(q)=A+ceil(N/q)*P; T(1)=A+N*P.
 These expressions feed the same chooser. A cold packed-destination fill is
 also priced by its executed contiguous leaf ranges, and first-written by the
-pack workers; a warm destination needs no fill. Sequential uses one slot,
-Inner leaves items inline on the whole token, Outer distributes independent
-items, and Split uses the requested lane count within the caller's budget.
+pack workers; a warm destination needs no fill. Growth within retained capacity
+fills only the missing tail. Forced policies delegate to Tenferro's batch
+decision: the product of lanes and item threads is clamped to the caller's
+budget and runnable jobs, as for other flat phases.
 An executor that cannot honor a forced
 batch policy refuses a
 tree-transform replay, owned overwrite or member batch under a forced

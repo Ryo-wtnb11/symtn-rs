@@ -75,8 +75,8 @@ use std::num::NonZeroUsize;
 use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
-pub use tcontract_exec::{BatchPolicy, Exec};
-use tcontract_exec::{BatchQuery, BatchStrategy};
+use tcontract_exec::BatchStrategy;
+pub use tcontract_exec::{BatchPolicy, BatchQuery, Exec};
 use tenferro_cpu::threadteam;
 
 mod placement;

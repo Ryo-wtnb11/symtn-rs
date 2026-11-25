@@ -368,7 +368,7 @@ fn overwrite(
 }
 
 /// Cold packed destinations are initialized once by the pack workers; a
-/// warm repeat adds no fill. Growing retained capacity still uses worker fills.
+/// warm repeat adds no fill. Growing within retained capacity fills only the tail.
 #[test]
 fn a_parallel_replay_fills_its_destination_scratch_once_in_its_phases() {
     let threads = 4;
@@ -414,7 +414,7 @@ fn a_parallel_replay_fills_its_destination_scratch_once_in_its_phases() {
     );
     let prefix = history.destination_len();
     assert!(prefix < largest_chunk && 2 * 32 * 32 >= largest_chunk);
-    assert_eq!(call(&mut history), largest_chunk, "grown");
+    assert_eq!(call(&mut history), largest_chunk - prefix, "tail");
 }
 
 /// A one-item forced phase retains the same traversal scratch at different
@@ -673,4 +673,134 @@ fn forced_chunks_preserve_empty_groups_and_inactive_values() {
         at += 2 * rows;
     }
     assert_eq!(out, values);
+}
+
+/// Purpose: one transitive group ownership run keeps the whole token. Pairs of `[1, 2]` destinations of stride 2 interleave
+/// at `4 i` and `4 i + 1`, and group `i` writes the second block of pair
+/// `i` and the first of pair `i + 1`, so neighbouring group hulls overlap
+/// and every chunk of four groups is one hull run: each scatter column
+/// stays inline on the caller's whole four-slot token.
+#[test]
+fn a_chain_of_overlapping_groups_scatters_inline() {
+    let groups = 12;
+    let dst = blocks(
+        &(0..=groups)
+            .flat_map(|i| [([1, 2], [1, 2], 4 * i), ([1, 2], [1, 2], 4 * i + 1)])
+            .collect::<Vec<_>>(),
+    );
+    let src =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![1, 2]; 2 * groups + 2]).unwrap());
+    let mut specs = (0..groups)
+        .map(|i| {
+            TreeTransformBlockSpec::multi(
+                vec![2 * i + 1, 2 * i + 2],
+                vec![2 * i + 1, 2 * i + 2],
+                vec![1.0, 0.5, 0.5, 1.0],
+            )
+        })
+        .collect::<Vec<_>>();
+    specs.push(TreeTransformBlockSpec::single(0, 0, 1.0));
+    specs.push(TreeTransformBlockSpec::single(
+        2 * groups + 1,
+        2 * groups + 1,
+        1.0,
+    ));
+    let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
+    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
+    let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+    // The two Singles first and last in address order; every scatter
+    // column between them inline.
+    assert_eq!(offers.len(), 2 * groups + 2);
+    assert!(
+        offers[1..offers.len() - 1].iter().all(|&offer| offer == 4),
+        "{offers:?}"
+    );
+}
+
+/// `pairs` coupled pairs of `[2, cols]` Singles whose destinations
+/// interleave (strides `[1, 4]`, offsets `4 cols p` and `4 cols p + 2`):
+/// the Singles are not slice-disjoint and form one hull run per pair.
+fn interleaved_single_pairs(
+    pairs: usize,
+    cols: usize,
+) -> (
+    Arc<BlockStructure>,
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+) {
+    let dst = blocks(
+        &(0..pairs)
+            .flat_map(|p| {
+                [
+                    ([2, cols], [1, 4], 4 * cols * p),
+                    ([2, cols], [1, 4], 4 * cols * p + 2),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    );
+    let src =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, cols]; 2 * pairs]).unwrap());
+    let specs = (0..2 * pairs)
+        .map(|b| TreeTransformBlockSpec::single(b, b, 1.0))
+        .collect::<Vec<_>>();
+    let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
+    let schedule = transform.parallel_schedule();
+    assert!(!schedule.singles_slice_disjoint());
+    assert_eq!(schedule.single_runs.len(), pairs);
+    (dst, src, transform)
+}
+
+/// Purpose: one indivisible hull job keeps every planned role on the whole
+/// token, so the inline gate can still admit its plans.
+#[test]
+fn an_admitted_planned_single_keeps_mains_inline_route() {
+    let (dst, src, transform) = interleaved_single_pairs(1, 8250);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+    assert_eq!(offers, [4; 2]);
+    let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
+    assert!(counts.widths > 0, "{counts:?}");
+}
+
+/// Purpose: all forced split leaves share one search per dispatch-cost key,
+/// including balanced three-slot leaves absent from a halving-only key list.
+#[test]
+fn balanced_split_leaves_share_their_gate_cost_key() {
+    let budget = 8;
+    let lanes = 3;
+    let m = 8193;
+    let dst = blocks(
+        &(0..lanes)
+            .map(|i| ([2, m], [m, 1], 2 * m * i))
+            .collect::<Vec<_>>(),
+    );
+    let src =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, m]; 2 * lanes]).unwrap());
+    let specs = (0..lanes)
+        .map(|i| TreeTransformBlockSpec::multi(vec![i], vec![2 * i, 2 * i + 1], vec![1.0, 1.0]))
+        .collect::<Vec<_>>();
+    let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
+    let mut engine = flat_engine(budget, 100, CpuBatchStrategy::Outer);
+    let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+    let expected = (0..lanes)
+        .map(|i| budget / lanes + usize::from(i < budget % lanes))
+        .collect::<Vec<_>>();
+    assert_eq!(offers, expected);
+    let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
+    // Flat dispatch makes every nonserial leaf's cheapest cost one shared key.
+    let keys = expected
+        .iter()
+        .filter(|&&share| share > 1)
+        .map(|_| 100)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(counts.scans, keys.len());
+    assert_eq!(counts.widths, lanes);
+    // A serial engine cannot search a team cost key.
+    let counts = overwrite_counts(
+        &mut flat_engine(1, 100, CpuBatchStrategy::Outer),
+        &transform,
+        &dst,
+        &src,
+    );
+    assert_eq!(counts.scans, 0);
 }

@@ -800,14 +800,13 @@ where
     {
         use symtn_dense::lanes;
         super::movement::region(engine, |exec, constants| {
-            let width = super::movement::width::<D>(
+            let width = super::movement::width::<D, _>(
                 &exec,
                 constants,
-                summary,
-                moves.parts.storage_conjugate,
-                Some(members),
-                None,
-                false,
+                members,
+                summary.working_set * members as u128,
+                summary.traffic * members as u128,
+                |costs| super::movement::member_phase(summary, costs, members),
             );
             if width <= 1 {
                 let sequential =

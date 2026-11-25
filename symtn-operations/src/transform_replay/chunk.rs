@@ -1,8 +1,8 @@
 //! Movement phases use one cost model and one balanced whole-token split.
 //! TensorKit's threaded index-manipulation kernels likewise parallelize
 //! independent writes around grouped recoupling. Safe Rust assigns each
-//! overlapping destination hull run to one writer; idle leaves retain their
-//! shares when fewer ownership runs exist than the selected width.
+//! overlapping destination hull run to one writer; the width is capped by
+//! those runnable ownership jobs.
 
 use symtn_dense::lanes::{self, Cut, Split, Work};
 
@@ -44,34 +44,20 @@ where
             (1, 1, 1)
         } else {
             let read_destination = writer.reads_destination();
+            let fixed = |summary: &crate::movement::Summary| {
+                movement::width::<D, _>(
+                    &exec,
+                    constants,
+                    summary.jobs.len(),
+                    summary.working_set,
+                    summary.logical_traffic(read_destination),
+                    |costs| movement::fixed(summary, costs),
+                )
+            };
             (
-                movement::width::<D>(
-                    &exec,
-                    constants,
-                    &schedule.group_movement,
-                    task.storage_conjugate(),
-                    None,
-                    None,
-                    read_destination,
-                ),
-                movement::width::<D>(
-                    &exec,
-                    constants,
-                    &schedule.single_movement,
-                    task.storage_conjugate(),
-                    None,
-                    None,
-                    read_destination,
-                ),
-                movement::width::<D>(
-                    &exec,
-                    constants,
-                    &schedule.inactive_movement,
-                    false,
-                    None,
-                    None,
-                    read_destination,
-                ),
+                fixed(&schedule.group_movement),
+                fixed(&schedule.single_movement),
+                fixed(&schedule.inactive_movement),
             )
         };
         workspace.prepare_fused_indices(threads.max(singles_width).max(inactive_width), rank)?;
@@ -198,7 +184,7 @@ where
         crate::host_pool::threads(engine)
     };
     workspace.prepare_fused_indices(scratch_width, layouts.max_fused_rank())?;
-    let (source_len, scratch_destination) = schedule.chunk_scratch[threads.min(jobs.len()) - 1];
+    let (source_len, scratch_destination) = chunk_scratch(jobs, threads)?;
     workspace.packed.source_mut().reserve_overwrite(source_len);
     let chunk_len = threads.min(jobs.len());
     workspace.chunk_jobs.clear();
@@ -207,7 +193,18 @@ where
     workspace.chunk_runs.reserve(chunk_len);
     workspace.chunk_scatter_groups.clear();
     workspace.chunk_scatter_groups.reserve(chunk_len);
-    let mut fill = workspace.packed.destination().len() < scratch_destination;
+    let packed_destination = workspace.packed.destination_mut();
+    let mut fill = packed_destination.len() < scratch_destination;
+    if fill && packed_destination.capacity() >= scratch_destination {
+        #[cfg(any(test, feature = "testing"))]
+        let tail = scratch_destination - packed_destination.len();
+        packed_destination.resize_filled(scratch_destination, D::zero());
+        fill = false;
+        #[cfg(any(test, feature = "testing"))]
+        {
+            workspace.destination_fills += tail;
+        }
+    }
 
     for (index, chunk) in jobs.chunks(threads).enumerate() {
         let first_group = index * threads;
@@ -245,7 +242,7 @@ where
             source_len,
             filled,
             src,
-            schedule.pack_movement.get(threads, index),
+            &schedule.pack_movement[first_group..=last_group],
         )?;
         fill &= pack.is_empty();
         #[cfg(any(test, feature = "testing"))]
@@ -300,14 +297,32 @@ where
         let groups = &ordered[..];
         let runs = &runs[..];
         movement::region(engine, |exec, constants| {
-            let width = movement::width::<D>(
+            let summaries = &schedule.scatter_movement;
+            let summary =
+                crate::movement::Summary::totals(groups.iter().map(|&group| &summaries[group]))?;
+            let width = movement::width::<D, _>(
                 &exec,
                 constants,
-                schedule.scatter_movement.get(threads, index),
-                false,
-                None,
-                None,
-                writer.reads_destination(),
+                runs.len(),
+                summary.working_set,
+                summary.logical_traffic(writer.reads_destination()),
+                |costs| {
+                    let (mut sum, mut largest) = (0.0, 0.0_f64);
+                    for (i, &start) in runs.iter().enumerate() {
+                        let end = runs.get(i + 1).map_or(groups.len(), |&end| end as usize);
+                        let job = groups[start as usize..end]
+                            .iter()
+                            .map(|&group| {
+                                let (setup, work) =
+                                    movement::components(&summaries[group].counts, costs);
+                                setup + work
+                            })
+                            .sum::<f64>();
+                        sum += job;
+                        largest = largest.max(job);
+                    }
+                    move |_| (sum, largest)
+                },
             );
             let split = width > 1;
             if split {
@@ -388,6 +403,36 @@ fn group_runs(ordered: &[usize], spans: &[TreeTransformGroupSpan], runs: &mut Ve
     }
 }
 
+/// The largest chunk's packed source and destination lengths over chunks
+/// of `threads` consecutive jobs (main's `reserve_multi_chunk_scratch`).
+///
+/// Why sized once: chunks are visited in GEMM-run order, not by size, so
+/// growing per chunk would reallocate once per larger chunk.
+fn chunk_scratch(
+    jobs: &[DenseGemmBatchJob],
+    threads: usize,
+) -> Result<(usize, usize), OperationError> {
+    let span = |start: usize, end: Option<usize>| {
+        end.and_then(|end| end.checked_sub(start))
+            .ok_or(OperationError::ElementCountOverflow)
+    };
+    let (mut source_len, mut destination_len) = (0usize, 0usize);
+    for chunk in jobs.chunks(threads) {
+        let (first, last) = (&chunk[0], &chunk[chunk.len() - 1]);
+        let source_end = last
+            .rows
+            .checked_mul(last.contracted)
+            .and_then(|len| last.lhs_offset.checked_add(len));
+        let destination_end = last
+            .rows
+            .checked_mul(last.cols)
+            .and_then(|len| last.dst_offset.checked_add(len));
+        source_len = source_len.max(span(first.lhs_offset, source_end)?);
+        destination_len = destination_len.max(span(first.dst_offset, destination_end)?);
+    }
+    Ok((source_len, destination_len))
+}
+
 /// One chunk's pack phase in one engine entry: `columns` packed into the
 /// source scratch (`source_len` elements from packed offset `source_start`),
 /// split at the model's selected width; with `fill`, the packed destination is
@@ -402,7 +447,7 @@ fn pack_chunk<D, C>(
     source_len: usize,
     fill: Option<usize>,
     src: &[D],
-    summary: &crate::movement::Summary,
+    summaries: &[crate::movement::Summary],
 ) -> Result<(), OperationError>
 where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
@@ -418,14 +463,31 @@ where
     let (source, destination) = packed.split_mut();
     let mut run = |writer: PackColumnWriter<'_, D>, fill: Option<PackColumnWriter<'_, D>>| {
         movement::region(engine, |exec, constants| {
-            let threads = movement::width::<D>(
+            let summary = crate::movement::Summary::totals(summaries)?;
+            let extra = fill.as_ref().map_or(0, |fill| fill.len());
+            let filling = fill.is_some();
+            let threads = movement::width::<D, _>(
                 &exec,
                 constants,
-                summary,
-                conjugate,
-                None,
-                fill.as_ref().map(|fill| (fill.len(), columns.len())),
-                false,
+                columns.len(),
+                summary.working_set + extra as u128,
+                summary.traffic + extra as u128,
+                |costs| {
+                    let (setup, work) = movement::components(&summary.counts, costs);
+                    let largest = summaries
+                        .iter()
+                        .map(|phase| movement::pack_maximum(phase, costs))
+                        .fold(0.0, f64::max);
+                    let (a, r, e) = costs[2];
+                    move |q| {
+                        let (fill_sum, fill_max) = if filling {
+                            movement::fill_cost(q, extra, columns.len(), a, r, e)
+                        } else {
+                            (0.0, 0.0)
+                        };
+                        (setup + work + fill_sum, largest.max(fill_max))
+                    }
+                },
             );
             let work = Pack {
                 columns,

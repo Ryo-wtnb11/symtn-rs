@@ -176,16 +176,26 @@ fn checked_u32(value: usize) -> Result<u32, OperationError> {
 }
 
 /// Counts come from the final normalized roles on every construction path.
-/// Temporary address unions count reused/overlapping sources once in W;
-/// X still charges every read and write. No address metadata survives compile.
+/// Per-role address extents take O(1) to combine; gaps make W an upper bound.
+/// X still charges every read and write; no payload element is visited.
 pub(super) fn compile_movement(
     schedule: &mut TreeTransformParallelSchedule,
     blocks: &[TreeTransformBlock],
     layouts: &TreeTransformLayoutTable,
-    plan: &TreeTransformRecouplingPlan,
+    extents: &[Option<(i128, i128)>],
 ) -> Result<(), OperationError> {
-    use crate::movement::{Ranges, Summary};
-    let offset = |n| isize::try_from(n).map_err(|_| OperationError::ElementCountOverflow);
+    use crate::movement::Summary;
+    let extent = |buffer, layout: usize| {
+        let (lo, hi) = extents[layout].unwrap_or((0, -1));
+        (buffer, lo, hi)
+    };
+    let packed = |buffer, offset: usize, elements: usize| {
+        (
+            buffer,
+            offset as i128,
+            offset as i128 + elements as i128 - 1,
+        )
+    };
     let mut singles = Summary::default();
     for &index in &schedule.singles {
         let TreeTransformBlock::Single {
@@ -200,21 +210,15 @@ pub(super) fn compile_movement(
             layouts,
             dst_layout,
             false,
-            (1, layouts.entry(dst_layout).offset),
-            (0, layouts.entry(src_layout).offset),
+            extent(1, dst_layout),
+            extent(0, src_layout),
         )?;
     }
     singles.finish()?;
     let mut inactive = Summary::default();
     for &layout in &schedule.inactive {
         let layout = layout as usize;
-        inactive.add_role(
-            layouts,
-            layout,
-            true,
-            (1, layouts.entry(layout).offset),
-            (0, 0),
-        )?;
+        inactive.add_role(layouts, layout, true, extent(1, layout), (0, 0, -1))?;
     }
     inactive.finish()?;
     let mut packs = Vec::with_capacity(schedule.scatter_groups.len());
@@ -226,8 +230,12 @@ pub(super) fn compile_movement(
                 layouts,
                 column.src_layout,
                 false,
-                (2, offset(column.packed_offset)?),
-                (0, layouts.entry(column.src_layout).offset),
+                packed(
+                    2,
+                    column.packed_offset,
+                    layouts.entry(column.src_layout).element_count,
+                ),
+                extent(0, column.src_layout),
             )?;
         }
         pack.finish()?;
@@ -238,8 +246,12 @@ pub(super) fn compile_movement(
                 layouts,
                 column.dst_layout,
                 false,
-                (1, layouts.entry(column.dst_layout).offset),
-                (3, offset(column.packed_offset)?),
+                extent(1, column.dst_layout),
+                packed(
+                    3,
+                    column.packed_offset,
+                    layouts.entry(column.dst_layout).element_count,
+                ),
             )?;
         }
         scatter.finish()?;
@@ -249,44 +261,19 @@ pub(super) fn compile_movement(
     let all_scatter = Summary::merge_all(&scatters)?;
     schedule.member_pack_movement = Summary::merge_all([&inactive, &singles, &all_pack])?;
     schedule.member_scatter_movement = all_scatter.clone();
-    schedule.group_movement = all_pack.merge(&all_scatter)?;
-    for width in 1..=plan.jobs().len() {
-        let mut largest = (0, 0);
-        for chunk in plan.jobs().chunks(width) {
-            let first = &chunk[0];
-            let last = &chunk[chunk.len() - 1];
-            let span = |start, offset: usize, rows: usize, cols: usize| {
-                offset
-                    .checked_add(rows.checked_mul(cols)?)
-                    .and_then(|end| end.checked_sub(start))
-            };
-            largest.0 = largest.0.max(
-                span(
-                    first.lhs_offset,
-                    last.lhs_offset,
-                    last.rows,
-                    last.contracted,
-                )
-                .ok_or(OperationError::ElementCountOverflow)?,
-            );
-            largest.1 = largest.1.max(
-                span(first.dst_offset, last.dst_offset, last.rows, last.cols)
-                    .ok_or(OperationError::ElementCountOverflow)?,
-            );
+    let mut groups = Vec::with_capacity(packs.len());
+    for (pack, scatter) in packs.iter().zip(&scatters) {
+        let mut group = pack.merge(scatter)?;
+        if !group.jobs.is_empty() {
+            group.fuse_jobs(&[0])?;
         }
-        schedule.chunk_scratch.push(largest);
+        groups.push(group);
     }
-    schedule.pack_movement = Ranges::new(packs)?;
-    schedule.scatter_movement = Ranges::new(scatters)?;
-    for summary in [
-        &mut singles,
-        &mut inactive,
-        &mut schedule.group_movement,
-        &mut schedule.member_pack_movement,
-        &mut schedule.member_scatter_movement,
-    ] {
-        summary.freeze();
-    }
+    schedule.group_movement = Summary::merge_all(&groups)?;
+    singles.fuse_jobs(&schedule.single_runs)?;
+    inactive.fuse_jobs(&schedule.inactive_runs)?;
+    schedule.pack_movement = packs;
+    schedule.scatter_movement = scatters;
     schedule.single_movement = singles;
     schedule.inactive_movement = inactive;
     Ok(())
@@ -319,7 +306,10 @@ fn hull_runs<N: Copy + Ord>(ranges: impl IntoIterator<Item = (N, N)>) -> Vec<u32
 /// it is empty. Exact: destination strides are nonnegative and every address
 /// lies below the destination's `usize` required length, so each partial sum
 /// stays below `2^64`.
-fn destination_span(layouts: &RawLayoutTable, layout_index: usize) -> Option<(i128, i128)> {
+pub(super) fn destination_span(
+    layouts: &RawLayoutTable,
+    layout_index: usize,
+) -> Option<(i128, i128)> {
     let layout = layouts.entry(layout_index);
     if layout.element_count == 0 {
         return None;

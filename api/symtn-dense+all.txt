@@ -11,6 +11,7 @@ pub fn symtn_dense::engine_slot::clear(&mut dyn tenferro_tensor::backend::Engine
 pub fn symtn_dense::engine_slot::retained_bytes(&mut dyn tenferro_tensor::backend::Engine) -> usize
 pub mod symtn_dense::lanes
 pub use symtn_dense::lanes::BatchPolicy
+pub use symtn_dense::lanes::BatchQuery
 pub use symtn_dense::lanes::Exec
 pub enum symtn_dense::lanes::Refusal<R>
 pub symtn_dense::lanes::Refusal::Context(R)

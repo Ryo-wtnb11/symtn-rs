@@ -216,8 +216,30 @@ pub(crate) mod sealed {
         }
     }
 
+    /// Whether some balanced split of root has a leaf of this budget.
+    fn balanced_budget(root: usize, budget: usize) -> bool {
+        budget == root
+            || root / budget > root / (budget + 1)
+            || (root - 1) / (budget - 1) > (root - 1) / budget
+    }
+
+    /// Purpose: the constant-time quotient test covers exactly the budgets
+    /// produced by explicit balanced splits, including nonhalving leaves.
+    #[test]
+    fn balanced_budgets_match_explicit_split_shares() {
+        for root in 2usize..=128 {
+            for budget in 2..=root {
+                let expected = (1..=root).any(|q| root / q == budget || root.div_ceil(q) == budget);
+                assert_eq!(balanced_budget(root, budget), expected);
+            }
+        }
+        assert!(balanced_budget(8, 3));
+        assert!(!balanced_budget(8, 5));
+        assert!(balanced_budget(usize::MAX, usize::MAX));
+    }
+
     impl GateKeys {
-        /// Prepares the keys of `exec`'s halving budgets for gates of
+        /// Prepares keys for every balanced split's leaf budgets for gates of
         /// `bound`, or none when no role is planned (`bound` zero) or
         /// `exec` carries no team.
         pub(crate) fn prepare(&mut self, exec: &mut crate::host_pool::Exec<'_>, bound: usize) {
@@ -227,34 +249,25 @@ pub(crate) mod sealed {
             if bound == 0 || exec.is_serial() || !exec.carries_team() {
                 return;
             }
-            // Split halves a token as threadteam's even fork does, so the
-            // budgets at depth d are the floor and ceil of `root / 2^d`.
+            // A balanced q-way split grants floor(root/q) or ceil(root/q).
+            // Prefix dispatch minima price all reachable budgets in one O(root)
+            // pass; there are O(sqrt(root)) distinct quotient budgets/cost keys.
             let root = exec.budget().get();
-            let mut divisor = 1usize;
-            while root.div_ceil(divisor) >= 2 {
-                for budget in [root / divisor, root.div_ceil(divisor)] {
-                    if budget < 2 || self.budgets.iter().any(|&(b, _)| b == budget) {
-                        continue;
-                    }
-                    let limited = exec
-                        .reborrow()
-                        .limit(core::num::NonZeroUsize::new(budget).expect("budget >= 2"));
-                    let Some((_, cost)) = LeafGate::cheapest(&limited) else {
-                        continue;
-                    };
-                    let slot = match self.slots.iter().position(|&(c, _)| c == cost) {
-                        Some(slot) => slot,
-                        None => {
-                            self.slots.push((cost, std::sync::OnceLock::new()));
-                            self.slots.len() - 1
-                        }
-                    };
-                    self.budgets.push((budget, slot));
+            let mut cheapest = core::time::Duration::MAX;
+            for budget in 2..=root {
+                let width = core::num::NonZeroUsize::new(budget).expect("budget >= 2");
+                cheapest = cheapest.min(exec.dispatch_cost(width));
+                if cheapest == core::time::Duration::MAX || !balanced_budget(root, budget) {
+                    continue;
                 }
-                let Some(next) = divisor.checked_mul(2) else {
-                    break;
+                let slot = match self.slots.iter().position(|&(cost, _)| cost == cheapest) {
+                    Some(slot) => slot,
+                    None => {
+                        self.slots.push((cheapest, std::sync::OnceLock::new()));
+                        self.slots.len() - 1
+                    }
                 };
-                divisor = next;
+                self.budgets.push((budget, slot));
             }
         }
 

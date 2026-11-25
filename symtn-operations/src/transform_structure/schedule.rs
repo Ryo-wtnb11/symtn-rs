@@ -64,9 +64,8 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub group_movement: crate::movement::Summary,
     pub member_pack_movement: crate::movement::Summary,
     pub member_scatter_movement: crate::movement::Summary,
-    pub pack_movement: crate::movement::Ranges,
-    pub scatter_movement: crate::movement::Ranges,
-    pub chunk_scratch: Vec<(usize, usize)>,
+    pub pack_movement: Vec<crate::movement::Summary>,
+    pub scatter_movement: Vec<crate::movement::Summary>,
     pub pack_columns: Vec<TreeTransformPackReplay>,
     pub scatter_columns: Vec<TreeTransformScatterReplay>,
     pub scatter_groups: Vec<TreeTransformScatterGroupReplay>,
@@ -122,12 +121,20 @@ impl TreeTransformParallelSchedule {
         .saturating_add(self.group_movement.retained_bytes())
         .saturating_add(self.member_pack_movement.retained_bytes())
         .saturating_add(self.member_scatter_movement.retained_bytes())
-        .saturating_add(self.pack_movement.retained_bytes())
-        .saturating_add(self.scatter_movement.retained_bytes())
-        .saturating_add(bytes(
-            self.chunk_scratch.capacity(),
-            core::mem::size_of::<(usize, usize)>(),
-        ))
+        .saturating_add(
+            [&self.pack_movement, &self.scatter_movement]
+                .into_iter()
+                .map(|groups| {
+                    bytes(
+                        groups.capacity(),
+                        core::mem::size_of::<crate::movement::Summary>(),
+                    ) + groups
+                        .iter()
+                        .map(crate::movement::Summary::retained_bytes)
+                        .sum::<usize>()
+                })
+                .sum::<usize>(),
+        )
     }
 }
 
