@@ -418,6 +418,15 @@ its analytic minimum, in O(ladder size) time with no allocation per decision.
 Block-lane placement and provider inner-width choice keep their existing
 cost models. This is a scheduling estimate, not a guarantee of measured speedup.
 
+The offline `calibrate_replay` example measures CPU `f64` owned-overwrite
+Singles through the compiled production replay: per-role and byte costs,
+paired structural-coefficient costs when identifiable, engine-team empty-fork
+dispatch, and cache/DRAM replay bandwidth across engine budgets. It prints
+raw batches, held-out errors, size/placement checks, cold time and memory use,
+and writes an explicit version-1 `key=value` profile. Unknown placement or
+rejected measurements leave the profile incomplete; it does not install
+constants or change the movement chooser.
+
 Destinations are grouped into hull runs:
 maximal address-ordered stretches whose bounding slices overlap
 transitively, so distinct runs occupy disjoint address ranges and one
