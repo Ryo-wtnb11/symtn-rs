@@ -66,6 +66,7 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub member_scatter_movement: crate::movement::Summary,
     pub pack_movement: Vec<crate::movement::Summary>,
     pub scatter_movement: Vec<crate::movement::Summary>,
+    pub pack_prefix: Vec<crate::movement::Job>,
     pub pack_columns: Vec<TreeTransformPackReplay>,
     pub scatter_columns: Vec<TreeTransformScatterReplay>,
     pub scatter_groups: Vec<TreeTransformScatterGroupReplay>,
@@ -91,13 +92,17 @@ impl TreeTransformParallelSchedule {
         self.single_runs.len() == self.singles.len()
     }
 
-    /// The capacity charge of every vector and movement hull retained here.
+    /// The capacity charge of every vector and movement prefix retained here.
     pub(crate) fn retained_bytes(&self) -> usize {
         let bytes = |capacity: usize, size: usize| capacity.saturating_mul(size);
         bytes(
+            self.pack_prefix.capacity(),
+            core::mem::size_of::<crate::movement::Job>(),
+        )
+        .saturating_add(bytes(
             self.pack_columns.capacity(),
             core::mem::size_of::<TreeTransformPackReplay>(),
-        )
+        ))
         .saturating_add(bytes(
             self.scatter_columns.capacity(),
             core::mem::size_of::<TreeTransformScatterReplay>(),

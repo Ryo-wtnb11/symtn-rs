@@ -30,7 +30,8 @@ mod tests {
     /// What: the leaf gate answers exactly Strided's
     /// `parallel_width(exec, Copy, elements) > 1`, on tokens with the host
     /// default dispatch costs and with free dispatch, across budgets and
-    /// element counts from empty to far past any paying size.
+    /// element counts from empty to far past any paying size. Prepared share
+    /// admission agrees on every reachable whole-token leaf budget.
     #[test]
     fn leaf_gate_matches_strided_parallel_width() {
         use strided_kernel::execution::{parallel_width, KernelClass};
@@ -43,6 +44,12 @@ mod tests {
                 crate::host_pool::eager_test_pool(threads),
             ] {
                 pool.with_exec(|exec| {
+                    #[cfg(feature = "tenferro")]
+                    let mut exec = exec;
+                    #[cfg(feature = "tenferro")]
+                    let mut keys = sealed::GateKeys::default();
+                    #[cfg(feature = "tenferro")]
+                    keys.prepare(&mut exec, usize::MAX);
                     let mut gate = sealed::LeafGate::new(usize::MAX);
                     let widens = |n| parallel_width(&exec, KernelClass::Copy, n).get() > 1;
                     // The first widened count, by bisection on Strided's own
@@ -83,6 +90,20 @@ mod tests {
                     }
                     // The sweep crosses the threshold on every wide token.
                     assert!(threads == 1 || seen == [true, true], "threads {threads}");
+                    #[cfg(feature = "tenferro")]
+                    for q in 1..=threads {
+                        for slots in [threads / q, threads.div_ceil(q)] {
+                            let token = exec.reborrow().limit(slots.try_into().unwrap());
+                            let mut leaf = sealed::LeafGate::new(usize::MAX);
+                            for &n in elements.iter().chain(&around) {
+                                assert_eq!(
+                                    keys.admits(slots, n),
+                                    leaf.widens(&token, n),
+                                    "share {slots}, elements {n}"
+                                );
+                            }
+                        }
+                    }
                 });
             }
         }

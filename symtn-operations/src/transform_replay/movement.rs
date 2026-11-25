@@ -1,7 +1,7 @@
 //! One movement model, with engine-local measurements and structural summaries.
 
 use super::*;
-use crate::movement::{maximum, Counts, Summary, CLASSES};
+use crate::movement::{job_range, Counts, Job, Summary, CLASSES};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -266,53 +266,36 @@ fn region_with<R>(
     }
 }
 
-/// The sole argmin, shared by fixed items and q-dependent executed ranges.
+/// One candidate ladder and one expression, including inline execution.
 fn choose(
     p: usize,
+    jobs: usize,
     traffic: f64,
-    phase: impl Fn(usize) -> (f64, f64),
+    phase: impl Fn(usize) -> f64,
     dispatch: impl Fn(usize) -> f64,
     bandwidth: impl Fn(usize) -> f64,
 ) -> usize {
-    if p == 1 {
+    if p.min(jobs) <= 1 {
         return 1;
     }
-    let (mut best, mut time) = (1, phase(1).0);
-    for q in 2..=p {
-        let (sum, largest) = phase(q);
-        let candidate = dispatch(q) + largest.max(sum / q as f64).max(traffic / bandwidth(q));
+    let candidates = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
+    let mut best = 1;
+    let mut time = f64::INFINITY;
+    let roof = traffic / bandwidth(p);
+    for q in candidates
+        .into_iter()
+        .chain((!candidates.contains(&p)).then_some(p))
+    {
+        if q > p.min(jobs) {
+            continue;
+        }
+        let candidate = if q > 1 { dispatch(q) } else { 0.0 } + phase(q).max(roof);
         if candidate < time {
             best = q;
             time = candidate;
         }
     }
     best
-}
-
-fn member_cost(q: usize, n: usize, setup: f64, work: f64) -> (f64, f64) {
-    (
-        q as f64 * setup + n as f64 * work,
-        setup + n.div_ceil(q) as f64 * work,
-    )
-}
-
-pub(super) fn fill_cost(
-    q: usize,
-    elements: usize,
-    columns: usize,
-    a: f64,
-    r: f64,
-    e: f64,
-) -> (f64, f64) {
-    let leaves = q.min(columns).max(1);
-    (
-        leaves as f64 * a + leaves.min(elements) as f64 * r + elements as f64 * e,
-        a + if elements == 0 {
-            0.0
-        } else {
-            r + elements.div_ceil(leaves) as f64 * e
-        },
-    )
 }
 
 pub(super) type Costs = [(f64, f64, f64); CLASSES];
@@ -329,115 +312,168 @@ pub(super) fn components(counts: &[Counts; CLASSES], costs: &Costs) -> (f64, f64
         })
 }
 
-pub(super) fn fixed(phase: &Summary, costs: &Costs) -> impl Fn(usize) -> (f64, f64) {
-    let (setup, work) = components(&phase.counts, costs);
-    // Fused ownership jobs can mix strides: summing independent class maxima
-    // bounds M above, so the conservative estimate may select fewer leaves.
-    let largest = phase.maxima.as_ref().map_or(0.0, |maxima| {
-        maxima
-            .hulls
-            .iter()
-            .zip(&maxima.setups)
-            .zip(costs)
-            .map(|((hull, &k), &(a, r, e))| a * k + maximum(hull, r, e))
-            .sum()
-    });
-    move |_| (setup + work, largest)
+pub(super) struct Prices<'a> {
+    bytes: f64,
+    dispatch: &'a dyn Fn(usize) -> f64,
+    bandwidth: &'a dyn Fn(usize) -> f64,
+    admits: &'a dyn Fn(usize, usize) -> bool,
 }
 
-/// The executor submits one GEMM batch per consecutive chunk of q groups.
-/// Summed chunk maxima bound its serial batch barriers' critical path below;
-/// they are not a prediction of the provider's actual placement or runtime.
+impl Prices<'_> {
+    fn leaf(&self, job: Job, minimum: usize, costs: &Costs, slots: usize) -> f64 {
+        let (setup, work) = components(&job.counts, costs);
+        let total = setup + work;
+        if slots == 1 || minimum == 0 || !(self.admits)(slots, minimum) {
+            return total;
+        }
+        let (setup, work) = components(&job.planned, costs);
+        let planned = setup + work;
+        let (count, traffic) = job.planned.iter().zip([2, 2, 1, 1]).fold(
+            (0.0, 0.0),
+            |(count, traffic), (item, reads)| {
+                (
+                    count + item.items as f64,
+                    traffic + item.elements as f64 * reads as f64 * self.bytes,
+                )
+            },
+        );
+        total - planned
+            + planned.min(
+                count * (self.dispatch)(slots)
+                    + (planned / slots as f64).max(traffic / (self.bandwidth)(slots)),
+            )
+    }
+}
+
+/// Mirrors lanes::Split, including its recursive job rounding and slot shares.
+fn leaf_max(
+    first: usize,
+    jobs: usize,
+    slots: usize,
+    q: usize,
+    fill: usize,
+    leaf: &impl Fn(core::ops::Range<usize>, usize, usize) -> f64,
+) -> f64 {
+    if q <= 1 || jobs <= 1 {
+        return leaf(first..first + jobs, slots, fill);
+    }
+    let left = q / 2;
+    let middle = jobs.saturating_mul(left).div_ceil(q).clamp(1, jobs - 1);
+    let left_slots = slots / q * left + (slots % q).min(left);
+    let left_fill = fill / q * left + (fill % q) * left / q;
+    leaf_max(first, middle, left_slots, left, left_fill, leaf).max(leaf_max(
+        first + middle,
+        jobs - middle,
+        slots - left_slots,
+        q - left,
+        fill - left_fill,
+        leaf,
+    ))
+}
+
+pub(super) fn fixed<'a>(
+    phase: &'a Summary,
+    costs: &Costs,
+) -> impl Fn(usize, usize, &Prices<'_>) -> f64 + 'a {
+    prefix_phase(
+        &phase.prefix,
+        0,
+        phase.prefix.len(),
+        phase.planned_min,
+        costs,
+        None,
+    )
+}
+
+pub(super) fn prefix_phase<'a>(
+    prefix: &'a [Job],
+    first: usize,
+    jobs: usize,
+    minimum: usize,
+    costs: &Costs,
+    fill: Option<usize>,
+) -> impl Fn(usize, usize, &Prices<'_>) -> f64 + 'a {
+    let costs = *costs;
+    move |q, p, prices| {
+        leaf_max(
+            first,
+            jobs,
+            p,
+            q,
+            fill.unwrap_or(0),
+            &|range, slots, fill_elements| {
+                let movement = prices.leaf(job_range(prefix, range), minimum, &costs, slots);
+                let (a, r, e) = costs[2];
+                movement
+                    + fill.map_or(0.0, |_| {
+                        a + if fill_elements == 0 {
+                            0.0
+                        } else {
+                            r + e * fill_elements as f64
+                        }
+                    })
+            },
+        )
+    }
+}
+
+/// Consecutive GEMM batches have serial barriers; their dense estimate remains
+/// the provider's, and their movement estimate conservatively withholds fan-out.
 pub(super) fn group_phase<'a>(
     schedule: &'a TreeTransformParallelSchedule,
     costs: &Costs,
     gemm: impl Fn(usize) -> f64 + 'a,
-) -> impl Fn(usize) -> (f64, f64) + 'a {
+) -> impl Fn(usize, usize, &Prices<'_>) -> f64 + 'a {
     let costs = *costs;
-    move |q| {
-        let (mut sum, mut critical) = (0.0, 0.0);
+    move |q, _, _| {
+        let mut critical = 0.0;
         for first in (0..schedule.pack_movement.len()).step_by(q) {
-            let mut largest = 0.0_f64;
-            for group in first..(first + q).min(schedule.pack_movement.len()) {
-                let movement = [
-                    &schedule.pack_movement[group],
-                    &schedule.scatter_movement[group],
-                ]
-                .into_iter()
-                .map(|summary| {
-                    let (setup, work) = components(&summary.counts, &costs);
-                    setup + work
+            critical += (first..(first + q).min(schedule.pack_movement.len()))
+                .map(|group| {
+                    [
+                        &schedule.pack_movement[group],
+                        &schedule.scatter_movement[group],
+                    ]
+                    .into_iter()
+                    .map(|summary| {
+                        let (a, w) = components(&summary.counts, &costs);
+                        a + w
+                    })
+                    .sum::<f64>()
+                        + gemm(group)
                 })
-                .sum::<f64>();
-                let item = movement + gemm(group);
-                sum += item;
-                largest = largest.max(item);
-            }
-            critical += largest;
+                .fold(0.0, f64::max);
         }
-        (sum, critical)
+        critical
     }
 }
 
-/// Each group's pack columns have equal element counts, so each class hull
-/// contains at most one point and a chunk aggregates these maxima in O(t).
-pub(super) fn pack_maximum(phase: &Summary, costs: &Costs) -> f64 {
-    phase.maxima.as_ref().map_or(0.0, |maxima| {
-        maxima
-            .hulls
-            .iter()
-            .zip(costs)
-            .filter(|(hull, _)| !hull.is_empty())
-            .map(|(hull, &(a, r, e))| a + maximum(hull, r, e))
-            .fold(0.0, f64::max)
-    })
-}
-
-pub(super) fn pack_phase(
-    summary: &Summary,
-    groups: &[Summary],
-    costs: &Costs,
-    columns: usize,
-    fill: Option<usize>,
-) -> impl Fn(usize) -> (f64, f64) {
-    let (setup, work) = components(&summary.counts, costs);
-    let largest = groups
-        .iter()
-        .map(|phase| pack_maximum(phase, costs))
-        .fold(0.0, f64::max);
-    let (a, r, e) = costs[2];
-    move |q| {
-        let (fill_sum, fill_max) = fill.map_or((0.0, 0.0), |elements| {
-            fill_cost(q, elements, columns, a, r, e)
-        });
-        (setup + work + fill_sum, largest + fill_max)
-    }
-}
-
+/// Member ranges fuse each role into one serial walk; no retained plan executes.
 pub(super) fn member_phase(
     phase: &Summary,
     costs: &Costs,
     members: usize,
-) -> impl Fn(usize) -> (f64, f64) {
+) -> impl Fn(usize, usize, &Prices<'_>) -> f64 {
     let (setup, work) = components(&phase.counts, costs);
-    move |q| member_cost(q, members, setup, work)
+    move |q, _, _| setup + members.div_ceil(q) as f64 * work
 }
 
-/// The phase supplies its executed-item costs; this chooser knows no phase kind.
-pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
+/// Each phase supplies its actual critical path; class remains table data.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64>(
     exec: &lanes::Exec<'_>,
     constants: Option<&Constants>,
     jobs: usize,
     working_set: u128,
     traffic: u128,
     elements: impl FnOnce() -> [f64; CLASSES],
+    admits: impl Fn(usize, usize) -> bool,
     prepare: impl Fn(&Costs) -> F,
 ) -> usize {
     let budget = exec.budget();
     if budget.min(jobs) <= 1 {
         return 1;
     }
-    let jobs = jobs.max(1);
     if let Some(width) = lanes::forced_width(exec, jobs) {
         return width;
     }
@@ -456,17 +492,27 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
         (row.a, row.r.at(working_set), row.e.at(working_set))
     });
     let traffic = traffic as f64 * bytes;
+    let phase = prepare(&costs);
+    let dispatch = |q| {
+        constants.dispatch_cost(q, || {
+            exec.token_ref()
+                .dispatch_cost(NonZeroUsize::new(q).unwrap())
+        })
+    };
+    let bandwidth = phase_bandwidth(working_set, traffic, elements(), constants);
+    let prices = Prices {
+        bytes,
+        dispatch: &dispatch,
+        bandwidth: &bandwidth,
+        admits: &admits,
+    };
     choose(
-        budget.min(jobs),
+        budget,
+        jobs,
         traffic,
-        prepare(&costs),
-        |q| {
-            constants.dispatch_cost(q, || {
-                exec.token_ref()
-                    .dispatch_cost(NonZeroUsize::new(q).unwrap())
-            })
-        },
-        phase_bandwidth(working_set, traffic, elements(), constants),
+        |q| phase(q, budget, &prices),
+        dispatch,
+        &bandwidth,
     )
 }
 
@@ -874,76 +920,44 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
-    fn fixed(p: usize, sum: f64, largest: f64, dispatch: f64) -> usize {
-        choose(
-            p,
-            0.0,
-            |_| (sum, largest),
-            |q| dispatch * q as f64,
-            |_| f64::INFINITY,
-        )
-    }
-
-    /// Purpose: distributed work pays for a split, while costly dispatch prevents it.
-    #[test]
-    fn dominant_item_with_small_items_can_split() {
-        assert!(fixed(8, 1000.0 + 99.0 * 10.0, 1000.0, 10.0) > 1);
-        assert_eq!(fixed(8, 1000.0 + 99.0 * 10.0, 1000.0, 1000.0), 1);
-    }
-
-    /// Purpose: many small items choose an interior width, unlike an inline-dominated phase.
-    #[test]
-    fn small_items_choose_an_interior_width() {
-        assert_eq!(fixed(8, 3000.0, 30.0, 100.0), 5);
-        assert_eq!(fixed(8, 30.0, 30.0, 100.0), 1);
-    }
-
-    /// Purpose: one indivisible item stays inline; splitting becomes useful with replication.
-    #[test]
-    fn one_large_item_stays_inline() {
-        assert_eq!(fixed(8, 1000.0, 1000.0, 0.0), 1);
-        assert!(fixed(8, 2000.0, 1000.0, 0.0) > 1);
-    }
-
-    /// Purpose: strict improvement preserves the smaller of tied integer widths.
+    /// Purpose: tied candidates retain the smaller width; a strict improvement changes it.
     #[test]
     fn ties_choose_the_smaller_width() {
-        assert_eq!(
-            choose(
-                3,
-                0.0,
-                |_| (12.0, 0.0),
-                |q| if q == 2 { 0.0 } else { 2.0 },
-                |_| f64::INFINITY
-            ),
-            2
-        );
-        assert_eq!(
-            choose(
-                3,
-                0.0,
-                |_| (12.0, 0.0),
-                |q| if q == 2 { 1.0 } else { 2.0 },
-                |_| f64::INFINITY
-            ),
-            3
-        );
+        for (last, expected) in [(6.0, 2), (5.0, 3)] {
+            assert_eq!(
+                choose(
+                    3,
+                    3,
+                    0.0,
+                    |q| [0.0, 12.0, 6.0, last][q],
+                    |_| 0.0,
+                    |_| f64::INFINITY
+                ),
+                expected
+            );
+        }
     }
 
-    /// Purpose: width one never evaluates model data.
+    /// Purpose: serial or indivisible phases never prepare model data.
     #[test]
     fn serial_choice_reads_no_model_data() {
+        for (slots, jobs) in [(1, 8), (8, 1)] {
+            assert_eq!(
+                choose(
+                    slots,
+                    jobs,
+                    0.0,
+                    |_| panic!("phase"),
+                    |_| panic!("dispatch"),
+                    |_| panic!("bandwidth")
+                ),
+                1
+            );
+        }
         assert_eq!(
-            choose(
-                1,
-                0.0,
-                |_| panic!("phase"),
-                |_| panic!("dispatch"),
-                |_| panic!("bandwidth")
-            ),
-            1
+            choose(2, 2, 0.0, |q| 12.0 / q as f64, |_| 0.0, |_| f64::INFINITY),
+            2
         );
-        assert_eq!(fixed(2, 12.0, 1.0, 0.0), 2);
     }
 
     /// Purpose: accepted dispatch measurements drive the width and skip table reads;
@@ -994,7 +1008,8 @@ mod tests {
                             0,
                             0,
                             || [0.0; CLASSES],
-                            |_| |_| (400.0, 200.0),
+                            |_, _| false,
+                            |_| |q, _, _| 400.0 / q as f64,
                         ),
                         expected_width
                     );
@@ -1012,236 +1027,365 @@ mod tests {
         );
     }
 
-    /// Purpose: the integer argmin agrees with an exact common-denominator oracle.
-    #[test]
-    fn small_ladders_match_an_exhaustive_integer_oracle() {
-        for p in 2..=6 {
-            let denominator: u64 = (1..=p as u64 + 1).product();
-            for sum in 0..=12u64 {
-                for largest in 0..=sum {
-                    for traffic in [0, 24] {
-                        let expected = (1..=p)
-                            .min_by_key(|&q| {
-                                if q == 1 {
-                                    sum * denominator
-                                } else {
-                                    let dispatch = (q * 3 % 5) as u64;
-                                    dispatch * denominator
-                                        + (largest * denominator)
-                                            .max(sum * denominator / q as u64)
-                                            .max(traffic * denominator / (q + 1) as u64)
-                                }
-                            })
-                            .unwrap();
-                        assert_eq!(
-                            choose(
-                                p,
-                                traffic as f64,
-                                |_| (sum as f64, largest as f64),
-                                |q| (q * 3 % 5) as f64,
-                                |q| (q + 1) as f64
-                            ),
-                            expected
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    /// Purpose: executed member ranges each pay setup and preserve the per-member work.
-    #[test]
-    fn member_ranges_price_setup_at_the_executed_width() {
-        assert_eq!(member_cost(1, 4, 1.0, 1.0 + 2.0), (13.0, 13.0));
-        assert_eq!(member_cost(2, 4, 1.0, 1.0 + 2.0), (14.0, 7.0));
-        assert_eq!(member_cost(2, 4, 0.0, 1.0 + 2.0), (12.0, 6.0));
-    }
-
-    /// Purpose: the shared chooser handles downward ceiling steps without convexity assumptions.
-    #[test]
-    fn member_ceiling_steps_share_the_integer_argmin() {
-        assert_eq!(
-            choose(
-                10,
-                0.0,
-                |q| member_cost(q, 10, 1.0, 1.0),
-                |q| 0.1 * q as f64,
-                |_| f64::INFINITY
-            ),
-            10
-        );
-        assert_eq!(
-            choose(
-                10,
-                0.0,
-                |q| member_cost(q, 10, 1.0, 1.0),
-                |q| 10.0 * q as f64,
-                |_| f64::INFINITY
-            ),
-            1
-        );
-    }
-
-    /// Purpose: even empty executed cold-fill leaves pay setup, but only nonempty leaves pay a run.
-    #[test]
-    fn cold_fill_prices_the_executed_nonempty_runs() {
-        assert_eq!(fill_cost(4, 1, 4, 1.0, 1.0, 1.0), (6.0, 3.0));
-        assert_eq!(fill_cost(1, 1, 4, 1.0, 1.0, 1.0), (3.0, 3.0));
-        assert_eq!(fill_cost(4, 4, 4, 1.0, 1.0, 1.0), (12.0, 3.0));
-    }
-
-    fn compiled_jobs(jobs: &[[Counts; CLASSES]]) -> Summary {
+    fn compiled_jobs(jobs: &[Job], minimum: usize) -> Summary {
         let mut phase = Summary::default();
+        phase.planned_min = minimum;
         for job in jobs {
-            for (count, &other) in phase.counts.iter_mut().zip(job) {
+            for (count, other) in phase.counts.iter_mut().zip(job.counts) {
                 *count = count.add(other).unwrap();
             }
-            phase.record_job(job).unwrap();
+            for (count, other) in phase.planned.iter_mut().zip(job.planned) {
+                *count = count.add(other).unwrap();
+            }
+            phase.record_job(&job.counts).unwrap();
         }
         phase.finish().unwrap();
         phase
     }
 
-    fn linear_job_costs(jobs: &[[Counts; CLASSES]], costs: &Costs) -> (f64, f64) {
-        jobs.iter()
-            .map(|job| {
-                job.iter()
-                    .zip(costs)
-                    .map(|(count, &(a, r, e))| {
-                        a * count.items as f64 + r * count.runs as f64 + e * count.elements as f64
-                    })
-                    .sum::<f64>()
-            })
-            .fold((0.0, 0.0_f64), |(sum, largest), job| {
-                (sum + job, largest.max(job))
-            })
+    fn uniform_job(items: u64, elements: u64, runs: u64, planned: bool) -> Job {
+        let mut counts = [Counts::default(); CLASSES];
+        counts[0] = Counts {
+            items,
+            runs: runs * items,
+            elements: elements * items,
+        };
+        Job {
+            counts,
+            planned: if planned {
+                counts
+            } else {
+                [Counts::default(); CLASSES]
+            },
+        }
     }
 
-    /// Purpose: independent class maxima bound mixed executed jobs above while
-    /// exact compiled totals preserve S, including zero-cost coefficients.
+    fn reference_choice(phase: &Summary, budget: usize, traffic: f64, admit: bool) -> usize {
+        let mut constants = Constants::reference(HostClass::Generic);
+        constants.bandwidth = vec![
+            5.303316889,
+            5.303316889,
+            6.580693628,
+            7.873770916,
+            9.166848204,
+        ];
+        let costs = core::array::from_fn(|c| {
+            let row = constants.row(c);
+            (row.a, row.r.at(traffic), row.e.at(traffic))
+        });
+        let dispatch = |q| [0.0, 0.0, 110.0, 200.0, 290.0][q];
+        let bandwidth = phase_bandwidth(
+            traffic,
+            traffic,
+            phase.counts.map(|count| count.elements as f64),
+            &constants,
+        );
+        let admits = |_, _| admit;
+        let prices = Prices {
+            bytes: 8.0,
+            dispatch: &dispatch,
+            bandwidth: &bandwidth,
+            admits: &admits,
+        };
+        let model = super::fixed(phase, &costs);
+        choose(
+            budget,
+            phase.prefix.len(),
+            traffic,
+            |q| model(q, budget, &prices),
+            dispatch,
+            &bandwidth,
+        )
+    }
+
+    /// Purpose: large admitted roles keep leaves with inner fan-out; withholding
+    /// that credit is the serial-item control that exhausts the outer slots.
     #[test]
-    fn compiled_bound_covers_random_mixed_jobs() {
+    fn large_planned_roles_choose_leaves_with_inner_fanout() {
+        let phase = compiled_jobs(
+            &[1, 4, 9, 4, 1].map(|items| uniform_job(items, 65536, 256, true)),
+            65536,
+        );
+        let traffic = 19.0 * 65536.0 * 16.0;
+        for budget in [2, 4] {
+            let chosen = reference_choice(&phase, budget, traffic, true);
+            assert!(budget / chosen >= 2);
+            assert_eq!(reference_choice(&phase, budget, traffic, false), budget);
+        }
+    }
+
+    /// Purpose: distributed serial work still pays for outer splitting; dispatch
+    /// dominating its total time is the inline control.
+    #[test]
+    fn dominant_serial_job_and_small_jobs_split() {
+        let mut jobs = vec![uniform_job(1, 10, 1, false); 100];
+        jobs[0] = uniform_job(1, 1000, 1, false);
+        let phase = compiled_jobs(&jobs, 0);
+        let costs = [(0.0, 0.0, 1.0); CLASSES];
+        for budget in [2, 4] {
+            for (dispatch_ns, split) in [(10.0, true), (2000.0, false)] {
+                let dispatch = |_| dispatch_ns;
+                let bandwidth = |_| f64::INFINITY;
+                let prices = Prices {
+                    bytes: 8.0,
+                    dispatch: &dispatch,
+                    bandwidth: &bandwidth,
+                    admits: &|_, _| true,
+                };
+                let model = super::fixed(&phase, &costs);
+                let chosen = choose(
+                    budget,
+                    jobs.len(),
+                    0.0,
+                    |q| model(q, budget, &prices),
+                    dispatch,
+                    bandwidth,
+                );
+                assert_eq!(chosen > 1, split);
+            }
+        }
+    }
+
+    /// Purpose: a dominant admitted role retains inner fan-out while distributed
+    /// work still splits at four slots; serial item pricing exhausts outer slots.
+    #[test]
+    fn dominant_admitted_roles_keep_a_split_with_inner_fanout() {
+        let mut jobs = vec![uniform_job(1, 2304, 1, true); 201];
+        jobs[0] = uniform_job(1, 589824, 1, true);
+        let phase = compiled_jobs(&jobs, 2304);
+        assert_eq!(reference_choice(&phase, 2, 16809984.0, true), 1);
+        assert_eq!(reference_choice(&phase, 4, 16809984.0, true), 3);
+        assert_eq!(reference_choice(&phase, 4, 16809984.0, false), 4);
+    }
+
+    /// Purpose: small gated roles use every outer slot on the measured cache
+    /// curve; a single ownership job is the indivisible control.
+    #[test]
+    fn small_roles_choose_the_budget_without_inner_credit() {
+        let mut jobs = vec![uniform_job(3, 256, 16, true); 597];
+        jobs.extend([uniform_job(2, 256, 16, true); 4]);
+        jobs.extend([uniform_job(1, 256, 16, true); 2]);
+        let phase = compiled_jobs(&jobs, 256);
+        for budget in [2, 4] {
+            assert_eq!(reference_choice(&phase, budget, 7376896.0, false), budget);
+            assert_eq!(
+                reference_choice(
+                    &compiled_jobs(&[uniform_job(1801, 256, 16, true)], 256),
+                    budget,
+                    7376896.0,
+                    false
+                ),
+                1
+            );
+        }
+    }
+
+    /// Purpose: slot count cannot change a serial-only job; an admitted planned
+    /// job is the control whose aggregate time decreases on wider leaves.
+    #[test]
+    fn serial_only_items_are_independent_of_leaf_slots() {
+        let costs = [(1.0, 1.0, 1.0); CLASSES];
+        let prices = Prices {
+            bytes: 8.0,
+            dispatch: &|_| 1.0,
+            bandwidth: &|_| f64::INFINITY,
+            admits: &|_, _| true,
+        };
+        let serial = uniform_job(2, 100, 4, false);
+        let planned = uniform_job(2, 100, 4, true);
+        for slots in [1, 2, 4] {
+            assert_eq!(prices.leaf(serial, 100, &costs, slots), 210.0);
+        }
+        assert!(prices.leaf(planned, 100, &costs, 4) < prices.leaf(planned, 100, &costs, 2));
+    }
+
+    /// Purpose: cumulative job components reproduce independent linear scans for
+    /// every range and preserve S_q under the same actual leaf partition.
+    #[test]
+    fn prefix_leaf_sums_match_random_linear_scans() {
         let mut seed = 17u64;
         for len in 1..30 {
             let jobs = (0..len)
                 .map(|_| {
-                    core::array::from_fn(|_| {
+                    let counts = core::array::from_fn(|_| {
                         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-                        let items = (seed >> 32) % 4;
+                        let items = 1 + (seed >> 32) % 4;
                         Counts {
                             items,
                             runs: items * (1 + seed % 19),
                             elements: items * (1 + seed % 31),
                         }
-                    })
+                    });
+                    let planned = core::array::from_fn(|c| {
+                        if c % 2 == 0 {
+                            counts[c]
+                        } else {
+                            Counts::default()
+                        }
+                    });
+                    Job { counts, planned }
                 })
                 .collect::<Vec<_>>();
-            let phase = compiled_jobs(&jobs);
-            for rate in 0..20 {
-                let costs = core::array::from_fn(|c| {
-                    (
-                        (rate % 5) as f64,
-                        ((rate + c) % 7) as f64,
-                        ((rate + 2 * c) % 11) as f64,
-                    )
+            let phase = compiled_jobs(&jobs, 1);
+            let costs = [(2.0, 3.0, 5.0); CLASSES];
+            let prices = Prices {
+                bytes: 8.0,
+                dispatch: &|s| s as f64,
+                bandwidth: &|s| 10.0 * s as f64,
+                admits: &|_, _| true,
+            };
+            for q in 1..=len.min(8) {
+                let (actual_sum, expected_sum) = (Cell::new(0.0), Cell::new(0.0));
+                leaf_max(0, len, 8, q, 0, &|range, slots, _| {
+                    let mut expected = Job::default();
+                    for job in &jobs[range.clone()] {
+                        for (left, right) in expected.counts.iter_mut().zip(job.counts) {
+                            left.items += right.items;
+                            left.runs += right.runs;
+                            left.elements += right.elements;
+                        }
+                        for (left, right) in expected.planned.iter_mut().zip(job.planned) {
+                            left.items += right.items;
+                            left.runs += right.runs;
+                            left.elements += right.elements;
+                        }
+                    }
+                    let actual = job_range(&phase.prefix, range);
+                    assert_eq!(actual, expected);
+                    actual_sum.set(actual_sum.get() + prices.leaf(actual, 1, &costs, slots));
+                    let linear_time = |counts: &[Counts; CLASSES]| {
+                        counts
+                            .iter()
+                            .map(|c| (2 * c.items + 3 * c.runs + 5 * c.elements) as f64)
+                            .sum::<f64>()
+                    };
+                    let total = linear_time(&expected.counts);
+                    let planned = linear_time(&expected.planned);
+                    let count = expected.planned.iter().map(|c| c.items).sum::<u64>() as f64;
+                    let traffic = expected
+                        .planned
+                        .iter()
+                        .enumerate()
+                        .map(|(c, item)| item.elements as f64 * if c < 2 { 16.0 } else { 8.0 })
+                        .sum::<f64>();
+                    let linear = if slots == 1 {
+                        total
+                    } else {
+                        total - planned
+                            + planned.min(
+                                count * slots as f64
+                                    + (planned / slots as f64).max(traffic / (10 * slots) as f64),
+                            )
+                    };
+                    expected_sum.set(expected_sum.get() + linear);
+                    0.0
                 });
-                let exact = linear_job_costs(&jobs, &costs);
-                let (sum, bound) = super::fixed(&phase, &costs)(1);
-                assert_eq!(sum, exact.0);
-                assert!(bound >= exact.1);
+                assert_eq!(actual_sum.get(), expected_sum.get());
             }
         }
     }
 
-    /// Purpose: a single class with a fixed setup count has an exact maximum;
-    /// varying setup counts are the control requiring a conservative bound.
+    /// Purpose: recursive splits use the executor's uneven job boundaries and
+    /// whole-token remainders, rather than equally sized flat job chunks.
     #[test]
-    fn single_class_fixed_setups_have_an_exact_maximum() {
-        for items in [1, 2] {
-            let jobs = [
-                [
-                    Counts {
-                        items,
-                        runs: 4,
-                        elements: 8,
-                    },
-                    Counts::default(),
-                    Counts::default(),
-                    Counts::default(),
-                ],
-                [
-                    Counts {
-                        items,
-                        runs: 1,
-                        elements: 100,
-                    },
-                    Counts::default(),
-                    Counts::default(),
-                    Counts::default(),
-                ],
-            ];
-            for costs in [[(100.0, 0.0, 1.0); CLASSES], [(1.0, 100.0, 0.0); CLASSES]] {
-                assert_eq!(
-                    super::fixed(&compiled_jobs(&jobs), &costs)(1),
-                    linear_job_costs(&jobs, &costs)
-                );
-            }
-        }
-        let jobs = [
-            [
-                Counts {
-                    items: 2,
-                    runs: 4,
-                    elements: 8,
-                },
-                Counts::default(),
-                Counts::default(),
-                Counts::default(),
-            ],
-            [
-                Counts {
-                    items: 1,
-                    runs: 1,
-                    elements: 100,
-                },
-                Counts::default(),
-                Counts::default(),
-                Counts::default(),
-            ],
-        ];
-        let costs = [(100.0, 0.0, 1.0); CLASSES];
-        assert_eq!(linear_job_costs(&jobs, &costs), (408.0, 208.0));
+    fn leaf_partition_matches_recursive_ownership_boundaries() {
+        let observed = std::cell::RefCell::new(Vec::new());
+        leaf_max(0, 7, 8, 3, 0, &|range, slots, _| {
+            observed.borrow_mut().push((range, slots));
+            0.0
+        });
+        assert_eq!(*observed.borrow(), [(0..3, 3), (3..5, 3), (5..7, 2)]);
+        assert_ne!(*observed.borrow(), [(0..3, 3), (3..6, 3), (6..7, 2)]);
+    }
+
+    /// Purpose: the total-slot bandwidth floor applies equally to inline and
+    /// split candidates; removing the floor allows the widest choice.
+    #[test]
+    fn aggregate_bandwidth_uses_all_slots_at_every_width() {
         assert_eq!(
-            super::fixed(&compiled_jobs(&jobs), &costs)(1),
-            (408.0, 300.0)
+            choose(
+                4,
+                8,
+                1000.0,
+                |q| 100.0 / q as f64,
+                |_| 0.0,
+                |slots| {
+                    assert_eq!(slots, 4);
+                    1.0
+                }
+            ),
+            1
+        );
+        assert_eq!(
+            choose(
+                4,
+                8,
+                1000.0,
+                |q| 100.0 / q as f64,
+                |_| 0.0,
+                |_| f64::INFINITY
+            ),
+            4
         );
     }
 
-    /// Purpose: a pack leaf pays for its column work and cold-fill share
-    /// together; warm scratch is the control with no fill price.
+    /// Purpose: only approved candidate widths and the actual token budget are
+    /// considered, never an unlisted job-count cap.
+    #[test]
+    fn candidate_widths_use_the_approved_ladder_and_budget() {
+        assert_eq!(
+            choose(7, 5, 0.0, |q| 100.0 / q as f64, |_| 0.0, |_| f64::INFINITY),
+            4
+        );
+        assert_eq!(
+            choose(7, 7, 0.0, |q| 100.0 / q as f64, |_| 0.0, |_| f64::INFINITY),
+            7
+        );
+    }
+
+    /// Purpose: a pack leaf pays column work plus its actual cold-fill share;
+    /// warm scratch is the control without setup or fill traffic.
     #[test]
     fn pack_columns_and_cold_fill_share_add_their_prices() {
-        let column = [
-            Counts {
-                items: 1,
-                runs: 1,
-                elements: 3,
-            },
-            Counts::default(),
-            Counts::default(),
-            Counts::default(),
-        ];
-        let groups = [compiled_jobs(&[column; 4])];
-        let summary = Summary::totals(&groups).unwrap();
+        let phase = compiled_jobs(&[uniform_job(1, 3, 1, false); 4], 0);
         let costs = [(1.0, 1.0, 1.0); CLASSES];
+        let prices = Prices {
+            bytes: 8.0,
+            dispatch: &|_| 0.0,
+            bandwidth: &|_| f64::INFINITY,
+            admits: &|_, _| false,
+        };
         assert_eq!(
-            pack_phase(&summary, &groups, &costs, 4, Some(8))(2),
-            (32.0, 11.0)
+            prefix_phase(&phase.prefix, 0, 4, 0, &costs, Some(8))(2, 4, &prices),
+            16.0
         );
         assert_eq!(
-            pack_phase(&summary, &groups, &costs, 4, None)(2),
-            (20.0, 5.0)
+            prefix_phase(&phase.prefix, 0, 4, 0, &costs, None)(2, 4, &prices),
+            10.0
         );
+        let tiny = std::cell::RefCell::new(Vec::new());
+        leaf_max(0, 4, 4, 4, 1, &|_, _, fill| {
+            tiny.borrow_mut().push(fill);
+            0.0
+        });
+        assert_eq!(*tiny.borrow(), [0, 0, 0, 1]);
+    }
+
+    /// Purpose: fused member ranges pay setup once per role and range; the
+    /// per-member setup model is the control with a different total.
+    #[test]
+    fn member_ranges_price_setup_at_the_executed_width() {
+        let phase = compiled_jobs(&[uniform_job(1, 2, 1, false)], 0);
+        let costs = [(1.0, 1.0, 1.0); CLASSES];
+        let prices = Prices {
+            bytes: 8.0,
+            dispatch: &|_| 0.0,
+            bandwidth: &|_| f64::INFINITY,
+            admits: &|_, _| false,
+        };
+        assert_eq!(member_phase(&phase, &costs, 4)(1, 4, &prices), 13.0);
+        assert_eq!(member_phase(&phase, &costs, 4)(2, 4, &prices), 7.0);
+        assert_ne!(member_phase(&phase, &costs, 4)(2, 4, &prices), 8.0);
     }
 
     /// Purpose: dense-dominated groups choose their chunk width from the combined
@@ -1272,29 +1416,53 @@ mod tests {
         let costs = [(0.5, 0.0, 0.0); CLASSES];
         let dense = [100.0, 1.0, 100.0, 1.0];
         let phase = group_phase(schedule, &costs, |group| dense[group]);
-        assert_eq!(
-            [phase(1), phase(2), phase(3), phase(4)],
-            [
-                (210.0, 210.0),
-                (210.0, 204.0),
-                (210.0, 105.0),
-                (210.0, 102.0)
-            ]
-        );
         let dispatch = |q| 10.0 * q as f64;
-        assert_eq!(choose(4, 0.0, phase, dispatch, |_| f64::INFINITY), 3);
+        let prices = Prices {
+            bytes: 8.0,
+            dispatch: &dispatch,
+            bandwidth: &|_| f64::INFINITY,
+            admits: &|_, _| false,
+        };
+        assert_eq!(
+            [
+                phase(1, 4, &prices),
+                phase(2, 4, &prices),
+                phase(3, 4, &prices),
+                phase(4, 4, &prices)
+            ],
+            [210.0, 204.0, 105.0, 102.0]
+        );
         assert_eq!(
             choose(
                 4,
+                4,
                 0.0,
-                group_phase(schedule, &costs, |_| 0.0),
+                |q| phase(q, 4, &prices),
+                dispatch,
+                |_| f64::INFINITY
+            ),
+            3
+        );
+        assert_eq!(
+            choose(
+                4,
+                4,
+                0.0,
+                |q| group_phase(schedule, &costs, |_| 0.0)(q, 4, &prices),
                 dispatch,
                 |_| f64::INFINITY
             ),
             1
         );
         assert_eq!(
-            choose(4, 0.0, |_| (210.0, 102.0), dispatch, |_| f64::INFINITY),
+            choose(
+                4,
+                4,
+                0.0,
+                |q| 102.0_f64.max(210.0 / q as f64),
+                dispatch,
+                |_| f64::INFINITY
+            ),
             2
         );
     }
@@ -1322,7 +1490,10 @@ mod tests {
                             0,
                             0,
                             || panic!("element preparation"),
-                            |_| -> fn(usize) -> (f64, f64) { panic!("cost preparation") }
+                            |_, _| false,
+                            |_| -> fn(usize, usize, &Prices<'_>) -> f64 {
+                                panic!("cost preparation")
+                            }
                         ),
                         1
                     );
@@ -1350,40 +1521,18 @@ mod tests {
         assert_eq!(empty, [f64::INFINITY; 3]);
     }
 
-    /// Purpose: a cache-resident phase scales its element rate at both budgets;
-    /// the ungated memory measurement is the control that keeps two slots inline.
+    /// Purpose: cache-resident bandwidth follows the element curve; applying
+    /// the memory roof prematurely is the slower negative control.
     #[test]
-    fn cache_resident_many_items_split_at_the_budget() {
-        let (sum, largest, traffic) = (136531.0, 227.0, 7376896.0);
+    fn cache_resident_bandwidth_uses_the_element_curve() {
+        let traffic = 7376896.0;
         let mut constants = Constants::reference(HostClass::Generic);
         constants.bandwidth = vec![60.0; 5];
         let elements = [traffic / 16.0, 0.0, 0.0, 0.0];
-        let dispatch = |q| [0.0, 0.0, 600.0, 650.0, 700.0][q];
-        for budget in [2, 4] {
-            assert_eq!(
-                choose(
-                    budget,
-                    traffic,
-                    |_| (sum, largest),
-                    dispatch,
-                    phase_bandwidth(traffic, traffic, elements, &constants)
-                ),
-                budget
-            );
-        }
-        assert_eq!(
-            choose(
-                2,
-                traffic,
-                |_| (sum, largest),
-                dispatch,
-                |_| traffic / 288719.0
-            ),
-            1
-        );
-        let element_time = traffic / 16.0 * 0.15972158132790892;
         let bandwidth = phase_bandwidth(traffic, traffic, elements, &constants);
+        let element_time = traffic / 16.0 * 0.15972158132790892;
         assert!((traffic / bandwidth(4) - element_time / 4.0).abs() < 1e-9);
+        assert!(bandwidth(2) > traffic / 288719.0);
     }
 
     /// Purpose: memory-resident phases stop gaining width above the measured
@@ -1407,7 +1556,10 @@ mod tests {
         let bandwidth = phase_bandwidth(traffic, traffic, elements, &constants);
         assert_eq!(bandwidth(4), 80.0);
         let sum = elements[0] * constants.rows[0].e.at(traffic);
-        assert_eq!(choose(8, traffic, |_| (sum, 0.0), |_| 0.0, bandwidth), 3);
+        assert_eq!(
+            choose(8, 8, traffic, |q| sum / q as f64, |_| 0.0, bandwidth),
+            2
+        );
         assert!(phase_bandwidth((4 << 20) as f64, traffic, elements, &constants)(4) > 80.0);
     }
 
@@ -1544,8 +1696,22 @@ mod tests {
             }
             summary.finish().unwrap();
             let phase = super::fixed(&summary, &[(1.0, 1.0, 1.0); CLASSES]);
-            assert!(phase(1).0.is_finite());
-            assert!((1..=4).contains(&choose(4, 0.0, phase, |_| 1.0, |_| f64::INFINITY)));
+            let prices = Prices {
+                bytes: 8.0,
+                dispatch: &|_| 1.0,
+                bandwidth: &|_| f64::INFINITY,
+                admits: &|_, _| false,
+            };
+            assert!(phase(1, 4, &prices).is_finite());
+            assert!((1..=4).contains(&choose(
+                4,
+                2,
+                0.0,
+                |q| phase(q, 4, &prices),
+                |_| 1.0,
+                |_| f64::INFINITY
+            )));
+            assert!(job_range(&summary.prefix, 1..2).counts[0].elements > 0);
         }
     }
 

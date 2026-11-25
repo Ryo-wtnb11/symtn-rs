@@ -94,6 +94,12 @@ where
         let modeled = exec.budget() > 1
             && exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Auto;
         let sequential = exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
+        workspace.gate_keys.prepare(
+            &mut exec.reborrow().into_token(),
+            layouts.max_planned_elements(),
+        );
+        #[cfg(test)]
+        workspace.gate_keys.watch_as(gate);
         let (threads, singles_width, inactive_width) = if exec.budget() == 1 {
             (1, 1, 1)
         } else {
@@ -102,10 +108,13 @@ where
                 movement::width::<D, _>(
                     &exec,
                     constants,
-                    summary.maxima.as_ref().map_or(0, |maxima| maxima.jobs),
+                    summary.prefix.len(),
                     summary.working_set as u128,
                     summary.logical_traffic(read_destination) as u128,
                     || summary.counts.map(|count| count.elements as f64),
+                    |slots, elements| {
+                        writer.replays_plans() && workspace.gate_keys.admits(slots, elements)
+                    },
                     |costs| movement::fixed(summary, costs),
                 )
             };
@@ -122,6 +131,7 @@ where
                             .counts
                             .map(|count| count.elements as f64)
                     },
+                    |_, _| false,
                     |costs| {
                         movement::group_phase(schedule, costs, |group| {
                             lanes::gemm_cost(
@@ -138,12 +148,6 @@ where
             )
         };
         workspace.prepare_fused_indices(threads.max(singles_width).max(inactive_width), rank)?;
-        workspace.gate_keys.prepare(
-            &mut exec.reborrow().into_token(),
-            layouts.max_planned_elements(),
-        );
-        #[cfg(test)]
-        workspace.gate_keys.watch_as(gate);
         let split_inactive = inactive_width > 1;
         let split_singles = singles_width > 1;
         let HostTreeTransformWorkspace {
@@ -325,6 +329,8 @@ where
             filled,
             src,
             &schedule.pack_movement[first_group..=last_group],
+            &schedule.pack_prefix,
+            schedule.scatter_groups[first_group].pack.start,
         )?;
         fill &= pack.is_empty();
         #[cfg(any(test, feature = "testing"))]
@@ -361,6 +367,7 @@ where
             zero_strides,
             fused_indices,
             gate_keys,
+            movement_prefix,
             chunk_scatter_groups: ordered,
             chunk_scatter_runs: runs,
             ..
@@ -385,6 +392,18 @@ where
             } else {
                 crate::movement::Summary::default()
             };
+            movement_prefix.clear();
+            if exec.budget().min(runs.len()) > 1 {
+                movement_prefix.reserve(runs.len());
+                let mut cumulative = crate::movement::Job::default();
+                for (i, &start) in runs.iter().enumerate() {
+                    let end = runs.get(i + 1).map_or(groups.len(), |&end| end as usize);
+                    for &group in &groups[start as usize..end] {
+                        cumulative = cumulative.add(summaries[group].job())?;
+                    }
+                    movement_prefix.push(cumulative);
+                }
+            }
             let width = movement::width::<D, _>(
                 &exec,
                 constants,
@@ -392,22 +411,16 @@ where
                 summary.working_set as u128,
                 summary.logical_traffic(writer.reads_destination()) as u128,
                 || summary.counts.map(|count| count.elements as f64),
+                |slots, elements| writer.replays_plans() && gate_keys.admits(slots, elements),
                 |costs| {
-                    let (mut sum, mut largest) = (0.0, 0.0_f64);
-                    for (i, &start) in runs.iter().enumerate() {
-                        let end = runs.get(i + 1).map_or(groups.len(), |&end| end as usize);
-                        let job = groups[start as usize..end]
-                            .iter()
-                            .map(|&group| {
-                                let (setup, work) =
-                                    movement::components(&summaries[group].counts, costs);
-                                setup + work
-                            })
-                            .sum::<f64>();
-                        sum += job;
-                        largest = largest.max(job);
-                    }
-                    move |_| (sum, largest)
+                    movement::prefix_phase(
+                        movement_prefix,
+                        0,
+                        runs.len(),
+                        summary.planned_min,
+                        costs,
+                        None,
+                    )
                 },
             );
             let split = width > 1;
@@ -534,6 +547,8 @@ fn pack_chunk<D, C>(
     fill: Option<usize>,
     src: &[D],
     summaries: &[crate::movement::Summary],
+    prefix: &[crate::movement::Job],
+    first: usize,
 ) -> Result<(), OperationError>
 where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
@@ -566,12 +581,14 @@ where
                     elements[2] += extra as f64;
                     elements
                 },
+                |_, _| false,
                 |costs| {
-                    movement::pack_phase(
-                        &summary,
-                        summaries,
-                        costs,
+                    movement::prefix_phase(
+                        prefix,
+                        first,
                         columns.len(),
+                        0,
+                        costs,
                         fill.as_ref().map(|fill| fill.len()),
                     )
                 },

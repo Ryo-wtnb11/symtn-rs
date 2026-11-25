@@ -370,81 +370,91 @@ no token from it.
 
 Tree-transform movement prices the jobs it executes: a destination hull run
 for Singles or inactive fills, a pack column, a scatter group run, or a member
-range. Every role in a job contributes its setup, run and element costs:
+range. Every executed role contributes its setup, run and element costs:
 
 ```text
-t_i = sum_c(k_ic * a[c] + r[c](W) * runs_ic + e[c](W) * elements_ic)
-S = sum(t_i)
-M_bound = sum_c(a[c] * max_i(k_ic) + max_hull_c(r[c] * runs + e[c] * elements))
-T(1) = S
-T(q) = D(q) + max(M(q), S/q, X/B(q, W))    (2 <= q <= min(p, J))
+t_i = a[c] + r[c](W) * runs_i + e[c](W) * elements_i
+planned leaf time = min(T_planned, k * D(s) + max(T_planned/s, X_planned/B(s, W)))
+tau_leaf = T_serial + planned leaf time
+T(q) = D(q) * [q > 1] + max(max_leaf(tau_leaf), X/B(p, W))
 q* = argmin T(q), with ties to smaller q
 ```
 
-Here p is the caller token's slot budget, J the number of runnable jobs, and
-k_ic the number of roles of class c executed by job i. W bounds the phase's
-source and destination address extents, and X counts structural logical reads
-and writes, including destination reads for nonzero-beta accumulation. Runtime
-zero or identity elisions can make this count conservative. Structural
+Here p is the caller token's slot budget, q its number of leaves, s a leaf's
+actual slot share, and k its number of planned roles. The same expression
+prices q=1 on all p slots. Concurrent leaves share the aggregate bandwidth
+at p slots for every candidate, including inline execution. The planned-leaf expression aggregates each leaf's planned work before
+comparing serial and parallel execution. The candidates are
+`{1,2,3,4,6,8,12,16,24,32,48,64,p}` intersected with `[1,min(p,J)]`, where J
+is the number of runnable jobs.
+
+W bounds source and destination address extents, and X counts structural
+logical reads and writes, including destination reads for accumulation.
+Runtime zero or identity elisions can make this count conservative. Structural
 classes distinguish contiguous or strided inner traversal, and inactive fill
 from real maps. Copy and non-identity real scale share a class; runtime alpha
 and destination scales never alter the compiled classes. Rows are indexed by
 structural class only; unmeasured fill rows use the same-stride real-map row.
 Reference curves interpolate in log W and remain flat outside their knots.
 Beyond the last online knot, an online curve keeps the reference curve's shape,
-scaled to meet that knot. Fixed movement phases use M(q)=M_bound. The plan-group
-chunk decision adds the dense provider's existing serial GEMM estimate to each
-group's pack and scatter costs: t_g=pack_g+GEMM_g+scatter_g, S=sum_g(t_g).
-It submits consecutive chunks of q GEMMs serially, so
-M(q)=sum_chunks(max_in_chunk(t_g)) is their batch-barrier critical-path lower
-bound. It does not predict the dense provider's actual placement or runtime.
-Only movement element counts feed B(q, W); dense time never changes that roof.
+scaled to meet that knot.
 
-The schedule compiles role totals and logical traffic, saturating model-only
-counts and address envelopes when metadata exceeds the estimate's integer
-range. Estimates never add a compilation error; replay's size and address
-validation remains unchanged. Unsaturated totals are exact. Fixed phases
-retain per-class upper hulls of executed-job run/element totals and maximum
-setup counts, converted to f64 at compile time. M_bound is an upper bound on
-max(t_i): fused jobs can mix strides, whose separate maxima need not belong to
-the same job. Even within one class, the setup and work maxima may differ
-when jobs contain different numbers of roles. The bound is exact for a
-single class with a fixed setup count, including unfused single-role jobs;
-otherwise it can overestimate M and select fewer leaves. S remains exact.
-Pack groups retain column hulls for their maximum lookup; scatter groups
-and member summaries retain only totals, with no job arrays or hulls.
-A pack leaf's column work and its cold-fill share add to its price.
-Address extents merge by buffer in constant space:
-W is exact for coalesced blocks and an upper bound with gaps or strides.
-No payload elements are visited during compilation. With I role intervals,
-B blocks, and F total axis metadata, compilation takes O(I log I + B + F)
-time and retains O(I + G) movement metadata, including O(G) summaries for G
-groups (O(I) when every group has a role).
-All capacities are charged in retained bytes. For H_c retained hull points of
-class c, a fixed phase computes its maximum bound by binary search in
-O(sum_c log(1 + H_c)), with no pass over J executed jobs. A chunk aggregates
-its t group summaries in O(t). The shared chooser then scans Q = min(p, J)
-widths without allocation, so a fixed decision costs
-O(sum_c log(1 + H_c) + Q). The plan-group chunk decision visits G groups at
-each candidate width, O(G*Q) time and constant extra storage, to price its
-actual consecutive batches; it retains no group job hulls or per-width tables.
-One effective width returns before cost preparation or element-count reads.
-Scratch maxima are computed once for the chosen chunk width. Single-tensor
-one-slot, Sequential and Inner replays bypass the movement model and calibration,
-using the serial item and plan-group sequence; Inner keeps the whole token for
-inline kernels. Wider Auto replays retain independently priced pack and scatter
-phases even when the chosen group chunk width is one.
+Planned roles are exactly those retaining the compiled Single or scatter plan;
+pack columns, inactive fills and fused member ranges execute serial walks.
+Credit also requires an overwriting writer whose adapter replays plans, and
+the caller gate's Copy admission on that leaf's token share. A phase compiles
+its smallest planned role size and uses the same cheapest-width `pays`
+predicate as the execution gate. Conservatively, if that minimum is rejected,
+the entire leaf is priced serially, even if larger roles would be admitted.
+No runtime pass over individual roles is needed. This policy can withhold
+inner fan-out credit, but never grants it to a rejected role or accumulation.
 
-The same chooser selects direct fill and Single widths, the plan-group chunk
-width, and each chunk's pack and scatter widths. A q-way split divides the
-whole token into q nonzero leaf shares summing to p and differing by at most
-one; remainder slots go to the first leaves. It never narrows the token to q.
+The plan-group chunk decision adds the dense provider's existing serial GEMM
+estimate to each group's pack and scatter costs. Its q consecutive GEMMs are
+submitted together, with serial barriers between chunks, so the critical-path
+estimate is the sum of each chunk's maximum group cost. That estimate
+conservatively withholds inner movement credit; actual pack and scatter phases
+choose their own leaves. It does not predict the dense provider's placement or
+runtime. Only movement elements feed B(q,W); dense time never changes that roof.
+
+The schedule compiles per-class setup, run and element totals, planned totals,
+logical traffic and cumulative components over executed jobs. Model-only counts
+and envelopes saturate without adding compilation failures; subtracting a
+saturated prefix stays conservative. Fixed phases retain cumulative job
+components, and pack columns share one compiled prefix in column order.
+Scatter ownership runs depend on the chosen group chunk: its existing O(t)
+preparation aggregates t group summaries into a reusable workspace prefix once,
+before any candidate is evaluated. Each leaf then reads two prefix entries in
+O(1). There are no per-width retained tables or per-candidate allocations.
+A cold pack fill is divided by the same recursive leaf counts as execution.
+
+With I role intervals, B blocks, F total axis metadata, and G plan groups,
+compilation takes O(I log I + B + F) time and O(I+G) retained metadata.
+For J_s Single jobs, J_z inactive jobs and C pack columns, the new prefix
+payload is `size_of::<Job>() * (J_s + J_z + C)` bytes (192 bytes per entry:
+two arrays of four `(items,runs,elements)` u64 triples). Actual capacities are
+charged, together with every Summary and its inline planned totals.
+The scatter workspace charges another `size_of::<Job>() * capacity` bytes,
+with capacity reused across chunks. Gate keys retain direct budget indices
+(`size_of::<usize>() * capacity`) plus their existing distinct cost/scan slots;
+the existing O(p) preparation pass makes each admission lookup O(1).
+A fixed chooser costs O(sum_candidate q), with constant-size class arithmetic
+per leaf and O(log q) recursion depth. The plan-group decision visits G groups
+per candidate to price actual batch barriers. A pack or scatter chunk also
+aggregates t group summaries once in O(t). One effective width returns before
+cost preparation or element-count reads.
+
+Single-tensor one-slot, Sequential and Inner replays bypass the movement model
+and calibration, using the serial item and plan-group sequence; Inner keeps
+the whole token for inline kernels. Wider Auto replays retain independently
+priced pack and scatter phases even when group chunk width is one.
+A q-way split divides the whole token into nonzero leaf shares summing to p
+and differing by at most one. Job boundaries and slot remainders follow the
+executor's recursive `parallel_split`, rather than flat equal-sized job chunks.
 Each destination ownership run (a maximal address-ordered stretch of
-transitively overlapping hulls) stays with one writer; the width cannot exceed
-the number of runs. Inline items retain the whole token; the existing Strided
-gate may still fan out an inline item internally. The chooser credits
-no inner fan-out in T(1). A leaf stops at its first error; the lowest failing
-job and the first failing phase or GEMM determine replay's error.
+transitively overlapping hulls) stays with one writer; width cannot exceed
+the number of runs. A leaf stops at its first error; the lowest failing job
+and the first failing phase or GEMM determine replay's error.
 
 Movement constants are retained separately in the caller CPU engine's bounded
 extension store. Online measurement is attempted once per retained entry,
@@ -504,8 +514,9 @@ A fixed-stride member batch admits all member ranges before writing, resolves
 destination scales once per role, and moves its members around one dense
 submission (plan group outer, member inner). For N members, let A be the sum
 of setup costs per role and P the per-member sum of run and element costs.
-Its executed q ranges give S(q)=q*A+N*P and M(q)=A+ceil(N/q)*P; T(1)=A+N*P.
-These expressions feed the same chooser. A cold packed-destination fill is
+Its executed q ranges have critical path A+ceil(N/q)*P because their fused
+walks are serial-only. This expression feeds the same chooser, including q=1
+and the common aggregate bandwidth floor. A cold packed-destination fill is
 also priced by its executed contiguous leaf ranges, and first-written by the
 pack workers; a warm destination needs no fill. Growth within retained capacity
 fills only the missing tail. Forced policies delegate to Tenferro's batch

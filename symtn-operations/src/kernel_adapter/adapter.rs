@@ -201,8 +201,8 @@ pub(crate) mod sealed {
     #[derive(Debug, Default)]
     pub(crate) struct GateKeys {
         bound: usize,
-        /// Each prepared budget and the index of its cost's slot.
-        budgets: Vec<(usize, usize)>,
+        /// Direct budget-to-slot indices; usize::MAX marks an unprepared budget.
+        budgets: Vec<usize>,
         slots: Vec<(core::time::Duration, std::sync::OnceLock<Option<usize>>)>,
         /// Whether the call that prepared the keys is watched.
         #[cfg(test)]
@@ -251,8 +251,10 @@ pub(crate) mod sealed {
             }
             // A balanced q-way split grants floor(root/q) or ceil(root/q).
             // Prefix dispatch minima price all reachable budgets in one O(root)
-            // pass; there are O(sqrt(root)) distinct quotient budgets/cost keys.
+            // pass; direct budget indices make every leaf lookup O(1), while
+            // only O(sqrt(root)) distinct quotient budgets/cost keys need slots.
             let root = exec.budget().get();
+            self.budgets.resize(root + 1, usize::MAX);
             let mut cheapest = core::time::Duration::MAX;
             for budget in 2..=root {
                 let width = core::num::NonZeroUsize::new(budget).expect("budget >= 2");
@@ -267,8 +269,18 @@ pub(crate) mod sealed {
                         self.slots.len() - 1
                     }
                 };
-                self.budgets.push((budget, slot));
+                self.budgets[budget] = slot;
             }
+        }
+
+        /// The same cheapest-width Copy admission used by LeafGate's scan.
+        #[cfg(feature = "tenferro")]
+        pub(crate) fn admits(&self, budget: usize, elements: usize) -> bool {
+            let estimate = execution::KernelClass::Copy.estimate(elements);
+            !estimate.is_zero()
+                && self
+                    .slot(budget)
+                    .is_some_and(|(cost, _)| tenferro_cpu::threadteam::pays_at(estimate, 1, *cost))
         }
 
         /// Marks the keys as `gate`'s call's, for the gates shared from them.
@@ -282,15 +294,14 @@ pub(crate) mod sealed {
             &self,
             budget: usize,
         ) -> Option<&(core::time::Duration, std::sync::OnceLock<Option<usize>>)> {
-            let &(_, slot) = self.budgets.iter().find(|&&(b, _)| b == budget)?;
-            self.slots.get(slot)
+            self.slots.get(*self.budgets.get(budget)?)
         }
 
         /// Bytes of the tables' capacity.
         pub(crate) fn retained_bytes(&self) -> usize {
             self.budgets
                 .capacity()
-                .saturating_mul(core::mem::size_of::<(usize, usize)>())
+                .saturating_mul(core::mem::size_of::<usize>())
                 .saturating_add(self.slots.capacity().saturating_mul(core::mem::size_of::<(
                     core::time::Duration,
                     std::sync::OnceLock<Option<usize>>,
@@ -305,6 +316,10 @@ pub(crate) mod sealed {
     /// `exec`; the default returns `None`, leaving the block to the public
     /// primitive's serial walk.
     pub trait Sealed {
+        fn replays_plans(&self) -> bool {
+            false
+        }
+
         /// A Single block's overwrite `dst = scale * op(src)` by the role's
         /// admitted `plan`. Replay never plans an accumulate: the plan's
         /// `alpha * f(x) + beta * y` multiplies `f(x)` by a payload-typed one,
@@ -847,6 +862,10 @@ impl StridedHostKernelAdapter {
 }
 
 impl sealed::Sealed for StridedHostKernelAdapter {
+    fn replays_plans(&self) -> bool {
+        true
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn planned_transform<T, C>(
         &mut self,

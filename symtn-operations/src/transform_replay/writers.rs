@@ -76,6 +76,10 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         false
     }
 
+    fn replays_plans(&self) -> bool {
+        false
+    }
+
     /// A fresh worker's kernel state.
     fn kernels(&self) -> Self::Kernels;
 
@@ -137,6 +141,10 @@ where
 
     fn reads_destination(&self) -> bool {
         matches!(self.mode, DestinationMode::Axpby(beta) if !beta.is_zero())
+    }
+
+    fn replays_plans(&self) -> bool {
+        self.mode.overwrites() && self.prototype.replays_plans()
     }
 
     fn kernels(&self) -> A {
@@ -262,6 +270,10 @@ where
 {
     type Kernels = ();
     const FIRST_TOUCH: bool = true;
+
+    fn replays_plans(&self) -> bool {
+        true
+    }
 
     fn kernels(&self) {}
 

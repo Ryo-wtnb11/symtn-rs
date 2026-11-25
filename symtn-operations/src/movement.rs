@@ -33,22 +33,57 @@ fn add(a: u64, b: u64) -> Result<u64, OperationError> {
     Ok(a.saturating_add(b))
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct Maxima {
-    pub hulls: [Vec<Point>; CLASSES],
-    // Counts convert once at compile time, never during the width search.
-    pub setups: [f64; CLASSES],
-    pub jobs: usize,
+/// Cumulative structural components at an executed-job boundary.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Job {
+    pub counts: [Counts; CLASSES],
+    pub planned: [Counts; CLASSES],
 }
 
-// Setups are finite, nonnegative conversions of integer structural counts.
-impl Eq for Maxima {}
+impl Job {
+    pub(crate) fn add(self, rhs: Self) -> Result<Self, OperationError> {
+        let mut result = self;
+        for (left, right) in result.counts.iter_mut().zip(rhs.counts) {
+            *left = left.add(right)?;
+        }
+        for (left, right) in result.planned.iter_mut().zip(rhs.planned) {
+            *left = left.add(right)?;
+        }
+        Ok(result)
+    }
+}
+
+/// Saturated metadata stays conservative when subtracting cumulative counts.
+pub(crate) fn job_range(prefix: &[Job], range: core::ops::Range<usize>) -> Job {
+    let end = prefix[range.end - 1];
+    let start = range
+        .start
+        .checked_sub(1)
+        .map_or(Job::default(), |i| prefix[i]);
+    let difference = |end: [Counts; CLASSES], start: [Counts; CLASSES]| {
+        core::array::from_fn(|c| {
+            let subtract = |a: u64, b: u64| if a == u64::MAX { a } else { a - b };
+            Counts {
+                items: subtract(end[c].items, start[c].items),
+                runs: subtract(end[c].runs, start[c].runs),
+                elements: subtract(end[c].elements, start[c].elements),
+            }
+        })
+    };
+    Job {
+        counts: difference(end.counts, start.counts),
+        planned: difference(end.planned, start.planned),
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Summary {
     pub counts: [Counts; CLASSES],
-    /// Only fixed phases and pack columns need compiled maxima.
-    pub maxima: Option<Box<Maxima>>,
+    pub planned: [Counts; CLASSES],
+    /// Smallest retained planned role; zero when none is planned.
+    pub planned_min: usize,
+    /// Cumulative counts in executed-job order, only where a decision reads them.
+    pub prefix: Vec<Job>,
     /// Payload elements touched, source and destination included.
     pub working_set: u64,
     pub traffic: u64,
@@ -70,29 +105,22 @@ impl Summary {
         Ok(count)
     }
 
-    /// Retain only each executed job's per-class hull points and maximum setup.
-    pub(crate) fn record_job(&mut self, job: &[Counts; CLASSES]) -> Result<(), OperationError> {
-        if job.iter().all(|count| count.items == 0) {
-            return Ok(());
+    pub(crate) fn job(&self) -> Job {
+        Job {
+            counts: self.counts,
+            planned: self.planned,
         }
-        let maxima = self.maxima.get_or_insert_with(Default::default);
-        maxima.jobs = maxima.jobs.saturating_add(1);
-        for (class, count) in job.iter().enumerate().filter(|(_, count)| count.items != 0) {
-            maxima.setups[class] = maxima.setups[class].max(count.items as f64);
-            maxima.hulls[class].push(Point {
-                runs: usize::try_from(count.runs).unwrap_or(usize::MAX),
-                elements: usize::try_from(count.elements).unwrap_or(usize::MAX),
-            });
+    }
+
+    pub(crate) fn record_job(&mut self, job: &[Counts; CLASSES]) -> Result<(), OperationError> {
+        if job.iter().any(|count| count.items != 0) {
+            self.prefix.push(self.job());
         }
         Ok(())
     }
 
     pub(crate) fn finish(&mut self) -> Result<(), OperationError> {
-        if let Some(maxima) = &mut self.maxima {
-            for points in &mut maxima.hulls {
-                *points = upper_hull(core::mem::take(points));
-            }
-        }
+        self.prefix.shrink_to_fit();
         self.working_set = self
             .extents
             .iter()
@@ -120,6 +148,16 @@ impl Summary {
         for (count, &other) in self.counts.iter_mut().zip(&rhs.counts) {
             *count = count.add(other)?;
         }
+        for (count, &other) in self.planned.iter_mut().zip(&rhs.planned) {
+            *count = count.add(other)?;
+        }
+        if rhs.planned_min != 0 {
+            self.planned_min = if self.planned_min == 0 {
+                rhs.planned_min
+            } else {
+                self.planned_min.min(rhs.planned_min)
+            };
+        }
         self.traffic = add(self.traffic, rhs.traffic)?;
         self.destination_reads = add(self.destination_reads, rhs.destination_reads)?;
         for (buffer, extent) in rhs.extents.iter().enumerate() {
@@ -131,14 +169,7 @@ impl Summary {
     }
 
     pub(crate) fn retained_bytes(&self) -> usize {
-        self.maxima.as_ref().map_or(0, |maxima| {
-            core::mem::size_of::<Maxima>()
-                + maxima
-                    .hulls
-                    .iter()
-                    .map(|h| h.capacity() * core::mem::size_of::<Point>())
-                    .sum::<usize>()
-        })
+        self.prefix.capacity() * core::mem::size_of::<Job>()
     }
 
     pub(crate) fn logical_traffic(&self, read_destination: bool) -> u64 {
@@ -159,6 +190,14 @@ impl Summary {
             return Ok((class, Counts::default()));
         }
         let count = self.push(class, point)?;
+        if !inactive && layouts.role(layout)?.plan.is_some() {
+            self.planned[class] = self.planned[class].add(count)?;
+            self.planned_min = if self.planned_min == 0 {
+                point.elements
+            } else {
+                self.planned_min.min(point.elements)
+            };
+        }
         if dst.0 == 1 {
             self.destination_reads = add(self.destination_reads, count.elements)?;
         }
@@ -176,56 +215,6 @@ impl Summary {
             None => (lo, hi),
         });
     }
-}
-
-/// Increasing runs, decreasing elements, with strictly decreasing edge slopes.
-/// Points below an upper chord cannot maximize a nonnegative linear form.
-fn upper_hull(mut points: Vec<Point>) -> Vec<Point> {
-    // Keep the largest element value for each run count.
-    points.sort_unstable_by_key(|p| (p.runs, core::cmp::Reverse(p.elements)));
-    points.dedup_by_key(|p| p.runs);
-    let mut frontier = Vec::new();
-    let mut largest = None;
-    for &point in points.iter().rev() {
-        if largest.is_none_or(|elements| point.elements > elements) {
-            frontier.push(point);
-            largest = Some(point.elements);
-        }
-    }
-    frontier.reverse();
-    let mut hull: Vec<Point> = Vec::new();
-    for point in frontier {
-        while hull.len() >= 2 {
-            let a = hull[hull.len() - 2];
-            let b = hull[hull.len() - 1];
-            let left = (b.runs - a.runs) as u128 * (b.elements - point.elements) as u128;
-            let right = (point.runs - b.runs) as u128 * (a.elements - b.elements) as u128;
-            if left > right {
-                break;
-            }
-            hull.pop();
-        }
-        hull.push(point);
-    }
-    hull.shrink_to_fit();
-    hull
-}
-
-pub(crate) fn maximum(hull: &[Point], run: f64, element: f64) -> f64 {
-    let cost = |p: Point| run * p.runs as f64 + element * p.elements as f64;
-    if hull.is_empty() {
-        return 0.0;
-    }
-    let (mut lo, mut hi) = (0, hull.len() - 1);
-    while lo < hi {
-        let middle = lo + (hi - lo) / 2;
-        if cost(hull[middle]) < cost(hull[middle + 1]) {
-            lo = middle + 1;
-        } else {
-            hi = middle;
-        }
-    }
-    cost(hull[lo])
 }
 
 pub(crate) fn role(
@@ -304,53 +293,6 @@ mod tests {
                     3
                 }
             );
-        }
-    }
-
-    /// The maximizing item changes with the coefficients; coordinate maxima
-    /// from different items must never be combined into an imaginary item.
-    #[test]
-    fn hull_keeps_both_coefficient_dependent_maximizers() {
-        let points = vec![
-            Point {
-                runs: 100,
-                elements: 100,
-            },
-            Point {
-                runs: 1,
-                elements: 1000,
-            },
-        ];
-        let hull = upper_hull(points);
-        assert_eq!(maximum(&hull, 10.0, 0.1), 1010.0);
-        assert_eq!(maximum(&hull, 0.1, 10.0), 10000.1);
-    }
-
-    /// Exhaustive coefficient pairs on deterministic small random sets agree
-    /// with an independent linear scan, including dominated and duplicate points.
-    #[test]
-    fn hull_binary_search_matches_linear_scan() {
-        let mut seed = 17u64;
-        for count in 0..30 {
-            let points = (0..count)
-                .map(|_| {
-                    seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
-                    Point {
-                        runs: (seed >> 32) as usize % 30,
-                        elements: seed as usize % 30,
-                    }
-                })
-                .collect::<Vec<_>>();
-            let hull = upper_hull(points.clone());
-            for r in 0..10 {
-                for e in 0..10 {
-                    let expected = points
-                        .iter()
-                        .map(|p| (r * p.runs + e * p.elements) as f64)
-                        .fold(0.0, f64::max);
-                    assert_eq!(maximum(&hull, r as f64, e as f64), expected);
-                }
-            }
         }
     }
 

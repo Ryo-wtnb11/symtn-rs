@@ -184,7 +184,7 @@ pub(super) fn compile_movement(
     layouts: &TreeTransformLayoutTable,
     extents: &[Option<(isize, isize)>],
 ) -> Result<(), OperationError> {
-    use crate::movement::{Counts, Summary, CLASSES};
+    use crate::movement::{Counts, Job, Summary, CLASSES};
     let extent = |buffer, layout: usize| {
         let (lo, hi) = extents[layout].unwrap_or((0, -1));
         (buffer, lo, hi)
@@ -241,6 +241,7 @@ pub(super) fn compile_movement(
         inactive.record_job(&job)?;
     }
     inactive.finish()?;
+    let mut pack_prefix = Vec::with_capacity(schedule.pack_columns.len());
     let mut packs = Vec::with_capacity(schedule.scatter_groups.len());
     let mut scatters = Vec::with_capacity(schedule.scatter_groups.len());
     let mut groups = Summary::default();
@@ -260,7 +261,14 @@ pub(super) fn compile_movement(
             )?;
             let mut job = [Counts::default(); CLASSES];
             job[class] = count;
-            pack.record_job(&job)?;
+            let previous = pack_prefix.last().copied().unwrap_or_default();
+            pack_prefix.push(
+                Job {
+                    counts: job,
+                    ..Job::default()
+                }
+                .add(previous)?,
+            );
         }
         pack.finish()?;
         let mut scatter = Summary::default();
@@ -289,6 +297,7 @@ pub(super) fn compile_movement(
     schedule.member_scatter_movement = Summary::totals(&scatters)?;
     schedule.group_movement = groups;
     schedule.pack_movement = packs;
+    schedule.pack_prefix = pack_prefix;
     schedule.scatter_movement = scatters;
     schedule.single_movement = singles;
     schedule.inactive_movement = inactive;

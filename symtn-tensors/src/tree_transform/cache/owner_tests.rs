@@ -335,7 +335,7 @@ fn only_canonical_keys_publish_and_hits_rebind_the_callers_structures() {
 }
 
 /// A canonical-key build and a cache-hit rebind retain the same complete
-/// replay payload, including movement counts and hulls. An independently
+/// replay payload, including movement counts and prefixes. An independently
 /// rebuilt expert layout is the control against path-dependent normalization.
 #[test]
 fn canonical_build_and_cache_rebind_have_equal_movement_payloads() {

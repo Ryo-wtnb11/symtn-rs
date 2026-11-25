@@ -811,6 +811,7 @@ where
                         .counts
                         .map(|count| count.elements as f64 * members as f64)
                 },
+                |_, _| false,
                 |costs| super::movement::member_phase(summary, costs, members),
             );
             if width <= 1 {
