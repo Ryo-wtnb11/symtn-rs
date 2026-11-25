@@ -17,7 +17,7 @@ use symtn_dense::DefaultDenseExecutor;
 use symtn_operations::host_pool::{lane_region, HostPoolSite};
 use symtn_operations::{
     try_tree_transform_structure_overwrite_owned_raw, TreeTransformBlockSpec,
-    TreeTransformStructure, TreeTransformWorkspace,
+    TreeTransformReplayProfile, TreeTransformStructure, TreeTransformWorkspace,
 };
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -25,6 +25,7 @@ const TOLERANCE: f64 = 0.20;
 
 struct Fixture {
     structure: Arc<BlockStructure>,
+    source: Arc<BlockStructure>,
     transform: TreeTransformStructure<f64>,
     data: Vec<f64>,
     workspace: TreeTransformWorkspace<f64>,
@@ -35,24 +36,44 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn new(roles: usize, elements: usize, rank: usize, coefficient: f64) -> Res<Self> {
-        let shape = if rank == 6 {
-            vec![4, 4, 4, 4, 4, elements / 1024]
-        } else {
-            vec![elements, 1]
-        };
+    fn new(roles: usize, shape: &[usize], axes: &[usize], interleaved: bool) -> Res<Self> {
+        let rank = shape.len();
+        let elements = shape
+            .iter()
+            .try_fold(1usize, |n, &d| n.checked_mul(d))
+            .ok_or("fixture size overflow")?;
         roles
             .checked_mul(elements)
             .and_then(|n| n.checked_mul(16))
             .ok_or("fixture size overflow")?;
-        let mut blocks = Vec::new();
+        let mut source_shape = vec![0; rank];
+        for (i, &axis) in axes.iter().enumerate() {
+            source_shape[axis] = shape[i];
+        }
+        let mut destination = Vec::new();
+        let mut source = Vec::new();
         for role in 0..roles {
-            let charge = SectorId::from(U1Irrep::new(i32::try_from(role)?)?).id();
-            let mut legs = vec![SectorId::from(U1Irrep::new(0)?).id(); rank / 2];
-            legs[0] = charge;
+            let zero = SectorId::from(U1Irrep::new(0)?).id();
+            let q = i32::try_from(role)?;
+            let charge = if interleaved {
+                zero
+            } else {
+                SectorId::from(U1Irrep::new(q)?).id()
+            };
+            let mut outgoing = vec![zero; rank / 2];
+            let mut incoming = outgoing.clone();
+            if interleaved {
+                outgoing = vec![
+                    SectorId::from(U1Irrep::new(q)?).id(),
+                    SectorId::from(U1Irrep::new(-q)?).id(),
+                ];
+            } else {
+                outgoing[0] = charge;
+                incoming[0] = charge;
+            }
             let key = FusionTreePairKey::try_pair_from_sector_ids(
-                legs.clone(),
-                legs,
+                outgoing,
+                incoming,
                 charge,
                 vec![false; rank / 2],
                 vec![false; rank / 2],
@@ -61,34 +82,49 @@ impl Fixture {
                 vec![1; rank / 2 - 1],
                 vec![1; rank / 2 - 1],
             )?;
-            blocks.push(BlockSpec::column_major_with_key(
-                key.into(),
-                shape.clone(),
-                role * elements,
-            )?);
+            if interleaved {
+                // Two interleaved matrix row blocks reproduce the small-item leading dimension.
+                let strides = vec![1, shape[0], roles * shape[0], roles * elements];
+                let offset = role * shape[0];
+                destination.push(BlockSpec::with_key(
+                    key.clone().into(),
+                    shape.to_vec(),
+                    strides.clone(),
+                    offset,
+                )?);
+                source.push(BlockSpec::with_key(
+                    key.into(),
+                    source_shape.clone(),
+                    strides,
+                    offset,
+                )?);
+            } else {
+                destination.push(BlockSpec::column_major_with_key(
+                    key.clone().into(),
+                    shape.to_vec(),
+                    role * elements,
+                )?);
+                source.push(BlockSpec::column_major_with_key(
+                    key.into(),
+                    source_shape.clone(),
+                    role * elements,
+                )?);
+            }
         }
-        let structure = Arc::new(BlockStructure::from_blocks_with_rank(rank, blocks)?);
+        let structure = Arc::new(BlockStructure::from_blocks_with_rank(rank, destination)?);
+        let source = Arc::new(BlockStructure::from_blocks_with_rank(rank, source)?);
         let specs: Vec<_> = (0..roles)
             .map(|role| {
-                let spec = TreeTransformBlockSpec::single(role, role, coefficient);
-                if rank == 6 {
-                    spec.with_source_axes([4, 3, 2, 1, 0, 5])
-                } else {
-                    spec
-                }
+                TreeTransformBlockSpec::single(role, role, 1.0)
+                    .with_source_axes(axes.iter().copied())
             })
             .collect();
-        let transform = TreeTransformStructure::compile_structures(&structure, &structure, &specs)?;
+        let transform = TreeTransformStructure::compile_structures(&structure, &source, &specs)?;
         assert_eq!(transform.blocks().len(), roles);
         assert!(!transform.has_pack_gemm_scatter_blocks());
-        if rank == 6 {
-            assert_eq!(
-                transform.layout_diagnostics().entry(0).unwrap().dims.len(),
-                6
-            );
-        }
         Ok(Self {
             structure,
+            source,
             transform,
             data: Vec::new(),
             workspace: TreeTransformWorkspace::default(),
@@ -119,20 +155,30 @@ impl Fixture {
         Ok(())
     }
 
-    fn replay(&mut self, engine: &mut CpuEngine) -> Res<Vec<f64>> {
+    fn replay(
+        &mut self,
+        engine: &mut CpuEngine,
+        profile: Option<&mut TreeTransformReplayProfile>,
+    ) -> Res<Vec<f64>> {
         Ok(try_tree_transform_structure_overwrite_owned_raw(
             engine,
             &mut self.dense,
             &mut self.workspace,
             &self.transform,
             &self.structure,
-            &self.structure,
+            &self.source,
             self.rank / 2,
             &self.data,
             1.0,
-            None,
+            profile,
         )?
         .ok_or("fixture lacks an owned-overwrite proof")?)
+    }
+
+    fn phase(&mut self, engine: &mut CpuEngine) -> Res<f64> {
+        let mut profile = TreeTransformReplayProfile::default();
+        black_box(self.replay(engine, Some(&mut profile))?);
+        Ok(profile.single_total.as_secs_f64() * 1e9)
     }
 
     fn bytes(&self) -> f64 {
@@ -148,7 +194,7 @@ struct Samples {
     cold: f64,
 }
 
-fn measure(mut call: impl FnMut() -> Res<()>, max_reps: usize) -> Res<Samples> {
+fn measure(mut call: impl FnMut() -> Res<Option<f64>>, max_reps: usize) -> Res<Samples> {
     let start = Instant::now();
     call()?;
     let cold = start.elapsed().as_secs_f64();
@@ -156,10 +202,13 @@ fn measure(mut call: impl FnMut() -> Res<()>, max_reps: usize) -> Res<Samples> {
     let mut raw = [0.0; 5];
     for sample in &mut raw {
         let start = Instant::now();
+        let mut phase = None;
         for _ in 0..reps {
-            call()?;
+            if let Some(ns) = call()? {
+                *phase.get_or_insert(0.0) += ns;
+            }
         }
-        *sample = start.elapsed().as_secs_f64() * 1e9 / reps as f64;
+        *sample = phase.unwrap_or_else(|| start.elapsed().as_secs_f64() * 1e9) / reps as f64;
     }
     let mut sorted = raw;
     sorted.sort_by(f64::total_cmp);
@@ -178,40 +227,66 @@ fn print_samples(label: &str, samples: Samples) {
     );
 }
 
-// Two-variable NNLS: test the unconstrained solution and each boundary.
-fn fit(rows: &[(f64, f64, f64)]) -> (f64, f64) {
-    let (mut xx, mut xy, mut yy, mut xt, mut yt) = (0.0, 0.0, 0.0, 0.0, 0.0);
-    for &(x, y, t) in rows {
-        xx += x * x;
-        xy += x * y;
-        yy += y * y;
-        xt += x * t;
-        yt += y * t;
-    }
-    let det = xx * yy - xy * xy;
-    let mut candidates = vec![
-        (0.0, 0.0),
-        ((xt / xx).max(0.0), 0.0),
-        (0.0, (yt / yy).max(0.0)),
-    ];
-    if det > 0.0 {
-        let (a, b) = ((xt * yy - yt * xy) / det, (yt * xx - xt * xy) / det);
-        if a >= 0.0 && b >= 0.0 {
-            candidates.push((a, b));
+// Column-scaled, relative least squares; singular designs have no identified constants.
+fn fit(rows: &[(Vec<f64>, f64)]) -> Option<Vec<f64>> {
+    let n = rows.first()?.0.len();
+    let mut scale = vec![0.0_f64; n];
+    for (x, t) in rows {
+        if x.len() != n || !t.is_finite() || *t <= 0.0 || x.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        for (s, v) in scale.iter_mut().zip(x) {
+            *s = s.max((v / t).abs());
         }
     }
-    candidates
-        .into_iter()
-        .filter(|(a, b)| a.is_finite() && b.is_finite())
-        .min_by(|&(a, b), &(c, d)| {
-            let error = |a: f64, b: f64| {
-                rows.iter()
-                    .map(|&(x, y, t)| (a * x + b * y - t).powi(2))
-                    .sum::<f64>()
-            };
-            error(a, b).total_cmp(&error(c, d))
-        })
-        .unwrap_or((0.0, 0.0))
+    if n == 0 || scale.contains(&0.0) {
+        return None;
+    }
+    let mut matrix = vec![vec![0.0; n + 1]; n];
+    for (x, t) in rows {
+        for i in 0..n {
+            let xi = x[i] / t / scale[i];
+            for j in 0..n {
+                matrix[i][j] += xi * x[j] / t / scale[j];
+            }
+            matrix[i][n] += xi;
+        }
+    }
+    for i in 0..n {
+        let pivot = (i..n).max_by(|&a, &b| matrix[a][i].abs().total_cmp(&matrix[b][i].abs()))?;
+        matrix.swap(i, pivot);
+        let diagonal = matrix[i][i];
+        if diagonal.abs() <= 1e-10 {
+            return None;
+        }
+        for j in i..=n {
+            matrix[i][j] /= diagonal;
+        }
+        for k in 0..n {
+            if k == i {
+                continue;
+            }
+            let factor = matrix[k][i];
+            for j in i..=n {
+                let entry = matrix[i][j];
+                matrix[k][j] -= factor * entry;
+            }
+        }
+    }
+    let constants: Vec<_> = (0..n).map(|i| matrix[i][n] / scale[i]).collect();
+    constants.iter().all(|v| v.is_finite()).then_some(constants)
+}
+
+fn cache_bytes(value: &str) -> Option<usize> {
+    let value = value.trim();
+    let (number, multiplier) = match value.as_bytes().last()? {
+        b'K' => (&value[..value.len() - 1], 1024usize),
+        b'M' => (&value[..value.len() - 1], 1024usize.pow(2)),
+        b'G' => (&value[..value.len() - 1], 1024usize.pow(3)),
+        _ => (value, 1),
+    };
+    let bytes = number.parse::<usize>().ok()?.checked_mul(multiplier)?;
+    (bytes > 0).then_some(bytes)
 }
 
 fn cpus(value: &str) -> Option<BTreeSet<usize>> {
@@ -244,7 +319,11 @@ fn sysctl(key: &str) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-fn host() -> (BTreeMap<String, String>, Option<usize>) {
+fn host() -> (
+    BTreeMap<String, String>,
+    Option<usize>,
+    Vec<(String, usize)>,
+) {
     let mut h = BTreeMap::new();
     let info = read("/proc/cpuinfo");
     for (key, field) in [("cpu", "model name"), ("isa", "flags")] {
@@ -411,16 +490,7 @@ fn host() -> (BTreeMap<String, String>, Option<usize>) {
                     }
                     let level = read(p.join("level")).parse::<usize>().ok();
                     let size = read(p.join("size"));
-                    let bytes = size
-                        .strip_suffix('K')
-                        .and_then(|s| s.parse::<usize>().ok())
-                        .and_then(|n| n.checked_mul(1024))
-                        .or_else(|| {
-                            size.strip_suffix('M')
-                                .and_then(|s| s.parse::<usize>().ok())
-                                .and_then(|n| n.checked_mul(1024 * 1024))
-                        })
-                        .or_else(|| size.parse::<usize>().ok());
+                    let bytes = cache_bytes(&size);
                     let shared = read(p.join("shared_cpu_list"));
                     if let (Some(level), Some(bytes), Some(shared)) = (level, bytes, cpus(&shared))
                     {
@@ -446,7 +516,58 @@ fn host() -> (BTreeMap<String, String>, Option<usize>) {
             .values()
             .try_fold(0usize, |sum, &n| sum.checked_add(n))
     };
-    (h, llc)
+    let mut levels = BTreeMap::new();
+    let mut cache_complete = true;
+    if let Ok(entries) = fs::read_dir("/sys/devices/system/cpu/cpu0/cache") {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name
+                .strip_prefix("index")
+                .is_some_and(|n| n.parse::<usize>().is_ok())
+            {
+                continue;
+            }
+            let path = entry.path();
+            let level = read(path.join("level"));
+            let size = read(path.join("size"));
+            let kind = read(path.join("type"));
+            for (field, value) in [("level", &level), ("size", &size), ("type", &kind)] {
+                h.insert(format!("host.cache.cpu0.{name}.{field}"), value.clone());
+            }
+            if kind == "Data" || kind == "Unified" {
+                if let (Ok(level), Some(bytes)) = (level.parse::<usize>(), cache_bytes(&size)) {
+                    levels
+                        .entry(level)
+                        .and_modify(|n: &mut usize| *n = (*n).max(bytes))
+                        .or_insert(bytes);
+                } else {
+                    cache_complete = false;
+                }
+            } else if kind != "Instruction" {
+                cache_complete = false;
+            }
+        }
+    } else {
+        cache_complete = false;
+    }
+    cache_complete &= !levels.is_empty();
+    h.insert(
+        "host.cache.cpu0.status".into(),
+        if cache_complete {
+            "complete"
+        } else {
+            "unavailable"
+        }
+        .into(),
+    );
+    if !cache_complete {
+        levels.clear();
+    }
+    let levels = levels
+        .into_iter()
+        .map(|(level, bytes)| (format!("L{level}"), bytes))
+        .collect();
+    (h, llc, levels)
 }
 
 fn profile_text(fields: &BTreeMap<String, String>) -> Res<String> {
@@ -491,7 +612,7 @@ fn main() -> Res<()> {
     let start = Instant::now();
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|s| s == "--help") {
-        println!("Usage: calibrate_replay <profile-path> [width]\nwidth defaults to available parallelism; run a release build.\nFive median batches after one warmup; held-out/stability tolerance = 20%.\nMeasures CPU f64 owned-overwrite structural Singles; no profile loader is installed.");
+        println!("Usage: calibrate_replay <profile-path> [width]\nwidth defaults to available parallelism; run a release build.\nFive median batches after one warmup; held-out/stability tolerance = 20%.\nMeasures CPU f64 identity owned-overwrite Singles, traversal/cache fits and held-out errors; no profile loader is installed.");
         return Ok(());
     }
     if args.is_empty() || args.len() > 2 {
@@ -507,7 +628,7 @@ fn main() -> Res<()> {
     if width == 0 || width > u16::MAX as usize {
         return Err("width must be in 1..=65535".into());
     }
-    let (mut profile, llc) = host();
+    let (mut profile, llc, caches) = host();
     println!("Compiled replay calibration: width={width}, cpu-faer, f64 owned-overwrite copy; tolerance=20%");
     for (key, value) in &profile {
         println!("{key} = {value}");
@@ -523,14 +644,13 @@ fn main() -> Res<()> {
         .unwrap_or_else(|| "unknown".into());
     for (k, v) in [
         ("format_version", "1"),
-        ("model_version", "1"),
+        ("model_version", "2"),
         ("replay_abi", "symtn-replay-v2"),
         ("dispatch_abi", "threadteam-0.5.1"),
         ("class", "f64-owned-overwrite-copy"),
         ("adapter", "StridedHostKernelAdapter-owned-writer"),
         ("reference_id", "unknown"),
         ("bandwidth_regime", "unknown"),
-        ("c_ns_per_application", "unknown"),
     ] {
         profile.insert(k.into(), v.into());
     }
@@ -560,163 +680,224 @@ fn main() -> Res<()> {
     );
     let mut serial = CpuEngine::serial();
     let section = Instant::now();
-    let mut empty = Fixture::new(0, 0, 2, 1.0)?;
+    let mut empty = Fixture::new(0, &[0, 1], &[0, 1], false)?;
     let setup_s = section.elapsed().as_secs_f64();
-    let baseline = measure(
-        || {
-            black_box(empty.replay(&mut serial)?);
-            Ok(())
-        },
-        1000,
-    )?;
-    print_samples("no-item serial engine entry", baseline);
+    let baseline = measure(|| Ok(Some(empty.phase(&mut serial)?)), 1000)?;
+    print_samples("no-item serial direct phase", baseline);
     let mut serial_cold_s = setup_s + baseline.cold;
-    let mut accepted = [true, true];
-    let mut rows = [Vec::new(), Vec::new()];
-    let mut pairs = Vec::new();
     let mut payload_peak = 0usize;
-    for roles in [1, 16, 64] {
-        for elements in [16, 64, 256, 4096] {
-            let mut samples = Vec::new();
-            for (class, coefficient) in [1.0, -0.75].into_iter().enumerate() {
-                let cold = Instant::now();
-                let mut fixture = Fixture::new(roles, elements, 2, coefficient)?;
-                fixture.data = (0..roles * elements)
-                    .map(|i| (i % 97) as f64 / 97.0)
-                    .collect();
-                payload_peak = payload_peak.max(roles * elements * 16);
-                let setup_s = cold.elapsed().as_secs_f64();
-                let time = measure(
-                    || {
-                        black_box(fixture.replay(&mut serial)?);
-                        Ok(())
-                    },
-                    1000,
-                )?;
-                print_samples(
-                    &format!(
-                        "serial map={} roles={roles} elements_per_role={elements} logical_bytes={}",
-                        if class == 0 {
-                            "identity"
-                        } else {
-                            "structural(-0.75)"
-                        },
-                        fixture.bytes()
-                    ),
-                    time,
-                );
-                serial_cold_s += setup_s + time.cold;
-                let residual = time.median - baseline.median;
-                let resolved = residual > time.spread + baseline.spread;
-                accepted[class] &= resolved;
-                println!("serial class={class} signed_residual_ns={residual:.3} resolved={resolved} setup_s={setup_s:.6}");
-                rows[class].push((roles as f64, fixture.bytes(), residual));
-                samples.push(time);
+    let mut regimes: Vec<_> = caches.iter().map(|(name, _)| name.clone()).collect();
+    regimes.push("memory".into());
+    let classes = ["contiguous-run", "strided-inner"];
+    let columns = 3 + classes.len() * regimes.len();
+    let mut rows = Vec::new();
+    let mut training_resolved = !caches.is_empty();
+    let mut targets = BTreeSet::new();
+    let mut previous = 0usize;
+    for &(_, bytes) in &caches {
+        if bytes > previous {
+            for part in [1, 2] {
+                targets.insert(previous + (bytes - previous) / 3 * part);
             }
-            pairs.push((
-                roles * elements,
-                samples[1].median - samples[0].median,
-                samples[0].spread + samples[1].spread,
-            ));
+            previous = bytes;
         }
     }
-    let copy_fit = fit(&rows[0]);
-    let scale_fit = fit(&rows[1]);
-    println!("fit identity: a_ns={:.6} b_ns_per_byte={:.9}; structural(-0.75): a_ns={:.6} b_ns_per_byte={:.9}",copy_fit.0,copy_fit.1,scale_fit.0,scale_fit.1);
-    for rank in [2, 6] {
-        for (class, coefficient) in [1.0, -0.75].into_iter().enumerate() {
-            let cold = Instant::now();
-            let mut held = Fixture::new(1, 65536, rank, coefficient)?;
-            held.data = (0..65536).map(|i| (i % 97) as f64 / 97.0).collect();
-            let setup_s = cold.elapsed().as_secs_f64();
-            let s = measure(
-                || {
-                    black_box(held.replay(&mut serial)?);
-                    Ok(())
-                },
-                100,
-            )?;
-            print_samples(
-                &format!("held-out map={class} roles=1 elements_per_role=65536 rank={rank}"),
-                s,
-            );
-            serial_cold_s += setup_s + s.cold;
-            println!(
-                "held-out normalized_dims={:?}",
-                held.transform.layout_diagnostics().entry(0).unwrap().dims
-            );
-            let (a, b) = if class == 0 { copy_fit } else { scale_fit };
-            let predicted = baseline.median + a + b * held.bytes();
-            let error = (predicted - s.median).abs() / s.median;
-            accepted[class] &= error.is_finite() && error <= TOLERANCE;
-            println!(
-                "held-out prediction_ns={predicted:.3} relative_error={error:.6} accepted={}",
-                error <= TOLERANCE
+    if previous > 0 {
+        for multiplier in [2, 4] {
+            targets.insert(
+                previous
+                    .checked_mul(multiplier)
+                    .ok_or("cache fixture size overflow")?,
             );
         }
     }
-    let denominator = pairs
-        .iter()
-        .map(|&(n, _, _)| (n as f64).powi(2))
-        .sum::<f64>();
-    let c = pairs.iter().map(|&(n, d, _)| n as f64 * d).sum::<f64>() / denominator;
-    let c_identified = accepted.into_iter().all(|v| v)
-        && c.is_finite()
-        && c > 0.0
-        && pairs
-            .iter()
-            .all(|&(n, d, spread)| d > spread && (d - c * n as f64).abs() <= TOLERANCE * d);
-    if c_identified {
-        println!("c_ns_per_application={c:.9} (paired identical-layout controlled structural coefficients)");
-    } else {
-        println!(
-            "c not identified; b reported separately per identity/structural(-0.75) map class"
+    println!("Serial fits use the production direct-phase timer minus its no-item baseline; output allocation/proof/validation are excluded, first stores remain inside items.");
+    println!("Raw inner lengths: 1,2,4,16,64,256; normalization removes unit axes and may fuse others: all regressors use printed baked geometry. Planned constants unavailable: admitted_plan requires more than one worker.");
+    for bytes in targets {
+        let total = bytes
+            .checked_add(8191)
+            .ok_or("cache fixture size overflow")?
+            / 8192
+            * 512;
+        for roles in [1, 4] {
+            let elements = (total / roles / 512).max(1) * 512;
+            let working_set = roles * elements * 16;
+            let regime = caches
+                .iter()
+                .position(|(_, size)| working_set <= *size)
+                .unwrap_or(caches.len());
+            for inner in [1, 2, 4, 16, 64, 256] {
+                for axes in [[0, 2, 1, 3], [1, 0, 2, 3]] {
+                    let cold = Instant::now();
+                    let shape = [inner, 2, elements / (2 * inner), 1];
+                    let mut fixture = Fixture::new(roles, &shape, &axes, false)?;
+                    fixture.data = (0..roles * elements)
+                        .map(|i| (i % 97) as f64 / 97.0)
+                        .collect();
+                    payload_peak = payload_peak.max(working_set);
+                    let diagnostics = fixture.transform.layout_diagnostics();
+                    let layout = diagnostics.entry(0).ok_or("missing destination layout")?;
+                    let source = layout.partner_strides.ok_or("missing source strides")?;
+                    let class = usize::from(layout.block_strides[0] != 1 || source[0] != 1);
+                    let runs = roles * elements / layout.dims[0];
+                    let setup_s = cold.elapsed().as_secs_f64();
+                    let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 1000)?;
+                    print_samples(&format!("serial k={} regime={} roles={roles} raw_dims={shape:?} axes={axes:?} dims={:?} dst_strides={:?} src_strides={source:?} elements_per_item={elements} runs_per_item={} working_set_bytes={working_set}", classes[class], regimes[regime], layout.dims, layout.block_strides, runs / roles), time);
+                    serial_cold_s += setup_s + time.cold;
+                    let residual = time.median - baseline.median;
+                    let resolved = residual > time.spread + baseline.spread;
+                    training_resolved &= resolved;
+                    let mut x = vec![0.0; columns];
+                    x[0] = roles as f64;
+                    x[1 + class] = runs as f64;
+                    x[3 + class * regimes.len() + regime] = (roles * elements) as f64;
+                    rows.push((x, residual));
+                    println!("signed_phase_residual_ns={residual:.3} resolved={resolved}");
+                }
+            }
+        }
+    }
+    let constants = fit(&rows);
+    let nonnegative = constants
+        .as_ref()
+        .is_some_and(|c| c.iter().all(|v| *v >= 0.0));
+    let mut accepted = training_resolved && nonnegative;
+    let mut training_errors = [None::<f64>; 2];
+    if let Some(constants) = &constants {
+        for (x, observed) in &rows {
+            let class = usize::from(x[1] == 0.0);
+            let predicted: f64 = x.iter().zip(constants).map(|(x, c)| x * c).sum();
+            let error = (predicted - observed).abs() / observed;
+            training_errors[class] = Some(training_errors[class].unwrap_or(0.0).max(error));
+        }
+    }
+    for (class, error) in classes.iter().zip(training_errors) {
+        let valid = error.is_some_and(|e| e.is_finite() && e <= TOLERANCE);
+        accepted &= valid;
+        println!("training k={class} max_relative_error={error:?} within_tolerance={valid}");
+        profile.insert(
+            format!("measured.item.{class}.training_max_relative_error"),
+            error.map_or("unknown".into(), |e| format!("{e:.12e}")),
+        );
+        profile.insert(
+            format!("item.{class}.training_status"),
+            if valid {
+                "within 20%"
+            } else {
+                "rejected or unidentified"
+            }
+            .into(),
         );
     }
-    for (key, value) in [("a_ns", copy_fit.0), ("b_ns_per_byte", copy_fit.1)] {
+    let mut names = vec!["a_ns".to_owned()];
+    names.extend(classes.iter().map(|k| format!("{k}.r_ns_per_run")));
+    for k in classes {
+        names.extend(
+            regimes
+                .iter()
+                .map(|regime| format!("{k}.{regime}.e_ns_per_element")),
+        );
+    }
+    for (i, name) in names.iter().enumerate() {
+        let value = constants
+            .as_ref()
+            .map_or("unknown".into(), |c| format!("{:.12e}", c[i]));
+        println!("joint_fit.{name} = {value}");
+        profile.insert(format!("measured.item.{name}"), value);
+    }
+    profile.insert(
+        "item_model".into(),
+        "a + r_k*runs + e_k(W)*elements; W=phase source+destination bytes; cache cpu0".into(),
+    );
+    profile.insert(
+        "measured.item.phase_baseline_ns".into(),
+        format!("{:.12e}", baseline.median),
+    );
+    profile.insert(
+        "item.planned.status".into(),
+        "unavailable: serial token cannot admit a planned kernel".into(),
+    );
+    profile.insert("item.planned.r_ns_per_run".into(), "unknown".into());
+    for regime in &regimes {
         profile.insert(
-            key.into(),
-            if accepted[0] {
-                format!("{value:.12e}")
+            format!("item.planned.{regime}.e_ns_per_element"),
+            "unknown".into(),
+        );
+    }
+    for (label, roles, shape, interleaved) in [
+        ("SU2-small-shaped", 2, [16, 1, 16, 1], true),
+        ("dom-large-shaped", 1, [768, 1, 768, 1], false),
+    ] {
+        let cold = Instant::now();
+        let mut held = Fixture::new(roles, &shape, &[0, 3, 2, 1], interleaved)?;
+        held.data = (0..roles * held.elements)
+            .map(|i| (i % 97) as f64 / 97.0)
+            .collect();
+        let working_set = roles * held.elements * 16;
+        payload_peak = payload_peak.max(working_set);
+        let diagnostics = held.transform.layout_diagnostics();
+        let layout = diagnostics.entry(0).ok_or("missing held-out layout")?;
+        let source = layout
+            .partner_strides
+            .ok_or("missing held-out source strides")?;
+        let class = usize::from(layout.block_strides[0] != 1 || source[0] != 1);
+        let regime = caches
+            .iter()
+            .position(|(_, size)| working_set <= *size)
+            .unwrap_or(caches.len());
+        let runs = roles * held.elements / layout.dims[0];
+        let expected_dims: &[usize] = if interleaved { &[16, 16] } else { &[589824] };
+        let expected_strides: &[isize] = if interleaved { &[1, 32] } else { &[1] };
+        assert_eq!(layout.dims, expected_dims);
+        assert_eq!(layout.block_strides, expected_strides);
+        assert_eq!(source, expected_strides);
+        assert_eq!(held.replay(&mut serial, None)?, held.data);
+        let setup_s = cold.elapsed().as_secs_f64();
+        let time = measure(|| Ok(Some(held.phase(&mut serial)?)), 1000)?;
+        let whole = measure(
+            || {
+                black_box(held.replay(&mut serial, None)?);
+                Ok(None)
+            },
+            1000,
+        )?;
+        serial_cold_s += setup_s + time.cold + whole.cold;
+        print_samples(&format!("held-out {label} k={} regime={} roles={roles} elements_per_item={} dims={:?} dst_strides={:?} src_strides={source:?} runs_per_item={} working_set_bytes={working_set}", classes[class], regimes[regime], held.elements, layout.dims, layout.block_strides, runs / roles), time);
+        print_samples(&format!("held-out {label} whole-owned-call"), whole);
+        let predicted = constants.as_ref().map(|c| {
+            baseline.median
+                + c[0] * roles as f64
+                + c[1 + class] * runs as f64
+                + c[3 + class * regimes.len() + regime] * (roles * held.elements) as f64
+        });
+        let error = predicted.map(|ns| (ns - time.median).abs() / time.median);
+        accepted &= error.is_some_and(|e| e.is_finite() && e <= TOLERANCE);
+        println!("held-out {label} phase_prediction_ns={predicted:?} relative_error={error:?}; whole_call_minus_phase_ns={:.3} (unpaired, unprofiled whole call; not an allocation attribution)", whole.median - time.median);
+        profile.insert(
+            format!("measured.heldout.{label}.phase_ns"),
+            format!("{:.12e}", time.median),
+        );
+        profile.insert(
+            format!("measured.heldout.{label}.predicted_phase_ns"),
+            predicted.map_or("unknown".into(), |ns| format!("{ns:.12e}")),
+        );
+        profile.insert(
+            format!("measured.heldout.{label}.relative_error"),
+            error.map_or("unknown".into(), |e| format!("{e:.12e}")),
+        );
+    }
+    profile.insert("item_fit_status".into(), if accepted { "held-out accepted; no trusted campaign reference" } else { "rejected: cache topology unavailable, singular/negative fit, unresolved residual, or held-out error exceeds 20%" }.into());
+    for (i, name) in names.iter().enumerate() {
+        profile.insert(
+            format!("item.{name}"),
+            if accepted {
+                format!("{:.12e}", constants.as_ref().unwrap()[i])
             } else {
                 "unknown".into()
             },
         );
-        profile.insert(format!("measured.{key}"), format!("{value:.12e}"));
     }
-    if c_identified {
-        profile.insert("c_ns_per_application".into(), format!("{c:.12e}"));
-    }
-    profile.insert(
-        "fit_status".into(),
-        if accepted[0] {
-            "held-out accepted; no trusted campaign reference"
-        } else {
-            "rejected: unresolved training residual or held-out error exceeds 20%"
-        }
-        .into(),
-    );
-    println!(
-        "map fit acceptance: identity={} structural(-0.75)={}",
-        accepted[0], accepted[1]
-    );
-    profile.insert(
-        "measured.structural.a_ns".into(),
-        format!("{:.12e}", scale_fit.0),
-    );
-    profile.insert(
-        "measured.structural.b_ns_per_byte".into(),
-        format!("{:.12e}", scale_fit.1),
-    );
-    profile.insert(
-        "structural_fit_status".into(),
-        if accepted[1] {
-            "held-out accepted; no trusted campaign reference"
-        } else {
-            "rejected: unresolved training residual or held-out error exceeds 20%"
-        }
-        .into(),
-    );
+    println!("serial joint fit accepted={accepted}; planned unavailable; no structural-coefficient class measured");
     println!(
         "serial fit section cold_s={serial_cold_s:.6} total_s={:.6}",
         section.elapsed().as_secs_f64()
@@ -760,7 +941,7 @@ fn main() -> Res<()> {
                         Some(measure(
                             || {
                                 exec.reborrow().into_token().fork(q, |_, _| {});
-                                Ok(())
+                                Ok(None)
                             },
                             1000,
                         )?)
@@ -792,14 +973,14 @@ fn main() -> Res<()> {
         let mut bandwidth_cold_s = 0.0;
         for elements in [4096, 65536] {
             let cold = Instant::now();
-            let mut fixture = Fixture::new(64, elements, 2, 1.0)?;
+            let mut fixture = Fixture::new(64, &[elements, 1], &[0, 1], false)?;
             fixture.seed(&mut engine)?;
             payload_peak = payload_peak.max(64 * elements * 16);
             let setup_s = cold.elapsed().as_secs_f64();
             let s = measure(
                 || {
-                    black_box(fixture.replay(&mut engine)?);
-                    Ok(())
+                    black_box(fixture.replay(&mut engine, None)?);
+                    Ok(None)
                 },
                 5,
             )?;
@@ -823,14 +1004,14 @@ fn main() -> Res<()> {
                     .checked_mul(multiplier)
                     .ok_or("bandwidth fixture size overflow")?;
                 let cold = Instant::now();
-                let mut fixture = Fixture::new(roles, elements, 2, 1.0)?;
+                let mut fixture = Fixture::new(roles, &[elements, 1], &[0, 1], false)?;
                 fixture.seed(&mut engine)?;
                 payload_peak = payload_peak.max(roles * elements * 16);
                 let setup_s = cold.elapsed().as_secs_f64();
                 let s = measure(
                     || {
-                        black_box(fixture.replay(&mut engine)?);
-                        Ok(())
+                        black_box(fixture.replay(&mut engine, None)?);
+                        Ok(None)
                     },
                     1,
                 )?;
@@ -847,8 +1028,8 @@ fn main() -> Res<()> {
                     if q == width {
                         let retest = measure(
                             || {
-                                black_box(fixture.replay(&mut serial)?);
-                                Ok(())
+                                black_box(fixture.replay(&mut serial, None)?);
+                                Ok(None)
                             },
                             1,
                         )?;
@@ -932,19 +1113,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nonnegative_fit_handles_interior_and_boundary_optima() {
-        // Purpose: recover the least-squares solution subject to nonnegative constants.
-        for (rows, expected) in [
-            (
-                &[(1.0, 1.0, 5.0), (1.0, 2.0, 8.0), (2.0, 1.0, 7.0)][..],
-                (2.0, 3.0),
-            ),
-            (&[(1.0, 0.0, -2.0), (0.0, 1.0, 3.0)][..], (0.0, 3.0)),
-        ] {
-            let actual = fit(rows);
-            assert!((actual.0 - expected.0).abs() <= 1e-12);
-            assert!((actual.1 - expected.1).abs() <= 1e-12);
+    fn fit_identifies_shared_setup_runs_and_regime_slopes() {
+        // Purpose: independent predictors recover shared setup, run and regime element costs.
+        let rows = [
+            (vec![1.0, 2.0, 4.0, 0.0], 24.0),
+            (vec![1.0, 4.0, 4.0, 0.0], 30.0),
+            (vec![2.0, 2.0, 8.0, 0.0], 42.0),
+            (vec![1.0, 2.0, 0.0, 4.0], 36.0),
+            (vec![1.0, 4.0, 0.0, 8.0], 70.0),
+        ];
+        let actual = fit(&rows).unwrap();
+        for (got, expected) in actual.iter().zip([2.0, 3.0, 4.0, 7.0]) {
+            assert!((got - expected).abs() < 1e-9);
         }
+        assert!(fit(&[(vec![1.0, 1.0], 2.0), (vec![2.0, 2.0], 4.0)]).is_none());
+    }
+
+    #[test]
+    fn cache_sizes_parse_sysfs_units_and_reject_invalid_sizes() {
+        // Purpose: cache regime boundaries use checked byte counts from sysfs.
+        for (text, expected) in [
+            (" 32K\n", Some(32768)),
+            ("2M", Some(2097152)),
+            ("1G", Some(1073741824)),
+            ("4096", Some(4096)),
+            ("0", None),
+            ("unknown", None),
+            ("2KB", None),
+        ] {
+            assert_eq!(cache_bytes(text), expected);
+        }
+        assert_eq!(cache_bytes(&format!("{}K", usize::MAX)), None);
     }
 
     #[test]

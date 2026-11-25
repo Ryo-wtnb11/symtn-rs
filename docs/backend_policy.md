@@ -419,13 +419,20 @@ Block-lane placement and provider inner-width choice keep their existing
 cost models. This is a scheduling estimate, not a guarantee of measured speedup.
 
 The offline `calibrate_replay` example measures CPU `f64` owned-overwrite
-Singles through the compiled production replay: per-role and byte costs,
-paired structural-coefficient costs when identifiable, engine-team empty-fork
-dispatch, and cache/DRAM replay bandwidth across engine budgets. It prints
-raw batches, held-out errors, size/placement checks, cold time and memory use,
-and writes an explicit version-1 `key=value` profile. Unknown placement or
-rejected measurements leave the profile incomplete; it does not install
-constants or change the movement chooser.
+Singles through the compiled production replay. Its serial direct-phase fit
+uses a common per-role cost, per-class run costs, and per-element costs for
+each cache regime discovered from Linux cpu0 sysfs. It varies run lengths
+and source permutations and reports the baked geometry, including removal
+of unit axes. Held-out items reproduce the 256-element, 16-run small-subblock
+layout and the 589824-element, one-run dominant layout. Serial tokens cannot
+admit planned kernels, so their constants remain unavailable. The example
+also measures engine-team empty-fork dispatch and cache/DRAM replay bandwidth
+across engine budgets. It prints raw batches, held-out errors, size/placement
+checks, cold time and memory use, and writes a version-1 `key=value` profile
+with item model version 2. Unknown cache topology or placement and rejected
+measurements leave the profile incomplete; it does not install constants or
+change the movement chooser. The serial phase timer excludes output allocation
+and proof validation; output first stores remain inside the timed movement.
 
 Destinations are grouped into hull runs:
 maximal address-ordered stretches whose bounding slices overlap
