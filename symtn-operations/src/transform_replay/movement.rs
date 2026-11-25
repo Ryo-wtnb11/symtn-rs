@@ -1634,7 +1634,7 @@ mod tests {
             0.0,
             |q| model(q, budget, &prices),
             dispatch,
-            &bandwidth,
+            bandwidth,
         );
         let times = (1..=budget.min(phase.prefix.len()))
             .map(|q| if q > 1 { 1.0 } else { 0.0 } + model(q, budget, &prices))
@@ -1922,7 +1922,7 @@ mod tests {
                                     },
                                 },
                                 &mut observed,
-                                &mut [0..jobs],
+                                core::slice::from_mut(&mut (0..jobs)),
                             )
                             .unwrap()
                             .unwrap();
