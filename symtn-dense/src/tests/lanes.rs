@@ -525,20 +525,22 @@ fn split<E>(threads: usize) -> Split<UnitCut<E>> {
     }
 }
 
-/// Split narrows to its chosen width, and each recursive token has exactly
-/// its logical share, including the right-hand odd slot.
+/// Base splits retain surplus slots; explicitly limiting the caller to the
+/// model's priced q=2 is the control offering one slot to each of two leaves.
 #[test]
-fn split_tokens_match_the_chosen_logical_shares() {
+fn split_preserves_surplus_token_slots() {
     let mut engine = engine(8, BatchPolicy::default(), row(60));
     for (jobs, threads, budget, expected) in [
         (6, 6, 6, vec![1, 1, 1, 1, 1, 1]),
         (3, 4, 4, vec![1, 1, 2]),
-        (3, 3, 8, vec![1, 1, 1]),
+        (3, 3, 8, vec![4, 2, 2]),
         (3, 8, 8, vec![2, 2, 4]),
         (2, 8, 8, vec![4, 4]),
-        (3, 7, 8, vec![1, 2, 4]),
-        (3, 4, 7, vec![1, 1, 2]),
-        (1, 3, 8, vec![3]),
+        (2, 2, 8, vec![4, 4]),
+        (2, 2, 2, vec![1, 1]),
+        (3, 7, 8, vec![2, 2, 4]),
+        (3, 4, 7, vec![1, 2, 4]),
+        (1, 3, 8, vec![8]),
     ] {
         let spy = one_stage(jobs, &[]);
         let (seen, outcome) = run_assigned(&mut engine, budget, &spy, split(threads), 1);

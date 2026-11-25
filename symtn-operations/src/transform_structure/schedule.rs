@@ -65,6 +65,7 @@ pub(crate) struct MovementItem {
     pub runs: usize,
     pub elements: usize,
     pub kind: usize,
+    pub planned: bool,
 }
 
 /// Totals and conservative component maxima over indivisible hull jobs.

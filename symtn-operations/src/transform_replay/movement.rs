@@ -1,9 +1,10 @@
 //! Replay-owned movement calibration and fixed-form phase pricing.
 use super::*;
 use crate::transform_structure::{MovementCounts, MovementSummary};
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
-const WORKING_SETS: [usize; 3] = [64 * 1024, 1024 * 1024, 16 * 1024 * 1024];
+const WORKING_SETS: [usize; 3] = [64 * 1024, 1024 * 1024, 4 * 1024 * 1024];
 
 #[derive(Clone, Copy)]
 struct Curve<const N: usize> {
@@ -31,7 +32,13 @@ impl<const N: usize> Curve<N> {
             && self
                 .points
                 .windows(2)
-                .all(|pair| pair[0].0 < pair[1].0 && pair[0].1 <= pair[1].1)
+                .all(|pair| pair[0].0 < pair[1].0 && pair[0].1 * 0.9 <= pair[1].1)
+    }
+
+    fn monotone(&mut self) {
+        for index in 1..N {
+            self.points[index].1 = self.points[index].1.max(self.points[index - 1].1);
+        }
     }
 }
 
@@ -87,9 +94,17 @@ fn inline_time(
     bytes: f64,
     dispatch: f64,
     budget: usize,
+    admits_largest: bool,
 ) -> f64 {
     let sum = rates.cost(phase.total, bytes);
-    let largest = rates.cost(phase.max, bytes).min(sum);
+    if !admits_largest {
+        return sum;
+    }
+    let item = phase.largest;
+    let largest = (rates.setup
+        + rates.runs[item.kind].at(bytes) * item.runs as f64
+        + rates.elements[item.kind].at(bytes) * item.elements as f64)
+        .min(sum);
     sum - largest + largest.min(dispatch + largest / budget as f64)
 }
 
@@ -101,6 +116,7 @@ fn choose(
     phase: MovementSummary,
     dispatch: &[(usize, Duration)],
     budget: usize,
+    admits_largest: bool,
 ) -> usize {
     if budget <= 1
         || phase.total.roles == [0; 2]
@@ -111,7 +127,14 @@ fn choose(
     }
     let bytes = phase.working_set_elements as f64 * std::mem::size_of::<f64>() as f64;
     let mut best = 1;
-    let mut time = inline_time(rates, phase, bytes, dispatch_at(dispatch, budget), budget);
+    let mut time = inline_time(
+        rates,
+        phase,
+        bytes,
+        dispatch_at(dispatch, budget),
+        budget,
+        admits_largest,
+    );
     let mut cuts = [2usize; usize::BITS as usize + 32];
     let mut count = 0;
     let mut add = |q: usize| {
@@ -174,6 +197,7 @@ pub(super) fn widths(
     dispatch: &[(usize, Duration)],
     schedule: &TreeTransformParallelSchedule,
     budget: usize,
+    admits_largest_single: bool,
 ) -> [usize; 2] {
     [
         choose(
@@ -181,12 +205,14 @@ pub(super) fn widths(
             schedule.single_movement,
             dispatch,
             budget,
+            admits_largest_single,
         ),
         choose(
             &calibration.fill,
             schedule.inactive_movement,
             dispatch,
             budget,
+            false,
         ),
     ]
 }
@@ -197,15 +223,73 @@ pub(super) fn calibrate(
     exec: &mut symtn_dense::lanes::Exec<'_>,
     deadline: Instant,
 ) -> Option<Calibration> {
-    let copy = measure(exec, deadline, false)?;
-    let fill = measure(exec, deadline, true)?;
-    Some(Calibration { copy, fill }).filter(|_| Instant::now() < deadline)
+    calibrate_report(exec, deadline, None)
+}
+
+fn calibrate_report(
+    exec: &mut symtn_dense::lanes::Exec<'_>,
+    deadline: Instant,
+    mut report: Option<&mut String>,
+) -> Option<Calibration> {
+    if Instant::now() >= deadline {
+        return None;
+    }
+    // One pair covers both kinds and all run counts, including source stride padding.
+    let count = WORKING_SETS[2] / std::mem::size_of::<f64>();
+    let source = vec![1.0; count];
+    let mut destination = Vec::with_capacity(count);
+    let timer_jitter = (0..8)
+        .map(|_| Instant::now().elapsed().as_secs_f64() * 1e9)
+        .fold(0.0, f64::max);
+    let copy = measure(
+        exec,
+        deadline,
+        false,
+        &source,
+        &mut destination,
+        timer_jitter,
+        &mut report,
+    )?;
+    let fill = measure(
+        exec,
+        deadline,
+        true,
+        &source,
+        &mut destination,
+        timer_jitter,
+        &mut report,
+    )?;
+    (Instant::now() < deadline).then_some(Calibration { copy, fill })
+}
+
+/// Runs the production online attempt on this engine and reports raw fit evidence.
+/// Intended only for the calibration example; it obeys admission, policy and retention.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn online_movement_calibration(engine: &mut dyn Engine) -> Result<String, OperationError> {
+    let start = Instant::now();
+    let mut evidence = String::new();
+    let mut attempted = false;
+    let accepted = symtn_dense::lanes::movement_region(
+        engine,
+        true,
+        |exec, deadline| {
+            attempted = true;
+            calibrate_report(exec, deadline, Some(&mut evidence))
+        },
+        |_, payload| payload.is_some(),
+    )
+    .map_err(OperationError::Dense)?;
+    Ok(format!(
+        "online outcome={} elapsed_us={} payload_attempted={attempted}\n{evidence}",
+        if accepted { "Some" } else { "None" },
+        start.elapsed().as_micros(),
+    ))
 }
 
 struct Fixture {
     transform: TreeTransformStructure<f64>,
-    source: Vec<f64>,
-    destination: Vec<f64>,
+    source_len: usize,
     count: usize,
 }
 
@@ -251,17 +335,18 @@ impl Fixture {
         let count = dst.required_len()?;
         Ok(Self {
             transform,
-            source: vec![1.0; src.required_len()?],
-            destination: Vec::with_capacity(count),
+            source_len: src.required_len()?,
             count,
         })
     }
 
     fn sample(
-        &mut self,
+        &self,
         exec: &mut symtn_dense::lanes::Exec<'_>,
         deadline: Instant,
         repetitions: usize,
+        source: &[f64],
+        destination: &mut Vec<f64>,
     ) -> Option<f64> {
         if Instant::now() >= deadline {
             return None;
@@ -272,8 +357,10 @@ impl Fixture {
             alpha: 1.0,
         };
         let mut gate = LeafGate::new(task.layouts().max_planned_elements());
-        let mut index = vec![0; task.layouts().max_fused_rank()];
+        let mut index = [0; 2];
         let mut zeros = Vec::new();
+        let source = source.get(..self.source_len)?;
+        let destination = destination.spare_capacity_mut().get_mut(..self.count)?;
         let start = Instant::now();
         for _ in 0..repetitions {
             inline_direct(
@@ -283,8 +370,8 @@ impl Fixture {
                 self.transform.parallel_schedule(),
                 true,
                 InlineSingles::Schedule,
-                &mut self.destination.spare_capacity_mut()[..self.count],
-                &self.source,
+                destination,
+                source,
                 &writer,
                 &mut (),
                 &mut zeros,
@@ -292,13 +379,24 @@ impl Fixture {
                 &mut gate,
             )
             .ok()?;
-            std::hint::black_box(&self.destination.spare_capacity_mut()[..self.count]);
+            std::hint::black_box(&*destination);
         }
         let ns = start.elapsed().as_secs_f64() * 1e9 / repetitions as f64;
         (Instant::now() < deadline).then_some(ns)
     }
 }
 
+#[derive(Clone, Copy)]
+struct Measurement {
+    ns: f64,
+    jitter: f64,
+}
+
+fn elements_at(working_set: usize, fill: bool) -> usize {
+    working_set / if fill { 8 } else { 16 }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn measured(
     exec: &mut symtn_dense::lanes::Exec<'_>,
     deadline: Instant,
@@ -306,47 +404,104 @@ fn measured(
     runs: usize,
     kind: usize,
     fill: bool,
-) -> Option<f64> {
+    source: &[f64],
+    destination: &mut Vec<f64>,
+    report: &mut Option<&mut String>,
+) -> Option<Measurement> {
     if Instant::now() >= deadline {
         return None;
     }
-    let mut fixture = Fixture::new(elements, runs, kind, fill).ok()?;
-    let repetitions = if elements <= 16 { 128 } else { 1 };
-    fixture.sample(exec, deadline, 1)?;
+    let fixture = Fixture::new(elements, runs, kind, fill).ok()?;
+    let working_set = elements * if fill { 8 } else { 16 };
+    let repetitions = if elements <= 16 {
+        128
+    } else if working_set < WORKING_SETS[1] {
+        4
+    } else {
+        1
+    };
+    if working_set < WORKING_SETS[1] {
+        fixture.sample(exec, deadline, 1, source, destination)?;
+    }
     let mut samples = [0.0; 3];
-    // ponytail: one large sample fits the online budget; use the offline campaign for stable medians.
-    let sample_count = if elements >= 65536 { 1 } else { samples.len() };
+    // ponytail: two large samples bound traffic; offline medians establish precision.
+    let sample_count = if working_set >= WORKING_SETS[1] {
+        2
+    } else {
+        samples.len()
+    };
     for sample in &mut samples[..sample_count] {
-        *sample = fixture.sample(exec, deadline, repetitions)?;
+        *sample = fixture.sample(exec, deadline, repetitions, source, destination)?;
+    }
+    if let Some(report) = report.as_deref_mut() {
+        let _ = writeln!(
+            report,
+            "{} kind={kind} n={elements} runs={runs} repetitions={repetitions} samples_ns={:?}",
+            if fill { "fill" } else { "copy" },
+            &samples[..sample_count]
+        );
     }
     samples[..sample_count].sort_by(f64::total_cmp);
-    Some(samples[sample_count / 2])
+    Some(Measurement {
+        // The lower of two large samples excludes their shared buffer's first stores.
+        ns: samples[(sample_count - 1) / 2],
+        jitter: samples[sample_count - 1] - samples[0],
+    })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn measure(
     exec: &mut symtn_dense::lanes::Exec<'_>,
     deadline: Instant,
     fill: bool,
+    source: &[f64],
+    destination: &mut Vec<f64>,
+    timer_jitter: f64,
+    report: &mut Option<&mut String>,
 ) -> Option<Rates> {
-    let empty = measured(exec, deadline, 0, 1, 0, fill)?;
+    let mut sample = |elements, runs, kind, report: &mut Option<&mut String>| {
+        measured(
+            exec,
+            deadline,
+            elements,
+            runs,
+            kind,
+            fill,
+            source,
+            destination,
+            report,
+        )
+    };
+    let empty = sample(0, 1, 0, report)?.ns;
     let mut run_points = [[(0, 0.0); 2]; 2];
     let mut one_run = [[0.0; 3]; 2];
     for (k, points) in run_points.iter_mut().enumerate().skip(usize::from(fill)) {
-        for (j, w) in [WORKING_SETS[0], WORKING_SETS[2]].into_iter().enumerate() {
-            let n = w / if fill { 8 } else { 16 };
-            let one = measured(exec, deadline, n, 1, k, fill)?;
-            one_run[k][j * 2] = one;
-            let many_runs = n / 16;
-            let many = measured(exec, deadline, n, many_runs, k, fill)?;
-            points[j] = (w, (many - one) / (many_runs - 1) as f64);
+        let n = elements_at(WORKING_SETS[0], fill);
+        let one = sample(n, 1, k, report)?;
+        let many_runs = n / 2;
+        let many = sample(n, many_runs, k, report)?;
+        let signal = many.ns - one.ns;
+        let jitter = timer_jitter.max(one.jitter + many.jitter);
+        if let Some(report) = report.as_deref_mut() {
+            let _ = writeln!(report, "{} kind={k} r_signal_ns={signal} jitter_ns={jitter} raw_r_ns_per_run={} accepted={}", if fill { "fill" } else { "copy" }, signal / (many_runs - 1) as f64, signal.is_finite() && signal >= 20.0 * jitter);
+        }
+        if !signal.is_finite() || signal < 20.0 * jitter {
+            return None;
+        }
+        let per_run = signal / (many_runs - 1) as f64;
+        // ponytail: online r is cache-resident only; offline paired ladders resolve W dependence.
+        *points = [(WORKING_SETS[0], per_run), (WORKING_SETS[2], per_run)];
+        one_run[k][0] = one.ns;
+        for (j, &w) in WORKING_SETS.iter().enumerate().skip(1) {
+            one_run[k][j] = sample(elements_at(w, fill), 1, k, report)?.ns;
         }
     }
     if fill {
         run_points[0] = run_points[1];
     }
     let runs = run_points.map(|points| Curve { points });
-    let low = measured(exec, deadline, 2, 1, 0, fill)?;
-    let high = measured(exec, deadline, 16, 1, 0, fill)?;
+    let low = sample(2, 1, 0, report)?.ns;
+    let high = sample(16, 1, 0, report)?.ns;
     let slope = (high - low) / 14.0;
     let setup = low - empty - slope * 2.0 - runs[0].points[0].1;
     let mut element_points = [[(0, 0.0); 3]; 2];
@@ -356,24 +511,46 @@ fn measure(
         .skip(usize::from(fill))
     {
         for (j, w) in WORKING_SETS.into_iter().enumerate() {
-            let n = w / if fill { 8 } else { 16 };
-            let time = if j == 1 {
-                measured(exec, deadline, n, 1, k, fill)?
-            } else {
-                one_run[k][j]
-            };
+            let n = elements_at(w, fill);
+            let time = one_run[k][j];
             points[j] = (w, (time - empty - setup - runs[k].at(w as f64)) / n as f64);
         }
     }
     if fill {
         element_points[0] = element_points[1];
     }
-    let rates = Rates {
+    let mut rates = Rates {
         setup,
         runs,
         elements: element_points.map(|points| Curve { points }),
     };
-    rates.valid().then_some(rates)
+    if let Some(report) = report.as_deref_mut() {
+        let _ = writeln!(
+            report,
+            "{} raw_a_ns={} raw_r_ns_per_run={:?} raw_e_ns_per_element={:?} valid={}",
+            if fill { "fill" } else { "copy" },
+            rates.setup,
+            run_points,
+            element_points,
+            rates.valid()
+        );
+    }
+    if !rates.valid() {
+        return None;
+    }
+    // Accepted <=10% noise is enveloped so the split search retains convex intervals.
+    for curve in &mut rates.elements {
+        curve.monotone();
+    }
+    if let Some(report) = report.as_deref_mut() {
+        let fitted = rates.elements.map(|curve| curve.points);
+        let _ = writeln!(
+            report,
+            "{} fitted_e_ns_per_element={fitted:?}",
+            if fill { "fill" } else { "copy" }
+        );
+    }
+    Some(rates)
 }
 
 #[cfg(test)]
@@ -419,6 +596,7 @@ mod tests {
                 runs,
                 elements: big,
                 kind,
+                planned: true,
             },
             working_set_elements: total.elements[kind] * 2,
             exact_working_set: true,
@@ -449,9 +627,9 @@ mod tests {
             (64, 30267.5),
             (96, 44956.5),
         ]);
-        assert!(choose(&rates, phase, &dispatch, 96) > 1);
+        assert!(choose(&rates, phase, &dispatch, 96, true) > 1);
         let free = ladder(&[(1, 0.0), (96, 0.0)]);
-        assert_eq!(choose(&rates, phase, &free, 96), 1);
+        assert_eq!(choose(&rates, phase, &free, 96, true), 1);
     }
 
     /// The larger population of small items splits with cheap dispatch;
@@ -460,9 +638,9 @@ mod tests {
     fn cheap_dispatch_respects_inline_competition() {
         let rates = measured_rates();
         let cheap = ladder(&[(1, 0.0), (2, 600.0), (4, 600.0)]);
-        assert!(choose(&rates, summary(589824, 2304, 200, 1, 0), &cheap, 4) > 1);
+        assert!(choose(&rates, summary(589824, 2304, 200, 1, 0), &cheap, 4, true) > 1);
         assert_eq!(
-            choose(&rates, summary(589824, 2304, 99, 1, 0), &cheap, 4),
+            choose(&rates, summary(589824, 2304, 99, 1, 0), &cheap, 4, true),
             1
         );
     }
@@ -478,12 +656,19 @@ mod tests {
                 &rates,
                 phase,
                 &ladder(&[(1, 0.0), (2, 100.0), (4, 100.0)]),
-                4
+                4,
+                true,
             ),
             4
         );
         assert_eq!(
-            choose(&rates, phase, &ladder(&[(1, 0.0), (2, 1e9), (4, 1e9)]), 4),
+            choose(
+                &rates,
+                phase,
+                &ladder(&[(1, 0.0), (2, 1e9), (4, 1e9)]),
+                4,
+                true
+            ),
             1
         );
     }
@@ -502,12 +687,60 @@ mod tests {
             }; 2],
         };
         let phase = summary(1000, 2, 3, 1, 0);
-        let actual = inline_time(&rates, phase, 1.0, 10.0, 4);
+        let actual = inline_time(&rates, phase, 1.0, 10.0, 4, true);
         assert_eq!(actual, 12.0 + 10.0 + 1002.0 / 4.0);
         let medium = summary(1000, 100, 1, 1, 0);
-        let approximation = inline_time(&rates, medium, 1.0, 10.0, 4);
+        let approximation = inline_time(&rates, medium, 1.0, 10.0, 4, true);
         let itemwise = 10.0 + 1002.0 / 4.0 + 10.0 + 102.0 / 4.0;
         assert!(approximation > itemwise);
+    }
+
+    /// Fill roles always walk serially; granting the largest role fictitious
+    /// fan-out is the negative control that incorrectly retains inline.
+    #[test]
+    fn serial_fill_dominance_selects_split() {
+        let rates = Rates {
+            setup: 1.0,
+            runs: [Curve {
+                points: [(1, 1.0), (2, 1.0)],
+            }; 2],
+            elements: [Curve {
+                points: [(1, 1.0), (2, 1.0), (3, 1.0)],
+            }; 2],
+        };
+        let phase = summary(1000, 2, 10, 1, 1);
+        let dispatch = ladder(&[(1, 0.0), (2, 10.0), (4, 10.0)]);
+        assert_eq!(inline_time(&rates, phase, 1.0, 10.0, 4, false), 1042.0);
+        assert!(choose(&rates, phase, &dispatch, 4, false) > 1);
+        assert_eq!(choose(&rates, phase, &dispatch, 4, true), 1);
+    }
+
+    /// The inline approximation widens one actual role; a larger synthetic
+    /// hull bound remains relevant only to the split's load estimate.
+    #[test]
+    fn inline_uses_largest_role_instead_of_hull_maxima() {
+        let rates = Rates {
+            setup: 1.0,
+            runs: [Curve {
+                points: [(1, 1.0), (2, 1.0)],
+            }; 2],
+            elements: [Curve {
+                points: [(1, 1.0), (2, 1.0), (3, 1.0)],
+            }; 2],
+        };
+        let mut phase = summary(1000, 2, 3, 1, 0);
+        phase.total = MovementCounts {
+            roles: [1, 3],
+            runs: [1, 3],
+            elements: [1000, 6],
+        };
+        phase.max.roles[1] = 1;
+        phase.max.runs[1] = 1;
+        phase.max.elements[1] = 2;
+        assert_eq!(
+            inline_time(&rates, phase, 1.0, 10.0, 4, true),
+            12.0 + 10.0 + 1002.0 / 4.0
+        );
     }
 
     /// Interval minimization matches an independently enumerated model at
@@ -540,15 +773,15 @@ mod tests {
                         expected = q;
                     }
                 }
-                assert_eq!(choose(&rates, phase, &dispatch, budget), expected);
+                assert_eq!(choose(&rates, phase, &dispatch, budget, true), expected);
             }
         }
         let empty = MovementSummary::default();
-        assert_eq!(choose(&rates, empty, &dispatch, 96), 1);
+        assert_eq!(choose(&rates, empty, &dispatch, 96, true), 1);
     }
 
     /// Log interpolation uses the geometric midpoint and flat endpoint tails;
-    /// a decreasing measured curve is rejected rather than reshaped.
+    /// a large decrease or invalid measured value is rejected.
     #[test]
     fn curves_interpolate_without_cache_regimes() {
         let curve = Curve {
@@ -584,7 +817,10 @@ mod tests {
             }; 2],
         };
         let dispatch = ladder(&[(1, 0.0), (4, 0.0)]);
-        assert_eq!(choose(&rates, summary(2, 2, 1, 1, 0), &dispatch, 4), 2);
+        assert_eq!(
+            choose(&rates, summary(2, 2, 1, 1, 0), &dispatch, 4, true),
+            2
+        );
         rates.setup = 0.0;
         for curve in &mut rates.runs {
             for point in &mut curve.points {
@@ -596,6 +832,91 @@ mod tests {
                 point.1 = 0.0;
             }
         }
-        assert_eq!(choose(&rates, summary(2, 2, 1, 1, 0), &dispatch, 4), 1);
+        assert_eq!(
+            choose(&rates, summary(2, 2, 1, 1, 0), &dispatch, 4, true),
+            1
+        );
+    }
+}
+
+#[cfg(test)]
+mod calibration_tests {
+    use super::*;
+
+    /// Every tiny, one-run and cache-resident many-run fixture must retain
+    /// the traversal class checked by Fixture::new after normalization.
+    #[test]
+    fn online_ladder_geometry_preserves_traversal_classes() {
+        for fill in [false, true] {
+            for n in [0, 2, 16] {
+                Fixture::new(n, 1, 0, fill).unwrap();
+            }
+            for kind in usize::from(fill)..2 {
+                for w in WORKING_SETS {
+                    Fixture::new(elements_at(w, fill), 1, kind, fill).unwrap();
+                }
+                let n = elements_at(WORKING_SETS[0], fill);
+                Fixture::new(n, n / 2, kind, fill).unwrap();
+            }
+        }
+    }
+
+    /// Slight measured dips are accepted then enveloped for convex search;
+    /// a larger dip and a negative coefficient remain rejected evidence.
+    #[test]
+    fn calibration_envelopes_only_accepted_noise() {
+        let mut curve = Curve {
+            points: [(1, 2.0), (2, 1.9), (4, 3.0)],
+        };
+        assert!(curve.valid());
+        curve.monotone();
+        assert_eq!(curve.points, [(1, 2.0), (2, 2.0), (4, 3.0)]);
+        assert!(!Curve {
+            points: [(1, 2.0), (2, 1.7)],
+        }
+        .valid());
+        assert!(!Curve {
+            points: [(1, -1.0), (2, 2.0)],
+        }
+        .valid());
+    }
+
+    /// Real timing must exercise measurement through payload construction;
+    /// clock noise can legitimately reject a fit even without a short deadline.
+    #[test]
+    #[ignore = "real clock and data-quality rejection can legitimately yield no calibration"]
+    fn real_online_calibration_produces_finite_nonnegative_payload() {
+        let row =
+            tenferro_cpu::threadteam::WidthCosts::from_anchors(&[(2, Duration::ZERO)]).unwrap();
+        let mut engine = tenferro_cpu::CpuEngine::new(
+            tenferro_cpu::Pool::builder()
+                .threads(2)
+                .dispatch_costs(tenferro_cpu::threadteam::DispatchCosts::new(row, row, row))
+                .build()
+                .unwrap(),
+        );
+        let payload = crate::host_pool::lane_region(
+            &mut engine,
+            crate::host_pool::HostPoolSite::Replay,
+            |mut exec| calibrate(&mut exec, Instant::now() + Duration::from_secs(60)),
+        )
+        .unwrap()
+        .expect("real measurement was rejected");
+        for rates in [payload.copy, payload.fill] {
+            assert!(std::iter::once(rates.setup)
+                .chain(
+                    rates
+                        .runs
+                        .iter()
+                        .flat_map(|curve| curve.points.iter().map(|p| p.1))
+                )
+                .chain(
+                    rates
+                        .elements
+                        .iter()
+                        .flat_map(|curve| curve.points.iter().map(|p| p.1))
+                )
+                .all(|value| value.is_finite() && value >= 0.0));
+        }
     }
 }

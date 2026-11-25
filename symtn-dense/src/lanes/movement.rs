@@ -33,6 +33,22 @@ pub fn movement_region<T: Send + 'static, R>(
                         .as_ref()
                         .and_then(|_| calibrate(exec, deadline))
                         .filter(|_| Instant::now() <= deadline);
+                    #[cfg(test)]
+                    {
+                        use crate::probe::{add, Event};
+                        add(
+                            if payload.is_some() {
+                                Event::MovementCalibrationSuccess
+                            } else {
+                                Event::MovementCalibrationFailure
+                            },
+                            1,
+                        );
+                        add(
+                            Event::MovementCalibrationMicros,
+                            start.elapsed().as_micros().min(usize::MAX as u128) as usize,
+                        );
+                    }
                     rates = Some(Calibration {
                         dispatch: dispatch.unwrap_or_default(),
                         payload,
@@ -176,6 +192,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(seen.get(Event::MovementCalibration), 2);
+        assert_eq!(
+            seen.get(Event::MovementCalibrationFailure),
+            seen.get(Event::MovementCalibration)
+        );
+        assert_eq!(seen.get(Event::MovementCalibrationSuccess), 0);
     }
 
     /// Ineligible calls never probe or retain, whereas admitted eligible calls do.
@@ -314,6 +335,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(seen.get(Event::MovementCalibration), 1);
+    }
+
+    /// Each cold accepted payload contributes one success and no rejection;
+    /// reuse is the control that contributes no second outcome.
+    #[test]
+    fn accepted_payload_outcomes_are_counted_only_when_cold() {
+        let mut engine = free_engine();
+        let seen = record();
+        for _ in 0..2 {
+            movement_region(
+                &mut engine,
+                true,
+                |_, _| Some(()),
+                |_, payload| assert!(payload.is_some()),
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            seen.get(Event::MovementCalibrationSuccess),
+            seen.get(Event::MovementCalibration)
+        );
+        assert_eq!(seen.get(Event::MovementCalibrationFailure), 0);
     }
 
     /// Rejected calibration routes through the literal base all-or-one rule;

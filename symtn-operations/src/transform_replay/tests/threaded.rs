@@ -688,7 +688,6 @@ fn replay_matches_the_block_oracle_on_interleaved_su2_blocks() {
                 &source,
                 alpha,
                 None,
-                None,
             )
             .unwrap()
         });
@@ -1162,7 +1161,6 @@ fn canonical_interleaved_runs_replay_the_dense_oracle() {
                 &source,
                 1.0,
                 None,
-                None,
             )
             .unwrap()
             .expect("canonical storage admits the owned output");
@@ -1210,7 +1208,6 @@ fn canonical_interleaved_runs_replay_the_dense_oracle() {
                 4,
                 &csource,
                 Complex64::new(1.0, 0.0),
-                None,
                 None,
             )
             .unwrap()

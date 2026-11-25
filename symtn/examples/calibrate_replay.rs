@@ -22,8 +22,10 @@ use symtn_core::{
 use symtn_dense::DefaultDenseExecutor;
 use symtn_operations::host_pool::{lane_region, HostPoolSite};
 use symtn_operations::{
-    try_tree_transform_structure_overwrite_owned_raw, TreeTransformBlock, TreeTransformBlockSpec,
-    TreeTransformReplayProfile, TreeTransformStructure, TreeTransformWorkspace,
+    online_movement_calibration, try_tree_transform_structure_overwrite_owned_raw,
+    try_tree_transform_structure_overwrite_reusing_owned_raw, TreeTransformBlock,
+    TreeTransformBlockSpec, TreeTransformReplayProfile, TreeTransformStructure,
+    TreeTransformWorkspace,
 };
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -264,7 +266,6 @@ impl Fixture {
             &[],
             1.0,
             None,
-            None,
         )?
         .ok_or("source fill lacks an owned-overwrite proof")?;
         Ok(())
@@ -276,7 +277,7 @@ impl Fixture {
         output: Option<Vec<f64>>,
         profile: Option<&mut TreeTransformReplayProfile>,
     ) -> Res<Vec<f64>> {
-        Ok(try_tree_transform_structure_overwrite_owned_raw(
+        Ok(try_tree_transform_structure_overwrite_reusing_owned_raw(
             engine,
             &mut self.dense,
             &mut self.workspace,
@@ -1493,6 +1494,9 @@ fn main() -> Res<()> {
         } else {
             CpuEngine::new(Pool::builder().threads(q).build()?)
         };
+        if q == width {
+            println!("{}", online_movement_calibration(&mut engine)?);
+        }
         let mut dispatch_cold_s = section.elapsed().as_secs_f64();
         if q == 1 {
             println!("D(1) = 0 ns (serial engine)");

@@ -34,10 +34,39 @@ fn unmodeled_singles_retain_the_base_all_or_one_route() {
             );
             let route =
                 base_movement_width(structure.required_len().unwrap(), budget, items, full_cost);
-            let offer = if route == 1 { budget } else { 1 };
+            let expected = if route == 1 {
+                vec![budget; items]
+            } else {
+                match items {
+                    2 => vec![2, 2],
+                    3 => vec![2, 1, 1],
+                    _ => vec![1; items],
+                }
+            };
             let (offers, _) = recorded(&mut engine, &transform, &structure, &structure);
-            assert_eq!(offers, vec![offer; items]);
+            assert_eq!(offers, expected);
         }
+    }
+}
+
+/// Base Singles retain all caller slots across their leaves; a serial engine
+/// is the control with no surplus to lend to a planned inner copy.
+#[test]
+fn auto_singles_share_surplus_slots() {
+    for (items, expected) in [(2, vec![4, 4]), (3, vec![2, 2, 4])] {
+        let structure =
+            Arc::new(BlockStructure::packed_column_major(1, vec![vec![4096]; items]).unwrap());
+        let specs = (0..items)
+            .map(|block| TreeTransformBlockSpec::single(block, block, 1.0))
+            .collect::<Vec<_>>();
+        let transform =
+            TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+        let mut wide = engine(8, CpuBatchStrategy::Auto);
+        let (mut offers, _) = recorded(&mut wide, &transform, &structure, &structure);
+        offers.sort_unstable();
+        assert_eq!(offers, expected);
+        let (offers, _) = recorded(&mut CpuEngine::serial(), &transform, &structure, &structure);
+        assert_eq!(offers, vec![1; items]);
     }
 }
 
@@ -106,7 +135,6 @@ fn plan_group_chunks_retain_the_base_width() {
             structure.rank() / 2,
             &source,
             1.0,
-            None,
             None,
         )
         .unwrap()
@@ -248,7 +276,6 @@ fn custom_executor_values_equal_the_built_in_replay() {
                         2,
                         &source,
                         1.25,
-                        None,
                         None,
                     )
                     .unwrap()
@@ -543,7 +570,6 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                     dst.rank(),
                     &source[..src_len],
                     1.25,
-                    None,
                     None,
                 );
                 assert!(unsupported(owned.unwrap_err()), "{what}, owned");

@@ -285,7 +285,6 @@ impl<E: DenseExecutor> DenseTreeTransformOperations<E> {
             src_data,
             alpha,
             None,
-            None,
         )
     }
 }

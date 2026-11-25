@@ -113,18 +113,31 @@ where
                 )
             };
             let mut inactive_width = run_threads;
+            let mut calibrated_singles = false;
+            let mut calibrated_inactive = false;
             if let Some((rates, dispatch)) = calibration {
-                let [single_width, fill_width] =
-                    super::movement::widths(rates, dispatch, schedule, exec.budget());
+                let largest = schedule.single_movement.largest;
+                let admits_largest = copy_eligible
+                    && largest.planned
+                    && inline_admits(gate, exec.token_ref(), largest.elements);
+                let [single_width, fill_width] = super::movement::widths(
+                    rates,
+                    dispatch,
+                    schedule,
+                    exec.budget(),
+                    admits_largest,
+                );
                 if copy_eligible
                     && schedule.single_movement.exact_working_set
                     && schedule.single_movement.supported_span
                 {
                     singles_width = single_width;
                     split_singles = single_width > 1 && schedule.single_runs.len() > 1;
+                    calibrated_singles = true;
                 }
                 if fill_eligible && schedule.inactive_movement.supported_span {
                     inactive_width = fill_width;
+                    calibrated_inactive = true;
                 }
             }
             workspace
@@ -152,7 +165,12 @@ where
                     src,
                 };
                 run_moves(
-                    exec.reborrow(),
+                    if calibrated_inactive {
+                        exec.reborrow()
+                            .limit(core::num::NonZeroUsize::new(inactive_width).unwrap())
+                    } else {
+                        exec.reborrow()
+                    },
                     writer,
                     layouts,
                     schedule,
@@ -196,7 +214,11 @@ where
                     src,
                 };
                 run_moves(
-                    exec,
+                    if calibrated_singles {
+                        exec.limit(core::num::NonZeroUsize::new(singles_width).unwrap())
+                    } else {
+                        exec
+                    },
                     writer,
                     layouts,
                     schedule,

@@ -10,7 +10,8 @@
 //!
 //! The `testing` feature is unstable and internal: it exposes the per-block
 //! strided tree-transform driver and scalar recoupling as a reference oracle
-//! (and adds a method to `HostKernelAdapter`). Do not enable it in applications.
+//! (and adds a method to `HostKernelAdapter`), calibration diagnostics and a
+//! reused owned-output probe for the calibration example. Do not enable it in applications.
 
 #[cfg(test)]
 #[path = "../../tests/support/su2.rs"]

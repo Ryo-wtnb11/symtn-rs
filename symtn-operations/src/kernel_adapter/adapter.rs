@@ -232,7 +232,7 @@ pub(crate) mod sealed {
             if bound == 0 || exec.is_serial() || !exec.carries_team() {
                 return;
             }
-            // Split first narrows to a phase width, then halves exact shares.
+            // Base splits halve the caller token; calibrated splits first limit to their priced width.
             let budget = exec.budget().get();
             for root in
                 std::iter::once(budget).chain(widths.iter().copied().map(|width| width.min(budget)))

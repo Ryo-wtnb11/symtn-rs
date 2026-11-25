@@ -382,12 +382,16 @@ For a calibrated phase at working set `W`, the item model is
 in log working-set size and extend flat beyond their endpoints; OS cache
 capacities never select a regime. The additive phase cost is `S`; `M` is a
 conservative hull-run bound from component maxima. It is exact when the same
-run attains those maxima. At budget `p`, inline is approximated by
-`(S(W) - M(W)) + min(M(W), D(p) + M(W)/p)`. A split at `q > 1` costs
+run attains those maxima. At budget `p`, inline is `S(W)` for inactive fill
+and for Singles whose largest role has no retained plan or whose caller gate
+rejects that role. Otherwise inline is approximated by
+`(S(W) - m(W)) + min(m(W), D(p) + m(W)/p)`, where `m` prices the actual
+largest role's traversal rather than the hull bound. A split at `q > 1` costs
 `D(q) + max(M(W/q), S(W/q)/q)`. This models unequal work and per-thread
 working sets approximately; it does not predict actual equal-count partition
 loads or change Strided's own planned-kernel admission. Ties keep the smaller
-route width. Route width one executes inline on the caller's whole token;
+route width. Calibrated splits limit the token to the priced `q` slots.
+Route width one executes inline on the caller's whole token;
 only a forced `Sequential` restricts that token to one worker.
 The search merges dispatch anchors and both integer neighbours of curve-knot
 crossings. Each resulting split-cost interval is convex, so integer bisection
@@ -408,8 +412,22 @@ The local D(q) does not replace Strided's dispatch table.
 
 One shared 10 ms planned deadline includes dispatch, replay fixture creation,
 allocation, first stores, sampling and validation. Dispatch has a 2 ms allowance;
-replay receives the remaining time. Finite, nonnegative, consistent constants
-are required. An incomplete or invalid fit retains a failed outcome and uses
+replay receives the remaining time. A deadline check precedes every fixture
+build. The online working-set ladder is 64 KiB, 1 MiB and 4 MiB; one source and
+one uninitialized destination allocation, each 4 MiB, serve all copy/fill kinds
+and run geometries, including source stride padding. No separate warm-up runs
+at 1 MiB or above. Two measured samples at those sizes retain the lower reused
+buffer result; smaller fixtures use three batches after one warm-up. The
+cache-resident one/many-run difference must exceed twenty times the measured
+timer/batch jitter before it supplies a flat online r curve. Large-W run
+dependence remains unmeasured and belongs to offline calibration.
+Finite, nonnegative constants are required; element curves may decrease by at
+most 10% between points before a monotone envelope is applied for split search.
+Raw samples and signed fit values remain available from the testing-only
+`online_movement_calibration` diagnostic, which the calibration example invokes
+once on its widest engine and prints with Some/None and elapsed microseconds.
+Dense test probes count complete-attempt successes, failures and elapsed
+microseconds, including dispatch. An incomplete or invalid fit retains a failed outcome and uses
 the base rule until eviction or `symtn::scratch::trim`. Synchronous kernels and
 OS descheduling can overrun a deadline; CI and host cold-call measurements
 must validate this budget. No measured speedup or successful calibration is
@@ -436,7 +454,9 @@ independently of Single coefficients.
 Under `Auto`, the original budget's dispatch cost must pay back three times
 against the whole destination's Strided Copy estimate, then the width is
 clamped to runnable parts; otherwise it is one. The original shared hull-run
-clamp and inline gate behavior are retained on fallback. Member movement and
+clamp and inline gate behavior are retained on fallback. Base splits keep the
+whole caller token and halve it at each fork, so leaves retain surplus slots
+for their inner kernels. Member movement and
 plan-group chunking always use this base rule, independently of the calibrated
 Singles width. Forced policies keep their batch decision (`lanes * item_threads`)
 clamped to runnable parts. Provider arithmetic and inner-width rules are unchanged.
@@ -497,8 +517,9 @@ uses destination address order for owned outputs, and block order for a
 caller-provided destination at base width one (address order above one).
 A split part of
 `n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
-workers to its left half and forks its token with exactly those logical
-shares (the odd slot to the right); a part of one worker or one item is a leaf, which writes its items
+logical workers to its left half and forks its token in halves (the odd slot
+to the right); only calibrated direct phases first limit that token to the
+priced width. A part of one logical worker or one item is a leaf, which writes its items
 whole on its token. The Multi groups then replay in chunks of their independent
 base width `t`
 consecutive groups: each chunk's pack is split the same way over its

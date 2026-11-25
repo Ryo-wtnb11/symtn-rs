@@ -92,16 +92,29 @@ pub struct TreeTransformReplay<T> {
 // Classification affects admission, not the compiled mathematical transform.
 impl<T: PartialEq> PartialEq for TreeTransformReplay<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.rank == other.rank
-            && self.storage_conjugate == other.storage_conjugate
-            && self.identity == other.identity
-            && self.blocks == other.blocks
-            && self.layouts == other.layouts
-            && self.coefficients == other.coefficients
-            && self.inactive_dst_layouts == other.inactive_dst_layouts
-            && self.physical_overwrite_len == other.physical_overwrite_len
-            && self.recoupling_plan == other.recoupling_plan
-            && self.parallel_schedule == other.parallel_schedule
+        let Self {
+            rank,
+            storage_conjugate,
+            identity,
+            blocks,
+            layouts,
+            coefficients,
+            single_coefficients_are_identity: _,
+            inactive_dst_layouts,
+            physical_overwrite_len,
+            recoupling_plan,
+            parallel_schedule,
+        } = self;
+        rank == &other.rank
+            && storage_conjugate == &other.storage_conjugate
+            && identity == &other.identity
+            && blocks == &other.blocks
+            && layouts == &other.layouts
+            && coefficients == &other.coefficients
+            && inactive_dst_layouts == &other.inactive_dst_layouts
+            && physical_overwrite_len == &other.physical_overwrite_len
+            && recoupling_plan == &other.recoupling_plan
+            && parallel_schedule == &other.parallel_schedule
     }
 }
 

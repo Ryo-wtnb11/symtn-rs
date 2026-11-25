@@ -47,6 +47,9 @@ use coefficients::*;
 pub use entry::*;
 pub(crate) use kernels::*;
 pub use member::*;
+#[cfg(all(feature = "tenferro", any(test, feature = "testing")))]
+#[doc(hidden)]
+pub use movement::online_movement_calibration;
 pub use owned::*;
 use writers::{InitializedWriter, OwnedWriter, ReplayParts};
 

@@ -1301,6 +1301,8 @@ fn compact(placement: &mut Placement, count: &mut Vec<usize>) {
 }
 
 /// Base all-or-one movement rule, using dispatch at the caller budget.
+/// Cap logical width by runnable parts so a one-item part stays a leaf;
+/// the split still lends surplus token slots to that leaf's inner kernels.
 pub fn flat_width(exec: &Exec<'_>, estimate: Duration, runnable: usize) -> usize {
     let budget = exec.budget();
     let runnable = runnable.max(1);

@@ -1,12 +1,11 @@
 use super::*;
 
 /// Internal, unstable owned-output path for the built-in host executor:
-/// allocates or reuses the destination uninitialised and writes every element exactly
+/// allocates the destination uninitialised and writes every element exactly
 /// once. Returns `Ok(None)` without allocating output when the destination
 /// does not have a proof of exact physical overwrite coverage.
 ///
 /// The writer runs on the same route as the initialised replay ([`replay`]).
-/// `output` optionally supplies an allocation to reuse; its contents are discarded.
 /// Nothing is published unless every write succeeded. A forced batch policy `dense` cannot honor is refused first,
 /// as the initialised replay refuses it, even where `Ok(None)` would follow.
 ///
@@ -18,6 +17,76 @@ use super::*;
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn try_tree_transform_structure_overwrite_owned_raw<E, D, C>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    structure: &TreeTransformStructure<C>,
+    dst_structure: &Arc<BlockStructure>,
+    src_structure: &Arc<BlockStructure>,
+    nout: usize,
+    src_data: &[D],
+    alpha: D,
+    profile: Option<&mut TreeTransformReplayProfile>,
+) -> Result<Option<Vec<D>>, OperationError>
+where
+    E: DenseExecutor,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    overwrite_owned(
+        engine,
+        dense,
+        workspace,
+        structure,
+        dst_structure,
+        src_structure,
+        nout,
+        src_data,
+        alpha,
+        None,
+        profile,
+    )
+}
+
+/// Calibration-only replay into an optional reused allocation; discards its contents.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn try_tree_transform_structure_overwrite_reusing_owned_raw<E, D, C>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    structure: &TreeTransformStructure<C>,
+    dst_structure: &Arc<BlockStructure>,
+    src_structure: &Arc<BlockStructure>,
+    nout: usize,
+    src_data: &[D],
+    alpha: D,
+    output: Option<Vec<D>>,
+    profile: Option<&mut TreeTransformReplayProfile>,
+) -> Result<Option<Vec<D>>, OperationError>
+where
+    E: DenseExecutor,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    overwrite_owned(
+        engine,
+        dense,
+        workspace,
+        structure,
+        dst_structure,
+        src_structure,
+        nout,
+        src_data,
+        alpha,
+        output,
+        profile,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn overwrite_owned<E, D, C>(
     engine: &mut dyn Engine,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -219,7 +288,6 @@ mod owned_overwrite_tests {
                 &real_src,
                 3.0,
                 None,
-                None,
             )
             .unwrap()
             .unwrap();
@@ -238,7 +306,6 @@ mod owned_overwrite_tests {
                 1,
                 &complex_src,
                 Complex64::new(3.0, 1.0),
-                None,
                 None,
             )
             .unwrap()
@@ -279,7 +346,6 @@ mod owned_overwrite_tests {
                 1,
                 &non_finite,
                 Complex64::new(1.0, 0.0),
-                None,
                 None,
             )
             .unwrap()
@@ -350,7 +416,6 @@ mod owned_overwrite_tests {
             &[11.0, 13.0],
             2.0,
             None,
-            None,
         )
         .unwrap()
         .unwrap();
@@ -400,7 +465,6 @@ mod owned_overwrite_tests {
                     1,
                     &non_finite,
                     alpha,
-                    None,
                     None,
                 )
                 .unwrap()
@@ -467,7 +531,6 @@ mod owned_overwrite_tests {
                 1,
                 &source,
                 0.0,
-                None,
                 None,
             )
             .unwrap()
@@ -540,7 +603,6 @@ mod owned_overwrite_tests {
             2,
             &source,
             1.5,
-            None,
             None,
         )
         .unwrap();
@@ -646,7 +708,6 @@ mod owned_overwrite_tests {
             &source,
             1.5,
             None,
-            None,
         )
         .unwrap()
         .unwrap();
@@ -664,7 +725,6 @@ mod owned_overwrite_tests {
                     1,
                     &source,
                     1.5,
-                    None,
                     None,
                 )
             })
@@ -691,7 +751,6 @@ mod owned_overwrite_tests {
             &complex_source,
             alpha,
             None,
-            None,
         )
         .unwrap()
         .unwrap();
@@ -707,7 +766,6 @@ mod owned_overwrite_tests {
                     1,
                     &complex_source,
                     alpha,
-                    None,
                     None,
                 )
             })
@@ -745,7 +803,6 @@ mod owned_overwrite_tests {
                     &source,
                     1.5,
                     None,
-                    None,
                 )
             })
             .unwrap()
@@ -782,7 +839,6 @@ mod owned_overwrite_tests {
                         1,
                         &source,
                         1.0,
-                        None,
                         None,
                     )
                 })
@@ -864,7 +920,6 @@ mod owned_overwrite_tests {
                 &source,
                 1.0,
                 None,
-                None,
             )
         });
         assert!(matches!(
@@ -899,7 +954,6 @@ mod owned_overwrite_tests {
             &[1.0; 6],
             1.0,
             None,
-            None,
         )
         .unwrap()
         .is_none());
@@ -920,7 +974,6 @@ mod owned_overwrite_tests {
             3,
             &[1.0; 6],
             1.0,
-            None,
             None,
         )
         .unwrap()

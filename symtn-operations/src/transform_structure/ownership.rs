@@ -294,6 +294,7 @@ fn movement_summary(
                     runs,
                     elements,
                     kind,
+                    planned: singles && layouts.role(layout)?.plan.is_some(),
                 };
             }
         }
@@ -508,12 +509,12 @@ mod tests {
             };
             assert_eq!(schedule.single_movement.max, max);
             assert_eq!(
-                schedule.single_movement.largest,
-                MovementItem {
-                    elements: 4,
-                    runs: if transpose { 2 } else { 1 },
-                    kind: usize::from(transpose)
-                }
+                (
+                    schedule.single_movement.largest.elements,
+                    schedule.single_movement.largest.runs,
+                    schedule.single_movement.largest.kind
+                ),
+                (4, if transpose { 2 } else { 1 }, usize::from(transpose))
             );
             assert_eq!(
                 schedule.inactive_movement.total,
@@ -526,6 +527,23 @@ mod tests {
             assert_eq!(schedule.inactive_movement.working_set_elements, 4);
         }
     }
+    /// A Single retains its role's planned capability; an inactive role of
+    /// the same geometry is the control that always remains serial.
+    #[test]
+    fn largest_role_marks_only_planned_singles() {
+        let dst = BlockStructure::packed_column_major(1, [vec![24], vec![24]]).unwrap();
+        let src = BlockStructure::packed_column_major(1, [vec![24]]).unwrap();
+        let transform = TreeTransformStructure::compile_structures(
+            &dst,
+            &src,
+            &[TreeTransformBlockSpec::single(0, 0, 1.0)],
+        )
+        .unwrap();
+        let schedule = transform.parallel_schedule();
+        assert!(schedule.single_movement.largest.planned);
+        assert!(!schedule.inactive_movement.largest.planned);
+    }
+
     /// Scalar normalization uses the uncalibrated broadcast arm for both copy
     /// and fill; a two-element role is the control admitted to the span model.
     #[test]

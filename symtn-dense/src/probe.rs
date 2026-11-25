@@ -37,9 +37,15 @@ pub(crate) enum Event {
     PlacementCostRead,
     /// One cold measurement of the engine's movement dispatch ladder.
     MovementCalibration,
+    /// A complete online dispatch and replay payload was accepted.
+    MovementCalibrationSuccess,
+    /// An online dispatch or replay measurement was rejected or incomplete.
+    MovementCalibrationFailure,
+    /// Microseconds in online dispatch, fixture creation, sampling and fitting.
+    MovementCalibrationMicros,
 }
 
-const EVENTS: usize = Event::MovementCalibration as usize + 1;
+const EVENTS: usize = Event::MovementCalibrationMicros as usize + 1;
 
 #[derive(Default)]
 struct Probe {
