@@ -242,7 +242,7 @@ where
         // must still be refused before anything is written, as initialized
         // replay refuses it in its inactive-block region.
         crate::host_pool::admit(engine)?;
-        initialize_owned(len, |spare| {
+        initialize_owned(Vec::new(), len, |spare| {
             self.write_fresh(
                 engine,
                 gemm,

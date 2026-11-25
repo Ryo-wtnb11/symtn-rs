@@ -35,6 +35,8 @@ mod coefficients;
 mod entry;
 mod kernels;
 mod member;
+#[cfg(feature = "tenferro")]
+mod movement;
 mod owned;
 #[cfg(test)]
 mod tests;

@@ -16,8 +16,8 @@
 //! `BatchDecision` for `(J, w)` (forced: `lanes * item_threads`); a forced
 //! policy's lane count is `min(decision.lanes, J)`, and Auto's is at most
 //! `L0 = min(S, J, decision.lanes)`. Block placement uses the token's table;
-//! movement phases separately use [`movement_region`]'s calibration. A
-//! single lane (one of the counts is one, or no job) takes every job on all
+//! eligible direct replay phases use [`movement_region`]'s calibration; other
+//! movement uses the base [`flat_width`] rule. A single lane (one of the counts is one, or no job) takes every job on all
 //! S slots, before any ordering.
 //!
 //! The baseline is `L0` lanes of equal shares of S (the remainder one slot
@@ -86,6 +86,7 @@ mod runner;
 
 pub use movement::movement_region;
 pub(crate) use movement::Calibration;
+pub use placement::flat_width;
 pub(crate) use placement::item_time;
 pub(crate) use placement::{allocate, lane_allocations, searchable, slots, LaneAllocationCache};
 use placement::{parallel_split, words, PlaceScratch};

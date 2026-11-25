@@ -14,6 +14,8 @@ pub(super) struct ReplayParts<'a, C> {
     pub blocks: &'a [TreeTransformBlock],
     pub single_coefficients: &'a [C],
     pub storage_conjugate: bool,
+    #[cfg(feature = "tenferro")]
+    pub single_coefficients_are_identity: bool,
 }
 
 impl<'a, C: Copy> ReplayParts<'a, C> {
@@ -23,6 +25,8 @@ impl<'a, C: Copy> ReplayParts<'a, C> {
             blocks: task.blocks(),
             single_coefficients: task.single_coefficients(),
             storage_conjugate: task.storage_conjugate(),
+            #[cfg(feature = "tenferro")]
+            single_coefficients_are_identity: task.single_coefficients_are_identity(),
         }
     }
 }
@@ -70,6 +74,12 @@ pub(super) trait DestinationWriter<T, D>: Sync {
     /// Whether the destination is uninitialized memory this replay writes
     /// for the first time (an owned output), not a caller-provided one.
     const FIRST_TOUCH: bool;
+
+    /// Whether this writer uses the measured owned f64 copy/fill maps.
+    #[cfg(feature = "tenferro")]
+    fn movement_eligible(&self) -> [bool; 2] {
+        [false; 2]
+    }
 
     /// A fresh worker's kernel state.
     fn kernels(&self) -> Self::Kernels;
@@ -257,6 +267,17 @@ where
 {
     type Kernels = ();
     const FIRST_TOUCH: bool = true;
+
+    #[cfg(feature = "tenferro")]
+    fn movement_eligible(&self) -> [bool; 2] {
+        let f64 = std::any::TypeId::of::<D>() == std::any::TypeId::of::<f64>();
+        [
+            f64 && self.alpha.is_one()
+                && !self.task.storage_conjugate
+                && self.task.single_coefficients_are_identity,
+            f64,
+        ]
+    }
 
     fn kernels(&self) {}
 

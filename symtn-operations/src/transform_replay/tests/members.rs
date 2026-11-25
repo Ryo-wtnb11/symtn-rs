@@ -39,6 +39,65 @@ fn overwrite_members<E: DenseExecutor>(
     Ok(out)
 }
 
+/// Pack and scatter inherit the same all-or-one width chosen for the member batch.
+#[test]
+fn member_pack_and_scatter_retain_the_base_width() {
+    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+    let (dst, src, transform) = two_lane_fixture();
+    let (budget, members) = (4, 5);
+    let source = vec![1.0; members * src.required_len().unwrap()];
+    for dispatch_ns in [1, 1_000_000_000] {
+        let full_cost = Duration::from_nanos(dispatch_ns);
+        let row = WidthCosts::new([Duration::from_nanos(1), full_cost, full_cost]);
+        let mut engine = CpuEngine::new(
+            Pool::builder()
+                .threads(budget)
+                .dispatch_costs(DispatchCosts::new(row, row, row))
+                .build()
+                .unwrap(),
+        );
+        let mut destination = vec![0.0; members * dst.required_len().unwrap()];
+        let width = base_movement_width(
+            destination.len(),
+            budget,
+            members,
+            Duration::from_nanos(dispatch_ns),
+        );
+        let offer = if width == 1 { budget } else { 1 };
+        let mut kernels = ObservedKernels::tracing_widths();
+        tree_transform_members_overwrite_raw(
+            &mut engine,
+            &mut kernels,
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &dst,
+            &src,
+            &mut destination,
+            &source,
+            members,
+            &[],
+        )
+        .unwrap();
+        let start = destination.as_ptr() as usize;
+        let end = start + destination.len() * core::mem::size_of::<f64>();
+        let trace = kernels.width_trace.as_ref().unwrap().lock().unwrap();
+        let (scatter, pack): (Vec<_>, Vec<_>) = trace
+            .iter()
+            .partition(|(address, _)| (start..end).contains(address));
+        let schedule = transform.parallel_schedule();
+        let ranges = width.min(members);
+        assert_eq!(
+            pack.iter().map(|(_, width)| *width).collect::<Vec<_>>(),
+            vec![offer; schedule.pack_columns.len() * ranges],
+        );
+        assert_eq!(
+            scatter.iter().map(|(_, width)| *width).collect::<Vec<_>>(),
+            vec![offer; schedule.scatter_columns.len() * ranges],
+        );
+    }
+}
+
 /// What: with two and three members at budgets 1, 2 and 4 under `Auto`,
 /// and under `Outer` where the executor honors forced policies, through the
 /// built-in executor and through a custom executor, a member overwrite

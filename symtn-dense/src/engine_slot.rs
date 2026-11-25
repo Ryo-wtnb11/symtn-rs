@@ -1,7 +1,7 @@
 //! Values kept in the caller's CPU engine between calls, under the extension
 //! store's own entry and retained-byte limits: eager contraction scratch and
-//! a separate, private movement-dispatch calibration entry. Checkout/checkin
-//! address scratch only; clear and retained_bytes cover both entries.
+//! a separate, private movement calibration entry (dispatch and replay outcome).
+//! Checkout/checkin address scratch only; clear and retained_bytes cover both entries.
 //!
 //! Internal and unstable despite being public for `symtn`, which keeps its
 //! eager Host contraction scratch here.
@@ -200,30 +200,35 @@ pub fn clear(engine: &mut dyn Engine) {
 pub(crate) mod tests;
 
 #[cfg(feature = "tenferro")]
-pub(crate) fn checkout_movement(engine: &mut dyn Engine) -> Option<crate::lanes::Calibration> {
+pub(crate) fn checkout_movement<T: Send + 'static>(
+    engine: &mut dyn Engine,
+) -> Option<crate::lanes::Calibration<T>> {
     store::with_store(engine, |s| store::checkout(s, &store::MOVEMENT)).flatten()
 }
 
 #[cfg(feature = "tenferro")]
-pub(crate) fn checkin_movement(engine: &mut dyn Engine, value: crate::lanes::Calibration) {
+pub(crate) fn checkin_movement<T: Send + 'static>(
+    engine: &mut dyn Engine,
+    value: crate::lanes::Calibration<T>,
+) {
     store::with_store(engine, |s| {
         store::checkin(
             s,
             store::MOVEMENT,
             value,
-            crate::lanes::Calibration::retained_bytes,
+            crate::lanes::Calibration::<T>::retained_bytes,
         )
     });
 }
 
 #[cfg(feature = "tenferro")]
-pub(crate) fn movement_fits(engine: &mut dyn Engine, bytes: usize) -> bool {
+pub(crate) fn movement_fits<T: Send + 'static>(engine: &mut dyn Engine, bytes: usize) -> bool {
     store::with_store(engine, |s| {
         store::admits(
             s,
             &store::MOVEMENT,
             bytes,
-            crate::lanes::Calibration::retained_bytes,
+            crate::lanes::Calibration::<T>::retained_bytes,
         )
     })
     .unwrap_or(false)

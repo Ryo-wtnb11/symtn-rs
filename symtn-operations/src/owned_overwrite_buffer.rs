@@ -80,11 +80,10 @@ struct OwnedOverwriteBuffer<D: Copy> {
 }
 
 impl<D: Copy> OwnedOverwriteBuffer<D> {
-    fn new(target_len: usize) -> Self {
-        Self {
-            data: Vec::with_capacity(target_len),
-            target_len,
-        }
+    fn new(mut data: Vec<D>, target_len: usize) -> Self {
+        data.clear();
+        data.reserve_exact(target_len);
+        Self { data, target_len }
     }
 
     fn spare_mut(&mut self) -> &mut [MaybeUninit<D>] {
@@ -116,21 +115,22 @@ pub(crate) fn write_zeros<D: Copy + num_traits::Zero>(piece: &mut [MaybeUninit<D
     unsafe { piece.assume_init_mut() }
 }
 
-/// Runs `write` over `target_len` uninitialized elements and returns them
-/// as a `Vec` of length `target_len` on `Ok`; on `Err` or a panic the
-/// storage is dropped at length zero.
+/// Reuses `data`'s allocation, runs `write` over `target_len` uninitialized
+/// elements and returns a `Vec` of that length on `Ok`; on `Err` or a panic
+/// the storage is dropped at length zero.
 ///
 /// The caller's `write` must initialize every element of its argument
 /// before returning `Ok`; this is the only obligation the length transition
 /// rests on.
 pub(crate) fn initialize_owned<D, E>(
+    data: Vec<D>,
     target_len: usize,
     write: impl FnOnce(&mut [MaybeUninit<D>]) -> Result<(), E>,
 ) -> Result<Vec<D>, E>
 where
     D: Copy,
 {
-    let mut buffer = OwnedOverwriteBuffer::new(target_len);
+    let mut buffer = OwnedOverwriteBuffer::new(data, target_len);
     write(buffer.spare_mut())?;
     Ok(buffer.finish())
 }
@@ -192,25 +192,47 @@ mod tests {
     fn completed_transaction_returns_initialized_values() {
         // What: the sole unsafe length transition follows complete writes and
         // remains suitable for Miri's uninitialized-memory checks.
-        let values = initialize_owned(4, |dst| -> Result<(), ()> {
-            for (index, slot) in dst.iter_mut().enumerate() {
-                slot.write(index + 1);
-            }
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(values, [1, 2, 3, 4]);
+        for data in [Vec::new(), vec![99; 2], vec![99; 8]] {
+            let values = initialize_owned(data, 4, |dst| -> Result<(), ()> {
+                for (index, slot) in dst.iter_mut().enumerate() {
+                    slot.write(index + 1);
+                }
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(values, [1, 2, 3, 4]);
+        }
+    }
+
+    #[test]
+    fn completed_transaction_reuses_sufficient_capacity() {
+        // Purpose: replay keeps an existing allocation even when its initialized length differs.
+        for initial_len in [0, 2, 8] {
+            let mut data = Vec::with_capacity(8);
+            data.resize(initial_len, 99);
+            let pointer = data.as_ptr();
+            let values = initialize_owned(data, 4, |dst| -> Result<(), ()> {
+                for slot in dst {
+                    slot.write(7);
+                }
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(values.as_ptr(), pointer);
+        }
     }
 
     #[test]
     fn failed_partial_transaction_does_not_return_storage() {
         // What: an error after a partial write drops the length-zero buffer
         // instead of exposing a Vec containing uninitialized elements.
-        let result = initialize_owned(4, |dst| {
-            dst[0].write(7u64);
-            Err("injected writer failure")
-        });
-        assert_eq!(result, Err("injected writer failure"));
+        for data in [Vec::new(), vec![99; 8]] {
+            let result = initialize_owned(data, 4, |dst| {
+                dst[0].write(7u64);
+                Err("injected writer failure")
+            });
+            assert_eq!(result, Err("injected writer failure"));
+        }
     }
 
     #[test]
@@ -218,7 +240,7 @@ mod tests {
         // What: unwinding after a partial write drops only a length-zero Vec;
         // no partially initialized owned output can escape the transaction.
         let result = std::panic::catch_unwind(|| {
-            let _ = initialize_owned(4, |dst| -> Result<(), ()> {
+            let _ = initialize_owned(Vec::new(), 4, |dst| -> Result<(), ()> {
                 dst[0].write(7u64);
                 panic!("injected writer panic");
             });

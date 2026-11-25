@@ -52,6 +52,33 @@ pub(crate) enum TreeTransformDirectItem {
     Single { block: u32 },
 }
 
+/// Host-independent role counts, grouped by the executed span traversal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MovementCounts {
+    pub roles: [usize; 2],
+    pub runs: [usize; 2],
+    pub elements: [usize; 2],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MovementItem {
+    pub runs: usize,
+    pub elements: usize,
+    pub kind: usize,
+}
+
+/// Totals and conservative component maxima over indivisible hull jobs.
+/// Source working-set counts are exact only for proved tiled storage.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MovementSummary {
+    pub total: MovementCounts,
+    pub max: MovementCounts,
+    pub largest: MovementItem,
+    pub working_set_elements: usize,
+    pub exact_working_set: bool,
+    pub supported_span: bool,
+}
+
 /// The replay schedule of a compiled structure, built eagerly with it and
 /// immutable afterwards, so derived equality compares every field: the pack
 /// and scatter columns, the address-ordered direct lists and their hull
@@ -81,6 +108,8 @@ pub(crate) struct TreeTransformParallelSchedule {
     /// The element count of the largest Single whose role retains a
     /// Strided plan (zero when none does).
     pub singles_planned: usize,
+    pub single_movement: MovementSummary,
+    pub inactive_movement: MovementSummary,
     /// Per plan group, its scatter columns' destination span.
     pub group_spans: Vec<TreeTransformGroupSpan>,
     /// The most workers a replay can keep busy on one phase: the Singles
@@ -100,6 +129,7 @@ impl TreeTransformParallelSchedule {
     /// exact length.
     pub(crate) fn retained_bytes(&self) -> usize {
         let bytes = |capacity: usize, size: usize| capacity.saturating_mul(size);
+        // Inline summaries are included in the replay core size_of charge.
         bytes(
             self.pack_columns.capacity(),
             core::mem::size_of::<TreeTransformPackReplay>(),

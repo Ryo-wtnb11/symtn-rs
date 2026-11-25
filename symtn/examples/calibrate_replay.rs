@@ -1,8 +1,6 @@
 //! Offline CPU calibration of the compiled, owned tree-transform replay.
 //! Usage: calibrate_replay <profile-path> [width]
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::hint::black_box;
@@ -34,79 +32,6 @@ const BANDWIDTH_TOLERANCE: f64 = 0.20;
 const STABILITY: f64 = 0.05;
 const MAX_WORKING_SET: usize = 1024 * 1024 * 1024;
 const KINDS: [&str; 2] = ["contiguous-run", "strided-inner"];
-
-// Recycle only the serial probe's owned output; production replay still owns every write.
-struct ReplayAllocator;
-thread_local! {
-    static RECYCLED: Cell<Option<(*mut u8, Layout)>> = const { Cell::new(None) };
-}
-#[global_allocator]
-static ALLOCATOR: ReplayAllocator = ReplayAllocator;
-
-// SAFETY: a reserved pointer comes from a forgotten Vec with exactly this layout.
-// Taking the slot transfers its sole ownership to the allocating Vec; other calls
-// use System, including zeroed allocations and reallocations.
-unsafe impl GlobalAlloc for ReplayAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        RECYCLED
-            .try_with(|slot| {
-                if let Some((pointer, reserved)) = slot.get() {
-                    if reserved == layout {
-                        slot.set(None);
-                        return pointer;
-                    }
-                }
-                System.alloc(layout)
-            })
-            .unwrap_or_else(|_| System.alloc(layout))
-    }
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        System.dealloc(pointer, layout);
-    }
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        System.alloc_zeroed(layout)
-    }
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        System.realloc(pointer, layout, size)
-    }
-}
-
-struct RecycledOutput;
-impl Drop for RecycledOutput {
-    fn drop(&mut self) {
-        RECYCLED.with(|slot| {
-            if let Some((pointer, layout)) = slot.take() {
-                // SAFETY: an unconsumed slot still owns the forgotten Vec allocation.
-                unsafe { System.dealloc(pointer, layout) };
-            }
-        });
-    }
-}
-
-fn reuse_output(output: &mut Vec<f64>, call: impl FnOnce() -> Res<Vec<f64>>) -> Res<()> {
-    if output.capacity() == 0 {
-        *output = call()?;
-        return Ok(());
-    }
-    let mut previous = std::mem::take(output);
-    let pointer = previous.as_mut_ptr();
-    let layout = Layout::array::<f64>(previous.capacity())?;
-    RECYCLED.with(|slot| {
-        assert!(slot.get().is_none(), "nested output recycling");
-        slot.set(Some((pointer.cast(), layout)));
-    });
-    std::mem::forget(previous);
-    let reservation = RecycledOutput;
-    let next = call()?;
-    assert_eq!(
-        next.as_ptr(),
-        pointer,
-        "replay did not consume its reserved output"
-    );
-    drop(reservation);
-    *output = next;
-    Ok(())
-}
 
 struct Fixture {
     structure: Arc<BlockStructure>,
@@ -339,6 +264,7 @@ impl Fixture {
             &[],
             1.0,
             None,
+            None,
         )?
         .ok_or("source fill lacks an owned-overwrite proof")?;
         Ok(())
@@ -347,6 +273,7 @@ impl Fixture {
     fn replay(
         &mut self,
         engine: &mut CpuEngine,
+        output: Option<Vec<f64>>,
         profile: Option<&mut TreeTransformReplayProfile>,
     ) -> Res<Vec<f64>> {
         Ok(try_tree_transform_structure_overwrite_owned_raw(
@@ -359,6 +286,7 @@ impl Fixture {
             self.rank / 2,
             &self.data,
             1.0,
+            output,
             profile,
         )?
         .ok_or("fixture lacks an owned-overwrite proof")?)
@@ -366,13 +294,13 @@ impl Fixture {
 
     fn phase(&mut self, engine: &mut CpuEngine) -> Res<f64> {
         let mut profile = TreeTransformReplayProfile::default();
-        black_box(self.replay(engine, Some(&mut profile))?);
+        black_box(self.replay(engine, None, Some(&mut profile))?);
         Ok(profile.single_total.as_secs_f64() * 1e9)
     }
 
     fn reused_phase(&mut self, engine: &mut CpuEngine, output: &mut Vec<f64>) -> Res<f64> {
         let mut profile = TreeTransformReplayProfile::default();
-        reuse_output(output, || self.replay(engine, Some(&mut profile)))?;
+        *output = self.replay(engine, Some(std::mem::take(output)), Some(&mut profile))?;
         black_box(&*output);
         Ok(profile.single_total.as_secs_f64() * 1e9)
     }
@@ -688,7 +616,7 @@ fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
                 elements: 0,
                 rank: 4,
             };
-            if replay.replay(engine, None)? != y.dense_data()? {
+            if replay.replay(engine, None, None)? != y.dense_data()? {
                 return Err("staged replay differs from public permute".into());
             }
             if classes.is_empty() {
@@ -1250,7 +1178,7 @@ fn main() -> Res<()> {
             fixture.print_geometry("curve")?;
             payload_peak = payload_peak.max(fixture.payload_bytes()?);
             let setup = cold.elapsed().as_secs_f64();
-            let mut output = fixture.replay(&mut serial, None)?;
+            let mut output = fixture.replay(&mut serial, None, None)?;
             payload_peak = payload_peak.max(fixture.payload_bytes()? + output.len() * 8);
             let time = measure(
                 || Ok(Some(fixture.reused_phase(&mut serial, &mut output)?)),
@@ -1316,7 +1244,7 @@ fn main() -> Res<()> {
                 fixture.print_geometry("paired")?;
                 payload_peak = payload_peak.max(fixture.payload_bytes()?);
                 let setup = cold.elapsed().as_secs_f64();
-                let mut output = fixture.replay(&mut serial, None)?;
+                let mut output = fixture.replay(&mut serial, None, None)?;
                 let time = measure(
                     || Ok(Some(fixture.reused_phase(&mut serial, &mut output)?)),
                     256,
@@ -1343,7 +1271,7 @@ fn main() -> Res<()> {
     for elements in 1..=16 {
         let mut fixture = Fixture::new(1, &[elements, 1], &[0, 1], false)?;
         fixture.data = vec![1.0; elements];
-        let mut output = fixture.replay(&mut serial, None)?;
+        let mut output = fixture.replay(&mut serial, None, None)?;
         let time = measure(
             || Ok(Some(fixture.reused_phase(&mut serial, &mut output)?)),
             256,
@@ -1620,7 +1548,7 @@ fn main() -> Res<()> {
             let setup_s = cold.elapsed().as_secs_f64();
             let s = measure(
                 || {
-                    black_box(fixture.replay(&mut engine, None)?);
+                    black_box(fixture.replay(&mut engine, None, None)?);
                     Ok(None)
                 },
                 5,
@@ -1651,7 +1579,7 @@ fn main() -> Res<()> {
                 let setup_s = cold.elapsed().as_secs_f64();
                 let s = measure(
                     || {
-                        black_box(fixture.replay(&mut engine, None)?);
+                        black_box(fixture.replay(&mut engine, None, None)?);
                         Ok(None)
                     },
                     1,
@@ -1669,7 +1597,7 @@ fn main() -> Res<()> {
                     if q == width {
                         let retest = measure(
                             || {
-                                black_box(fixture.replay(&mut serial, None)?);
+                                black_box(fixture.replay(&mut serial, None, None)?);
                                 Ok(None)
                             },
                             1,
@@ -1763,39 +1691,6 @@ fn main() -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reserved_output_is_reused_by_the_allocating_writer() {
-        // Purpose: the same allocation survives complete writes through the replay allocator.
-        for len in [2, 16, 8192] {
-            let mut output = vec![1.0; len];
-            let pointer = output.as_ptr();
-            reuse_output(&mut output, || {
-                let mut next = Vec::with_capacity(len);
-                next.resize(len, 3.0);
-                Ok(next)
-            })
-            .unwrap();
-            assert_eq!(output.as_ptr(), pointer);
-            assert!(output.iter().all(|&x| x == 3.0));
-        }
-    }
-
-    #[test]
-    fn failed_replay_releases_its_output_reservation() {
-        // Purpose: failure before or after allocation leaves no unowned reserved buffer.
-        for allocate in [false, true] {
-            let mut output = vec![1.0; 16];
-            let result = reuse_output(&mut output, || {
-                if allocate {
-                    black_box(Vec::<f64>::with_capacity(16));
-                }
-                Err("writer failed".into())
-            });
-            assert!(result.is_err());
-            RECYCLED.with(|slot| assert!(slot.get().is_none()));
-        }
-    }
 
     #[test]
     fn phase_prediction_uses_the_phase_working_set_for_every_item() {

@@ -241,6 +241,24 @@ pub(super) fn assert_written_once(blocks: &[(usize, [usize; 2], [usize; 2])], ma
     }
 }
 
+/// Independent all-or-one oracle: price the caller's dispatch before the runnable clamp.
+pub(super) fn base_movement_width(
+    elements: usize,
+    budget: usize,
+    runnable: usize,
+    dispatch: Duration,
+) -> usize {
+    if budget > 1
+        && runnable > 1
+        && strided_kernel::execution::KernelClass::Copy.estimate(elements)
+            >= dispatch.saturating_mul(3)
+    {
+        budget.min(runnable)
+    } else {
+        1
+    }
+}
+
 /// An eager-policy engine of `threads` workers under `strategy`.
 pub(super) fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
     crate::host_pool::eager_test_engine(threads).with_batch_policy(CpuBatchPolicy::new(strategy))

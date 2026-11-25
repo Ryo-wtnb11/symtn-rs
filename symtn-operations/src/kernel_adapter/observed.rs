@@ -29,11 +29,20 @@ pub(crate) struct ObservedKernels<F = fn(KernelCall)> {
     /// With [`Self::failing_at`], the absolute element address whose write
     /// fails: the primitive that would write it returns an error instead.
     fail_at: Option<usize>,
+    pub(crate) width_trace: Option<std::sync::Arc<std::sync::Mutex<Vec<(usize, usize)>>>>,
 }
 
 impl ObservedKernels {
     pub(crate) fn recording() -> Self {
         Self::new(|_| {})
+    }
+
+    /// Records destination addresses and offered token widths across worker clones.
+    pub(crate) fn tracing_widths() -> Self {
+        Self {
+            width_trace: Some(Default::default()),
+            ..Self::recording()
+        }
     }
 
     /// [`Self::recording`] that also records every written element.
@@ -62,6 +71,7 @@ impl<F: FnMut(KernelCall)> ObservedKernels<F> {
             calls: Vec::new(),
             writes: None,
             fail_at: None,
+            width_trace: None,
         }
     }
 
@@ -223,6 +233,12 @@ where
         baked: Option<BakedFusedLayout<'_>>,
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
+        if let Some(trace) = &self.width_trace {
+            trace
+                .lock()
+                .unwrap()
+                .push((dst_data.as_ptr() as usize, exec.budget().get()));
+        }
         self.record(KernelCall::CopyScale { dst_offset });
         self.record_writes(dst_data, shape, dst_strides, dst_offset)?;
         self.inner.copy_scale_strided_baked(

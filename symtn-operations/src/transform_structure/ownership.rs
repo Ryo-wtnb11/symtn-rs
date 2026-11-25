@@ -178,6 +178,8 @@ pub(super) fn compile_parallel_schedule(
         singles,
         single_runs,
         singles_planned: 0,
+        single_movement: MovementSummary::default(),
+        inactive_movement: MovementSummary::default(),
         group_spans,
         replay_runnable,
     })
@@ -194,7 +196,10 @@ pub(super) fn record_planned(
     schedule: &mut TreeTransformParallelSchedule,
     blocks: &[TreeTransformBlock],
     layouts: &TreeTransformLayoutTable,
+    source_tiled: bool,
 ) -> Result<(), OperationError> {
+    schedule.single_movement = movement_summary(schedule, blocks, layouts, true, source_tiled)?;
+    schedule.inactive_movement = movement_summary(schedule, blocks, layouts, false, true)?;
     let planned = |layout: usize| -> Result<usize, OperationError> {
         Ok(if layouts.role(layout)?.plan.is_some() {
             layouts.entry(layout).element_count
@@ -217,6 +222,103 @@ pub(super) fn record_planned(
             .try_fold(0, |max, planned| planned.map(|planned| max.max(planned)))?;
     }
     Ok(())
+}
+
+fn movement_summary(
+    schedule: &TreeTransformParallelSchedule,
+    blocks: &[TreeTransformBlock],
+    layouts: &TreeTransformLayoutTable,
+    singles: bool,
+    source_tiled: bool,
+) -> Result<MovementSummary, OperationError> {
+    let (list, jobs) = if singles {
+        (&schedule.singles, &schedule.single_runs)
+    } else {
+        (&schedule.inactive, &schedule.inactive_runs)
+    };
+    let mut result = MovementSummary {
+        exact_working_set: source_tiled,
+        supported_span: true,
+        ..Default::default()
+    };
+    let mut sources = std::collections::BTreeMap::new();
+    for (job, &start) in jobs.iter().enumerate() {
+        let end = jobs.get(job + 1).map_or(list.len(), |&v| v as usize);
+        let mut counts = MovementCounts::default();
+        for &item in &list[start as usize..end] {
+            let (layout, source) = if singles {
+                let TreeTransformBlock::Single {
+                    dst_layout,
+                    src_layout,
+                    ..
+                } = blocks[item as usize]
+                else {
+                    unreachable!("compiled Single list")
+                };
+                (dst_layout, Some(src_layout))
+            } else {
+                (item as usize, None)
+            };
+            let elements = layouts.entry(layout).element_count;
+            if elements == 0 {
+                continue;
+            }
+            let (inner, kind) = if singles {
+                let role = layouts.role(layout)?;
+                result.supported_span &= role.dst_strides()[0] != 0 || role.src_strides()[0] != 0;
+                (
+                    role.dims()[0],
+                    usize::from(role.dst_strides()[0] != 1 || role.src_strides()[0] != 1),
+                )
+            } else {
+                let (dims, strides) = layouts.inactive_role(layout)?;
+                result.supported_span &= strides[0] != 0;
+                (dims[0], 1)
+            };
+            let runs = elements
+                .checked_div(inner)
+                .ok_or(OperationError::ElementCountOverflow)?;
+            let add =
+                |a: usize, b: usize| a.checked_add(b).ok_or(OperationError::ElementCountOverflow);
+            counts.roles[kind] = add(counts.roles[kind], 1)?;
+            counts.runs[kind] = add(counts.runs[kind], runs)?;
+            counts.elements[kind] = add(counts.elements[kind], elements)?;
+            result.working_set_elements = add(result.working_set_elements, elements)?;
+            if let Some(source) = source {
+                sources
+                    .entry(layouts.entry(source).offset)
+                    .or_insert(elements);
+            }
+            if (elements, runs) > (result.largest.elements, result.largest.runs) {
+                result.largest = MovementItem {
+                    runs,
+                    elements,
+                    kind,
+                };
+            }
+        }
+        for kind in 0..2 {
+            result.total.roles[kind] = result.total.roles[kind]
+                .checked_add(counts.roles[kind])
+                .ok_or(OperationError::ElementCountOverflow)?;
+            result.max.roles[kind] = result.max.roles[kind].max(counts.roles[kind]);
+            result.total.runs[kind] = result.total.runs[kind]
+                .checked_add(counts.runs[kind])
+                .ok_or(OperationError::ElementCountOverflow)?;
+            result.total.elements[kind] = result.total.elements[kind]
+                .checked_add(counts.elements[kind])
+                .ok_or(OperationError::ElementCountOverflow)?;
+            result.max.runs[kind] = result.max.runs[kind].max(counts.runs[kind]);
+            result.max.elements[kind] = result.max.elements[kind].max(counts.elements[kind]);
+        }
+    }
+    for elements in sources.into_values() {
+        result.working_set_elements = result
+            .working_set_elements
+            .checked_add(elements)
+            .ok_or(OperationError::ElementCountOverflow)?;
+    }
+    Ok(result)
 }
 
 /// Whether the inclusive destination ranges, in their order, are
@@ -358,5 +460,89 @@ mod tests {
         let transform = TreeTransformStructure::compile_structures(&dst, &src, &[spec]).unwrap();
         let span = transform.parallel_schedule().group_spans[0];
         assert_eq!((span.lo, span.hi), (1, 9));
+    }
+    /// Counts follow the baked traversal and inactive zero-source arm;
+    /// removing the transpose is the control changing the copy class only.
+    #[test]
+    fn movement_summaries_count_actual_traversal() {
+        let dst =
+            BlockStructure::packed_column_major(2, [vec![2, 2], vec![2, 2], vec![2, 2]]).unwrap();
+        let src = BlockStructure::packed_column_major(2, [vec![2, 2]]).unwrap();
+        for transpose in [true, false] {
+            let second = TreeTransformBlockSpec::single(1, 0, 1.0);
+            let second = if transpose {
+                second.with_source_axes([1, 0])
+            } else {
+                second
+            };
+            let transform = TreeTransformStructure::compile_structures(
+                &dst,
+                &src,
+                &[TreeTransformBlockSpec::single(0, 0, 1.0), second],
+            )
+            .unwrap();
+            let schedule = transform.parallel_schedule();
+            let expected = if transpose {
+                MovementCounts {
+                    roles: [1, 1],
+                    runs: [1, 2],
+                    elements: [4, 4],
+                }
+            } else {
+                MovementCounts {
+                    roles: [2, 0],
+                    runs: [2, 0],
+                    elements: [8, 0],
+                }
+            };
+            assert_eq!(schedule.single_movement.total, expected);
+            assert_eq!(schedule.single_movement.working_set_elements, 12);
+            let max = if transpose {
+                expected
+            } else {
+                MovementCounts {
+                    roles: [1, 0],
+                    runs: [1, 0],
+                    elements: [4, 0],
+                }
+            };
+            assert_eq!(schedule.single_movement.max, max);
+            assert_eq!(
+                schedule.single_movement.largest,
+                MovementItem {
+                    elements: 4,
+                    runs: if transpose { 2 } else { 1 },
+                    kind: usize::from(transpose)
+                }
+            );
+            assert_eq!(
+                schedule.inactive_movement.total,
+                MovementCounts {
+                    roles: [0, 1],
+                    runs: [0, 1],
+                    elements: [0, 4]
+                }
+            );
+            assert_eq!(schedule.inactive_movement.working_set_elements, 4);
+        }
+    }
+    /// Scalar normalization uses the uncalibrated broadcast arm for both copy
+    /// and fill; a two-element role is the control admitted to the span model.
+    #[test]
+    fn scalar_roles_keep_the_uncalibrated_span_marker() {
+        for elements in [1, 2] {
+            let dst =
+                BlockStructure::packed_column_major(1, [vec![elements], vec![elements]]).unwrap();
+            let src = BlockStructure::packed_column_major(1, [vec![elements]]).unwrap();
+            let transform = TreeTransformStructure::compile_structures(
+                &dst,
+                &src,
+                &[TreeTransformBlockSpec::single(0, 0, 1.0)],
+            )
+            .unwrap();
+            let schedule = transform.parallel_schedule();
+            assert_eq!(schedule.single_movement.supported_span, elements > 1);
+            assert_eq!(schedule.inactive_movement.supported_span, elements > 1);
+        }
     }
 }

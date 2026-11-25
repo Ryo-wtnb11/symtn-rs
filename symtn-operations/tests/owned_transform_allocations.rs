@@ -50,6 +50,7 @@ fn warm_owned_transform_allocates_only_the_output_payload() {
         &source,
         1.0,
         None,
+        None,
     )
     .unwrap()
     .unwrap();
@@ -65,6 +66,7 @@ fn warm_owned_transform_allocates_only_the_output_payload() {
         1,
         &source,
         1.0,
+        None,
         None,
     )
     .unwrap()

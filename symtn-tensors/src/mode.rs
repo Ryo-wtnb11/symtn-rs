@@ -1262,7 +1262,8 @@ where
                 Arc::clone(structure),
                 storage_conjugate,
             )?,
-        };
+        }
+        .classify_single_coefficients();
         // A non-canonical logical source keys nothing publishable.
         if logical.is_none_or(|logical| publishable([logical.as_ref()])) {
             coefficients.stage_transformer(key, &built);

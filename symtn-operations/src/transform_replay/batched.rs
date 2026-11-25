@@ -3,26 +3,14 @@ use super::*;
 use crate::kernel_adapter::movement::with_conjugation;
 use crate::transform_structure::TreeTransformDirectItem;
 
-/// Replays a validated task into `dst` through `writer` (main's replay):
+/// Replays a validated task through `writer`: direct inactive/Single phases
+/// first, then pack/GEMM/scatter groups. The direct phases have independent
+/// movement widths; group chunks retain the base all-or-one replay width.
 ///
-/// - first the direct items, in one engine entry that also fixes the replay
-///   width `t` ([`super::chunk::direct`]): the inactive layouts, split over
-///   their hull runs or inline, then the Singles, split over `t` workers when
-///   they are slice-disjoint, over their hull runs when they form several
-///   and inline would not fan out a planned Single, and inline otherwise;
-/// - then the plan groups: at `t > 1` in chunks of `t` consecutive groups
-///   ([`super::chunk::groups`]), each a parallel pack, one grouped GEMM and
-///   a scatter split over `t` workers when the chunk's groups are
-///   slice-disjoint, or form two or more hull runs and inline would not fan
-///   out a planned column (inline otherwise); at `t = 1` one group at a time
-///   ([`replay_serial_groups`]).
-///
-/// Every inline move runs on the caller's whole token (one slot under a
-/// forced `Sequential`) and is admitted through one caller gate; a split
-/// leaf builds its own. The first failure stops the replay.
-///
-/// Its callers refuse a forced policy `dense` cannot honor first
-/// ([`refuse_unhonored_policy`]), before any coefficient preparation.
+/// Inline moves retain the whole caller token (one slot under forced
+/// Sequential), with one caller gate. Split leaves own hull runs and their
+/// own gates. The first failure stops replay; callers refuse unsupported
+/// forced policies before coefficient preparation or writes.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay<E, W, T, D, C>(
     engine: &mut dyn Engine,

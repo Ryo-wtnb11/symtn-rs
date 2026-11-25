@@ -34,27 +34,16 @@ use crate::transform_structure::{
     TreeTransformDirectItem, TreeTransformGroupSpan, TreeTransformPackReplay,
 };
 
-/// The direct items of a replay in one engine entry, and the replay width
-/// `t` it admits there, with whether the policy is a forced `Sequential`.
+/// Replays inactive writes and direct Singles in one guarded CPU entry.
+/// Eligible owned f64 identity copies/zero-fill use replay-calibrated phase
+/// costs. Width one keeps the whole caller token; unsupported or failed
+/// calibration uses the original all-or-one rule and planned-leaf admission.
+/// The returned width is independently the base plan-group chunk width.
+/// Forced policies use the base batch decision without calibration.
 ///
-/// `t` is chosen by [`lanes::movement_region`] for a copy of the whole destination over
-/// the compiled runnable parts: under `Auto` the calibrated split model
-/// compared with inline items on the whole token; a forced
-/// policy's decision, at most the runnable parts. It fixes the chunks of
-/// the plan groups, and the Singles' split when they are slice-disjoint.
-///
-/// The inactive layouts run first: split over their hull runs when there
-/// are two or more and the run width `t_A` (the same rule over the new run
-/// routes' runnable parts) exceeds one, inline on the caller's token
-/// otherwise. Then the Singles: split over `t` workers when `t > 1` and they
-/// are slice-disjoint (main's split); split over their runs at `t_A` when
-/// they form at least two runs that are not all singletons and the caller's
-/// gate would not admit the largest planned Single on the caller's token
-/// (see [`inline_admits`]); inline in [`InlineSingles::ordered`]'s order
-/// otherwise.
-///
-/// The call's gate cost keys are prepared here, before any split, for
-/// every leaf gate of the call (none when no role retains a plan).
+/// Every split owns complete destination hull runs; inline Singles retain
+/// the destination-kind order. Gate keys and traversal scratch cover all
+/// selected widths before worker entry.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn direct<W, T, D, C>(
     engine: &mut dyn Engine,
@@ -90,31 +79,64 @@ where
         .filter(|&runs| runs >= 2)
         .max()
         .unwrap_or(0);
+    let [copy_eligible, fill_eligible] = writer.movement_eligible();
+    let eligible = (copy_eligible
+        && schedule.single_runs.len() > 1
+        && schedule.single_movement.exact_working_set
+        && schedule.single_movement.supported_span)
+        || (fill_eligible
+            && schedule.inactive_runs.len() > 1
+            && schedule.inactive_movement.supported_span);
     let admitted = lanes::movement_region(
         engine,
-        estimate,
-        [schedule.replay_runnable, run_runnable],
-        |mut exec, [threads, run_threads]| {
+        eligible,
+        super::movement::calibrate,
+        |mut exec, calibration| {
             crate::host_pool::observe(crate::host_pool::HostPoolSite::Replay, exec.budget());
             let sequential =
                 exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
-            workspace.prepare_fused_indices(threads.max(run_threads), rank)?;
+            // The base choice owns plan-group chunks independently of direct phases.
+            let threads = lanes::flat_width(&exec, estimate, schedule.replay_runnable);
+            let run_threads = if run_runnable >= 2 {
+                lanes::flat_width(&exec, estimate, run_runnable)
+            } else {
+                1
+            };
+            let (mut split_singles, mut singles_width) = if singles_disjoint {
+                (threads > 1, threads)
+            } else {
+                (
+                    run_threads > 1
+                        && single_runs >= 2
+                        && !inline_admits(gate, exec.token_ref(), schedule.singles_planned),
+                    run_threads,
+                )
+            };
+            let mut inactive_width = run_threads;
+            if let Some((rates, dispatch)) = calibration {
+                let [single_width, fill_width] =
+                    super::movement::widths(rates, dispatch, schedule, exec.budget());
+                if copy_eligible
+                    && schedule.single_movement.exact_working_set
+                    && schedule.single_movement.supported_span
+                {
+                    singles_width = single_width;
+                    split_singles = single_width > 1 && schedule.single_runs.len() > 1;
+                }
+                if fill_eligible && schedule.inactive_movement.supported_span {
+                    inactive_width = fill_width;
+                }
+            }
+            workspace
+                .prepare_fused_indices(threads.max(singles_width).max(inactive_width), rank)?;
             workspace.gate_keys.prepare(
                 &mut exec.reborrow().into_token(),
                 layouts.max_planned_elements(),
-                &[threads, run_threads],
+                &[threads, singles_width, inactive_width],
             );
             #[cfg(test)]
             workspace.gate_keys.watch_as(gate);
-            let split_inactive = run_threads > 1 && inactive_runs >= 2;
-            let (split_singles, singles_width) = if singles_disjoint {
-                (threads > 1, threads)
-            } else {
-                let split = run_threads > 1
-                    && single_runs >= 2
-                    && !inline_admits(gate, exec.token_ref(), schedule.singles_planned);
-                (split, run_threads)
-            };
+            let split_inactive = inactive_width > 1 && inactive_runs >= 2;
             let HostTreeTransformWorkspace {
                 zero_strides,
                 fused_indices,
@@ -136,7 +158,7 @@ where
                     schedule,
                     gate_keys,
                     items,
-                    run_threads,
+                    inactive_width,
                     dst,
                     fused_indices,
                 )?;

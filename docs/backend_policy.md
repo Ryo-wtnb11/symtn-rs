@@ -368,58 +368,78 @@ without inactive blocks to initialize, a transform without destination
 scales) only admits the engine, with the Host region's refusals, and takes
 no token from it.
 
-A tree-transform replay follows TensorKit's threaded kernels and main's
-replay. One internal chooser fixes its movement width `t`: under `Auto` it
-considers every integer width through the engine budget, including widths
-larger than the compiled runnable item count. Split items share all chosen
-slots, so a leaf containing one large item can offer several slots to Strided.
-The aggregate split estimate is `D(q) + estimate / q`, where `estimate` is
-Strided's serial copy estimate of the whole destination. Width one instead
-keeps the caller's whole token: its baseline is the minimum of
-`runnable * D(w) + estimate / w` over `w` through the budget, modeling sequential
-items that can each fan out. These are equal-size, divisible-work estimates;
-they do not model per-role plan eligibility, unequal item sizes, or additional
-inner forks inside split leaves. Ties choose width one, then the smaller split
-width, including intermediate widths between calibration anchors. Under a
-forced policy the batch decision (`lanes * item_threads`, one for `Sequential`)
-is capped by the runnable parts. A split narrows its token to the chosen width;
-its recursive shares retain every slot even when items are fewer than slots.
+A tree-transform replay chooses the direct Singles and inactive movement
+widths separately from plan-group chunking. Compilation retains integer
+role, run and element totals by contiguous-run or strided-inner traversal,
+hull-run maxima, and the phase's distinct source-plus-destination working
+set in elements. Scalar size converts that working set to bytes at execution.
+These summaries contain no host timing constants and are included in retained
+storage charges. Hulls are ownership boundaries; their padding is not counted
+as touched storage.
 
-The dispatch ladder is calibrated on the engine's own `limit(q)` prefixes
-at widths 1, 2, 4, ... and the full budget, and linearly interpolated. The
-10 ms table-priced target is divided among anchors above one. Each anchor
-uses five equal median batches, with 20–200 sections total (rounded down to
-a multiple of five), plus one unmeasured warmup section. This bounds planned
-work, not elapsed time under interruption or a mispriced dispatch table.
-Measurements above 20 times the token's effective threadteam dispatch table
-are rejected in favor of that table; faster-than-table measurements are valid.
-The precheck reads the engine's team costs without minting an execution token.
-Calibration and the movement phase run inside the same guarded engine entry
-and share its single ledger root; forced and retained
-width decisions also reuse that entry. A caller's
-`PoolBuilder` override takes precedence over the default host-class row
-(zero stays zero). An invalid elapsed interval falls back to the table.
-A nondecreasing envelope is used for accepted measurements within the upper
-bound.
-Width one has no dispatch cost. Threadteam 0.5 supplies no prefix node map,
-so no NUMA boundaries are added; bandwidth and topology calibration are
-deferred to the flat vector operations.
+For a calibrated phase at working set `W`, the item model is
+`t_i = a + r_k(W) * runs_i + e_k(W) * elements_i`. Curves interpolate linearly
+in log working-set size and extend flat beyond their endpoints; OS cache
+capacities never select a regime. The additive phase cost is `S`; `M` is a
+conservative hull-run bound from component maxima. It is exact when the same
+run attains those maxima. At budget `p`, inline is approximated by
+`(S(W) - M(W)) + min(M(W), D(p) + M(W)/p)`. A split at `q > 1` costs
+`D(q) + max(M(W/q), S(W/q)/q)`. This models unequal work and per-thread
+working sets approximately; it does not predict actual equal-count partition
+loads or change Strided's own planned-kernel admission. Ties keep the smaller
+route width. Route width one executes inline on the caller's whole token;
+only a forced `Sequential` restricts that token to one worker.
+The search merges dispatch anchors and both integer neighbours of curve-knot
+crossings. Each resulting split-cost interval is convex, so integer bisection
+finds its minimum. For `L` dispatch anchors and fixed `K` curve cuts, search
+uses O((L + K) log p) constant-size cost evaluations and a bounded stack sort;
+the phase counts are read in O(1), without item traversal or tuning allocation.
 
-The first eligible Auto decision calibrates only when the model using half
-the table cost can beat fully serial execution. This is a screening heuristic,
-not a lower bound on valid measured dispatch costs. Serial engines and provably
-tiny phases and single-item inline phases perform no calibration. The ladder is a separate, byte-charged
-entry in the existing per-engine extension store, not a structure cache;
-a retained entry is reused without measurement. Admission is checked before
-measuring: when the byte or entry limits refuse the ladder, decisions use
-the token's table without repeatedly measuring an unretainable entry.
-Eviction or `symtn::scratch::trim` makes an admitted entry cold again; freeing
-store capacity permits a previously refused engine to calibrate. Only the
-small ladder is retained; there is no bandwidth buffer. The pure chooser
-evaluates each interpolated interval's endpoints and integer neighbours of
-its analytic minimum, in O(ladder size) time with no allocation per decision.
-Block-lane placement and provider inner-width choice keep their existing
-cost models. This is a scheduling estimate, not a guarantee of measured speedup.
+Online replay constants belong to `symtn-operations`. Calibration uses the
+production direct replay and owned writer on the serial share of the existing
+guarded token. Calling the public replay entry inside that token would re-enter
+the engine, so it uses the internal direct traversal. `symtn-dense` owns the
+guarded entry, the empty-fork dispatch probe and opaque fixed-size payload
+retention, without depending on replay. The engine's `limit(q)` prefixes at
+1, 2, 4, ... and the full budget supply linearly interpolated D(q). Accepted
+dispatch measurements keep the nondecreasing envelope; samples above twenty
+times the effective table use the table, and explicit zero overrides stay zero.
+The local D(q) does not replace Strided's dispatch table.
+
+One shared 10 ms planned deadline includes dispatch, replay fixture creation,
+allocation, first stores, sampling and validation. Dispatch has a 2 ms allowance;
+replay receives the remaining time. Finite, nonnegative, consistent constants
+are required. An incomplete or invalid fit retains a failed outcome and uses
+the base rule until eviction or `symtn::scratch::trim`. Synchronous kernels and
+OS descheduling can overrun a deadline; CI and host cold-call measurements
+must validate this budget. No measured speedup or successful calibration is
+guaranteed.
+
+The dispatch ladder and replay outcome share the existing byte-charged engine
+entry. Admission is checked before any measurement; refused admission performs
+no probes and uses the base rule. Warm decisions read fixed-size summaries
+without traversing items or allocating tuning storage. Calibration fixtures
+are discarded after the attempt. Physical width one, empty/ineligible phases,
+forced policies and non-CPU engines perform no calibration. Non-CPU engines
+keep the typed Host-region refusal; broken CPU engines keep their backend
+error. Placement must remain stable for the retained entry's lifetime; trim
+after changing it.
+
+Uncalibrated scalar, writer or map classes use the base all-or-one rule.
+The measured classes are built-in CPU `f64` owned identity copies and owned
+zero fill, with separate rates. Categorical structure compilation records an
+exact `f64` identity-coefficient check before publishing the core. Generic
+expert Singles without that classification, initialized updates, complex
+payloads, nonidentity Single maps, scalar/broadcast traversals and custom
+adapters retain the base route. Inactive owned zero fill is admitted
+independently of Single coefficients.
+Under `Auto`, the original budget's dispatch cost must pay back three times
+against the whole destination's Strided Copy estimate, then the width is
+clamped to runnable parts; otherwise it is one. The original shared hull-run
+clamp and inline gate behavior are retained on fallback. Member movement and
+plan-group chunking always use this base rule, independently of the calibrated
+Singles width. Forced policies keep their batch decision (`lanes * item_threads`)
+clamped to runnable parts. Provider arithmetic and inner-width rules are unchanged.
 
 The offline `calibrate_replay` example measures CPU `f64` owned-overwrite
 Singles through the compiled production replay. It measures per-kind element
@@ -431,14 +451,16 @@ Run costs come from median pairwise time/run slopes at fixed element counts;
 the common role cost comes from the tiny-copy intercept after subtracting the
 no-item baseline and one-run cost. The raw element curves also subtract this
 independently fitted role/run overhead before entering the additive model.
-Role/run/element fits reuse the owned destination through an example-local
-allocator reservation; the same production owned writer executes every write.
+Role/run/element fits return the owned destination Vec to the existing replay
+entry for safe allocation reuse; the same production owned writer executes
+every write. No global allocator override is installed.
 Fresh allocation versus that reused destination on the same replay measures
 f(W), the signed extra nanoseconds per destination byte, over the W ladder.
 This empirical difference includes cache/page effects; allocator reuse can make
 it negative and fresh allocations need not fault. Allocation/free are outside
 the phase interval. Linux reports process-wide minor page faults per call from
-`/proc/self/stat` field 10; other platforms report `unknown`.
+`/proc/self/stat` field 10, and peak process RSS from `/proc/self/status`
+`VmHWM`; other platforms report `unknown`.
 Held-out validation runs public owned `permute` end to end on U1/SU2 small,
 U1/SU2 dominant, and SU2 large fixtures with a serial engine. Its prediction
 uses the whole phase working set for every Single, adds f(W) times destination
@@ -466,21 +488,19 @@ validation; output first stores remain inside the timed movement.
 Destinations are grouped into hull runs:
 maximal address-ordered stretches whose bounding slices overlap
 transitively, so distinct runs occupy disjoint address ranges and one
-writer owns each run. In that region the inactive blocks are split over
-their runs when there are two or more and the same chooser admits more
-than one worker for that many runs, otherwise written inline on the
-caller's token in destination address order; then the Singles: at `t > 1`
-with slice-disjoint destinations split over `t` workers, when they are not
-slice-disjoint but form two or more runs split over those runs unless the
-caller's gate would admit the largest Single with a retained Strided plan
-on the caller's token (then inline, where that plan fans the move out), otherwise
-inline: in block order into a caller-provided destination at `t = 1`
-(main's one-worker replay), in address order into an owned output or at
-`t > 1`. A split part of
+writer owns each run. Inactive blocks run first, then Singles, each split over
+its hull runs when its applicable chooser admits more than one worker and
+there are at least two runs; otherwise it executes inline. On base fallback,
+interleaved Singles retain the original shared run width and defer to the
+caller's gate when it admits the largest planned Single. Inline execution
+uses destination address order for owned outputs, and block order for a
+caller-provided destination at base width one (address order above one).
+A split part of
 `n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
 workers to its left half and forks its token with exactly those logical
 shares (the odd slot to the right); a part of one worker or one item is a leaf, which writes its items
-whole on its token. The Multi groups then replay in chunks of `t`
+whole on its token. The Multi groups then replay in chunks of their independent
+base width `t`
 consecutive groups: each chunk's pack is split the same way over its
 columns, its jobs go to the executor as one grouped GEMM, and its non-empty
 groups, ordered by destination, are scattered split by group when every
@@ -511,9 +531,9 @@ admits every member's ranges before any write and resolves each
 destination scale once per role, then moves its members (the member axis
 one more strided dimension of each move) around one dense submission of
 every member's GEMMs, ordered plan job outer, member inner, and returns
-the first failure in that order. Each move phase takes the width the
-same chooser selects over the members (under `Auto` using the whole batch
-destination's serial copy estimate and the inline-item baseline; under a
+the first failure in that order. Each move phase keeps the base width
+selected over the members (under `Auto` using the whole batch
+destination's serial copy estimate and the original-budget payback rule; under a
 forced policy its batch decision): at one every member moves on the
 caller's token, above it the members split into at most that many
 contiguous ranges, each moving its members as one move per role. An executor that cannot honor a forced

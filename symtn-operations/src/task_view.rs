@@ -76,6 +76,12 @@ impl<'a, C: Copy> TreeTransformTaskView<'a, C> {
         self.structure.single_coefficients()
     }
 
+    #[inline]
+    #[cfg(feature = "tenferro")]
+    pub(crate) fn single_coefficients_are_identity(self) -> bool {
+        self.structure.single_coefficients_are_identity()
+    }
+
     /// A Multi block's shared `U[dst, src]` matrix, read in place.
     #[inline]
     pub(crate) fn block_matrix(self, block_index: usize) -> Option<&'a [C]> {

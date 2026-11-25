@@ -11,9 +11,10 @@
 //! contraction on a warm engine therefore allocates no operand or core
 //! scratch, only its owned output.
 //!
-//! Movement phases also retain their small dispatch-calibration ladder in
-//! a separate engine entry. [`retained_bytes`] includes it, and [`trim`]
-//! clears it so the next eligible movement decision recalibrates.
+//! Eligible direct movement phases also retain a dispatch ladder and a
+//! fixed-size replay calibration outcome in one separate engine entry.
+//! [`retained_bytes`] includes it, and [`trim`] clears it so the next eligible
+//! movement decision recalibrates, including after a failed attempt.
 //!
 //! This is execution workspace, not semantic cache: it changes cost, never
 //! results. It is separate from the process-global structure caches of
@@ -67,8 +68,8 @@ use crate::typed::Engine;
 /// The bytes of scratch and movement calibration the engine keeps between
 /// calls: every kept buffer at capacity, the box that holds its execution context, the boxes of its
 /// later payload-type lanes, their fixed slot, and the separately charged
-/// dispatch ladder. While contraction scratch is checked out, or after a
-/// call whose scratch did not fit, its empty slot and any retained
+/// dispatch ladder and fixed replay outcome. While contraction scratch is
+/// checked out, or after a call whose scratch did not fit, its empty slot and any retained
 /// calibration are reported. It is 0 when no slot exists (never created, or
 /// [`trim`]med) and on a non-CPU engine. It is not peak or in-flight memory.
 ///
@@ -78,7 +79,7 @@ pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
     symtn_dense::engine_slot::retained_bytes(engine)
 }
 
-/// Releases the scratch and dispatch calibration the engine keeps, with
+/// Releases the scratch and movement calibration the engine keeps, with
 /// their slots; the next eligible contraction is cold and the next eligible
 /// movement decision recalibrates. Scratch a contraction has checked out
 /// at that moment is unaffected, and returns under the store's limits. Does nothing on a

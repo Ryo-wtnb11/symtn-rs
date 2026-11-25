@@ -1,11 +1,12 @@
 use super::*;
 
 /// Internal, unstable owned-output path for the built-in host executor:
-/// allocates the destination uninitialised and writes every element exactly
+/// allocates or reuses the destination uninitialised and writes every element exactly
 /// once. Returns `Ok(None)` without allocating output when the destination
 /// does not have a proof of exact physical overwrite coverage.
 ///
 /// The writer runs on the same route as the initialised replay ([`replay`]).
+/// `output` optionally supplies an allocation to reuse; its contents are discarded.
 /// Nothing is published unless every write succeeded. A forced batch policy `dense` cannot honor is refused first,
 /// as the initialised replay refuses it, even where `Ok(None)` would follow.
 ///
@@ -26,6 +27,7 @@ pub fn try_tree_transform_structure_overwrite_owned_raw<E, D, C>(
     nout: usize,
     src_data: &[D],
     alpha: D,
+    output: Option<Vec<D>>,
     mut profile: Option<&mut TreeTransformReplayProfile>,
 ) -> Result<Option<Vec<D>>, OperationError>
 where
@@ -62,20 +64,24 @@ where
         task: ReplayParts::new(task),
         alpha,
     };
-    let output = initialize_owned::<D, OperationError>(proof.required_len, |dst_data| {
-        replay(
-            engine,
-            dense,
-            workspace,
-            task,
-            structure.parallel_schedule(),
-            dst_data,
-            src_data,
-            &writer,
-            &mut (),
-            profile.as_deref_mut(),
-        )
-    })?;
+    let output = initialize_owned::<D, OperationError>(
+        output.unwrap_or_default(),
+        proof.required_len,
+        |dst_data| {
+            replay(
+                engine,
+                dense,
+                workspace,
+                task,
+                structure.parallel_schedule(),
+                dst_data,
+                src_data,
+                &writer,
+                &mut (),
+                profile.as_deref_mut(),
+            )
+        },
+    )?;
     if let (Some(profile), Some(start)) = (profile, total_start) {
         profile.total += start.elapsed();
     }
@@ -213,6 +219,7 @@ mod owned_overwrite_tests {
                 &real_src,
                 3.0,
                 None,
+                None,
             )
             .unwrap()
             .unwrap();
@@ -231,6 +238,7 @@ mod owned_overwrite_tests {
                 1,
                 &complex_src,
                 Complex64::new(3.0, 1.0),
+                None,
                 None,
             )
             .unwrap()
@@ -271,6 +279,7 @@ mod owned_overwrite_tests {
                 1,
                 &non_finite,
                 Complex64::new(1.0, 0.0),
+                None,
                 None,
             )
             .unwrap()
@@ -341,6 +350,7 @@ mod owned_overwrite_tests {
             &[11.0, 13.0],
             2.0,
             None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -390,6 +400,7 @@ mod owned_overwrite_tests {
                     1,
                     &non_finite,
                     alpha,
+                    None,
                     None,
                 )
                 .unwrap()
@@ -456,6 +467,7 @@ mod owned_overwrite_tests {
                 1,
                 &source,
                 0.0,
+                None,
                 None,
             )
             .unwrap()
@@ -528,6 +540,7 @@ mod owned_overwrite_tests {
             2,
             &source,
             1.5,
+            None,
             None,
         )
         .unwrap();
@@ -633,6 +646,7 @@ mod owned_overwrite_tests {
             &source,
             1.5,
             None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -650,6 +664,7 @@ mod owned_overwrite_tests {
                     1,
                     &source,
                     1.5,
+                    None,
                     None,
                 )
             })
@@ -676,6 +691,7 @@ mod owned_overwrite_tests {
             &complex_source,
             alpha,
             None,
+            None,
         )
         .unwrap()
         .unwrap();
@@ -691,6 +707,7 @@ mod owned_overwrite_tests {
                     1,
                     &complex_source,
                     alpha,
+                    None,
                     None,
                 )
             })
@@ -728,6 +745,7 @@ mod owned_overwrite_tests {
                     &source,
                     1.5,
                     None,
+                    None,
                 )
             })
             .unwrap()
@@ -764,6 +782,7 @@ mod owned_overwrite_tests {
                         1,
                         &source,
                         1.0,
+                        None,
                         None,
                     )
                 })
@@ -845,6 +864,7 @@ mod owned_overwrite_tests {
                 &source,
                 1.0,
                 None,
+                None,
             )
         });
         assert!(matches!(
@@ -879,6 +899,7 @@ mod owned_overwrite_tests {
             &[1.0; 6],
             1.0,
             None,
+            None,
         )
         .unwrap()
         .is_none());
@@ -899,6 +920,7 @@ mod owned_overwrite_tests {
             3,
             &[1.0; 6],
             1.0,
+            None,
             None,
         )
         .unwrap()

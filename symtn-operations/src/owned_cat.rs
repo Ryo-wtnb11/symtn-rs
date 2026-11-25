@@ -213,10 +213,14 @@ fn initialize_infallible<D: Copy>(
     required_len: usize,
     write: impl FnOnce(&mut [MaybeUninit<D>]),
 ) -> Vec<D> {
-    match initialize_owned(required_len, |destination| -> Result<(), Infallible> {
-        write(destination);
-        Ok(())
-    }) {
+    match initialize_owned(
+        Vec::new(),
+        required_len,
+        |destination| -> Result<(), Infallible> {
+            write(destination);
+            Ok(())
+        },
+    ) {
         Ok(values) => values,
         Err(error) => match error {},
     }

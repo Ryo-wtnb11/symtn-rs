@@ -186,7 +186,7 @@ where
         // output-sized allocation and zero pass. This fixed tile is reused for
         // every block and bounds stack use independently of tensor geometry.
         let mut tile = [D::zero(); OWNED_TRACE_TILE_ELEMENTS];
-        initialize_owned(self.required_len, |dst| {
+        initialize_owned(Vec::new(), self.required_len, |dst| {
             self.write_tiles(dst, &mut tile, src, alpha);
             Ok(())
         })

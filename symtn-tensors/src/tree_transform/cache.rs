@@ -718,7 +718,7 @@ where
     }
     #[cfg(test)]
     crate::probe::hit(crate::probe::Event::CompletedBuild);
-    let built = build()?;
+    let built = build()?.classify_single_coefficients();
     if !may_publish {
         return Ok(built);
     }
@@ -1051,7 +1051,7 @@ impl TreeTransformPlanning {
         // the ordinary tree-pair key while its plan follows the caller's
         // logical key order, and no production caller compiles it.
         if !storage_conjugate {
-            return build();
+            return build().map(TreeTransformStructure::classify_single_coefficients);
         }
         // Why not key the logical keys, projection, rank, or axis map: the two
         // operand preparations derive them from the parent structure and the

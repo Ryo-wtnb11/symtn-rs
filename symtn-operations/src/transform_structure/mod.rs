@@ -74,7 +74,7 @@ pub struct TreeTransformStructure<T> {
 /// Its identity marker keys device-side preparation, so every handle bound
 /// to one core shares that preparation.
 #[doc(hidden)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct TreeTransformReplay<T> {
     rank: usize,
     storage_conjugate: bool,
@@ -82,10 +82,27 @@ pub struct TreeTransformReplay<T> {
     blocks: Vec<TreeTransformBlock>,
     layouts: TreeTransformLayoutTable,
     coefficients: Arc<TreeTransformCoefficients<T>>,
+    single_coefficients_are_identity: bool,
     inactive_dst_layouts: Vec<usize>,
     physical_overwrite_len: Option<usize>,
     recoupling_plan: TreeTransformRecouplingPlan,
     parallel_schedule: TreeTransformParallelSchedule,
+}
+
+// Classification affects admission, not the compiled mathematical transform.
+impl<T: PartialEq> PartialEq for TreeTransformReplay<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.rank == other.rank
+            && self.storage_conjugate == other.storage_conjugate
+            && self.identity == other.identity
+            && self.blocks == other.blocks
+            && self.layouts == other.layouts
+            && self.coefficients == other.coefficients
+            && self.inactive_dst_layouts == other.inactive_dst_layouts
+            && self.physical_overwrite_len == other.physical_overwrite_len
+            && self.recoupling_plan == other.recoupling_plan
+            && self.parallel_schedule == other.parallel_schedule
+    }
 }
 
 impl<T> TreeTransformReplay<T> {
@@ -151,6 +168,23 @@ impl<T> TreeTransformReplay<T> {
 }
 
 impl<T> TreeTransformStructure<T> {
+    /// Classifies an exclusively owned, newly compiled core's f64 Single coefficients.
+    /// Shared cores retain their existing classification without scanning or copying.
+    #[doc(hidden)]
+    pub fn classify_single_coefficients(mut self) -> Self
+    where
+        T: 'static,
+    {
+        if let Some(core) = Arc::get_mut(&mut self.core) {
+            core.single_coefficients_are_identity = core.coefficients.singles.iter().all(|value| {
+                (value as &dyn std::any::Any)
+                    .downcast_ref::<f64>()
+                    .is_some_and(|value| *value == 1.0)
+            });
+        }
+        self
+    }
+
     /// Conservative retained-byte charge of this handle and its core. The
     /// source and destination structures are separate canonical owners, so
     /// only the handle's inline `Arc`s are included through
@@ -276,6 +310,12 @@ impl<T: Copy> TreeTransformStructure<T> {
     #[inline]
     pub(crate) fn single_coefficients(&self) -> &[T] {
         &self.core.coefficients.singles
+    }
+
+    #[inline]
+    #[cfg(any(feature = "tenferro", test))]
+    pub(crate) fn single_coefficients_are_identity(&self) -> bool {
+        self.core.single_coefficients_are_identity
     }
 
     /// Length of the logical coefficient payload the block offsets index.
@@ -491,6 +531,45 @@ mod tests {
     use super::*;
     use strided_kernel::execution::KernelClass;
     use symtn_core::{BlockKey, BlockSpec};
+
+    #[test]
+    fn coefficient_classification_admits_only_verified_f64_identity() {
+        // Purpose: only exclusively compiled f64 unit maps gain the copy-model proof.
+        let space = BlockStructure::packed_column_major(1, [vec![2]]).unwrap();
+        let compile = |value| {
+            TreeTransformStructure::compile_structures(
+                &space,
+                &space,
+                &[TreeTransformBlockSpec::single(0, 0, value)],
+            )
+            .unwrap()
+        };
+        for (value, expected) in [(1.0, true), (-1.0, false), (f64::NAN, false)] {
+            let transform = compile(value);
+            assert!(!transform.single_coefficients_are_identity());
+            assert_eq!(
+                transform
+                    .classify_single_coefficients()
+                    .single_coefficients_are_identity(),
+                expected
+            );
+        }
+        let shared = compile(1.0);
+        let other = shared.clone();
+        assert!(!shared
+            .classify_single_coefficients()
+            .single_coefficients_are_identity());
+        drop(other);
+        let single = TreeTransformStructure::compile_structures(
+            &space,
+            &space,
+            &[TreeTransformBlockSpec::single(0, 0, 1.0_f32)],
+        )
+        .unwrap();
+        assert!(!single
+            .classify_single_coefficients()
+            .single_coefficients_are_identity());
+    }
 
     /// Independent hand normalization of a two-sided role: drop extent-1
     /// axes, order by destination stride, fuse runs contiguous on both sides.

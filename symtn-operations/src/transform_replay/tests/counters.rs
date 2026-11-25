@@ -304,9 +304,9 @@ fn an_unsplit_move_gets_the_whole_caller_token() {
 /// A custom executor that records each grouped submission's jobs and runs
 /// and forwards it to the built-in executor's.
 #[derive(Default)]
-struct Batches {
+pub(super) struct Batches {
     inner: DefaultDenseExecutor,
-    submissions: Vec<(Vec<DenseGemmBatchJob>, Vec<usize>)>,
+    pub(super) submissions: Vec<(Vec<DenseGemmBatchJob>, Vec<usize>)>,
 }
 
 impl DenseExecutor for Batches {

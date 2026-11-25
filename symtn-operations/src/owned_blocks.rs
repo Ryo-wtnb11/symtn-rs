@@ -630,7 +630,7 @@ where
         Ok(())
     };
     if allow_uninit && blocks_tile_storage(destination, member_len)? {
-        return initialize_owned(len, |dst| write_all(Storage::Uninit(dst)));
+        return initialize_owned(Vec::new(), len, |dst| write_all(Storage::Uninit(dst)));
     }
     #[cfg(any(test, feature = "testing"))]
     crate::probe::add(crate::probe::Event::OwnedPrefillElement, len);

@@ -1299,3 +1299,25 @@ fn compact(placement: &mut Placement, count: &mut Vec<usize>) {
     }
     placement.lane_starts[0] = 0;
 }
+
+/// Base all-or-one movement rule, using dispatch at the caller budget.
+pub fn flat_width(exec: &Exec<'_>, estimate: Duration, runnable: usize) -> usize {
+    let budget = exec.budget();
+    let runnable = runnable.max(1);
+    match exec.batch_policy().strategy {
+        BatchStrategy::Auto => match NonZeroUsize::new(budget) {
+            Some(width) if runnable > 1 && exec.token_ref().pays(estimate, 1, width) => {
+                budget.min(runnable)
+            }
+            _ => 1,
+        },
+        _ => {
+            let decision = exec.batch_decision(&BatchQuery::new(runnable, 0.0));
+            decision
+                .lanes
+                .saturating_mul(decision.item_threads)
+                .clamp(1, budget.max(1))
+                .min(runnable)
+        }
+    }
+}

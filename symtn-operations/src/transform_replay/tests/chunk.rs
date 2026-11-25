@@ -10,51 +10,113 @@ use super::*;
 use symtn_dense::{CpuEngine, Pool};
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
-/// A cheap two-worker prefix beats inline item dispatch, while the costly four-worker
-/// prefix cannot: the public Singles replay uses the intermediate width.
+/// Unmodeled Singles price dispatch at the original budget, then clamp to runnable items.
 #[test]
-fn singles_replay_uses_the_intermediate_movement_width() {
+fn unmodeled_singles_retain_the_base_all_or_one_route() {
     use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
-    let row = WidthCosts::new([
-        Duration::from_nanos(1),
-        Duration::from_secs(1),
-        Duration::from_secs(1),
-    ]);
-    let mut engine = CpuEngine::new(
-        Pool::builder()
-            .threads(4)
-            .dispatch_costs(DispatchCosts::new(row, row, row))
-            .build()
-            .unwrap(),
-    );
-    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![4096]; 4]).unwrap());
-    let specs = (0..4)
-        .map(|block| TreeTransformBlockSpec::single(block, block, 1.0))
-        .collect::<Vec<_>>();
-    let transform =
-        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
-    let (_, marks) = recorded(&mut engine, &transform, &structure, &structure);
-    let workers = marks
-        .iter()
-        .filter_map(|mark| mark.worker)
-        .collect::<std::collections::HashSet<_>>();
-    assert_eq!(workers.len(), 2);
-}
-
-/// Auto gives every leaf its chosen slots even when there are fewer Singles than workers.
-#[test]
-fn auto_singles_share_surplus_slots() {
-    for (items, expected) in [(2, vec![4, 4]), (3, vec![2, 2, 4])] {
+    let budget = 4;
+    for items in [2, 3, budget] {
         let structure =
-            Arc::new(BlockStructure::packed_column_major(1, vec![vec![131_072]; items]).unwrap());
+            Arc::new(BlockStructure::packed_column_major(1, vec![vec![4096]; items]).unwrap());
         let specs = (0..items)
             .map(|block| TreeTransformBlockSpec::single(block, block, 1.0))
             .collect::<Vec<_>>();
         let transform =
             TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
-        let mut engine = flat_engine(8, 1, CpuBatchStrategy::Auto);
-        let (offers, _) = recorded(&mut engine, &transform, &structure, &structure);
-        assert_eq!(offers, expected);
+        for full_cost in [Duration::from_secs(1), Duration::from_nanos(1)] {
+            let row = WidthCosts::new([Duration::from_nanos(1), full_cost, full_cost]);
+            let mut engine = CpuEngine::new(
+                Pool::builder()
+                    .threads(budget)
+                    .dispatch_costs(DispatchCosts::new(row, row, row))
+                    .build()
+                    .unwrap(),
+            );
+            let route =
+                base_movement_width(structure.required_len().unwrap(), budget, items, full_cost);
+            let offer = if route == 1 { budget } else { 1 };
+            let (offers, _) = recorded(&mut engine, &transform, &structure, &structure);
+            assert_eq!(offers, vec![offer; items]);
+        }
+    }
+}
+
+/// Group submissions retain the base chunk width independently of owned Singles tuning.
+#[test]
+fn plan_group_chunks_retain_the_base_width() {
+    use super::counters::Batches;
+    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+    let (structure, _) = su2_interleaved_fixture();
+    let (budget, singles) = (4, 3);
+    let groups = (structure.block_count() - singles) / 2;
+    let mut specs = (0..singles)
+        .map(|block| TreeTransformBlockSpec::single(block, block, 1.0))
+        .collect::<Vec<_>>();
+    specs.extend((0..groups).map(|group| {
+        let first = singles + 2 * group;
+        TreeTransformBlockSpec::multi(
+            vec![first, first + 1],
+            vec![first, first + 1],
+            vec![1.0, 0.0, 0.0, 1.0],
+        )
+    }));
+    let transform = TreeTransformStructure::compile_structures(&structure, &structure, &specs)
+        .unwrap()
+        .classify_single_coefficients();
+    let source = vec![1.0; structure.required_len().unwrap()];
+    for dispatch_ns in [1, 1_000_000_000] {
+        let full_cost = Duration::from_nanos(dispatch_ns);
+        let row = WidthCosts::new([Duration::from_nanos(1), full_cost, full_cost]);
+        let mut engine = CpuEngine::new(
+            Pool::builder()
+                .threads(budget)
+                .dispatch_costs(DispatchCosts::new(row, row, row))
+                .build()
+                .unwrap(),
+        );
+        let width = base_movement_width(
+            source.len(),
+            budget,
+            singles.max(2 * groups),
+            Duration::from_nanos(dispatch_ns),
+        );
+        let expected = transform
+            .recoupling_plan()
+            .jobs()
+            .chunks(width)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .map(|job| DenseGemmBatchJob {
+                        dst_offset: job.dst_offset - chunk[0].dst_offset,
+                        lhs_offset: job.lhs_offset - chunk[0].lhs_offset,
+                        ..*job
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let mut dense = Batches::default();
+        try_tree_transform_structure_overwrite_owned_raw(
+            &mut engine,
+            &mut dense,
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &structure,
+            &structure,
+            structure.rank() / 2,
+            &source,
+            1.0,
+            None,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let actual = dense
+            .submissions
+            .into_iter()
+            .map(|(jobs, _)| jobs)
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
     }
 }
 
@@ -186,6 +248,7 @@ fn custom_executor_values_equal_the_built_in_replay() {
                         2,
                         &source,
                         1.25,
+                        None,
                         None,
                     )
                     .unwrap()
@@ -480,6 +543,7 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                     dst.rank(),
                     &source[..src_len],
                     1.25,
+                    None,
                     None,
                 );
                 assert!(unsupported(owned.unwrap_err()), "{what}, owned");
