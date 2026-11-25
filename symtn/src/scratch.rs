@@ -10,6 +10,10 @@
 //! dense staging, for every payload type the engine has run. A repeated
 //! contraction on a warm engine therefore allocates no operand or core
 //! scratch, only its owned output.
+//! Multithreaded Host transform replays use the same retained context for
+//! pack buffers, converted coefficients, dense staging and movement widths.
+//! Serial transforms keep their replay scratch local to the call; transform
+//! staging remains local at every width.
 //!
 //! Movement width selection keeps its calibration result, including a failed
 //! attempt, in a separate typed slot. [`trim`] releases both scratch and
@@ -25,7 +29,8 @@
 //! The scratch and movement calibration occupy separate entries of the engine's
 //! extension store and are charged against that store's limits (by default 256
 //! entries and 64 MiB in all).
-//! When a contraction returns, its scratch is kept only if its whole ledger
+//! When a contraction or multithreaded Host transform replay returns, its
+//! scratch is kept only if its whole ledger
 //! fits those limits next to every other entry; otherwise it is dropped, and
 //! that workload stays correct and cold (it allocates its scratch on every
 //! call). A warm repeated eager contraction allocates no operand or core
@@ -79,7 +84,7 @@ pub fn retained_bytes(engine: &mut dyn Engine) -> usize {
 }
 
 /// Releases retained scratch and movement calibration with their slots; the
-/// next eligible contraction is cold and the next eligible movement phase
+/// next eligible contraction or transform replay is cold and the next eligible movement phase
 /// calibrates again. Checked-out values are unaffected and return under the
 /// store's limits. Does nothing on a non-CPU engine.
 pub fn trim(engine: &mut dyn Engine) {

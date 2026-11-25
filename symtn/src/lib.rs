@@ -21,8 +21,9 @@
 //! context as its first argument ([`typed::ExecContext`]): an engine
 //! ([`typed::Engine`]), a [`typed::CpuEngine`] (serial, or over a
 //! [`typed::Pool`] of threads) for Host tensors. The caller owns the engine; symtn stores none.
-//! An eager Host contraction keeps its execution scratch in the caller's CPU
-//! engine between calls ([`scratch`]). The dense provider is Tenferro's faer-backed CPU stack
+//! Eager Host contractions and multithreaded Host transform replays keep their
+//! execution scratch in the caller's CPU engine between calls ([`scratch`]).
+//! The dense provider is Tenferro's faer-backed CPU stack
 //! (`cpu-faer`). A [`typed::Runtime`] holds prepared structural state only:
 //! the per-rule contraction/tree-transform contexts, reusable scratch, and
 //! the contraction-plan cache `symtn-network` keys by network topology.

@@ -446,6 +446,10 @@ also determine `gate_keys.admits`, together with the compiled plan bound.
 Gate admission therefore participates in memoization rather than being
 assumed constant across engines. Forced strategies, including their parameters,
 are part of the key; `forced_width` still resolves before model evaluation.
+When a cold replay needs a packed-destination fill, the same decision pass
+also prices that pack without the fill. A successful replay installs the warm
+pack width and records the resulting scratch length/capacity, so the second
+identical replay evaluates no model. A failed replay does not advance the key.
 
 For P phases the width payload is `P * size_of::<usize>()` bytes (8P on a
 64-bit target): three direct/group decisions plus two per selected chunk, or
@@ -453,7 +457,8 @@ two member decisions. Its allocation charge uses the vector's actual capacity.
 The exact dispatch key adds `capacity * size_of::<Duration>()` bytes. Retained
 chunk order/run tables charge `capacity * size_of::<ChunkMovement>()` for the
 outer vector, plus each group's `capacity * size_of::<usize>()` and each run
-list's `capacity * size_of::<u32>()`. Temporary aggregate summaries and scatter
+list's `capacity * size_of::<u32>()`. Each chunk's inline size includes one
+additional `usize` for its warm pack width. Temporary aggregate summaries and scatter
 prefixes are dropped after deciding. All these capacities are included in
 `HostTreeTransformWorkspace::retained_bytes`; old decision keys are not kept.
 Gate keys retain direct budget indices
@@ -568,17 +573,17 @@ reduce in another order at another width (faer's matrix-vector route splits
 the contraction over its threads), so results agree within rounding.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
-An eager operation builds its execution scratch (tree-transform pack
-scratch, contraction lanes, a factorization's dense executor) for the call and drops
-it on return, as TensorKit allocates its temporaries per call; a prepared
-plan's workspace keeps that scratch for its replays. The exception is an
-eager Host contraction (`contract`, `contract_into`, `compose`, the planar
-contractions and every network step): its contraction lanes are one entry of
-the caller's `CpuEngine` extension store, kept between calls under that
+Serial Host transforms, transform staging and factorizations build execution
+scratch for the call and drop it on return; a prepared plan's workspace keeps
+its scratch for its replays. Eager Host contractions
+(`contract`, `contract_into`, `compose`, the planar contractions and every
+network step) and multithreaded Host transform replays use one shared context
+entry of the caller's `CpuEngine` extension store, kept between calls under that
 store's entry and byte limits (64 MiB by default) and released by
 [`symtn::scratch::trim`](../symtn/src/scratch.rs); a ledger that does not
 fit is dropped, so that workload allocates its scratch per call. Movement
-constants use another typed entry under the same bounded store and trim
+widths live in that context's replay workspace. Movement constants use
+another typed entry under the same bounded store and trim
 lifecycle; retaining either payload never replaces the other. Structural
 and plan caches take short lookup and publication locks.
 

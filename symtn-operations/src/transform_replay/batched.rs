@@ -74,8 +74,7 @@ where
     if threads > 1 || modeled {
         #[cfg(feature = "tenferro")]
         return super::chunk::groups(
-            engine, dense, workspace, task, schedule, dst, src, writer, kernels, &mut gate,
-            threads, profile,
+            engine, dense, workspace, task, schedule, dst, src, writer, threads, profile,
         );
     }
     replay_serial_groups(

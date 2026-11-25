@@ -236,6 +236,13 @@ impl WidthMemo {
         Ok(())
     }
 
+    pub fn finish_destination(&mut self, len: usize, capacity: usize) {
+        if let Some(key) = self.key.as_mut() {
+            key.destination_len = len;
+            key.destination_capacity = capacity;
+        }
+    }
+
     pub fn retained_bytes(&self) -> usize {
         self.widths.capacity() * core::mem::size_of::<usize>()
             + self.dispatch.capacity() * core::mem::size_of::<Duration>()
@@ -617,6 +624,8 @@ fn width_with<F: Fn(usize, usize, &Prices<'_>) -> f64>(
     if budget.min(jobs) <= 1 {
         return 1;
     }
+    #[cfg(any(test, feature = "testing"))]
+    crate::probe::add(crate::probe::Event::MovementModelEvaluation, 1);
     let bytes = bytes as f64;
     let working_set = working_set as f64 * bytes;
     let costs = core::array::from_fn(|c| {

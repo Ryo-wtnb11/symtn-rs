@@ -197,6 +197,7 @@ where
 pub(super) struct ChunkMovement {
     groups: Vec<usize>,
     runs: Vec<u32>,
+    warm_pack_width: usize,
 }
 
 impl ChunkMovement {
@@ -294,29 +295,37 @@ where
                 let summary = crate::movement::Summary::totals(
                     &schedule.pack_movement[first_group..=last_group],
                 )?;
-                let pack_width = movement::width::<D, _>(
-                    exec,
-                    constants,
-                    columns,
-                    summary.working_set as u128 + extra.unwrap_or(0) as u128,
-                    summary.traffic as u128 + extra.unwrap_or(0) as u128,
-                    || {
-                        let mut elements = summary.counts.map(|count| count.elements as f64);
-                        elements[2] += extra.unwrap_or(0) as f64;
-                        elements
-                    },
-                    |_, _| false,
-                    |costs| {
-                        movement::prefix_phase(
-                            &schedule.pack_prefix,
-                            first,
-                            columns,
-                            0,
-                            costs,
-                            extra,
-                        )
-                    },
-                );
+                let pack_width = |extra: Option<usize>| {
+                    movement::width::<D, _>(
+                        exec,
+                        constants,
+                        columns,
+                        summary.working_set as u128 + extra.unwrap_or(0) as u128,
+                        summary.traffic as u128 + extra.unwrap_or(0) as u128,
+                        || {
+                            let mut elements = summary.counts.map(|count| count.elements as f64);
+                            elements[2] += extra.unwrap_or(0) as f64;
+                            elements
+                        },
+                        |_, _| false,
+                        |costs| {
+                            movement::prefix_phase(
+                                &schedule.pack_prefix,
+                                first,
+                                columns,
+                                0,
+                                costs,
+                                extra,
+                            )
+                        },
+                    )
+                };
+                let cold_pack_width = pack_width(extra);
+                let warm_pack_width = if extra.is_some() {
+                    pack_width(None)
+                } else {
+                    cold_pack_width
+                };
                 let mut groups: Vec<_> = (first_group..=last_group)
                     .filter(|&group| !schedule.scatter_groups[group].columns.is_empty())
                     .collect();
@@ -356,8 +365,12 @@ where
                         )
                     },
                 );
-                widths.extend([pack_width, scatter_width]);
-                movement_chunks.push(ChunkMovement { groups, runs });
+                widths.extend([cold_pack_width, scatter_width]);
+                movement_chunks.push(ChunkMovement {
+                    groups,
+                    runs,
+                    warm_pack_width,
+                });
             }
             movement_chunks.shrink_to_fit();
             Ok(())
@@ -379,8 +392,6 @@ pub(super) fn groups<E, W, T, D, C>(
     dst: &mut [T],
     src: &[D],
     writer: &W,
-    kernels: &mut W::Kernels,
-    gate: &mut LeafGate<'_>,
     threads: usize,
     mut profile: Option<&mut TreeTransformReplayProfile>,
 ) -> Result<(), OperationError>
@@ -492,7 +503,6 @@ where
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         let HostTreeTransformWorkspace {
             packed,
-            zero_strides,
             fused_indices,
             gate_keys,
             movement_memo,
@@ -504,53 +514,23 @@ where
         let runs = &movement_chunks[index].runs[..];
         let width = movement_memo.widths[4 + index * 2];
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
-            let split = width > 1;
-            if split {
-                let items = Items::Groups {
-                    groups,
-                    runs,
-                    packed,
-                    packed_start: destination_start,
-                };
-                return run_moves(
-                    exec,
-                    writer,
-                    layouts,
-                    schedule,
-                    gate_keys,
-                    items,
-                    width,
-                    dst,
-                    fused_indices,
-                );
-            }
-            let sequential =
-                exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
-            let token = exec.into_token();
-            let mut exec = if sequential {
-                token.limit(core::num::NonZeroUsize::MIN)
-            } else {
-                token
+            let items = Items::Groups {
+                groups,
+                runs,
+                packed,
+                packed_start: destination_start,
             };
-            for &group in groups {
-                for column in
-                    &schedule.scatter_columns[schedule.scatter_groups[group].columns.clone()]
-                {
-                    writer.scatter(
-                        kernels,
-                        zero_strides,
-                        column.dst_layout,
-                        packed,
-                        column.packed_offset - destination_start,
-                        dst,
-                        0,
-                        exec.reborrow(),
-                        gate,
-                        fused_indices,
-                    )?;
-                }
-            }
-            Ok(())
+            run_moves(
+                exec,
+                writer,
+                layouts,
+                schedule,
+                gate_keys,
+                items,
+                width,
+                dst,
+                fused_indices,
+            )
         })??;
         #[cfg(any(test, feature = "testing"))]
         {
@@ -561,6 +541,13 @@ where
             profile.multi_scatter += start.elapsed();
         }
     }
+    for (index, chunk) in workspace.movement_chunks.iter().enumerate() {
+        workspace.movement_memo.widths[3 + index * 2] = chunk.warm_pack_width;
+    }
+    workspace.movement_memo.finish_destination(
+        workspace.packed.destination().len(),
+        workspace.packed.destination().capacity(),
+    );
     Ok(())
 }
 
@@ -641,8 +628,29 @@ where
         ..
     } = &mut *workspace;
     let (source, destination) = packed.split_mut();
-    let mut run = |writer: PackColumnWriter<'_, D>, fill: Option<PackColumnWriter<'_, D>>| {
+    let mut run = |mut writer: PackColumnWriter<'_, D>,
+                   mut fill: Option<PackColumnWriter<'_, D>>| {
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
+            if threads == 1 {
+                if let Some(fill) = fill.as_mut() {
+                    fill.fill(D::zero());
+                }
+                return with_conjugation!(D, conjugate, |map| {
+                    for column in columns {
+                        writer.write_column(
+                            column.packed_offset - source_start,
+                            layouts.role(column.src_layout)?,
+                            src,
+                            layouts.entry(column.src_layout).offset,
+                            fused_indices.as_mut_slice(),
+                            map,
+                        )?;
+                    }
+                    Ok(())
+                });
+            }
+            #[cfg(test)]
+            replay_paths::pack_runner();
             let work = Pack {
                 columns,
                 layouts,
@@ -785,6 +793,8 @@ where
     T: Send + Sync,
     D: Copy + Sync,
 {
+    #[cfg(test)]
+    replay_paths::moves();
     let work = Moves {
         writer,
         layouts,
@@ -1041,5 +1051,26 @@ where
             index,
             map,
         ))
+    }
+}
+
+#[cfg(test)]
+pub(super) mod replay_paths {
+    use std::cell::Cell;
+
+    std::thread_local! {
+        static COUNTS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
+    }
+
+    pub fn pack_runner() {
+        COUNTS.with(|counts| counts.set((counts.get().0 + 1, counts.get().1)));
+    }
+
+    pub fn moves() {
+        COUNTS.with(|counts| counts.set((counts.get().0, counts.get().1 + 1)));
+    }
+
+    pub fn take() -> (usize, usize) {
+        COUNTS.with(|counts| counts.replace((0, 0)))
     }
 }

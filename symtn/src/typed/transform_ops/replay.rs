@@ -100,9 +100,16 @@ where
         + symtn_tensors::ConjugateValue,
     C: symtn_tensors::DenseBlockScalar,
 {
-    L::lane(context)?
+    let mut retained = (symtn_operations::host_pool::threads(engine) > 1)
+        .then(|| crate::runtime::ContextLease::checkout(engine));
+    let context = retained.as_mut().map_or(context, |lease| lease.context());
+    let result = L::lane(context)?
         .replay_tree_transform_dyn_owned(engine, structure, destination, source, nout, data, alpha)
-        .map_err(TransformExecError::Replay)
+        .map_err(TransformExecError::Replay);
+    if let Some(lease) = retained {
+        lease.checkin(engine);
+    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -124,7 +131,10 @@ where
         + symtn_tensors::ConjugateValue,
     C: symtn_tensors::DenseBlockScalar,
 {
-    L::lane(context)?
+    let mut retained = (symtn_operations::host_pool::threads(engine) > 1)
+        .then(|| crate::runtime::ContextLease::checkout(engine));
+    let context = retained.as_mut().map_or(context, |lease| lease.context());
+    let result = L::lane(context)?
         .replay_tree_transform_dyn_into(
             engine,
             structure,
@@ -135,16 +145,21 @@ where
             alpha,
             beta,
         )
-        .map_err(TransformExecError::Replay)
+        .map_err(TransformExecError::Replay);
+    if let Some(lease) = retained {
+        lease.checkin(engine);
+    }
+    result
 }
 
 /// One staged tree-transform replay, handed to the storage kernel by value:
 /// a borrow of the execution context the transform was staged in, the
 /// completed transformer, and the stored block structures it maps between.
 ///
-/// Host replays in that context, so a Host transform builds one context;
-/// CUDA does not use it. The Host replay of the staging mode's lane is bound
-/// here, where that lane's scalar bounds are proved.
+/// Serial Host replay uses that context; multithreaded Host replay borrows
+/// the caller CPU engine's retained context. CUDA does not use it. The Host
+/// replay of the staging mode's lane is bound here, where that lane's scalar
+/// bounds are proved.
 ///
 /// Why a borrow: the context is about 9.7 KB inline, and a replay that held
 /// it moved it twice per call, into the replay and out of it again.

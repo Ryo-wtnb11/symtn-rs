@@ -708,3 +708,42 @@ fn unique_planning_scratch_is_charged_and_released() {
     run(missed, &fixture(7_312));
     assert!(ledger(missed).0 > 0);
 }
+
+/// Purpose: repeated public permutes reuse movement widths even after the
+/// first replay fills scratch; trimming the engine forces fresh decisions.
+#[cfg(feature = "cpu-faer")]
+#[test]
+fn repeated_permute_reuses_movement_decisions() {
+    if crate::test_cache::run_isolated_or_return(
+        "SYMTN_PERMUTE_MOVEMENT_DECISIONS_ISOLATED",
+        "runtime::tests::repeated_permute_reuses_movement_decisions",
+    ) {
+        return;
+    }
+    let runtime = Runtime::builder().build().unwrap();
+    let space = GradedSpace::try_new(
+        Arc::new(su2_rule()),
+        (0..=4).map(|spin| (su2_irrep(spin), 2)),
+    )
+    .unwrap();
+    let mut engine = symtn_operations::host_pool::eager_test_engine(2);
+    let source: TensorMap<Su2Rule, f64> = TensorMap::rand_with_seed(
+        &mut engine,
+        &runtime,
+        [&space, &space],
+        [&space, &space],
+        173,
+    )
+    .unwrap();
+    let take = symtn_operations::take_movement_model_evaluations;
+    take();
+    drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+    assert!(take() > 0, "cold permute evaluates the model");
+    drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+    assert_eq!(take(), 0, "warm permute");
+    crate::scratch::trim(&mut engine);
+    drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+    assert!(take() > 0, "trim invalidates retained decisions");
+    drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
+    assert_eq!(take(), 0, "warm after trim");
+}

@@ -505,3 +505,77 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
         }
     }
 }
+
+/// Purpose: a one-column inline pack keeps the serial column loop and its
+/// scatter keeps the movement runner; a public Outer policy splits a
+/// multi-column pack through the pack runner instead.
+#[test]
+fn inline_pack_and_scatter_keep_their_item_paths() {
+    let structure = |columns| {
+        let leg = |degeneracy| {
+            symtn_core::SectorLeg::new(
+                (0..columns).map(|sector| (symtn_core::SectorId::new(sector), degeneracy)),
+                false,
+            )
+        };
+        symtn_core::FusionTreeHomSpace::new(
+            symtn_core::FusionProductSpace::new([leg(2)]),
+            symtn_core::FusionProductSpace::new([leg(1)]),
+        )
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_rule())
+        .unwrap()
+    };
+    let destination = structure(2);
+    for (columns, strategy, matrix, expected) in [
+        (
+            1,
+            CpuBatchStrategy::Auto,
+            vec![2.0, -1.0],
+            [2.0, 4.0, -1.0, -2.0],
+        ),
+        (
+            2,
+            CpuBatchStrategy::Outer,
+            vec![2.0, 3.0, -1.0, 4.0],
+            [11.0, 16.0, 11.0, 14.0],
+        ),
+    ] {
+        let source_structure = structure(columns);
+        let transform = TreeTransformStructure::compile_structures(
+            &destination,
+            &source_structure,
+            &[TreeTransformBlockSpec::multi(
+                vec![0, 1],
+                (0..columns as usize).collect(),
+                matrix,
+            )],
+        )
+        .unwrap();
+        let source = (1..=2 * columns)
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        super::super::chunk::replay_paths::take();
+        let out = try_tree_transform_structure_overwrite_owned_raw(
+            &mut engine(2, strategy),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &destination,
+            &source_structure,
+            1,
+            &source,
+            1.0,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let (pack, moves) = super::super::chunk::replay_paths::take();
+        assert_eq!(out, expected);
+        if columns == 1 {
+            assert_eq!(pack, 0);
+        } else {
+            assert!(pack > 0, "a split pack enters its runner");
+        }
+        assert!(moves > 0, "scatter enters the movement runner");
+    }
+}
