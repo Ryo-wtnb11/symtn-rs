@@ -280,11 +280,6 @@ pub(super) fn compile_movement(
         scatter.finish()?;
         groups.add_totals(&pack)?;
         groups.add_totals(&scatter)?;
-        let mut job = pack.counts;
-        for (count, &other) in job.iter_mut().zip(&scatter.counts) {
-            *count = count.add(other)?;
-        }
-        groups.record_job(&job)?;
         packs.push(pack);
         scatters.push(scatter);
     }

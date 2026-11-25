@@ -51,11 +51,34 @@ where
                     summary.maxima.as_ref().map_or(0, |maxima| maxima.jobs),
                     summary.working_set as u128,
                     summary.logical_traffic(read_destination) as u128,
+                    || summary.counts.map(|count| count.elements as f64),
                     |costs| movement::fixed(summary, costs),
                 )
             };
             (
-                fixed(&schedule.group_movement),
+                movement::width::<D, _>(
+                    &exec,
+                    constants,
+                    task.recoupling_plan().jobs().len(),
+                    schedule.group_movement.working_set as u128,
+                    schedule.group_movement.logical_traffic(read_destination) as u128,
+                    || {
+                        schedule
+                            .group_movement
+                            .counts
+                            .map(|count| count.elements as f64)
+                    },
+                    |costs| {
+                        movement::group_phase(schedule, costs, |group| {
+                            lanes::gemm_cost(
+                                &task.recoupling_plan().jobs()[group],
+                                D::one().dense_scalar(),
+                            )
+                            .as_secs_f64()
+                                * 1e9
+                        })
+                    },
+                ),
                 fixed(&schedule.single_movement),
                 fixed(&schedule.inactive_movement),
             )
@@ -309,6 +332,7 @@ where
                 runs.len(),
                 summary.working_set as u128,
                 summary.logical_traffic(writer.reads_destination()) as u128,
+                || summary.counts.map(|count| count.elements as f64),
                 |costs| {
                     let (mut sum, mut largest) = (0.0, 0.0_f64);
                     for (i, &start) in runs.iter().enumerate() {
@@ -478,6 +502,11 @@ where
                 columns.len(),
                 summary.working_set as u128 + extra as u128,
                 summary.traffic as u128 + extra as u128,
+                || {
+                    let mut elements = summary.counts.map(|count| count.elements as f64);
+                    elements[2] += extra as f64;
+                    elements
+                },
                 |costs| {
                     movement::pack_phase(
                         &summary,

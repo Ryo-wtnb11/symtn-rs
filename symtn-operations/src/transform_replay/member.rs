@@ -806,6 +806,11 @@ where
                 members,
                 summary.working_set as u128 * members as u128,
                 summary.traffic as u128 * members as u128,
+                || {
+                    summary
+                        .counts
+                        .map(|count| count.elements as f64 * members as f64)
+                },
                 |costs| super::movement::member_phase(summary, costs, members),
             );
             if width <= 1 {

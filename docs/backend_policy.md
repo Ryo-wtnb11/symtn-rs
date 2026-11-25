@@ -377,7 +377,7 @@ t_i = sum_c(k_ic * a[c] + r[c](W) * runs_ic + e[c](W) * elements_ic)
 S = sum(t_i)
 M_bound = sum_c(a[c] * max_i(k_ic) + max_hull_c(r[c] * runs + e[c] * elements))
 T(1) = S
-T(q) = D(q) + max(M_bound, S/q, X/B(q, W))    (2 <= q <= min(p, J))
+T(q) = D(q) + max(M(q), S/q, X/B(q, W))    (2 <= q <= min(p, J))
 q* = argmin T(q), with ties to smaller q
 ```
 
@@ -392,8 +392,13 @@ and destination scales never alter the compiled classes. Rows are indexed by
 structural class only; unmeasured fill rows use the same-stride real-map row.
 Reference curves interpolate in log W and remain flat outside their knots.
 Beyond the last online knot, an online curve keeps the reference curve's shape,
-scaled to meet that knot. GEMM work belongs to the dense provider and is
-outside this model.
+scaled to meet that knot. Fixed movement phases use M(q)=M_bound. The plan-group
+chunk decision adds the dense provider's existing serial GEMM estimate to each
+group's pack and scatter costs: t_g=pack_g+GEMM_g+scatter_g, S=sum_g(t_g).
+It submits consecutive chunks of q GEMMs serially, so
+M(q)=sum_chunks(max_in_chunk(t_g)) is their batch-barrier critical-path lower
+bound. It does not predict the dense provider's actual placement or runtime.
+Only movement element counts feed B(q, W); dense time never changes that roof.
 
 The schedule compiles role totals and logical traffic, saturating model-only
 counts and address envelopes when metadata exceeds the estimate's integer
@@ -420,7 +425,10 @@ class c, a fixed phase computes its maximum bound by binary search in
 O(sum_c log(1 + H_c)), with no pass over J executed jobs. A chunk aggregates
 its t group summaries in O(t). The shared chooser then scans Q = min(p, J)
 widths without allocation, so a fixed decision costs
-O(sum_c log(1 + H_c) + Q). One effective width returns before cost preparation.
+O(sum_c log(1 + H_c) + Q). The plan-group chunk decision visits G groups at
+each candidate width, O(G*Q) time and constant extra storage, to price its
+actual consecutive batches; it retains no group job hulls or per-width tables.
+One effective width returns before cost preparation or element-count reads.
 Scratch maxima are computed once for the chosen chunk width. A one-slot replay does no model or
 calibration work.
 
@@ -457,9 +465,9 @@ its knee is the first knot after the curve's minimum that reaches that value.
 Online knots and the scaled reference tail both participate. B_sat is infinity
 below the largest knee of the phase's active classes, so a mixed phase uses the
 memory cap only after every active curve has reached its plateau. The knees are
-computed once per retained constants entry. Four element-only preparations
-recover the phase's class weights without adding retained metadata or allocating;
-they have the same asymptotic cost as its normal preparation.
+computed once per retained constants entry. Compiled counts supply the phase's
+class weights directly, including member and cold-fill element counts, without
+extra cost preparations or allocations.
 
 Bandwidth fixtures are at least the contiguous curve's knee in size and use
 exactly the same q-slot prefix when measuring q, regardless of the caller's

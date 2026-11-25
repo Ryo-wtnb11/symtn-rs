@@ -330,6 +330,40 @@ pub(super) fn fixed(phase: &Summary, costs: &Costs) -> impl Fn(usize) -> (f64, f
     move |_| (setup + work, largest)
 }
 
+/// The executor submits one GEMM batch per consecutive chunk of q groups.
+/// Summed chunk maxima bound its serial batch barriers' critical path below;
+/// they are not a prediction of the provider's actual placement or runtime.
+pub(super) fn group_phase<'a>(
+    schedule: &'a TreeTransformParallelSchedule,
+    costs: &Costs,
+    gemm: impl Fn(usize) -> f64 + 'a,
+) -> impl Fn(usize) -> (f64, f64) + 'a {
+    let costs = *costs;
+    move |q| {
+        let (mut sum, mut critical) = (0.0, 0.0);
+        for first in (0..schedule.pack_movement.len()).step_by(q) {
+            let mut largest = 0.0_f64;
+            for group in first..(first + q).min(schedule.pack_movement.len()) {
+                let movement = [
+                    &schedule.pack_movement[group],
+                    &schedule.scatter_movement[group],
+                ]
+                .into_iter()
+                .map(|summary| {
+                    let (setup, work) = components(&summary.counts, &costs);
+                    setup + work
+                })
+                .sum::<f64>();
+                let item = movement + gemm(group);
+                sum += item;
+                largest = largest.max(item);
+            }
+            critical += largest;
+        }
+        (sum, critical)
+    }
+}
+
 /// Each group's pack columns have equal element counts, so each class hull
 /// contains at most one point and a chunk aggregates these maxima in O(t).
 pub(super) fn pack_maximum(phase: &Summary, costs: &Costs) -> f64 {
@@ -381,6 +415,7 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
     jobs: usize,
     working_set: u128,
     traffic: u128,
+    elements: impl FnOnce() -> [f64; CLASSES],
     prepare: impl Fn(&Costs) -> F,
 ) -> usize {
     let budget = exec.budget();
@@ -405,10 +440,6 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
         let row = constants.row(c);
         (row.a, row.r.at(working_set), row.e.at(working_set))
     });
-    let elements = core::array::from_fn(|class| {
-        let basis = core::array::from_fn(|c| (0.0, 0.0, f64::from(c == class)));
-        prepare(&basis)(1).0
-    });
     let traffic = traffic as f64 * bytes;
     choose(
         budget.min(jobs),
@@ -420,7 +451,7 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
                 .as_secs_f64()
                 * 1e9
         },
-        phase_bandwidth(working_set, traffic, elements, constants),
+        phase_bandwidth(working_set, traffic, elements(), constants),
     )
 }
 
@@ -1091,6 +1122,61 @@ mod tests {
         );
     }
 
+    /// Purpose: dense-dominated groups choose their chunk width from the combined
+    /// cost and serial batch barriers; movement alone is the inline control.
+    #[test]
+    fn group_chunks_price_gemm_and_serial_batch_barriers() {
+        use crate::TreeTransformBlockSpec;
+        let blocks = [100, 1, 100, 1]
+            .into_iter()
+            .flat_map(|rows| [vec![rows], vec![rows]])
+            .collect::<Vec<_>>();
+        let structure = BlockStructure::packed_column_major(1, blocks).unwrap();
+        let transform = TreeTransformStructure::compile_structures(
+            &structure,
+            &structure,
+            &(0..4)
+                .map(|group| {
+                    TreeTransformBlockSpec::multi(
+                        vec![2 * group, 2 * group + 1],
+                        vec![2 * group, 2 * group + 1],
+                        vec![1.0, 0.0, 0.0, 1.0],
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schedule = transform.parallel_schedule();
+        let costs = [(0.5, 0.0, 0.0); CLASSES];
+        let dense = [100.0, 1.0, 100.0, 1.0];
+        let phase = group_phase(schedule, &costs, |group| dense[group]);
+        assert_eq!(
+            [phase(1), phase(2), phase(3), phase(4)],
+            [
+                (210.0, 210.0),
+                (210.0, 204.0),
+                (210.0, 105.0),
+                (210.0, 102.0)
+            ]
+        );
+        let dispatch = |q| 10.0 * q as f64;
+        assert_eq!(choose(4, 0.0, phase, dispatch, |_| f64::INFINITY), 3);
+        assert_eq!(
+            choose(
+                4,
+                0.0,
+                group_phase(schedule, &costs, |_| 0.0),
+                dispatch,
+                |_| f64::INFINITY
+            ),
+            1
+        );
+        assert_eq!(
+            choose(4, 0.0, |_| (210.0, 102.0), dispatch, |_| f64::INFINITY),
+            2
+        );
+    }
+
     /// Purpose: one runnable job bypasses preparation even on a wider token;
     /// one slot is the matching control for a phase with multiple jobs.
     #[test]
@@ -1107,9 +1193,15 @@ mod tests {
                 crate::host_pool::HostPoolSite::Replay,
                 |exec| {
                     assert_eq!(
-                        width::<f64, _>(&exec, None, jobs, 0, 0, |_| -> fn(usize) -> (f64, f64) {
-                            panic!("cost preparation")
-                        }),
+                        width::<f64, _>(
+                            &exec,
+                            None,
+                            jobs,
+                            0,
+                            0,
+                            || panic!("element preparation"),
+                            |_| -> fn(usize) -> (f64, f64) { panic!("cost preparation") }
+                        ),
                         1
                     );
                 },

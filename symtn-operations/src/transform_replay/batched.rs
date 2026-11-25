@@ -4,8 +4,8 @@ use crate::kernel_adapter::movement::with_conjugation;
 use crate::transform_structure::TreeTransformDirectItem;
 
 /// Replay direct fills and Singles, then chunks of plan groups. Every
-/// movement phase and the group chunk width use the same cost model; GEMM
-/// remains the dense provider's responsibility. Inline items keep the caller's
+/// movement phase and the group chunk width use the same chooser; the group's
+/// GEMM time comes from the dense provider's cost estimate. Inline items keep the caller's
 /// whole token (one slot under Sequential), and split leaves get balanced
 /// shares of that whole token. The first failure stops replay.
 /// Callers first refuse a forced policy their executor cannot honor.
