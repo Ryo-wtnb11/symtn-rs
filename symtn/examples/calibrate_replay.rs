@@ -1,6 +1,8 @@
 //! Offline CPU calibration of the compiled, owned tree-transform replay.
 //! Usage: calibrate_replay <profile-path> [width]
 
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::hint::black_box;
@@ -32,6 +34,79 @@ const BANDWIDTH_TOLERANCE: f64 = 0.20;
 const STABILITY: f64 = 0.05;
 const MAX_WORKING_SET: usize = 1024 * 1024 * 1024;
 const KINDS: [&str; 2] = ["contiguous-run", "strided-inner"];
+
+// Recycle only the serial probe's owned output; production replay still owns every write.
+struct ReplayAllocator;
+thread_local! {
+    static RECYCLED: Cell<Option<(*mut u8, Layout)>> = const { Cell::new(None) };
+}
+#[global_allocator]
+static ALLOCATOR: ReplayAllocator = ReplayAllocator;
+
+// SAFETY: a reserved pointer comes from a forgotten Vec with exactly this layout.
+// Taking the slot transfers its sole ownership to the allocating Vec; other calls
+// use System, including zeroed allocations and reallocations.
+unsafe impl GlobalAlloc for ReplayAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        RECYCLED
+            .try_with(|slot| {
+                if let Some((pointer, reserved)) = slot.get() {
+                    if reserved == layout {
+                        slot.set(None);
+                        return pointer;
+                    }
+                }
+                System.alloc(layout)
+            })
+            .unwrap_or_else(|_| System.alloc(layout))
+    }
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        System.dealloc(pointer, layout);
+    }
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        System.alloc_zeroed(layout)
+    }
+    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        System.realloc(pointer, layout, size)
+    }
+}
+
+struct RecycledOutput;
+impl Drop for RecycledOutput {
+    fn drop(&mut self) {
+        RECYCLED.with(|slot| {
+            if let Some((pointer, layout)) = slot.take() {
+                // SAFETY: an unconsumed slot still owns the forgotten Vec allocation.
+                unsafe { System.dealloc(pointer, layout) };
+            }
+        });
+    }
+}
+
+fn reuse_output(output: &mut Vec<f64>, call: impl FnOnce() -> Res<Vec<f64>>) -> Res<()> {
+    if output.capacity() == 0 {
+        *output = call()?;
+        return Ok(());
+    }
+    let mut previous = std::mem::take(output);
+    let pointer = previous.as_mut_ptr();
+    let layout = Layout::array::<f64>(previous.capacity())?;
+    RECYCLED.with(|slot| {
+        assert!(slot.get().is_none(), "nested output recycling");
+        slot.set(Some((pointer.cast(), layout)));
+    });
+    std::mem::forget(previous);
+    let reservation = RecycledOutput;
+    let next = call()?;
+    assert_eq!(
+        next.as_ptr(),
+        pointer,
+        "replay did not consume its reserved output"
+    );
+    drop(reservation);
+    *output = next;
+    Ok(())
+}
 
 struct Fixture {
     structure: Arc<BlockStructure>,
@@ -295,6 +370,13 @@ impl Fixture {
         Ok(profile.single_total.as_secs_f64() * 1e9)
     }
 
+    fn reused_phase(&mut self, engine: &mut CpuEngine, output: &mut Vec<f64>) -> Res<f64> {
+        let mut profile = TreeTransformReplayProfile::default();
+        reuse_output(output, || self.replay(engine, Some(&mut profile)))?;
+        black_box(&*output);
+        Ok(profile.single_total.as_secs_f64() * 1e9)
+    }
+
     fn bytes(&self) -> f64 {
         (self.roles * self.elements * 16) as f64
     }
@@ -308,6 +390,7 @@ struct Samples {
     median: f64,
     spread: f64,
     cold: f64,
+    minor_faults: Option<f64>,
 }
 
 fn median(values: &[f64]) -> f64 {
@@ -325,8 +408,10 @@ fn measure(mut call: impl FnMut() -> Res<Option<f64>>, max_reps: usize) -> Res<S
     let mut raw = [0.0; 5];
     let mut repetitions = [0; 5];
     let mut count = 0;
+    let mut faults = Vec::new();
     for (i, batch_reps) in repetitions.iter_mut().enumerate() {
         *batch_reps = reps;
+        let before = minor_faults();
         let start = Instant::now();
         let mut phase = None;
         for _ in 0..reps {
@@ -335,6 +420,12 @@ fn measure(mut call: impl FnMut() -> Res<Option<f64>>, max_reps: usize) -> Res<S
             }
         }
         raw[i] = phase.unwrap_or_else(|| start.elapsed().as_secs_f64() * 1e9) / reps as f64;
+        if let Some(delta) = before
+            .zip(minor_faults())
+            .and_then(|(a, b)| b.checked_sub(a))
+        {
+            faults.push(delta as f64 / reps as f64);
+        }
         count = i + 1;
         if count >= 3 {
             let center = median(&raw[..count]);
@@ -361,18 +452,38 @@ fn measure(mut call: impl FnMut() -> Res<Option<f64>>, max_reps: usize) -> Res<S
             .fold(f64::NEG_INFINITY, f64::max)
             - raw[..count].iter().copied().fold(f64::INFINITY, f64::min),
         cold,
+        minor_faults: (faults.len() == count).then(|| median(&faults)),
     })
 }
 
 fn print_samples(label: &str, samples: Samples) {
     println!(
-        "{label}: batches_ns={:?} repetitions={:?} median_ns={:.3} spread_max_min_ns={:.3} warmup_s={:.6}",
+        "{label}: batches_ns={:?} repetitions={:?} median_ns={:.3} spread_max_min_ns={:.3} warmup_s={:.6} process_minor_faults_per_call={}",
         &samples.raw[..samples.count],
         &samples.repetitions[..samples.count],
         samples.median,
         samples.spread,
-        samples.cold
+        samples.cold,
+        samples.minor_faults.map_or("unknown".into(), |n| format!("{n:.6}"))
     );
+}
+
+fn stat_minor_faults(stat: &str) -> Option<u64> {
+    // comm may contain spaces and parentheses; field 3 starts after the last ") ".
+    stat.rsplit_once(") ")?
+        .1
+        .split_whitespace()
+        .nth(7)?
+        .parse()
+        .ok()
+}
+
+fn minor_faults() -> Option<u64> {
+    if cfg!(target_os = "linux") {
+        stat_minor_faults(&fs::read_to_string("/proc/self/stat").ok()?)
+    } else {
+        None
+    }
 }
 
 fn paired_slope(rows: &[(f64, f64)]) -> Option<f64> {
@@ -433,7 +544,33 @@ impl ItemClass {
     }
 }
 
-type RealItems = Vec<(String, Res<(usize, BTreeMap<ItemClass, usize>)>)>;
+struct RealPhase {
+    working_set: usize,
+    destination_bytes: usize,
+    classes: BTreeMap<ItemClass, usize>,
+    multi_blocks: usize,
+    whole: Samples,
+    singles: Samples,
+}
+type RealItems = Vec<(String, Res<RealPhase>)>;
+
+fn predict_singles(
+    classes: &BTreeMap<ItemClass, usize>,
+    working_set: usize,
+    a: f64,
+    run_curves: &[Vec<(usize, f64)>; 2],
+    element_curves: &[Vec<(usize, f64)>; 2],
+) -> f64 {
+    classes
+        .iter()
+        .map(|(class, count)| {
+            let kind = class.kind();
+            *count as f64
+                * (a + interpolate(&run_curves[kind], working_set) * class.runs() as f64
+                    + interpolate(&element_curves[kind], working_set) * class.elements() as f64)
+        })
+        .sum()
+}
 
 fn single_classes(
     structure: &TreeTransformStructure<f64>,
@@ -532,10 +669,13 @@ fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
             let multi_share = if destination_elements == 0 { 0.0 } else { multi_elements as f64 / destination_elements as f64 };
             let working_set = (x.dense_data()?.len() + y.dense_data()?.len()) * 8;
             println!(
-                "real permute {}: items={} single_items={single_items} multi_blocks={multi_blocks} multi_destination_elements={multi_elements} active_destination_elements={destination_elements} multi_element_share={multi_share:.6} phase_working_set_bytes={working_set}; held-out uses isolated Singles only",
+                "real permute {}: items={} single_items={single_items} multi_blocks={multi_blocks} multi_destination_elements={multi_elements} active_destination_elements={destination_elements} multi_element_share={multi_share:.6} phase_working_set_bytes={working_set}",
                 $label,
                 structure.blocks().len()
             );
+            for (class, count) in &classes {
+                println!("real permute {} Single class: count={count} dims={:?} dst_strides={:?} src_strides={:?}", $label, class.dims, class.dst, class.src);
+            }
             // This also checks that the staged compiler is the public permute's execution path.
             let mut replay = Fixture {
                 structure: staged.destination_structure().clone(),
@@ -554,42 +694,56 @@ fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
             if classes.is_empty() {
                 return Err("no Single items to evaluate".into());
             }
-            Ok((working_set, classes))
+            let destination_bytes = y.dense_data()?.len() * 8;
+            drop(y);
+            let whole = measure(|| {
+                black_box(x.permute(engine, &[0, 3], &[2, 1])?);
+                Ok(None)
+            }, 16)?;
+            let singles = measure(|| Ok(Some(replay.phase(engine)?)), 16)?;
+            Ok(RealPhase { working_set, destination_bytes, classes, multi_blocks, whole, singles })
         }};
     }
-    for dominant in [false, true] {
-        let label = if dominant { "U1-dom" } else { "U1-small" };
-        let result = (|| -> Res<_> {
-            let w = (-100..=100)
-                .map(|q| {
-                    Ok((
-                        U1Irrep::new(q)?,
-                        if dominant {
-                            if q == 0 {
-                                768
+    for shape in ["small", "dom", "large"] {
+        let dominant = shape == "dom";
+        if shape != "large" {
+            let label = if dominant { "U1-dom" } else { "U1-small" };
+            let result = (|| -> Res<_> {
+                let w = (-100..=100)
+                    .map(|q| {
+                        Ok((
+                            U1Irrep::new(q)?,
+                            if dominant {
+                                if q == 0 {
+                                    768
+                                } else {
+                                    48
+                                }
                             } else {
-                                48
-                            }
-                        } else {
-                            16
-                        },
-                    ))
-                })
-                .collect::<Res<Vec<_>>>()?;
-            let p = if dominant {
-                vec![(U1Irrep::new(0)?, 1)]
-            } else {
-                (-1..=1)
-                    .map(|q| Ok((U1Irrep::new(q)?, 1)))
-                    .collect::<Res<Vec<_>>>()?
-            };
-            collect!(label, U1FusionRule, w, p)
-        })();
-        fixtures.push((label.to_owned(), result));
-        let label = if dominant { "SU2-dom" } else { "SU2-small" };
+                                16
+                            },
+                        ))
+                    })
+                    .collect::<Res<Vec<_>>>()?;
+                let p = if dominant {
+                    vec![(U1Irrep::new(0)?, 1)]
+                } else {
+                    (-1..=1)
+                        .map(|q| Ok((U1Irrep::new(q)?, 1)))
+                        .collect::<Res<Vec<_>>>()?
+                };
+                collect!(label, U1FusionRule, w, p)
+            })();
+            fixtures.push((label.to_owned(), result));
+        }
+        let label = match shape {
+            "dom" => "SU2-dom",
+            "large" => "SU2-large",
+            _ => "SU2-small",
+        };
         let result = (|| -> Res<_> {
             let rule = LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(GroupId::su(2)?)?;
-            let w = (0..=99)
+            let w = (0..=if shape == "large" { 4 } else { 99 })
                 .map(|j| {
                     Ok((
                         rule.category().irrep(&[j])?,
@@ -599,6 +753,8 @@ fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
                             } else {
                                 48
                             }
+                        } else if shape == "large" {
+                            256
                         } else {
                             16
                         },
@@ -988,7 +1144,7 @@ fn main() -> Res<()> {
     let start = Instant::now();
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|s| s == "--help") {
-        println!("Usage: calibrate_replay <profile-path> [width]\nwidth defaults to available parallelism; run a release build.\nThree batches when spread <=5%, otherwise five; held-out tolerance = 25%.\nMeasures CPU f64 owned-overwrite Singles with measured working-set curves and decoupled fits; no profile loader is installed.");
+        println!("Usage: calibrate_replay <profile-path> [width]\nwidth defaults to available parallelism; run a release build.\nThree batches when spread <=5%, otherwise five; Single-only phase tolerance = 25%.\nMeasures CPU f64 owned permute phases, reused-output Single curves and fresh-minus-reused first touch; no profile loader is installed.");
         return Ok(());
     }
     if args.is_empty() || args.len() > 2 {
@@ -1020,7 +1176,7 @@ fn main() -> Res<()> {
         .unwrap_or_else(|| "unknown".into());
     for (k, v) in [
         ("format_version", "1"),
-        ("model_version", "3"),
+        ("model_version", "4"),
         ("replay_abi", "symtn-replay-v2"),
         ("dispatch_abi", "threadteam-0.5.1"),
         ("class", "f64-owned-overwrite-copy"),
@@ -1059,7 +1215,7 @@ fn main() -> Res<()> {
     let mut empty = Fixture::new(0, &[0, 1], &[0, 1], false)?;
     let setup_s = section.elapsed().as_secs_f64();
     let baseline = measure(|| Ok(Some(empty.phase(&mut serial)?)), 1000)?;
-    print_samples("no-item serial direct phase", baseline);
+    print_samples("no-item serial reused-output direct phase", baseline);
     let mut serial_cold_s = setup_s + baseline.cold;
     let mut payload_peak = 0usize;
     let largest_cache = caches.iter().map(|(_, bytes)| *bytes).max();
@@ -1082,8 +1238,9 @@ fn main() -> Res<()> {
     }
     let largest = *targets.last().unwrap();
     println!("Working-set ladder: {:?}; reported caches are information only; requested_bytes={requested} memory_allowance_bytes={allowance}; W counts distinct source+destination element bytes, sparse padding is reported separately.", targets);
-    println!("Serial phase minus no-item baseline excludes output allocation/proof validation, includes first stores. Raw e(W)=median residual/elements; corrected e subtracts independently fitted a and r(W) to avoid double counting. All curves interpolate in log W with flat endpoints.");
+    println!("Serial phase minus no-item baseline excludes output allocation/proof validation, uses a reused owned destination. Fresh minus reused measures first-touch separately. Raw e(W)=median residual/elements; corrected e subtracts independently fitted a and r(W) to avoid double counting. All curves interpolate in log W with flat endpoints.");
     let mut identified = true;
+    let mut first_touch = Vec::new();
     let mut raw_curves: [Vec<(usize, f64)>; 2] = Default::default();
     for (kind, _) in KINDS.iter().enumerate() {
         for &working_set in &targets {
@@ -1093,7 +1250,40 @@ fn main() -> Res<()> {
             fixture.print_geometry("curve")?;
             payload_peak = payload_peak.max(fixture.payload_bytes()?);
             let setup = cold.elapsed().as_secs_f64();
-            let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 256)?;
+            let mut output = fixture.replay(&mut serial, None)?;
+            payload_peak = payload_peak.max(fixture.payload_bytes()? + output.len() * 8);
+            let time = measure(
+                || Ok(Some(fixture.reused_phase(&mut serial, &mut output)?)),
+                256,
+            )?;
+            if kind == 0 {
+                let fresh = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 256)?;
+                let destination_bytes = output.len() * 8;
+                let f = (fresh.median - time.median) / destination_bytes as f64;
+                first_touch.push((working_set, f));
+                print_samples(
+                    &format!(
+                        "first-touch fresh W={working_set} destination_bytes={destination_bytes}"
+                    ),
+                    fresh,
+                );
+                print_samples(
+                    &format!(
+                        "first-touch reused W={working_set} destination_bytes={destination_bytes}"
+                    ),
+                    time,
+                );
+                println!("first-touch W={working_set} f_ns_per_destination_byte={f:.12}; signed fresh-minus-reused; allocation/free excluded, allocator page reuse is observable in process fault counts");
+                for (mode, samples) in [("fresh", fresh), ("reused", time)] {
+                    profile.insert(
+                        format!("measured.first_touch.{working_set}.{mode}.minor_faults_per_call"),
+                        samples
+                            .minor_faults
+                            .map_or("unknown".into(), |n| format!("{n:.12e}")),
+                    );
+                }
+                serial_cold_s += fresh.cold;
+            }
             serial_cold_s += setup + time.cold;
             print_samples(
                 &format!(
@@ -1126,7 +1316,11 @@ fn main() -> Res<()> {
                 fixture.print_geometry("paired")?;
                 payload_peak = payload_peak.max(fixture.payload_bytes()?);
                 let setup = cold.elapsed().as_secs_f64();
-                let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 256)?;
+                let mut output = fixture.replay(&mut serial, None)?;
+                let time = measure(
+                    || Ok(Some(fixture.reused_phase(&mut serial, &mut output)?)),
+                    256,
+                )?;
                 serial_cold_s += setup + time.cold;
                 print_samples(&format!("paired k={} W={working_set} elements={elements} runs={runs} payload_bytes={}", KINDS[kind], fixture.payload_bytes()?), time);
                 rows.push((runs as f64, time.median));
@@ -1149,7 +1343,11 @@ fn main() -> Res<()> {
     for elements in 1..=16 {
         let mut fixture = Fixture::new(1, &[elements, 1], &[0, 1], false)?;
         fixture.data = vec![1.0; elements];
-        let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 256)?;
+        let mut output = fixture.replay(&mut serial, None)?;
+        let time = measure(
+            || Ok(Some(fixture.reused_phase(&mut serial, &mut output)?)),
+            256,
+        )?;
         print_samples(&format!("tiny elements={elements} roles=1 runs=1"), time);
         serial_cold_s += time.cold;
         if elements > 1 {
@@ -1199,7 +1397,24 @@ fn main() -> Res<()> {
             );
         }
     }
-    let mut accepted = identified
+    profile.insert(
+        "measured.first_touch.working_set_bytes".into(),
+        first_touch
+            .iter()
+            .map(|(w, _)| w.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    profile.insert(
+        "measured.first_touch.ns_per_destination_byte".into(),
+        first_touch
+            .iter()
+            .map(|(_, f)| format!("{f:.12e}"))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    let mut accepted = first_touch.iter().all(|(_, f)| f.is_finite())
+        && identified
         && a.is_finite()
         && a >= 0.0
         && run_curves
@@ -1208,7 +1423,7 @@ fn main() -> Res<()> {
             .flatten()
             .all(|(_, value)| value.is_finite() && *value >= 0.0);
     profile.insert("measured.item.a_ns".into(), format!("{a:.12e}"));
-    profile.insert("item_model".into(), "a + r_k(W)*runs + e_k(W)*elements; log-W interpolation, flat endpoints; W=distinct phase source+destination element bytes; sysfs informational only".into());
+    profile.insert("item_model".into(), "sum Singles(a + r_k(W)*runs + e_k(W)*elements) + f(W)*destination_bytes; log-W interpolation, flat endpoints; W=distinct phase source+destination element bytes; sysfs informational only".into());
     profile.insert(
         "measured.item.phase_baseline_ns".into(),
         format!("{:.12e}", baseline.median),
@@ -1228,64 +1443,99 @@ fn main() -> Res<()> {
     };
     serial_cold_s += heldout_cold.elapsed().as_secs_f64();
     for (label, result) in real {
-        let (phase_w, classes) = match result {
+        let real = match result {
             Ok(fixture) => fixture,
             Err(reason) => {
-                println!("held-out {label}: skipped: {reason}");
+                println!("phase held-out {label}: skipped: {reason}");
                 accepted = false;
                 continue;
             }
         };
-        payload_peak = payload_peak.max(2 * phase_w);
-        for (index, (class, original_roles)) in classes.iter().enumerate() {
-            let cold = Instant::now();
-            let result = (|| -> Res<_> {
-                let mut held = Fixture::geometry(&class.dims, &class.dst, &class.src)?;
-                let payload_bytes = held.payload_bytes()?;
-                payload_peak = payload_peak.max(payload_bytes);
-                let setup = cold.elapsed().as_secs_f64();
-                let time = measure(|| Ok(Some(held.phase(&mut serial)?)), 256)?;
-                Ok((held, payload_bytes, setup, time))
-            })();
-            let (held, payload_bytes, setup, time) = match result {
-                Ok(measurement) => measurement,
-                Err(reason) => {
-                    println!("held-out {label}.{index}: skipped: {reason}");
-                    accepted = false;
-                    serial_cold_s += cold.elapsed().as_secs_f64();
-                    continue;
-                }
-            };
-            serial_cold_s += setup + time.cold;
-            let working_set = held.roles * held.elements * 16;
-            let kind = class.kind();
-            let per_item = (time.median - baseline.median) / held.roles as f64;
-            let predicted = a
-                + interpolate(&run_curves[kind], working_set) * class.runs() as f64
-                + interpolate(&element_curves[kind], working_set) * class.elements() as f64;
-            let error = (predicted - per_item).abs() / per_item.abs();
-            let valid = error.is_finite() && per_item > 0.0 && error <= TOLERANCE;
+        payload_peak = payload_peak.max(2 * real.working_set);
+        let predicted_singles = predict_singles(
+            &real.classes,
+            real.working_set,
+            a,
+            &run_curves,
+            &element_curves,
+        );
+        let single_bytes: usize = real
+            .classes
+            .iter()
+            .map(|(class, count)| class.elements() * count * 8)
+            .sum();
+        let modeled_bytes = if real.multi_blocks == 0 {
+            real.destination_bytes
+        } else {
+            single_bytes
+        };
+        let touch = interpolate(&first_touch, real.working_set) * modeled_bytes as f64;
+        let predicted_phase = baseline.median + predicted_singles + touch;
+        print_samples(
+            &format!(
+                "phase held-out {label} public owned permute W={}",
+                real.working_set
+            ),
+            real.whole,
+        );
+        print_samples(
+            &format!("phase held-out {label} compiled owned Single interval"),
+            real.singles,
+        );
+        let error = (predicted_phase - real.whole.median).abs() / real.whole.median;
+        let valid = error.is_finite() && error <= TOLERANCE;
+        if real.multi_blocks == 0 {
             accepted &= valid;
-            print_samples(&format!("held-out {label}.{index} k={} elements={} runs={} dims={:?} dst_strides={:?} src_strides={:?} original_items={original_roles} original_phase_W={phase_w} isolated_items={} isolated_W={working_set} payload_bytes={}", KINDS[kind], class.elements(), class.runs(), class.dims, class.dst, class.src, held.roles, payload_bytes), time);
-            println!("held-out {label}.{index}: measured_ns_per_item={per_item:.3} predicted_ns_per_item={predicted:.3} relative_error={error:.6} within_25_percent={valid}; isolated exact Single geometry, excludes Multi work; not the original phase cache state");
-            for (field, value) in [
-                ("measured_ns_per_item", per_item),
-                ("predicted_ns_per_item", predicted),
-                ("relative_error", error),
-            ] {
-                profile.insert(
-                    format!("measured.heldout.{label}.{index}.{field}"),
-                    format!("{value:.12e}"),
-                );
-            }
+            println!("phase held-out {label}: predicted_singles_ns={predicted_singles:.3} first_touch_ns={touch:.3} baseline_ns={:.3} predicted_ns={predicted_phase:.3} measured_ns={:.3} relative_error={error:.6} within_25_percent={valid}", baseline.median, real.whole.median);
+        } else {
+            // ponytail: public replay has no profile hook; independent warm medians estimate its remainder.
+            let remainder = real.whole.median - real.singles.median;
+            profile.insert(
+                format!("measured.heldout.{label}.measured_remainder_ns"),
+                format!("{remainder:.12e}"),
+            );
+            profile.insert(
+                format!("measured.heldout.{label}.predicted_singles_plus_measured_remainder_ns"),
+                format!("{:.12e}", predicted_phase + remainder),
+            );
+            println!("phase held-out {label}: predicted_singles_ns={predicted_phase:.3} measured_remainder_ns={remainder:.3} predicted_singles_plus_measured_remainder_ns={:.3}; remainder is public median minus compiled Single median, includes Multi and public overhead; Multi model acceptance=unavailable; add public profiling if a paired decomposition is needed", predicted_phase + remainder);
+        }
+        profile.insert(
+            format!("measured.heldout.{label}.within_25_percent"),
+            if real.multi_blocks == 0 {
+                valid.to_string()
+            } else {
+                "unavailable: Multi outside Single model".into()
+            },
+        );
+        for (field, value) in [
+            ("working_set_bytes", real.working_set as f64),
+            ("predicted_singles_ns", predicted_singles),
+            ("first_touch_ns", touch),
+            ("predicted_single_phase_ns", predicted_phase),
+            ("measured_public_ns", real.whole.median),
+            ("measured_single_interval_ns", real.singles.median),
+            (
+                "relative_error",
+                if real.multi_blocks == 0 {
+                    error
+                } else {
+                    f64::NAN
+                },
+            ),
+        ] {
+            profile.insert(
+                format!("measured.heldout.{label}.{field}"),
+                format!("{value:.12e}"),
+            );
         }
     }
     profile.insert(
         "item_fit_status".into(),
         if accepted {
-            "held-out accepted; no trusted campaign reference"
+            "Single-only phases accepted; Multi remainder measured separately; no trusted campaign reference"
         } else {
-            "rejected: unresolved/nonfinite/negative constant, skipped held-out coverage, or per-class held-out error exceeds 25%"
+            "rejected: unresolved/nonfinite/negative constant, skipped coverage, or Single-only phase error exceeds 25%"
         }
         .into(),
     );
@@ -1342,7 +1592,7 @@ fn main() -> Res<()> {
             let value = if let Some(s) = s {
                 dispatch_cold_s += s.cold;
                 print_samples(&format!("empty-fork q={q} table_ns={table:.3}"), s);
-                let accepted = s.median >= table / 2.0 && s.median < 20.0 * table;
+                let accepted = s.median.is_finite() && s.median <= 20.0 * table;
                 println!("D({q}) measured_ns={:.3} accepted={accepted}; rejected samples retain the unmodified table",s.median);
                 if accepted {
                     s.median
@@ -1499,7 +1749,7 @@ fn main() -> Res<()> {
         .map(str::trim)
         .map(str::to_owned)
         .unwrap_or_else(|| "unknown".into());
-    println!("peak_process_rss={peak}; peak_simultaneous_payload_bytes={payload_peak} (excludes metadata/pool/allocator retention)");
+    println!("peak_process_rss={peak}; peak_simultaneous_payload_bound_bytes={payload_peak} (excludes metadata/pool/allocator retention)");
     println!("incomplete, base fallback: initial measurements have no trusted campaign reference; offline placement identity remains unknown");
     save(Path::new(&args[0]), &profile)?;
     println!(
@@ -1513,6 +1763,65 @@ fn main() -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reserved_output_is_reused_by_the_allocating_writer() {
+        // Purpose: the same allocation survives complete writes through the replay allocator.
+        for len in [2, 16, 8192] {
+            let mut output = vec![1.0; len];
+            let pointer = output.as_ptr();
+            reuse_output(&mut output, || {
+                let mut next = Vec::with_capacity(len);
+                next.resize(len, 3.0);
+                Ok(next)
+            })
+            .unwrap();
+            assert_eq!(output.as_ptr(), pointer);
+            assert!(output.iter().all(|&x| x == 3.0));
+        }
+    }
+
+    #[test]
+    fn failed_replay_releases_its_output_reservation() {
+        // Purpose: failure before or after allocation leaves no unowned reserved buffer.
+        for allocate in [false, true] {
+            let mut output = vec![1.0; 16];
+            let result = reuse_output(&mut output, || {
+                if allocate {
+                    black_box(Vec::<f64>::with_capacity(16));
+                }
+                Err("writer failed".into())
+            });
+            assert!(result.is_err());
+            RECYCLED.with(|slot| assert!(slot.get().is_none()));
+        }
+    }
+
+    #[test]
+    fn phase_prediction_uses_the_phase_working_set_for_every_item() {
+        // Purpose: all item multiplicities use the whole phase W, not their isolated W.
+        let classes = BTreeMap::from([(
+            ItemClass {
+                dims: vec![2, 2],
+                dst: vec![1, 2],
+                src: vec![1, 3],
+            },
+            3,
+        )]);
+        let runs = [vec![(16, 1.0), (512, 7.0)], vec![]];
+        let elements = [vec![(16, 2.0), (512, 11.0)], vec![]];
+        assert_eq!(predict_singles(&classes, 512, 5.0, &runs, &elements), 189.0);
+    }
+
+    #[test]
+    fn minor_faults_parser_skips_a_process_name_with_spaces_and_parentheses() {
+        // Purpose: Linux stat field 10 is located after the complete comm field.
+        assert_eq!(
+            stat_minor_faults("123 (worker (copy) probe) S 1 2 3 4 5 6 42 99"),
+            Some(42)
+        );
+        assert_eq!(stat_minor_faults("123 (worker) S 1"), None);
+    }
 
     #[test]
     fn mixed_replay_summary_separates_singles_from_multi_destination_work() {

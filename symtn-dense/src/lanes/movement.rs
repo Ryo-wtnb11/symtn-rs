@@ -112,10 +112,6 @@ impl Calibration {
         crate::probe::add(crate::probe::Event::MovementCalibration, 1);
         // Five batches share a 10 ms table-priced target across the anchors.
         const BATCHES: usize = 5;
-        // Bound noise to [0.5, 20] times the token's threadteam table. A
-        // PoolBuilder override takes precedence over the default class row;
-        // in particular, an explicitly free dispatch remains free.
-        const MAX_TABLE_MULTIPLE: u32 = 20;
         let anchors = widths(exec.budget()).count();
         let mut dispatch = Vec::with_capacity(anchors);
         dispatch.push((1, Duration::ZERO));
@@ -137,15 +133,26 @@ impl Calibration {
                     .unwrap_or(baseline);
             }
             samples.sort_unstable();
-            let measured = samples[BATCHES / 2]
-                .max(dispatch.last().unwrap().1)
-                .clamp(baseline / 2, baseline.saturating_mul(MAX_TABLE_MULTIPLE));
+            let measured =
+                calibrated_dispatch(samples[BATCHES / 2], baseline, dispatch.last().unwrap().1);
             dispatch.push((width, measured));
         }
         // threadteam 0.5 exposes neither prefix placement nor node boundaries;
         // interpolate between powers of two and the full budget. Topology and
         // bandwidth calibration belong to the flat vector-operation work.
         Self { dispatch }
+    }
+}
+
+// Faster-than-table measurements are valid; only excessive samples fall back.
+// A PoolBuilder override remains authoritative, including explicitly free dispatch.
+fn calibrated_dispatch(measured: Duration, table: Duration, previous: Duration) -> Duration {
+    const MAX_TABLE_MULTIPLE: u32 = 20;
+    let upper = table.saturating_mul(MAX_TABLE_MULTIPLE);
+    if measured > upper {
+        table
+    } else {
+        measured.max(previous).min(upper)
     }
 }
 
@@ -363,6 +370,22 @@ mod tests {
         }
     }
 
+    /// Dispatch measurements below half the table remain valid; only the upper bound rejects.
+    #[test]
+    fn dispatch_measurements_reject_only_above_the_table_multiple() {
+        let table = Duration::from_nanos(600);
+        for (measured, expected) in [(125, 125), (12_000, 12_000), (12_001, 600)] {
+            assert_eq!(
+                calibrated_dispatch(Duration::from_nanos(measured), table, Duration::ZERO),
+                Duration::from_nanos(expected)
+            );
+        }
+        assert_eq!(
+            calibrated_dispatch(Duration::from_nanos(1), Duration::ZERO, table),
+            Duration::ZERO
+        );
+    }
+
     /// Planned sections share the target and stay bounded even for free or costly tables.
     #[test]
     fn calibration_sections_share_the_time_target() {
@@ -456,7 +479,7 @@ mod tests {
         assert_eq!(crate::engine_slot::retained_bytes(&mut engine), 0);
     }
 
-    /// A lower-bound model that cannot beat serial leaves tiny phases cold.
+    /// The optimistic screening model leaves provably tiny phases cold.
     #[test]
     fn tiny_movement_does_not_calibrate() {
         let mut engine =

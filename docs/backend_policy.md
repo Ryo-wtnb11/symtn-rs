@@ -391,20 +391,23 @@ at widths 1, 2, 4, ... and the full budget, and linearly interpolated. The
 uses five equal median batches, with 20–200 sections total (rounded down to
 a multiple of five), plus one unmeasured warmup section. This bounds planned
 work, not elapsed time under interruption or a mispriced dispatch table.
-Measurements are bounded to [0.5, 20] times the token's effective threadteam
-dispatch table; the precheck reads the engine's team costs without minting
-an execution token. Calibration and the movement phase run inside the same
-guarded engine entry and share its single ledger root; forced and retained
+Measurements above 20 times the token's effective threadteam dispatch table
+are rejected in favor of that table; faster-than-table measurements are valid.
+The precheck reads the engine's team costs without minting an execution token.
+Calibration and the movement phase run inside the same guarded engine entry
+and share its single ledger root; forced and retained
 width decisions also reuse that entry. A caller's
 `PoolBuilder` override takes precedence over the default host-class row
 (zero stays zero). An invalid elapsed interval falls back to the table.
-A nondecreasing envelope is used where compatible with those bounds.
+A nondecreasing envelope is used for accepted measurements within the upper
+bound.
 Width one has no dispatch cost. Threadteam 0.5 supplies no prefix node map,
 so no NUMA boundaries are added; bandwidth and topology calibration are
 deferred to the flat vector operations.
 
 The first eligible Auto decision calibrates only when the model using half
-the table cost can beat fully serial execution. Serial engines and provably
+the table cost can beat fully serial execution. This is a screening heuristic,
+not a lower bound on valid measured dispatch costs. Serial engines and provably
 tiny phases and single-item inline phases perform no calibration. The ladder is a separate, byte-charged
 entry in the existing per-engine extension store, not a structure cache;
 a retained entry is reused without measurement. Admission is checked before
@@ -428,14 +431,24 @@ Run costs come from median pairwise time/run slopes at fixed element counts;
 the common role cost comes from the tiny-copy intercept after subtracting the
 no-item baseline and one-run cost. The raw element curves also subtract this
 independently fitted role/run overhead before entering the additive model.
-Held-out classes use exact compiled Single geometry from public U1/SU2 small
-and dominant permutations. Each class is replayed in a minimal complete
-padding tiling, with its isolated working set reported separately from the
-original phase. Real replays may contain Multi blocks; the tool reports their
-count and share of active destination elements, and evaluates only Singles in
-these isolated class replays, excluding Multi work. An unevaluable fixture or
-class prints its reason and continues; skipped coverage prevents acceptance.
-Acceptance requires at most 25% relative error per class.
+Role/run/element fits reuse the owned destination through an example-local
+allocator reservation; the same production owned writer executes every write.
+Fresh allocation versus that reused destination on the same replay measures
+f(W), the signed extra nanoseconds per destination byte, over the W ladder.
+This empirical difference includes cache/page effects; allocator reuse can make
+it negative and fresh allocations need not fault. Allocation/free are outside
+the phase interval. Linux reports process-wide minor page faults per call from
+`/proc/self/stat` field 10; other platforms report `unknown`.
+Held-out validation runs public owned `permute` end to end on U1/SU2 small,
+U1/SU2 dominant, and SU2 large fixtures with a serial engine. Its prediction
+uses the whole phase working set for every Single, adds f(W) times destination
+bytes and the empty-phase baseline, and prints acceptance at 25% relative
+error for Single-only fixtures. Multi count and destination-element share are
+reported separately. Mixed fixtures print predicted Singles plus a measured
+remainder (public median minus the separately measured compiled Single
+interval); this residual includes Multi and public overhead and is not a
+paired decomposition or a validation of a Multi model. Skipped fixtures
+prevent acceptance.
 Three batches suffice when their spread is at most 5%, otherwise five are
 measured. The tool targets 60 seconds at width four and prints a width-96
 projection from its fixed serial cost and per-width ladder measurements;
@@ -445,7 +458,7 @@ unavailable. The example also measures engine-team empty-fork dispatch and
 size/retest stability of replay bandwidth over bounded measured working sets;
 it does not infer a DRAM boundary from sysfs. It prints raw batches, baked
 geometry, errors, cold time and memory use, and writes a version-1
-`key=value` profile with item model version 3. Unknown placement leaves the
+`key=value` profile with item model version 4. Unknown placement leaves the
 profile incomplete; it does not install constants or change the movement
 chooser. The serial phase timer excludes output allocation and proof
 validation; output first stores remain inside the timed movement.
