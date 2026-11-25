@@ -47,7 +47,7 @@ impl<'a, C: Copy> TreeTransformTaskView<'a, C> {
     /// layouts cannot change after compilation, this also identifies the exact
     /// layout ordering used by converted coefficients.
     #[inline]
-    #[cfg(any(feature = "cuda", test))]
+    #[cfg(any(feature = "cuda", feature = "tenferro", test))]
     pub(crate) fn admission_identity(self) -> std::sync::Weak<()> {
         Arc::downgrade(self.structure.identity_marker())
     }

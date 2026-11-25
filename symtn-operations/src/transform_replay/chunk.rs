@@ -100,53 +100,10 @@ where
         );
         #[cfg(test)]
         workspace.gate_keys.watch_as(gate);
-        let (threads, singles_width, inactive_width) = if exec.budget() == 1 {
-            (1, 1, 1)
-        } else {
-            let read_destination = writer.reads_destination();
-            let fixed = |summary: &crate::movement::Summary| {
-                movement::width::<D, _>(
-                    &exec,
-                    constants,
-                    summary.prefix.len(),
-                    summary.working_set as u128,
-                    summary.logical_traffic(read_destination) as u128,
-                    || summary.counts.map(|count| count.elements as f64),
-                    |slots, elements| {
-                        writer.replays_plans() && workspace.gate_keys.admits(slots, elements)
-                    },
-                    |costs| movement::fixed(summary, costs),
-                )
-            };
-            (
-                movement::width::<D, _>(
-                    &exec,
-                    constants,
-                    task.recoupling_plan().jobs().len(),
-                    schedule.group_movement.working_set as u128,
-                    schedule.group_movement.logical_traffic(read_destination) as u128,
-                    || {
-                        schedule
-                            .group_movement
-                            .counts
-                            .map(|count| count.elements as f64)
-                    },
-                    |_, _| false,
-                    |costs| {
-                        movement::group_phase(schedule, costs, |group| {
-                            lanes::gemm_cost(
-                                &task.recoupling_plan().jobs()[group],
-                                D::one().dense_scalar(),
-                            )
-                            .as_secs_f64()
-                                * 1e9
-                        })
-                    },
-                ),
-                fixed(&schedule.single_movement),
-                fixed(&schedule.inactive_movement),
-            )
-        };
+        prepare_decisions::<W, T, D, C>(workspace, task, schedule, writer, &exec, constants)?;
+        let [threads, singles_width, inactive_width] = workspace.movement_memo.widths[..3]
+            .try_into()
+            .expect("direct phases");
         workspace.prepare_fused_indices(threads.max(singles_width).max(inactive_width), rank)?;
         let split_inactive = inactive_width > 1;
         let split_singles = singles_width > 1;
@@ -234,6 +191,180 @@ where
     Ok((admitted.0, admitted.1, admitted.3))
 }
 
+/// Only the selected group width fixes chunk boundaries, so these tables are
+/// rebuilt on a decision-key change, never on a warm replay.
+#[derive(Clone, Debug)]
+pub(super) struct ChunkMovement {
+    groups: Vec<usize>,
+    runs: Vec<u32>,
+}
+
+impl ChunkMovement {
+    pub fn retained_bytes(&self) -> usize {
+        self.groups.capacity() * core::mem::size_of::<usize>()
+            + self.runs.capacity() * core::mem::size_of::<u32>()
+    }
+}
+
+fn prepare_decisions<W, T, D, C>(
+    workspace: &mut TreeTransformWorkspace<D>,
+    task: TreeTransformTaskView<'_, C>,
+    schedule: &TreeTransformParallelSchedule,
+    writer: &W,
+    exec: &lanes::Exec<'_>,
+    constants: Option<&movement::Constants>,
+) -> Result<(), OperationError>
+where
+    W: DestinationWriter<T, D>,
+    T: Send + Sync,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    let key = movement::decision_key::<D>(
+        exec,
+        constants,
+        writer.reads_destination(),
+        writer.replays_plans(),
+        workspace.packed.destination().len(),
+        workspace.packed.destination().capacity(),
+        1,
+    );
+    let HostTreeTransformWorkspace {
+        movement_memo,
+        movement_chunks,
+        gate_keys,
+        ..
+    } = workspace;
+    movement_memo.update(
+        key,
+        task.admission_identity(),
+        movement::dispatch_key(exec),
+        |widths| {
+            let fixed = |summary: &crate::movement::Summary| {
+                movement::width::<D, _>(
+                    exec,
+                    constants,
+                    summary.prefix.len(),
+                    summary.working_set as u128,
+                    summary.logical_traffic(key.reads_destination) as u128,
+                    || summary.counts.map(|count| count.elements as f64),
+                    |slots, elements| key.replays_plans && gate_keys.admits(slots, elements),
+                    |costs| movement::fixed(summary, costs),
+                )
+            };
+            let jobs = task.recoupling_plan().jobs();
+            let threads = movement::width::<D, _>(
+                exec,
+                constants,
+                jobs.len(),
+                schedule.group_movement.working_set as u128,
+                schedule
+                    .group_movement
+                    .logical_traffic(key.reads_destination) as u128,
+                || {
+                    schedule
+                        .group_movement
+                        .counts
+                        .map(|count| count.elements as f64)
+                },
+                |_, _| false,
+                |costs| {
+                    movement::group_phase(schedule, costs, |group| {
+                        lanes::gemm_cost(&jobs[group], D::one().dense_scalar()).as_secs_f64() * 1e9
+                    })
+                },
+            );
+            widths.extend([
+                threads,
+                fixed(&schedule.single_movement),
+                fixed(&schedule.inactive_movement),
+            ]);
+            let (_, destination_len) = chunk_scratch(jobs, threads)?;
+            let mut fill =
+                key.destination_len < destination_len && key.destination_capacity < destination_len;
+            movement_chunks.clear();
+            for (index, chunk) in jobs.chunks(threads).enumerate() {
+                let first_group = index * threads;
+                let last_group = first_group + chunk.len() - 1;
+                let first = schedule.scatter_groups[first_group].pack.start;
+                let end = schedule.scatter_groups[last_group].pack.end;
+                let columns = end - first;
+                let extra = (fill && columns != 0).then_some(destination_len);
+                fill &= columns == 0;
+                let summary = crate::movement::Summary::totals(
+                    &schedule.pack_movement[first_group..=last_group],
+                )?;
+                let pack_width = movement::width::<D, _>(
+                    exec,
+                    constants,
+                    columns,
+                    summary.working_set as u128 + extra.unwrap_or(0) as u128,
+                    summary.traffic as u128 + extra.unwrap_or(0) as u128,
+                    || {
+                        let mut elements = summary.counts.map(|count| count.elements as f64);
+                        elements[2] += extra.unwrap_or(0) as f64;
+                        elements
+                    },
+                    |_, _| false,
+                    |costs| {
+                        movement::prefix_phase(
+                            &schedule.pack_prefix,
+                            first,
+                            columns,
+                            0,
+                            costs,
+                            extra,
+                        )
+                    },
+                );
+                let mut groups: Vec<_> = (first_group..=last_group)
+                    .filter(|&group| !schedule.scatter_groups[group].columns.is_empty())
+                    .collect();
+                groups.sort_unstable_by_key(|&group| schedule.group_spans[group].lo);
+                let mut runs = Vec::new();
+                group_runs(&groups, &schedule.group_spans, &mut runs);
+                let summary = crate::movement::Summary::totals(
+                    groups
+                        .iter()
+                        .map(|&group| &schedule.scatter_movement[group]),
+                )?;
+                let mut prefix = Vec::with_capacity(runs.len());
+                let mut cumulative = crate::movement::Job::default();
+                for (run, &start) in runs.iter().enumerate() {
+                    let end = runs.get(run + 1).map_or(groups.len(), |&end| end as usize);
+                    for &group in &groups[start as usize..end] {
+                        cumulative = cumulative.add(schedule.scatter_movement[group].job())?;
+                    }
+                    prefix.push(cumulative);
+                }
+                let scatter_width = movement::width::<D, _>(
+                    exec,
+                    constants,
+                    runs.len(),
+                    summary.working_set as u128,
+                    summary.logical_traffic(key.reads_destination) as u128,
+                    || summary.counts.map(|count| count.elements as f64),
+                    |slots, elements| key.replays_plans && gate_keys.admits(slots, elements),
+                    |costs| {
+                        movement::prefix_phase(
+                            &prefix,
+                            0,
+                            runs.len(),
+                            summary.planned_min,
+                            costs,
+                            None,
+                        )
+                    },
+                );
+                widths.extend([pack_width, scatter_width]);
+                movement_chunks.push(ChunkMovement { groups, runs });
+            }
+            movement_chunks.shrink_to_fit();
+            Ok(())
+        },
+    )
+}
+
 /// Execute compiled chunks of plan groups, each with an independently priced
 /// pack, one grouped GEMM, and an independently priced scatter. A cold packed
 /// destination is first-written inside the first nonempty pack; warm scratch
@@ -277,8 +408,6 @@ where
     workspace.chunk_jobs.reserve(chunk_len);
     workspace.chunk_runs.clear();
     workspace.chunk_runs.reserve(chunk_len);
-    workspace.chunk_scatter_groups.clear();
-    workspace.chunk_scatter_groups.reserve(chunk_len);
     let packed_destination = workspace.packed.destination_mut();
     let mut fill = packed_destination.len() < scratch_destination;
     if fill && packed_destination.capacity() >= scratch_destination {
@@ -319,6 +448,7 @@ where
         let pack = &schedule.pack_columns[schedule.scatter_groups[first_group].pack.start
             ..schedule.scatter_groups[last_group].pack.end];
         let filled = (fill && !pack.is_empty()).then_some(scratch_destination);
+        let pack_width = workspace.movement_memo.widths[3 + index * 2];
         pack_chunk(
             engine,
             workspace,
@@ -328,9 +458,7 @@ where
             source_len,
             filled,
             src,
-            &schedule.pack_movement[first_group..=last_group],
-            &schedule.pack_prefix,
-            schedule.scatter_groups[first_group].pack.start,
+            pack_width,
         )?;
         fill &= pack.is_empty();
         #[cfg(any(test, feature = "testing"))]
@@ -367,62 +495,15 @@ where
             zero_strides,
             fused_indices,
             gate_keys,
-            movement_prefix,
-            chunk_scatter_groups: ordered,
-            chunk_scatter_runs: runs,
+            movement_memo,
+            movement_chunks,
             ..
         } = &mut *workspace;
-        let spans = &schedule.group_spans;
-        ordered.clear();
-        ordered.extend(
-            (first_group..=last_group)
-                .filter(|&group| !schedule.scatter_groups[group].columns.is_empty()),
-        );
-        // Why not sort every scatter column: only the at-most-t group indices
-        // need destination order for one safe split tree.
-        ordered.sort_unstable_by_key(|&group| spans[group].lo);
-        group_runs(ordered, spans, runs);
         let packed = &packed.destination().as_slice()[..destination_len];
-        let groups = &ordered[..];
-        let runs = &runs[..];
-        movement::region(engine, |exec, constants| {
-            let summaries = &schedule.scatter_movement;
-            let summary = if exec.budget().min(runs.len()) > 1 {
-                crate::movement::Summary::totals(groups.iter().map(|&group| &summaries[group]))?
-            } else {
-                crate::movement::Summary::default()
-            };
-            movement_prefix.clear();
-            if exec.budget().min(runs.len()) > 1 {
-                movement_prefix.reserve(runs.len());
-                let mut cumulative = crate::movement::Job::default();
-                for (i, &start) in runs.iter().enumerate() {
-                    let end = runs.get(i + 1).map_or(groups.len(), |&end| end as usize);
-                    for &group in &groups[start as usize..end] {
-                        cumulative = cumulative.add(summaries[group].job())?;
-                    }
-                    movement_prefix.push(cumulative);
-                }
-            }
-            let width = movement::width::<D, _>(
-                &exec,
-                constants,
-                runs.len(),
-                summary.working_set as u128,
-                summary.logical_traffic(writer.reads_destination()) as u128,
-                || summary.counts.map(|count| count.elements as f64),
-                |slots, elements| writer.replays_plans() && gate_keys.admits(slots, elements),
-                |costs| {
-                    movement::prefix_phase(
-                        movement_prefix,
-                        0,
-                        runs.len(),
-                        summary.planned_min,
-                        costs,
-                        None,
-                    )
-                },
-            );
+        let groups = &movement_chunks[index].groups[..];
+        let runs = &movement_chunks[index].runs[..];
+        let width = movement_memo.widths[4 + index * 2];
+        crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
             let split = width > 1;
             if split {
                 let items = Items::Groups {
@@ -546,9 +627,7 @@ fn pack_chunk<D, C>(
     source_len: usize,
     fill: Option<usize>,
     src: &[D],
-    summaries: &[crate::movement::Summary],
-    prefix: &[crate::movement::Job],
-    first: usize,
+    threads: usize,
 ) -> Result<(), OperationError>
 where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
@@ -563,36 +642,7 @@ where
     } = &mut *workspace;
     let (source, destination) = packed.split_mut();
     let mut run = |writer: PackColumnWriter<'_, D>, fill: Option<PackColumnWriter<'_, D>>| {
-        movement::region(engine, |exec, constants| {
-            let summary = if exec.budget().min(columns.len()) > 1 {
-                crate::movement::Summary::totals(summaries)?
-            } else {
-                crate::movement::Summary::default()
-            };
-            let extra = fill.as_ref().map_or(0, |fill| fill.len());
-            let threads = movement::width::<D, _>(
-                &exec,
-                constants,
-                columns.len(),
-                summary.working_set as u128 + extra as u128,
-                summary.traffic as u128 + extra as u128,
-                || {
-                    let mut elements = summary.counts.map(|count| count.elements as f64);
-                    elements[2] += extra as f64;
-                    elements
-                },
-                |_, _| false,
-                |costs| {
-                    movement::prefix_phase(
-                        prefix,
-                        first,
-                        columns.len(),
-                        0,
-                        costs,
-                        fill.as_ref().map(|fill| fill.len()),
-                    )
-                },
-            );
+        crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
             let work = Pack {
                 columns,
                 layouts,

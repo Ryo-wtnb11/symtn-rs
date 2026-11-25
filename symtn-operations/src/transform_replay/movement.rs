@@ -3,7 +3,7 @@
 use super::*;
 use crate::movement::{job_range, Counts, Job, Summary, CLASSES};
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use symtn_dense::lanes;
@@ -129,6 +129,7 @@ const REFERENCES: [(HostClass, [Row; 2]); 1] = [(HostClass::X86_64Avx512, CI_ROW
 
 /// Structural table: unmeasured inactive rows use their same-stride real-map source.
 pub(super) struct MovementConstants {
+    generation: u64,
     rows: [Row; CLASSES],
     memory_knees: [f64; CLASSES],
     bandwidth: Vec<f64>,
@@ -146,6 +147,7 @@ impl MovementConstants {
             .find(|(class, _)| *class == host)
             .map_or(CI_ROWS, |(_, rows)| *rows);
         Self {
+            generation: next_generation(),
             rows: [rows[0], rows[1], rows[0], rows[1]],
             memory_knees: core::array::from_fn(|c| rows[c % 2].e.memory_knee()),
             bandwidth: Vec::new(),
@@ -177,6 +179,99 @@ impl MovementConstants {
             .as_secs_f64()
             * 1e9
     }
+}
+
+// Entry creation and measurement both advance the revision, including after eviction.
+fn next_generation() -> u64 {
+    static GENERATION: AtomicU64 = AtomicU64::new(1);
+    GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct DecisionKey {
+    pub budget: usize,
+    pub carries_team: bool,
+    pub generation: u64,
+    pub strategy: tenferro_cpu::CpuBatchStrategy,
+    pub bytes: usize,
+    pub reads_destination: bool,
+    pub replays_plans: bool,
+    pub destination_len: usize,
+    pub destination_capacity: usize,
+    pub members: usize,
+}
+
+/// A single schedule/key, with one usize per phase; no old key survives replacement.
+#[derive(Clone, Debug, Default)]
+pub(super) struct WidthMemo {
+    key: Option<DecisionKey>,
+    identity: Weak<()>,
+    dispatch: Vec<Duration>,
+    pub widths: Vec<usize>,
+}
+
+impl WidthMemo {
+    pub fn update(
+        &mut self,
+        key: DecisionKey,
+        identity: Weak<()>,
+        dispatch: impl Iterator<Item = Duration> + Clone,
+        build: impl FnOnce(&mut Vec<usize>) -> Result<(), OperationError>,
+    ) -> Result<(), OperationError> {
+        if self.key == Some(key)
+            && self.identity.ptr_eq(&identity)
+            && self.dispatch.iter().copied().eq(dispatch.clone())
+        {
+            return Ok(());
+        }
+        self.key = None;
+        self.widths.clear();
+        build(&mut self.widths)?;
+        self.widths.shrink_to_fit();
+        self.dispatch.clear();
+        self.dispatch.extend(dispatch);
+        self.dispatch.shrink_to_fit();
+        self.identity = identity;
+        self.key = Some(key);
+        Ok(())
+    }
+
+    pub fn retained_bytes(&self) -> usize {
+        self.widths.capacity() * core::mem::size_of::<usize>()
+            + self.dispatch.capacity() * core::mem::size_of::<Duration>()
+    }
+}
+
+pub(super) fn decision_key<D>(
+    exec: &lanes::Exec<'_>,
+    constants: Option<&Constants>,
+    reads_destination: bool,
+    replays_plans: bool,
+    destination_len: usize,
+    destination_capacity: usize,
+    members: usize,
+) -> DecisionKey {
+    DecisionKey {
+        budget: exec.budget(),
+        carries_team: exec.token_ref().carries_team(),
+        generation: constants.map_or(0, |constants| constants.generation),
+        strategy: exec.batch_policy().strategy,
+        bytes: core::mem::size_of::<D>(),
+        reads_destination,
+        replays_plans,
+        destination_len,
+        destination_capacity,
+        members,
+    }
+}
+
+pub(super) fn dispatch_key<'a>(
+    exec: &'a lanes::Exec<'_>,
+) -> impl Iterator<Item = Duration> + Clone + 'a {
+    (2..=exec.budget()).map(|q| {
+        exec.token_ref()
+            .dispatch_cost(NonZeroUsize::new(q).unwrap())
+    })
 }
 
 /// The retained value itself records the attempt, including a failed one:
@@ -252,6 +347,7 @@ fn region_with<R>(
                             / constants.rows[0].e.at(f64::INFINITY),
                     );
                     interpolate_bandwidth(&mut constants.bandwidth);
+                    constants.generation = next_generation();
                 }
                 op.take().expect("region body runs once")(exec, retained.as_ref())
             },
@@ -485,7 +581,43 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -
             &reference
         }
     };
-    let bytes = std::mem::size_of::<D>() as f64;
+    let dispatch = |q| {
+        constants.dispatch_cost(q, || {
+            exec.token_ref()
+                .dispatch_cost(NonZeroUsize::new(q).unwrap())
+        })
+    };
+    width_with(
+        budget,
+        constants,
+        std::mem::size_of::<D>(),
+        jobs,
+        working_set,
+        traffic,
+        elements,
+        admits,
+        prepare,
+        dispatch,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn width_with<F: Fn(usize, usize, &Prices<'_>) -> f64>(
+    budget: usize,
+    constants: &Constants,
+    bytes: usize,
+    jobs: usize,
+    working_set: u128,
+    traffic: u128,
+    elements: impl FnOnce() -> [f64; CLASSES],
+    admits: impl Fn(usize, usize) -> bool,
+    prepare: impl Fn(&Costs) -> F,
+    dispatch: impl Fn(usize) -> f64,
+) -> usize {
+    if budget.min(jobs) <= 1 {
+        return 1;
+    }
+    let bytes = bytes as f64;
     let working_set = working_set as f64 * bytes;
     let costs = core::array::from_fn(|c| {
         let row = constants.row(c);
@@ -493,12 +625,6 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -
     });
     let traffic = traffic as f64 * bytes;
     let phase = prepare(&costs);
-    let dispatch = |q| {
-        constants.dispatch_cost(q, || {
-            exec.token_ref()
-                .dispatch_cost(NonZeroUsize::new(q).unwrap())
-        })
-    };
     let bandwidth = phase_bandwidth(working_set, traffic, elements(), constants);
     let prices = Prices {
         bytes,
@@ -511,7 +637,7 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -
         jobs,
         traffic,
         |q| phase(q, budget, &prices),
-        dispatch,
+        &dispatch,
         &bandwidth,
     )
 }
@@ -1025,6 +1151,263 @@ mod tests {
             validated_dispatch(Duration::from_nanos(1), Duration::ZERO),
             None
         );
+    }
+
+    fn memo_key(constants: &Constants) -> DecisionKey {
+        DecisionKey {
+            budget: 4,
+            carries_team: true,
+            generation: constants.generation,
+            strategy: tenferro_cpu::CpuBatchStrategy::Auto,
+            bytes: core::mem::size_of::<f64>(),
+            reads_destination: false,
+            replays_plans: true,
+            destination_len: 0,
+            destination_capacity: 0,
+            members: 1,
+        }
+    }
+
+    fn direct_phase_width(phase: &Summary, constants: &Constants, key: DecisionKey) -> usize {
+        width_with(
+            key.budget,
+            constants,
+            key.bytes,
+            phase.prefix.len(),
+            phase.working_set as u128,
+            phase.logical_traffic(key.reads_destination) as u128,
+            || phase.counts.map(|count| count.elements as f64),
+            |slots, elements| key.carries_team && key.replays_plans && elements >= slots,
+            |costs| fixed(phase, costs),
+            |q| constants.dispatch_cost(q, || Duration::from_nanos((q * 23) as u64)),
+        )
+    }
+
+    /// Purpose: memoized widths match direct model evaluation over varied
+    /// structural plans and constants; both inline and split choices occur.
+    #[test]
+    fn memoized_widths_match_direct_random_plans_and_constants() {
+        let mut seed = 31u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            seed >> 32
+        };
+        let mut memo = WidthMemo::default();
+        let mut split = false;
+        let mut inline = false;
+        for _ in 0..64 {
+            let mut constants = Constants::reference(HostClass::Generic);
+            for row in &mut constants.rows {
+                row.a = next() as f64 % 100.0;
+                for (_, value) in &mut row.r.points {
+                    *value = next() as f64 % 30.0 + 0.1;
+                }
+                for (_, value) in &mut row.e.points {
+                    *value = next() as f64 % 10.0 + 0.1;
+                }
+            }
+            constants.memory_knees = core::array::from_fn(|c| constants.rows[c].e.memory_knee());
+            constants.dispatch = (0..=8)
+                .map(|_| Some(Duration::from_nanos(next() % 10000)))
+                .collect();
+            let mut key = memo_key(&constants);
+            key.budget = next() as usize % 8 + 1;
+            key.reads_destination = next() % 2 != 0;
+            key.bytes = if next() % 2 == 0 { 4 } else { 16 };
+            let phases: Vec<_> = (0..next() as usize % 5 + 1)
+                .map(|_| {
+                    let jobs: Vec<_> = (0..next() as usize % 16 + 1)
+                        .map(|_| {
+                            let counts = core::array::from_fn(|_| Counts {
+                                items: next() % 3 + 1,
+                                runs: next() % 50 + 1,
+                                elements: next() % 1000 + 1,
+                            });
+                            Job {
+                                planned: if next() % 2 == 0 {
+                                    counts
+                                } else {
+                                    [Counts::default(); CLASSES]
+                                },
+                                counts,
+                            }
+                        })
+                        .collect();
+                    let mut phase = compiled_jobs(&jobs, 1);
+                    phase.traffic = phase.counts.iter().map(|count| count.elements * 2).sum();
+                    phase.working_set = phase.traffic;
+                    phase.destination_reads = phase.traffic / 2;
+                    phase
+                })
+                .collect();
+            let expected: Vec<_> = phases
+                .iter()
+                .map(|phase| direct_phase_width(phase, &constants, key))
+                .collect();
+            split |= expected.iter().any(|&width| width > 1);
+            inline |= expected.contains(&1);
+            let identity = Arc::new(());
+            for _ in 0..2 {
+                memo.update(
+                    key,
+                    Arc::downgrade(&identity),
+                    core::iter::once(Duration::ZERO),
+                    |widths| {
+                        widths.extend(
+                            phases
+                                .iter()
+                                .map(|phase| direct_phase_width(phase, &constants, key)),
+                        );
+                        Ok(())
+                    },
+                )
+                .unwrap();
+                assert_eq!(memo.widths, expected);
+            }
+        }
+        assert!(split && inline);
+    }
+
+    /// Purpose: budget and constants revisions rebuild every phase once;
+    /// an identical key evaluates no model, and both changes alter a choice.
+    #[test]
+    fn memo_recomputes_only_when_budget_or_constants_change() {
+        use std::cell::Cell;
+        let phase = compiled_jobs(
+            &vec![
+                Job {
+                    counts: [Counts {
+                        items: 1,
+                        runs: 1,
+                        elements: 1000000
+                    }; CLASSES],
+                    ..Job::default()
+                };
+                8
+            ],
+            0,
+        );
+        let phases = [phase];
+        let identity = Arc::new(());
+        let mut constants = Constants::reference(HostClass::Generic);
+        constants.dispatch = vec![Some(Duration::ZERO); 5];
+        let mut key = memo_key(&constants);
+        key.budget = 2;
+        let mut memo = WidthMemo::default();
+        let evaluations = Cell::new(0);
+        let mut previous = None;
+        for change in 0..3 {
+            if change == 1 {
+                key.budget = 4;
+            }
+            if change == 2 {
+                constants.dispatch.fill(Some(Duration::from_secs(1)));
+                constants.generation = next_generation();
+                key.generation = constants.generation;
+            }
+            evaluations.set(0);
+            for replay in 0..2 {
+                memo.update(
+                    key,
+                    Arc::downgrade(&identity),
+                    core::iter::once(Duration::ZERO),
+                    |widths| {
+                        for phase in &phases {
+                            evaluations.set(evaluations.get() + 1);
+                            widths.push(direct_phase_width(phase, &constants, key));
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap();
+                assert_eq!(
+                    evaluations.replace(0),
+                    if replay == 0 { phases.len() } else { 0 }
+                );
+            }
+            assert_eq!(
+                memo.widths,
+                phases
+                    .iter()
+                    .map(|phase| direct_phase_width(phase, &constants, key))
+                    .collect::<Vec<_>>()
+            );
+            if let Some(previous) = previous {
+                assert_ne!(memo.widths, previous);
+            }
+            previous = Some(memo.widths.clone());
+        }
+    }
+
+    /// Purpose: schedule, gate, policy, scalar, writer, fill and member inputs
+    /// invalidate the single entry; each unchanged input is the warm control.
+    #[test]
+    fn memo_invalidates_every_other_decision_input() {
+        let constants = Constants::reference(HostClass::Generic);
+        let base = memo_key(&constants);
+        let identity = Arc::new(());
+        let other_identity = Arc::new(());
+        let variants = [
+            DecisionKey {
+                carries_team: false,
+                ..base
+            },
+            DecisionKey {
+                strategy: tenferro_cpu::CpuBatchStrategy::Inner,
+                ..base
+            },
+            DecisionKey {
+                bytes: base.bytes * 2,
+                ..base
+            },
+            DecisionKey {
+                reads_destination: true,
+                ..base
+            },
+            DecisionKey {
+                replays_plans: false,
+                ..base
+            },
+            DecisionKey {
+                destination_len: 1,
+                ..base
+            },
+            DecisionKey {
+                destination_capacity: 1,
+                ..base
+            },
+            DecisionKey { members: 2, ..base },
+        ];
+        for (key, id, cost) in variants
+            .into_iter()
+            .map(|key| (key, &identity, Duration::ZERO))
+            .chain([
+                (base, &other_identity, Duration::ZERO),
+                (base, &identity, Duration::from_nanos(1)),
+            ])
+        {
+            let mut memo = WidthMemo::default();
+            memo.update(
+                base,
+                Arc::downgrade(&identity),
+                core::iter::once(Duration::ZERO),
+                |widths| {
+                    widths.push(1);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            memo.update(key, Arc::downgrade(id), core::iter::once(cost), |widths| {
+                widths.push(2);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(memo.widths, [2]);
+            memo.update(key, Arc::downgrade(id), core::iter::once(cost), |_| {
+                panic!("warm key rebuilt")
+            })
+            .unwrap();
+        }
     }
 
     fn compiled_jobs(jobs: &[Job], minimum: usize) -> Summary {

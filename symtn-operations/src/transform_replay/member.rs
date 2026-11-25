@@ -708,6 +708,10 @@ where
         packed,
         member_alpha,
         member_scratch,
+        #[cfg(feature = "tenferro")]
+        movement_memo,
+        #[cfg(feature = "tenferro")]
+        movement_chunks,
         ..
     } = &mut *workspace;
     let lens = MemberLens {
@@ -729,6 +733,13 @@ where
         members,
         false,
         &structure.parallel_schedule().member_pack_movement,
+        &structure.parallel_schedule().member_scatter_movement,
+        #[cfg(feature = "tenferro")]
+        movement_memo,
+        #[cfg(feature = "tenferro")]
+        movement_chunks,
+        #[cfg(feature = "tenferro")]
+        task.admission_identity(),
     )?;
     if !workspace.chunk_jobs.is_empty() {
         let (source, destination) = workspace.packed.source_and_destination_mut();
@@ -746,6 +757,10 @@ where
         packed,
         member_alpha,
         member_scratch,
+        #[cfg(feature = "tenferro")]
+        movement_memo,
+        #[cfg(feature = "tenferro")]
+        movement_chunks,
         ..
     } = &mut *workspace;
     member_moves(
@@ -763,6 +778,13 @@ where
         members,
         true,
         &structure.parallel_schedule().member_scatter_movement,
+        &structure.parallel_schedule().member_pack_movement,
+        #[cfg(feature = "tenferro")]
+        movement_memo,
+        #[cfg(feature = "tenferro")]
+        movement_chunks,
+        #[cfg(feature = "tenferro")]
+        task.admission_identity(),
     )?;
     Ok(())
 }
@@ -790,6 +812,10 @@ fn member_moves<A, D, C>(
     members: usize,
     scatter: bool,
     summary: &crate::movement::Summary,
+    other_summary: &crate::movement::Summary,
+    #[cfg(feature = "tenferro")] memo: &mut super::movement::WidthMemo,
+    #[cfg(feature = "tenferro")] chunks: &mut Vec<super::chunk::ChunkMovement>,
+    #[cfg(feature = "tenferro")] identity: Weak<()>,
 ) -> Result<usize, OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -799,21 +825,39 @@ where
     #[cfg(feature = "tenferro")]
     {
         use symtn_dense::lanes;
-        super::movement::region(engine, |exec, constants| {
-            let width = super::movement::width::<D, _>(
-                &exec,
-                constants,
-                members,
-                summary.working_set as u128 * members as u128,
-                summary.traffic as u128 * members as u128,
-                || {
-                    summary
-                        .counts
-                        .map(|count| count.elements as f64 * members as f64)
-                },
-                |_, _| false,
-                |costs| super::movement::member_phase(summary, costs, members),
-            );
+        let run = |exec: lanes::Exec<'_>, constants: Option<&super::movement::Constants>| {
+            if !scatter {
+                let key = super::movement::decision_key::<D>(
+                    &exec, constants, false, false, 0, 0, members,
+                );
+                memo.update(
+                    key,
+                    identity,
+                    super::movement::dispatch_key(&exec),
+                    |widths| {
+                        chunks.clear();
+                        chunks.shrink_to_fit();
+                        for summary in [summary, other_summary] {
+                            widths.push(super::movement::width::<D, _>(
+                                &exec,
+                                constants,
+                                members,
+                                summary.working_set as u128 * members as u128,
+                                summary.traffic as u128 * members as u128,
+                                || {
+                                    summary
+                                        .counts
+                                        .map(|count| count.elements as f64 * members as f64)
+                                },
+                                |_, _| false,
+                                |costs| super::movement::member_phase(summary, costs, members),
+                            ));
+                        }
+                        Ok(())
+                    },
+                )?;
+            }
+            let width = memo.widths[usize::from(scatter)];
             if width <= 1 {
                 let sequential =
                     exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
@@ -860,11 +904,18 @@ where
                 core::slice::from_mut(&mut lane),
             ))
             .map(|()| width)
-        })?
+        };
+        if scatter {
+            crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
+                run(exec, None)
+            })?
+        } else {
+            super::movement::region(engine, run)?
+        }
     }
     #[cfg(not(feature = "tenferro"))]
     {
-        let _ = (packed_dst, lens, summary);
+        let _ = (packed_dst, lens, summary, other_summary);
         crate::host_pool::with_exec(engine, |exec| {
             if scatter {
                 moves.scatter(exec, kernels, &mut scratch[0], dst, packed_dst, 0, members)

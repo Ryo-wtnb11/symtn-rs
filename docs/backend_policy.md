@@ -422,10 +422,13 @@ logical traffic and cumulative components over executed jobs. Model-only counts
 and envelopes saturate without adding compilation failures; subtracting a
 saturated prefix stays conservative. Fixed phases retain cumulative job
 components, and pack columns share one compiled prefix in column order.
-Scatter ownership runs depend on the chosen group chunk: its existing O(t)
-preparation aggregates t group summaries into a reusable workspace prefix once,
-before any candidate is evaluated. Each leaf then reads two prefix entries in
-O(1). There are no per-width retained tables or per-candidate allocations.
+Scatter ownership runs depend on the chosen group chunk. On a decision-key
+miss, the workspace orders each selected chunk's groups, builds its ownership
+runs and temporary movement prefix, and combines its pack/scatter summaries
+before evaluating widths. These aggregates depend on the runtime group width;
+the plan-only counts, extents, planned minimums and pack/job prefixes remain
+compiled with the structure. Each modeled leaf reads two prefix entries in
+O(1). There are no per-candidate allocations.
 A cold pack fill is divided by the same recursive leaf counts as execution.
 
 With I role intervals, B blocks, F total axis metadata, and G plan groups,
@@ -434,15 +437,36 @@ For J_s Single jobs, J_z inactive jobs and C pack columns, the new prefix
 payload is `size_of::<Job>() * (J_s + J_z + C)` bytes (192 bytes per entry:
 two arrays of four `(items,runs,elements)` u64 triples). Actual capacities are
 charged, together with every Summary and its inline planned totals.
-The scatter workspace charges another `size_of::<Job>() * capacity` bytes,
-with capacity reused across chunks. Gate keys retain direct budget indices
+The workspace retains one decision entry, replacing it on a key change. Its key
+includes the compiled structure identity, slot budget, constants generation,
+full batch strategy, dtype size, destination-read and plan-replay flags,
+destination scratch length/capacity, and member count. Token team authority
+and the exact dispatch costs at widths 2 through p complete the key: these
+also determine `gate_keys.admits`, together with the compiled plan bound.
+Gate admission therefore participates in memoization rather than being
+assumed constant across engines. Forced strategies, including their parameters,
+are part of the key; `forced_width` still resolves before model evaluation.
+
+For P phases the width payload is `P * size_of::<usize>()` bytes (8P on a
+64-bit target): three direct/group decisions plus two per selected chunk, or
+two member decisions. Its allocation charge uses the vector's actual capacity.
+The exact dispatch key adds `capacity * size_of::<Duration>()` bytes. Retained
+chunk order/run tables charge `capacity * size_of::<ChunkMovement>()` for the
+outer vector, plus each group's `capacity * size_of::<usize>()` and each run
+list's `capacity * size_of::<u32>()`. Temporary aggregate summaries and scatter
+prefixes are dropped after deciding. All these capacities are included in
+`HostTreeTransformWorkspace::retained_bytes`; old decision keys are not kept.
+Gate keys retain direct budget indices
 (`size_of::<usize>() * capacity`) plus their existing distinct cost/scan slots;
 the existing O(p) preparation pass makes each admission lookup O(1).
-A fixed chooser costs O(sum_candidate q), with constant-size class arithmetic
-per leaf and O(log q) recursion depth. The plan-group decision visits G groups
-per candidate to price actual batch barriers. A pack or scatter chunk also
-aggregates t group summaries once in O(t). One effective width returns before
-cost preparation or element-count reads.
+On a key hit each phase reads its width in O(1), without model evaluation,
+summary construction, sorting or an engine-extension lookup. The operation's
+exact dispatch-key comparison costs O(p). On a miss, a fixed chooser costs
+O(sum_candidate q), with constant-size class arithmetic per leaf and O(log q)
+recursion depth. The plan-group decision visits G groups per candidate to
+price actual batch barriers, and each chunk combines t group summaries once
+in O(t). One effective width returns before cost preparation or element-count
+reads.
 
 Single-tensor one-slot, Sequential and Inner replays bypass the movement model
 and calibration, using the serial item and plan-group sequence; Inner keeps
@@ -457,7 +481,11 @@ the number of runs. A leaf stops at its first error; the lowest failing job
 and the first failing phase or GEMM determine replay's error.
 
 Movement constants are retained separately in the caller CPU engine's bounded
-extension store. Online measurement is attempted once per retained entry,
+extension store and fetched once per operation, before preparing all its
+movement decisions. Reference entry creation and completed online updates
+receive fresh process-wide generations, so a workspace cannot reuse widths
+from a different engine entry or an evicted entry's replacement.
+Online measurement is attempted once per retained entry,
 through the real replay writer using shared buffers, within a 10 ms budget
 including fixture construction. The deadline is checked before every fixture.
 Failed or unfinished entries keep the next source and
