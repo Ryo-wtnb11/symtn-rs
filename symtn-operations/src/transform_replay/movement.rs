@@ -723,7 +723,8 @@ fn validated_dispatch(measured: Duration, table: Duration) -> Option<Duration> {
 }
 
 fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
-    // ponytail: replace this interim measurement with the threadteam calibration hook;
+    // ponytail: replace this interim measurement with the threadteam calibration hook
+    // (tensor4all/threadteam-rs#92);
     // delete it when threadteam can calibrate a running pool.
     for q in 2..=exec.budget() {
         if Instant::now() >= deadline {
@@ -946,9 +947,10 @@ mod tests {
         let mut engine = tenferro_cpu::CpuEngine::new(
             tenferro_cpu::Pool::builder()
                 .threads(2)
-                .dispatch_costs(tenferro_cpu::threadteam::DispatchCosts::new(
-                    table, table, table,
-                ))
+                .dispatch_costs({
+                    let flat = tenferro_cpu::threadteam::WidthCosts::flat(table);
+                    tenferro_cpu::threadteam::DispatchCosts::new(flat, flat, flat)
+                })
                 .build()
                 .unwrap(),
         );
