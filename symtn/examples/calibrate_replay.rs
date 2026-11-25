@@ -228,6 +228,9 @@ fn print_samples(label: &str, samples: Samples) {
 }
 
 // Column-scaled, relative least squares; singular designs have no identified constants.
+// Why indices: Gauss-Jordan elimination reads and writes rows i and k of
+// the same matrix in one step.
+#[allow(clippy::needless_range_loop)]
 fn fit(rows: &[(Vec<f64>, f64)]) -> Option<Vec<f64>> {
     let n = rows.first()?.0.len();
     let mut scale = vec![0.0_f64; n];
@@ -319,11 +322,15 @@ fn sysctl(key: &str) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-fn host() -> (
+/// Host identity fields, the aggregate LLC bytes, and each cache level's
+/// `(name, bytes)`.
+type Host = (
     BTreeMap<String, String>,
     Option<usize>,
     Vec<(String, usize)>,
-) {
+);
+
+fn host() -> Host {
     let mut h = BTreeMap::new();
     let info = read("/proc/cpuinfo");
     for (key, field) in [("cpu", "model name"), ("isa", "flags")] {
