@@ -395,7 +395,10 @@ Beyond the last online knot, an online curve keeps the reference curve's shape,
 scaled to meet that knot. GEMM work belongs to the dense provider and is
 outside this model.
 
-The schedule compiles exact role totals and logical traffic. Fixed phases
+The schedule compiles role totals and logical traffic, saturating model-only
+counts and address envelopes when metadata exceeds the estimate's integer
+range. Estimates never add a compilation error; replay's size and address
+validation remains unchanged. Unsaturated totals are exact. Fixed phases
 retain per-class upper hulls of executed-job run/element totals and maximum
 setup counts, converted to f64 at compile time. M_bound is an upper bound on
 max(t_i): fused jobs can mix strides, whose separate maxima need not belong to
@@ -470,6 +473,11 @@ infinity if none exists. The current-W check covers noise after the knee.
 The row-calibration buffers occupy 8 MiB; they are released before bandwidth
 buffers are allocated lazily, requesting combined payload capacity at most the
 contiguous knee plus 16*(p+1) bytes. Their destination pages are first written by workers.
+Before allocating those buffers, admission bounds their size by the remaining
+deadline using the observed small-buffer allocation, source first-touch and
+teardown rate, the serial element curve, and every remaining ladder dispatch.
+If that bound cannot accommodate the full memory knee, the saturated measurement
+is skipped and its cap stays unknown; a smaller cache fixture cannot replace it.
 The deadline is checked again before each fixture and after each sample;
 unfinished measurements leave the cap unknown. Source selection never changes
 the formula or chooser.

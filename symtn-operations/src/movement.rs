@@ -1,4 +1,5 @@
 //! Structural movement counts. Coefficients and payload values never enter them.
+//! Estimates saturate so metadata-only structures keep replay's validation limits.
 
 use crate::{OperationError, TreeTransformLayoutTable};
 
@@ -29,7 +30,7 @@ impl Counts {
 }
 
 fn add(a: u64, b: u64) -> Result<u64, OperationError> {
-    a.checked_add(b).ok_or(OperationError::ElementCountOverflow)
+    Ok(a.saturating_add(b))
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -60,15 +61,11 @@ impl Summary {
     pub(crate) fn push(&mut self, class: usize, point: Point) -> Result<Counts, OperationError> {
         let count = Counts {
             items: 1,
-            runs: u64::try_from(point.runs).map_err(|_| OperationError::ElementCountOverflow)?,
-            elements: u64::try_from(point.elements)
-                .map_err(|_| OperationError::ElementCountOverflow)?,
+            runs: u64::try_from(point.runs).unwrap_or(u64::MAX),
+            elements: u64::try_from(point.elements).unwrap_or(u64::MAX),
         };
         self.counts[class] = self.counts[class].add(count)?;
-        let touched = count
-            .elements
-            .checked_mul([2, 2, 1, 1][class])
-            .ok_or(OperationError::ElementCountOverflow)?;
+        let touched = count.elements.saturating_mul([2, 2, 1, 1][class]);
         self.traffic = add(self.traffic, touched)?;
         Ok(count)
     }
@@ -79,22 +76,18 @@ impl Summary {
             return Ok(());
         }
         let maxima = self.maxima.get_or_insert_with(Default::default);
-        maxima.jobs += 1;
+        maxima.jobs = maxima.jobs.saturating_add(1);
         for (class, count) in job.iter().enumerate().filter(|(_, count)| count.items != 0) {
             maxima.setups[class] = maxima.setups[class].max(count.items as f64);
             maxima.hulls[class].push(Point {
-                runs: usize::try_from(count.runs)
-                    .map_err(|_| OperationError::ElementCountOverflow)?,
-                elements: usize::try_from(count.elements)
-                    .map_err(|_| OperationError::ElementCountOverflow)?,
+                runs: usize::try_from(count.runs).unwrap_or(usize::MAX),
+                elements: usize::try_from(count.elements).unwrap_or(usize::MAX),
             });
         }
         Ok(())
     }
 
     pub(crate) fn finish(&mut self) -> Result<(), OperationError> {
-        // Both whole-call destination modes must have representable traffic.
-        add(self.traffic, self.destination_reads)?;
         if let Some(maxima) = &mut self.maxima {
             for points in &mut maxima.hulls {
                 *points = upper_hull(core::mem::take(points));
@@ -105,8 +98,7 @@ impl Summary {
             .iter()
             .flatten()
             .try_fold(0, |sum, &(lo, hi)| {
-                let span = u64::try_from(hi as i128 - lo as i128 + 1)
-                    .map_err(|_| OperationError::ElementCountOverflow)?;
+                let span = u64::try_from(hi as i128 - lo as i128 + 1).unwrap_or(u64::MAX);
                 add(sum, span)
             })?;
         Ok(())
@@ -150,7 +142,8 @@ impl Summary {
     }
 
     pub(crate) fn logical_traffic(&self, read_destination: bool) -> u64 {
-        self.traffic + u64::from(read_destination) * self.destination_reads
+        self.traffic
+            .saturating_add(u64::from(read_destination) * self.destination_reads)
     }
 
     pub(crate) fn add_role(
@@ -263,6 +256,56 @@ pub(crate) fn role(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Estimates saturate without rejecting metadata; small counts and extents
+    /// are the control that still accumulates exactly.
+    #[test]
+    fn summary_arithmetic_saturates_without_rejecting_metadata() {
+        for elements in [3, usize::MAX] {
+            let mut phase = Summary::default();
+            for _ in 0..2 {
+                let count = phase
+                    .push(
+                        0,
+                        Point {
+                            runs: elements,
+                            elements,
+                        },
+                    )
+                    .unwrap();
+                phase
+                    .record_job(&[
+                        count,
+                        Counts::default(),
+                        Counts::default(),
+                        Counts::default(),
+                    ])
+                    .unwrap();
+            }
+            phase.destination_reads = elements as u64;
+            phase.touch((1, 0, 2));
+            if elements == usize::MAX {
+                phase.touch((2, isize::MIN, isize::MAX));
+            }
+            phase.finish().unwrap();
+            assert_eq!(
+                phase.counts[0].elements,
+                (elements as u64).saturating_mul(2)
+            );
+            assert_eq!(
+                phase.logical_traffic(true),
+                (elements as u64).saturating_mul(5)
+            );
+            assert_eq!(
+                phase.working_set,
+                if elements == usize::MAX {
+                    (usize::MAX as u64).saturating_add(4)
+                } else {
+                    3
+                }
+            );
+        }
+    }
 
     /// The maximizing item changes with the coefficients; coordinate maxima
     /// from different items must never be combined into an imaginary item.

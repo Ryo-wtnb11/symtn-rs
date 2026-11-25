@@ -134,7 +134,7 @@ pub(super) fn compile_parallel_schedule(
     singles.extend(ranges.iter().map(|&(_, _, block)| block));
     let mut inactive = Vec::with_capacity(inactive_dst_layouts.len());
     for &layout in inactive_dst_layouts {
-        if let Some(span) = layout_index_range(layouts, layout)? {
+        if let Some(span) = destination_span(layouts, layout) {
             inactive.push((span, checked_u32(layout)?));
         }
     }
@@ -190,12 +190,11 @@ pub(super) fn compile_movement(
         (buffer, lo, hi)
     };
     let packed = |buffer, offset: usize, elements: usize| {
-        let lo = isize::try_from(offset).map_err(|_| OperationError::ElementCountOverflow)?;
+        let lo = isize::try_from(offset).ok();
         let hi = offset
-            .checked_add(elements)
-            .and_then(|end| end.checked_sub(1))
-            .and_then(|end| isize::try_from(end).ok())
-            .ok_or(OperationError::ElementCountOverflow)?;
+            .checked_add(elements.saturating_sub(1))
+            .and_then(|hi| isize::try_from(hi).ok());
+        let (lo, hi) = lo.zip(hi).unwrap_or((isize::MIN, isize::MAX));
         Ok::<_, OperationError>((buffer, lo, hi))
     };
     let mut singles = Summary::default();
@@ -322,6 +321,28 @@ fn hull_runs<N: Copy + Ord>(ranges: impl IntoIterator<Item = (N, N)>) -> Vec<u32
     }
     starts.shrink_to_fit();
     starts
+}
+
+/// Destination metadata can span all of `usize` even when no payload exists.
+fn destination_span(layouts: &RawLayoutTable, layout_index: usize) -> Option<(i128, i128)> {
+    let layout = layouts.entry(layout_index);
+    if layout.element_count == 0 {
+        return None;
+    }
+    let (mut lo, mut hi) = (layout.offset as i128, layout.offset as i128);
+    for (&extent, &stride) in layouts
+        .shape(layout_index)
+        .iter()
+        .zip(layouts.strides(layout_index))
+    {
+        let span = (extent as i128 - 1) * stride as i128;
+        if span < 0 {
+            lo += span;
+        } else {
+            hi += span;
+        }
+    }
+    Some((lo, hi))
 }
 
 #[cfg(test)]

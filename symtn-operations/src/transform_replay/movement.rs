@@ -179,18 +179,32 @@ fn region_with<R>(
     measure: impl FnOnce(&mut lanes::Exec<'_>, Instant, &mut Constants),
     op: impl FnOnce(lanes::Exec<'_>, Option<&Constants>) -> R,
 ) -> Result<R, OperationError> {
+    let mut op = Some(op);
+    let mut serial = None;
     let budget = tenferro_cpu::with_cpu_engine(engine, |cpu| {
+        if cpu.num_threads() == 1 {
+            serial = Some(crate::host_pool::enter_cpu(
+                cpu,
+                crate::host_pool::HostPoolSite::Replay,
+                true,
+                |exec| op.take().expect("region body runs once")(exec, None),
+            ));
+            return None;
+        }
         (!cpu.is_broken()
             && cpu.num_threads() > 1
             && cpu.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Auto)
             .then(|| cpu.num_threads())
     })
     .flatten();
+    if let Some(result) = serial {
+        return result;
+    }
     let Some(budget) = budget else {
         return crate::host_pool::lane_region(
             engine,
             crate::host_pool::HostPoolSite::Replay,
-            |exec| op(exec, None),
+            |exec| op.take().expect("region body runs once")(exec, None),
         );
     };
     let mut retained = symtn_dense::engine_slot::checkout::<Constants>(engine);
@@ -224,7 +238,7 @@ fn region_with<R>(
                     );
                     interpolate_bandwidth(&mut constants.bandwidth);
                 }
-                op(exec, retained.as_ref())
+                op.take().expect("region body runs once")(exec, retained.as_ref())
             },
         )
     }));
@@ -650,12 +664,23 @@ fn measure_row(
     })
 }
 
+fn bandwidth_fixture_bytes(remaining_ns: f64, dispatch_ns: f64, ns_per_byte: f64) -> usize {
+    if ns_per_byte > 0.0 && ns_per_byte.is_finite() {
+        ((remaining_ns - dispatch_ns).max(0.0) / ns_per_byte) as usize
+    } else {
+        0
+    }
+}
+
 fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
     if Instant::now() >= deadline {
         return;
     }
+    let setup_start = Instant::now();
     let source = vec![1.0; BUFFER_ELEMENTS];
     let mut destination = Vec::<f64>::with_capacity(BUFFER_ELEMENTS);
+    let setup_ns_per_byte = setup_start.elapsed().as_secs_f64() * 1e9
+        / (BUFFER_ELEMENTS * std::mem::size_of::<f64>()) as f64;
     for inner in 0..2 {
         if let Some(row) = measure_row(
             exec,
@@ -672,21 +697,50 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
     if Instant::now() >= deadline {
         return;
     }
+    let teardown_start = Instant::now();
     drop(source);
     drop(destination);
+    let setup_ns_per_byte = setup_ns_per_byte
+        + teardown_start.elapsed().as_secs_f64() * 1e9
+            / (BUFFER_ELEMENTS * std::mem::size_of::<f64>()) as f64;
+    let ladder = || std::iter::successors(Some(2.min(p)), |&q| (q < p).then(|| (q * 2).min(p)));
+    let dispatch_ns = |q| {
+        exec.token_ref()
+            .dispatch_cost(NonZeroUsize::new(q).unwrap())
+            .as_secs_f64()
+            * 1e9
+    };
     let memory_bytes = constants.rows[0].e.memory_knee() as usize;
+    let ns_per_byte = setup_ns_per_byte
+        + ladder().count() as f64 * constants.rows[0].e.at(memory_bytes as f64)
+            / (2 * std::mem::size_of::<f64>()) as f64;
+    let remaining_ns = deadline
+        .saturating_duration_since(Instant::now())
+        .as_secs_f64()
+        * 1e9;
+    let maximum_bytes =
+        bandwidth_fixture_bytes(remaining_ns, ladder().map(dispatch_ns).sum(), ns_per_byte);
     let elements = memory_bytes.div_ceil(2 * std::mem::size_of::<f64>());
+    // A smaller fixture would measure cache bandwidth, so leave B_sat unknown
+    // when first-touch and the whole saturated ladder cannot fit the deadline.
+    if (elements + p).saturating_mul(2 * std::mem::size_of::<f64>()) > maximum_bytes {
+        return;
+    }
     let source = vec![1.0; elements + p];
     let mut destination = Vec::<f64>::with_capacity(elements + p);
-    for q in std::iter::successors(Some(2.min(p)), |&q| (q < p).then(|| (q * 2).min(p))) {
-        if Instant::now() >= deadline {
-            return;
-        }
+    for q in ladder() {
         let table = exec
             .token_ref()
             .dispatch_cost(NonZeroUsize::new(q).unwrap())
             .as_secs_f64()
             * 1e9;
+        let remaining_ns = deadline
+            .saturating_duration_since(Instant::now())
+            .as_secs_f64()
+            * 1e9;
+        if bandwidth_fixture_bytes(remaining_ns, table, ns_per_byte) < memory_bytes {
+            return;
+        }
         let n = elements.div_ceil(q).max(1);
         let Some(fixture) = Fixture::new(n, 1, 0).ok() else {
             continue;
@@ -1236,6 +1290,49 @@ mod tests {
             2.0 * 0.3517858496209 / 0.1558782935818,
         );
         assert_ne!(element.at(134217728.0), 2.0);
+    }
+
+    /// Purpose: remaining calibration time bounds fixture bytes before allocation;
+    /// an insufficient deadline cannot admit a memory-resident fixture.
+    #[test]
+    fn saturated_fixture_must_fit_the_remaining_budget() {
+        let memory_bytes = 64 << 20;
+        assert!(bandwidth_fixture_bytes(1_000_000.0, 1000.0, 0.1) < memory_bytes);
+        assert!(bandwidth_fixture_bytes(9_000_000.0, 1000.0, 0.1) >= memory_bytes);
+        assert_eq!(bandwidth_fixture_bytes(1000.0, 1000.0, 0.1), 0);
+        assert_eq!(bandwidth_fixture_bytes(1000.0, 0.0, f64::INFINITY), 0);
+    }
+
+    /// Purpose: saturated model counts still feed a finite cost and valid width;
+    /// ordinary counts are the control exercising the same decision path.
+    #[test]
+    fn saturated_summary_keeps_a_valid_width() {
+        for count in [1, usize::MAX] {
+            let mut summary = Summary::default();
+            for _ in 0..2 {
+                let counts = summary
+                    .push(
+                        0,
+                        crate::movement::Point {
+                            runs: count,
+                            elements: count,
+                        },
+                    )
+                    .unwrap();
+                summary
+                    .record_job(&[
+                        counts,
+                        Counts::default(),
+                        Counts::default(),
+                        Counts::default(),
+                    ])
+                    .unwrap();
+            }
+            summary.finish().unwrap();
+            let phase = super::fixed(&summary, &[(1.0, 1.0, 1.0); CLASSES]);
+            assert!(phase(1).0.is_finite());
+            assert!((1..=4).contains(&choose(4, 0.0, phase, |_| 1.0, |_| f64::INFINITY)));
+        }
     }
 
     /// Purpose: admission reserves ladder bytes without allocating, and never undercharges actual capacity.
