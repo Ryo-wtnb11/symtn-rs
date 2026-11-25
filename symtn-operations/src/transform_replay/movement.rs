@@ -132,6 +132,7 @@ pub(super) struct MovementConstants {
     rows: [Row; CLASSES],
     memory_knees: [f64; CLASSES],
     bandwidth: Vec<f64>,
+    dispatch: Vec<Option<Duration>>,
     reserved_entries: usize,
     attempted: bool,
 }
@@ -148,6 +149,7 @@ impl MovementConstants {
             rows: [rows[0], rows[1], rows[0], rows[1]],
             memory_knees: core::array::from_fn(|c| rows[c % 2].e.memory_knee()),
             bandwidth: Vec::new(),
+            dispatch: Vec::new(),
             reserved_entries: 0,
             attempted: false,
         }
@@ -162,6 +164,18 @@ impl MovementConstants {
     fn retained_bytes(&self) -> usize {
         // The slot already charges its inline value, including the rows.
         self.bandwidth.capacity().max(self.reserved_entries) * std::mem::size_of::<f64>()
+            + self.dispatch.capacity().max(self.reserved_entries)
+                * std::mem::size_of::<Option<Duration>>()
+    }
+
+    fn dispatch_cost(&self, q: usize, table: impl FnOnce() -> Duration) -> f64 {
+        self.dispatch
+            .get(q)
+            .copied()
+            .flatten()
+            .unwrap_or_else(table)
+            .as_secs_f64()
+            * 1e9
     }
 }
 
@@ -224,6 +238,7 @@ fn region_with<R>(
                 {
                     constants.attempted = true;
                     constants.bandwidth = vec![f64::INFINITY; constants.reserved_entries];
+                    constants.dispatch = vec![None; constants.reserved_entries];
                     measure(
                         &mut exec,
                         deadline.unwrap_or_else(|| Instant::now() + ONLINE_BUDGET),
@@ -446,10 +461,10 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize) -> (f64, f64)>(
         traffic,
         prepare(&costs),
         |q| {
-            exec.token_ref()
-                .dispatch_cost(NonZeroUsize::new(q).unwrap())
-                .as_secs_f64()
-                * 1e9
+            constants.dispatch_cost(q, || {
+                exec.token_ref()
+                    .dispatch_cost(NonZeroUsize::new(q).unwrap())
+            })
         },
         phase_bandwidth(working_set, traffic, elements(), constants),
     )
@@ -703,7 +718,41 @@ fn bandwidth_fixture_bytes(remaining_ns: f64, dispatch_ns: f64, ns_per_byte: f64
     }
 }
 
+fn validated_dispatch(measured: Duration, table: Duration) -> Option<Duration> {
+    (measured <= table.saturating_mul(20)).then_some(measured)
+}
+
+fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
+    // ponytail: replace this interim measurement with the threadteam calibration hook;
+    // delete it when threadteam can calibrate a running pool.
+    for q in 2..=exec.budget() {
+        if Instant::now() >= deadline {
+            return;
+        }
+        let width = NonZeroUsize::new(q).unwrap();
+        let table = exec.token_ref().dispatch_cost(width);
+        exec.reborrow().limit(width).into_token().fork(q, |_, _| {});
+        let mut samples = [Duration::ZERO; 5];
+        for sample in &mut samples {
+            if Instant::now() >= deadline {
+                return;
+            }
+            let start = Instant::now();
+            for _ in 0..8 {
+                exec.reborrow().limit(width).into_token().fork(q, |_, _| {});
+            }
+            *sample = start.elapsed() / 8;
+        }
+        if Instant::now() >= deadline {
+            return;
+        }
+        samples.sort_unstable();
+        constants.dispatch[q] = validated_dispatch(samples[2], table);
+    }
+}
+
 fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
+    measure_dispatch(exec, deadline, constants);
     if Instant::now() >= deadline {
         return;
     }
@@ -736,10 +785,10 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
             / (BUFFER_ELEMENTS * std::mem::size_of::<f64>()) as f64;
     let ladder = || std::iter::successors(Some(2.min(p)), |&q| (q < p).then(|| (q * 2).min(p)));
     let dispatch_ns = |q| {
-        exec.token_ref()
-            .dispatch_cost(NonZeroUsize::new(q).unwrap())
-            .as_secs_f64()
-            * 1e9
+        constants.dispatch_cost(q, || {
+            exec.token_ref()
+                .dispatch_cost(NonZeroUsize::new(q).unwrap())
+        })
     };
     let memory_bytes = constants.rows[0].e.memory_knee() as usize;
     let ns_per_byte = setup_ns_per_byte
@@ -760,16 +809,15 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
     let source = vec![1.0; elements + p];
     let mut destination = Vec::<f64>::with_capacity(elements + p);
     for q in ladder() {
-        let table = exec
-            .token_ref()
-            .dispatch_cost(NonZeroUsize::new(q).unwrap())
-            .as_secs_f64()
-            * 1e9;
+        let dispatch = constants.dispatch_cost(q, || {
+            exec.token_ref()
+                .dispatch_cost(NonZeroUsize::new(q).unwrap())
+        });
         let remaining_ns = deadline
             .saturating_duration_since(Instant::now())
             .as_secs_f64()
             * 1e9;
-        if bandwidth_fixture_bytes(remaining_ns, table, ns_per_byte) < memory_bytes {
+        if bandwidth_fixture_bytes(remaining_ns, dispatch, ns_per_byte) < memory_bytes {
             return;
         }
         let n = elements.div_ceil(q).max(1);
@@ -802,7 +850,7 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
                     failed.store(true, Ordering::Relaxed);
                 }
             });
-        let elapsed = start.elapsed().as_secs_f64() * 1e9 - table;
+        let elapsed = start.elapsed().as_secs_f64() * 1e9 - dispatch;
         if Instant::now() < deadline
             && !failed.load(Ordering::Relaxed)
             && elapsed.is_finite()
@@ -888,6 +936,71 @@ mod tests {
             1
         );
         assert_eq!(fixed(2, 12.0, 1.0, 0.0), 2);
+    }
+
+    /// Purpose: accepted dispatch measurements drive the width and skip table reads;
+    /// absent and rejected measurements are the table-route controls.
+    #[test]
+    fn movement_dispatch_uses_measurement_or_table() {
+        let table = Duration::from_nanos(600);
+        let mut engine = tenferro_cpu::CpuEngine::new(
+            tenferro_cpu::Pool::builder()
+                .threads(2)
+                .dispatch_costs(tenferro_cpu::threadteam::DispatchCosts::new(
+                    table, table, table,
+                ))
+                .build()
+                .unwrap(),
+        );
+        for (sample, expected, table_route, expected_width) in [
+            (Some(0), 0.0, false, 2),
+            (Some(110), 110.0, false, 2),
+            (Some(12_000), 12_000.0, false, 1),
+            (Some(12_001), 600.0, true, 1),
+            (None, 600.0, true, 1),
+        ] {
+            let mut constants = Constants::reference(HostClass::Generic);
+            constants.dispatch = vec![None; 3];
+            constants.dispatch[2] = sample
+                .map(Duration::from_nanos)
+                .and_then(|measured| validated_dispatch(measured, table));
+            let reads = Cell::new(0);
+            assert_eq!(
+                constants.dispatch_cost(2, || {
+                    reads.set(reads.get() + 1);
+                    table
+                }),
+                expected
+            );
+            assert_eq!(reads.get(), usize::from(table_route));
+            crate::host_pool::lane_region(
+                &mut engine,
+                crate::host_pool::HostPoolSite::Replay,
+                |exec| {
+                    assert_eq!(
+                        width::<f64, _>(
+                            &exec,
+                            Some(&constants),
+                            2,
+                            0,
+                            0,
+                            || [0.0; CLASSES],
+                            |_| |_| (400.0, 200.0),
+                        ),
+                        expected_width
+                    );
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            validated_dispatch(Duration::ZERO, Duration::ZERO),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(
+            validated_dispatch(Duration::from_nanos(1), Duration::ZERO),
+            None
+        );
     }
 
     /// Purpose: the integer argmin agrees with an exact common-denominator oracle.
@@ -1435,12 +1548,15 @@ mod tests {
         assert_eq!(constants.bandwidth.capacity(), 0);
         assert_eq!(
             constants.retained_bytes(),
-            constants.reserved_entries * std::mem::size_of::<f64>()
+            constants.reserved_entries
+                * (std::mem::size_of::<f64>() + std::mem::size_of::<Option<Duration>>())
         );
         constants.bandwidth = Vec::with_capacity(3 * constants.reserved_entries);
+        constants.dispatch = Vec::with_capacity(2 * constants.reserved_entries);
         assert_eq!(
             constants.retained_bytes(),
             constants.bandwidth.capacity() * std::mem::size_of::<f64>()
+                + constants.dispatch.capacity() * std::mem::size_of::<Option<Duration>>()
         );
     }
 
@@ -1474,9 +1590,9 @@ mod tests {
         assert_eq!(calls.get(), 2);
     }
 
-    /// Purpose: accepted online rows outrank references and remain installed on a warm entry.
+    /// Purpose: accepted online constants outrank references and survive warm reentry.
     #[test]
-    fn accepted_online_row_is_reused() {
+    fn accepted_online_constants_are_reused() {
         let mut engine =
             tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(2).build().unwrap());
         let calls = Cell::new(0);
@@ -1486,12 +1602,18 @@ mod tests {
                 |_, _, constants| {
                     calls.set(calls.get() + 1);
                     constants.rows[0].a += 1.0;
+                    constants.dispatch[2] = Some(Duration::from_nanos(110));
                 },
                 |_, constants| {
-                    let rows = constants.unwrap().rows;
+                    let constants = constants.unwrap();
+                    let rows = constants.rows;
                     assert_eq!(rows[0].a, CI_ROWS[0].a + 1.0);
                     assert_ne!(rows[0].a, CI_ROWS[0].a);
                     assert_eq!(rows[1], CI_ROWS[1]);
+                    assert_eq!(
+                        constants.dispatch_cost(2, || panic!("retained online dispatch")),
+                        110.0
+                    );
                 },
             )
             .unwrap();

@@ -453,8 +453,15 @@ its online measurement, the checked-in reference for threadteam's HostClass,
 or the slowest available row with the same inner stride. The reference table
 records the CI CPU, date and run provenance; that run's fit-acceptance flag was
 false, so these rows are measured seeds, not validated phase predictions.
-D(q) comes only from threadteam's `Exec::dispatch_cost`, including the pool
-creator's overrides. Bandwidth uses the same element costs as the serial model:
+D(q) uses the engine entry's online empty-fork measurement when available,
+otherwise threadteam's `Exec::dispatch_cost`, including the pool creator's
+overrides. Each width is measured through the running engine's `limit(q)`
+prefix after warm-up, taking the median of five batches of eight empty forks,
+before the movement fixtures and inside their shared 10 ms budget. Samples
+above 20 times the table value are rejected; there is no lower bound. Missing
+or unfinished widths keep the table. These measurements affect only symtn's
+movement model; the pool's dispatch table and dense provider remain unchanged.
+Bandwidth uses the same element costs as the serial model:
 E(W) = sum_c(elements_c * e[c](W)), b1(W) = X/E(W), and
 B(q, W) = min(q*b1(W), B_sat(q, W)). Setup and run costs remain in S, rather
 than being charged again in E. Logical destination reads, fused member ranges
