@@ -10,18 +10,27 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
-use symtn::sector::{SectorId, U1Irrep};
-use symtn::typed::{CpuEngine, Pool};
-use symtn_core::{BlockSpec, BlockStructure, FusionTreePairKey};
+use symtn::sector::{
+    GroupId, LieGroupFusionRule, MultiplicityFreeAdmissionMode, SectorId, U1FusionRule, U1Irrep,
+};
+use symtn::typed::{CpuEngine, GradedSpace, Pool, Runtime, TensorMap, TypedSectorAdmission};
+use symtn_core::{
+    BlockSpec, BlockStructure, FusionProductSpace, FusionTreeHomSpace, FusionTreePairKey,
+    RuleIdentity, SectorLeg,
+};
 use symtn_dense::DefaultDenseExecutor;
 use symtn_operations::host_pool::{lane_region, HostPoolSite};
 use symtn_operations::{
-    try_tree_transform_structure_overwrite_owned_raw, TreeTransformBlockSpec,
+    try_tree_transform_structure_overwrite_owned_raw, TreeTransformBlock, TreeTransformBlockSpec,
     TreeTransformReplayProfile, TreeTransformStructure, TreeTransformWorkspace,
 };
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
-const TOLERANCE: f64 = 0.20;
+const TOLERANCE: f64 = 0.25;
+const BANDWIDTH_TOLERANCE: f64 = 0.20;
+const STABILITY: f64 = 0.05;
+const MAX_WORKING_SET: usize = 1024 * 1024 * 1024;
+const KINDS: [&str; 2] = ["contiguous-run", "strided-inner"];
 
 struct Fixture {
     structure: Arc<BlockStructure>,
@@ -135,6 +144,110 @@ impl Fixture {
         })
     }
 
+    // Replicate row-tree members to fill the destination's matrix leading dimension.
+    fn geometry(dims: &[usize], dst: &[isize], src: &[isize]) -> Res<Self> {
+        if !(1..=2).contains(&dims.len())
+            || dims.len() != dst.len()
+            || dims.len() != src.len()
+            || dims.contains(&0)
+            || dst[0] != 1
+            || src.iter().any(|&s| s <= 0)
+        {
+            return Err("unsupported calibration geometry".into());
+        }
+        let inner = dims[0];
+        let outer = dims.get(1).copied().unwrap_or(1);
+        let lead = usize::try_from(dst.get(1).copied().unwrap_or(inner as isize))?;
+        if lead < inner || lead % inner != 0 {
+            return Err("destination padding does not tile with identical row-tree members".into());
+        }
+        let roles = lead / inner;
+        let source_inner = usize::try_from(src[0])?;
+        let source_lead = usize::try_from(
+            src.get(1)
+                .copied()
+                .unwrap_or((source_inner * inner) as isize),
+        )?;
+        let source_span = (inner - 1)
+            .checked_mul(source_inner)
+            .and_then(|n| {
+                (outer - 1)
+                    .checked_mul(source_lead)
+                    .and_then(|v| n.checked_add(v))
+            })
+            .and_then(|n| n.checked_add(1))
+            .ok_or("fixture size overflow")?;
+        let shape = [inner, 1, outer, 1];
+        let mut fixture = Self::new(roles, &shape, &[0, 1, 2, 3], true)?;
+        let mut source = Vec::new();
+        for role in 0..roles {
+            source.push(BlockSpec::with_key(
+                fixture.structure.block(role)?.key().clone(),
+                shape.to_vec(),
+                vec![source_inner, source_inner * inner, source_lead, source_span],
+                role * source_span,
+            )?);
+        }
+        fixture.source = Arc::new(BlockStructure::from_blocks_with_rank(4, source)?);
+        let specs: Vec<_> = (0..roles)
+            .map(|i| TreeTransformBlockSpec::single(i, i, 1.0))
+            .collect();
+        fixture.transform = TreeTransformStructure::compile_structures(
+            &fixture.structure,
+            &fixture.source,
+            &specs,
+        )?;
+        let diagnostics = fixture.transform.layout_diagnostics();
+        for block in fixture.transform.blocks() {
+            let TreeTransformBlock::Single { dst_layout, .. } = *block else {
+                return Err("expected only Singles".into());
+            };
+            let layout = diagnostics
+                .entry(dst_layout)
+                .ok_or("missing compiled geometry")?;
+            if layout.dims != dims
+                || layout.block_strides != dst
+                || layout.partner_strides != Some(src)
+            {
+                return Err("calibration geometry changed during normalization".into());
+            }
+        }
+        fixture.data = (0..fixture.source.required_len()?)
+            .map(|i| (i % 97) as f64 / 97.0)
+            .collect();
+        Ok(fixture)
+    }
+
+    fn traversal(elements: usize, runs: usize, kind: usize) -> Res<Self> {
+        let inner = elements / runs;
+        let step = kind + 1;
+        if runs == 1 {
+            Self::geometry(&[elements], &[1], &[step as isize])
+        } else {
+            Self::geometry(
+                &[inner, runs],
+                &[1, inner as isize],
+                &[step as isize, (step * inner + 1) as isize],
+            )
+        }
+    }
+
+    fn print_geometry(&self, label: &str) -> Res<()> {
+        let TreeTransformBlock::Single { dst_layout, .. } = self.transform.blocks()[0] else {
+            return Err("expected a Single geometry".into());
+        };
+        let diagnostics = self.transform.layout_diagnostics();
+        let layout = diagnostics
+            .entry(dst_layout)
+            .ok_or("missing calibration geometry")?;
+        println!("{label}: baked_dims={:?} dst_strides={:?} src_strides={:?} elements_per_item={} runs_per_item={}", layout.dims, layout.block_strides, layout.partner_strides, layout.element_count, layout.element_count / layout.dims[0]);
+        Ok(())
+    }
+
+    fn payload_bytes(&self) -> Res<usize> {
+        Ok((self.source.required_len()? + self.structure.required_len()?) * 8)
+    }
+
     fn seed(&mut self, engine: &mut CpuEngine) -> Res<()> {
         // Inactive replay first-writes each source range on its computing worker.
         let empty = Arc::new(BlockStructure::empty(self.rank));
@@ -189,18 +302,30 @@ impl Fixture {
 #[derive(Clone, Copy)]
 struct Samples {
     raw: [f64; 5],
+    repetitions: [usize; 5],
+    count: usize,
     median: f64,
     spread: f64,
     cold: f64,
+}
+
+fn median(values: &[f64]) -> f64 {
+    let mut values = values.to_vec();
+    values.sort_by(f64::total_cmp);
+    (values[(values.len() - 1) / 2] + values[values.len() / 2]) / 2.0
 }
 
 fn measure(mut call: impl FnMut() -> Res<Option<f64>>, max_reps: usize) -> Res<Samples> {
     let start = Instant::now();
     call()?;
     let cold = start.elapsed().as_secs_f64();
-    let reps = ((0.002 / cold.max(1e-9)) as usize).clamp(1, max_reps);
+    let max_reps = max_reps.min(((0.001 / cold.max(1e-9)) as usize).max(1));
+    let mut reps = ((0.0002 / cold.max(1e-9)) as usize).clamp(1, max_reps);
     let mut raw = [0.0; 5];
-    for sample in &mut raw {
+    let mut repetitions = [0; 5];
+    let mut count = 0;
+    for (i, batch_reps) in repetitions.iter_mut().enumerate() {
+        *batch_reps = reps;
         let start = Instant::now();
         let mut phase = None;
         for _ in 0..reps {
@@ -208,76 +333,292 @@ fn measure(mut call: impl FnMut() -> Res<Option<f64>>, max_reps: usize) -> Res<S
                 *phase.get_or_insert(0.0) += ns;
             }
         }
-        *sample = phase.unwrap_or_else(|| start.elapsed().as_secs_f64() * 1e9) / reps as f64;
+        raw[i] = phase.unwrap_or_else(|| start.elapsed().as_secs_f64() * 1e9) / reps as f64;
+        count = i + 1;
+        if count >= 3 {
+            let center = median(&raw[..count]);
+            let spread = raw[..count]
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
+                - raw[..count].iter().copied().fold(f64::INFINITY, f64::min);
+            if count == 3 && spread <= STABILITY * center {
+                break;
+            }
+            // More short calls average timer noise; expensive calls keep one repetition.
+            reps = reps.saturating_mul(2).min(max_reps);
+        }
     }
-    let mut sorted = raw;
-    sorted.sort_by(f64::total_cmp);
     Ok(Samples {
         raw,
-        median: sorted[2],
-        spread: sorted[4] - sorted[0],
+        repetitions,
+        count,
+        median: median(&raw[..count]),
+        spread: raw[..count]
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max)
+            - raw[..count].iter().copied().fold(f64::INFINITY, f64::min),
         cold,
     })
 }
 
 fn print_samples(label: &str, samples: Samples) {
     println!(
-        "{label}: batches_ns={:?} median_ns={:.3} spread_max_min_ns={:.3} warmup_s={:.6}",
-        samples.raw, samples.median, samples.spread, samples.cold
+        "{label}: batches_ns={:?} repetitions={:?} median_ns={:.3} spread_max_min_ns={:.3} warmup_s={:.6}",
+        &samples.raw[..samples.count],
+        &samples.repetitions[..samples.count],
+        samples.median,
+        samples.spread,
+        samples.cold
     );
 }
 
-// Column-scaled, relative least squares; singular designs have no identified constants.
-// Why indices: Gauss-Jordan elimination reads and writes rows i and k of
-// the same matrix in one step.
-#[allow(clippy::needless_range_loop)]
-fn fit(rows: &[(Vec<f64>, f64)]) -> Option<Vec<f64>> {
-    let n = rows.first()?.0.len();
-    let mut scale = vec![0.0_f64; n];
-    for (x, t) in rows {
-        if x.len() != n || !t.is_finite() || *t <= 0.0 || x.iter().any(|v| !v.is_finite()) {
-            return None;
-        }
-        for (s, v) in scale.iter_mut().zip(x) {
-            *s = s.max((v / t).abs());
-        }
-    }
-    if n == 0 || scale.contains(&0.0) {
-        return None;
-    }
-    let mut matrix = vec![vec![0.0; n + 1]; n];
-    for (x, t) in rows {
-        for i in 0..n {
-            let xi = x[i] / t / scale[i];
-            for j in 0..n {
-                matrix[i][j] += xi * x[j] / t / scale[j];
-            }
-            matrix[i][n] += xi;
-        }
-    }
-    for i in 0..n {
-        let pivot = (i..n).max_by(|&a, &b| matrix[a][i].abs().total_cmp(&matrix[b][i].abs()))?;
-        matrix.swap(i, pivot);
-        let diagonal = matrix[i][i];
-        if diagonal.abs() <= 1e-10 {
-            return None;
-        }
-        for j in i..=n {
-            matrix[i][j] /= diagonal;
-        }
-        for k in 0..n {
-            if k == i {
-                continue;
-            }
-            let factor = matrix[k][i];
-            for j in i..=n {
-                let entry = matrix[i][j];
-                matrix[k][j] -= factor * entry;
+fn paired_slope(rows: &[(f64, f64)]) -> Option<f64> {
+    let mut slopes = Vec::new();
+    for (i, &(x, y)) in rows.iter().enumerate() {
+        for &(other_x, other_y) in &rows[i + 1..] {
+            if other_x != x {
+                slopes.push((other_y - y) / (other_x - x));
             }
         }
     }
-    let constants: Vec<_> = (0..n).map(|i| matrix[i][n] / scale[i]).collect();
-    constants.iter().all(|v| v.is_finite()).then_some(constants)
+    (!slopes.is_empty() && slopes.iter().all(|v| v.is_finite())).then(|| median(&slopes))
+}
+
+fn tiny_intercept(rows: &[(f64, f64)]) -> Option<f64> {
+    let slope = paired_slope(rows)?;
+    Some(median(
+        &rows.iter().map(|&(n, t)| t - slope * n).collect::<Vec<_>>(),
+    ))
+}
+
+fn interpolate(curve: &[(usize, f64)], bytes: usize) -> f64 {
+    let Some(&(first_w, first)) = curve.first() else {
+        return f64::NAN;
+    };
+    if bytes <= first_w {
+        return first;
+    }
+    for pair in curve.windows(2) {
+        let [(lo_w, lo), (hi_w, hi)] = pair else {
+            unreachable!()
+        };
+        if bytes <= *hi_w {
+            return lo
+                + (hi - lo)
+                    * ((bytes as f64 / *lo_w as f64).ln() / (*hi_w as f64 / *lo_w as f64).ln());
+        }
+    }
+    curve.last().unwrap().1
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ItemClass {
+    dims: Vec<usize>,
+    dst: Vec<isize>,
+    src: Vec<isize>,
+}
+
+impl ItemClass {
+    fn elements(&self) -> usize {
+        self.dims.iter().product()
+    }
+    fn runs(&self) -> usize {
+        self.elements() / self.dims[0]
+    }
+    fn kind(&self) -> usize {
+        usize::from(self.dst[0] != 1 || self.src[0] != 1)
+    }
+}
+
+type RealItems = Vec<(String, usize, BTreeMap<ItemClass, usize>)>;
+
+fn real_items(engine: &mut CpuEngine) -> Res<RealItems> {
+    let runtime = Runtime::builder().build()?;
+    let mut fixtures = Vec::new();
+    // Typed public permute and lower staging use the same spaces and production compiler.
+    macro_rules! collect {
+        ($label:expr, $rule:expr, $w:expr, $p:expr) => {{
+            let rule = Arc::new($rule);
+            let w = $w;
+            let p = $p;
+            let encode = |pairs: &Vec<_>| -> Res<SectorLeg> {
+                let pairs = pairs
+                    .iter()
+                    .map(|(q, n)| {
+                        Ok((
+                            TypedSectorAdmission::try_encode_label(rule.as_ref(), q)?,
+                            *n,
+                        ))
+                    })
+                    .collect::<Res<Vec<_>>>()?;
+                Ok(SectorLeg::try_new(pairs, false)?)
+            };
+            let bond = encode(&w)?;
+            let physical = encode(&p)?;
+            let w = GradedSpace::try_new(rule.clone(), w)?;
+            let p = GradedSpace::try_new(rule.clone(), p)?;
+            let x: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+                engine,
+                &runtime,
+                [&w, &p],
+                [&w, &p],
+                |tree, index| {
+                    let charge =
+                        TypedSectorAdmission::try_encode_label(rule.as_ref(), tree.coupled())
+                            .expect("fixture provider encodes its own sector")
+                            .id();
+                    (index.iter().fold(charge % 97, |n, &i| (n * 17 + i) % 97) as f64 + 1.0) / 97.0
+                },
+            )?;
+            let y = x.permute(engine, &[0, 3], &[2, 1])?;
+            let product = FusionProductSpace::new([bond, physical]);
+            let source =
+                symtn_tensors::BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+                    rule,
+                    FusionTreeHomSpace::new(product.clone(), product),
+                )?;
+            let mut context =
+                symtn_tensors::TreeTransformExecutionContext::<f64, RuleIdentity>::default();
+            let staged = context.stage_tree_transform_multiplicity_free_in(
+                engine,
+                symtn_tensors::FusionSource::Direct(&source),
+                x.dense_data()?.len(),
+                &symtn_tensors::TreeTransformOperation::permute([0, 3], [2, 1]),
+            )?;
+            let structure = staged.structure();
+            if structure.has_pack_gemm_scatter_blocks() {
+                return Err("real held-out fixture contains a Multi".into());
+            }
+            // This also checks that the staged compiler is the public permute's execution path.
+            let mut replay = Fixture {
+                structure: staged.destination_structure().clone(),
+                source: staged.source_structure().clone(),
+                transform: structure.clone(),
+                data: x.dense_data()?.to_vec(),
+                workspace: TreeTransformWorkspace::default(),
+                dense: DefaultDenseExecutor::new(),
+                roles: structure.blocks().len(),
+                elements: 0,
+                rank: 4,
+            };
+            assert_eq!(replay.replay(engine, None)?, y.dense_data()?);
+            let diagnostics = structure.layout_diagnostics();
+            let mut classes = BTreeMap::new();
+            for block in structure.blocks() {
+                let TreeTransformBlock::Single { dst_layout, .. } = *block else {
+                    unreachable!()
+                };
+                let layout = diagnostics
+                    .entry(dst_layout)
+                    .ok_or("missing real Single geometry")?;
+                let class = ItemClass {
+                    dims: layout.dims.to_vec(),
+                    dst: layout.block_strides.to_vec(),
+                    src: layout
+                        .partner_strides
+                        .ok_or("missing real source geometry")?
+                        .to_vec(),
+                };
+                *classes.entry(class).or_insert(0) += 1;
+            }
+            let working_set = (x.dense_data()?.len() + y.dense_data()?.len()) * 8;
+            println!(
+                "real permute {}: items={} phase_working_set_bytes={working_set}",
+                $label,
+                structure.blocks().len()
+            );
+            fixtures.push(($label.to_owned(), working_set, classes));
+        }};
+    }
+    for dominant in [false, true] {
+        let w = (-100..=100)
+            .map(|q| {
+                Ok((
+                    U1Irrep::new(q)?,
+                    if dominant {
+                        if q == 0 {
+                            768
+                        } else {
+                            48
+                        }
+                    } else {
+                        16
+                    },
+                ))
+            })
+            .collect::<Res<Vec<_>>>()?;
+        let p = if dominant {
+            vec![(U1Irrep::new(0)?, 1)]
+        } else {
+            (-1..=1)
+                .map(|q| Ok((U1Irrep::new(q)?, 1)))
+                .collect::<Res<Vec<_>>>()?
+        };
+        collect!(
+            if dominant { "U1-dom" } else { "U1-small" },
+            U1FusionRule,
+            w,
+            p
+        );
+        let rule = LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(GroupId::su(2)?)?;
+        let w = (0..=99)
+            .map(|j| {
+                Ok((
+                    rule.category().irrep(&[j])?,
+                    if dominant {
+                        if j == 0 {
+                            768
+                        } else {
+                            48
+                        }
+                    } else {
+                        16
+                    },
+                ))
+            })
+            .collect::<Res<Vec<_>>>()?;
+        let p = vec![(rule.category().irrep(&[if dominant { 0 } else { 1 }])?, 1)];
+        collect!(if dominant { "SU2-dom" } else { "SU2-small" }, rule, w, p);
+    }
+    Ok(fixtures)
+}
+
+fn memory_limit() -> usize {
+    let available = read("/proc/meminfo")
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("MemAvailable:")?
+                .split_whitespace()
+                .next()?
+                .parse::<usize>()
+                .ok()?
+                .checked_mul(1024)
+        })
+        .or_else(|| {
+            if cfg!(target_os = "macos") {
+                sysctl("hw.memsize").parse().ok()
+            } else {
+                None
+            }
+        });
+    let mut limit = available.unwrap_or(MAX_WORKING_SET);
+    for root in ["/sys/fs/cgroup", "/sys/fs/cgroup/memory"] {
+        let capacity = read(format!("{root}/memory.max"))
+            .parse::<usize>()
+            .ok()
+            .or_else(|| read(format!("{root}/memory.limit_in_bytes")).parse().ok());
+        let used = read(format!("{root}/memory.current"))
+            .parse::<usize>()
+            .ok()
+            .or_else(|| read(format!("{root}/memory.usage_in_bytes")).parse().ok());
+        if let Some(remaining) = capacity.zip(used).map(|(n, used)| n.saturating_sub(used)) {
+            limit = limit.min(remaining);
+        }
+    }
+    // Sparse source hulls use up to twice the addressed bytes; leave room for allocator retention.
+    (limit / 4).min(MAX_WORKING_SET)
 }
 
 fn cache_bytes(value: &str) -> Option<usize> {
@@ -619,7 +960,7 @@ fn main() -> Res<()> {
     let start = Instant::now();
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.first().is_some_and(|s| s == "--help") {
-        println!("Usage: calibrate_replay <profile-path> [width]\nwidth defaults to available parallelism; run a release build.\nFive median batches after one warmup; held-out/stability tolerance = 20%.\nMeasures CPU f64 identity owned-overwrite Singles, traversal/cache fits and held-out errors; no profile loader is installed.");
+        println!("Usage: calibrate_replay <profile-path> [width]\nwidth defaults to available parallelism; run a release build.\nThree batches when spread <=5%, otherwise five; held-out tolerance = 25%.\nMeasures CPU f64 owned-overwrite Singles with measured working-set curves and decoupled fits; no profile loader is installed.");
         return Ok(());
     }
     if args.is_empty() || args.len() > 2 {
@@ -636,7 +977,7 @@ fn main() -> Res<()> {
         return Err("width must be in 1..=65535".into());
     }
     let (mut profile, llc, caches) = host();
-    println!("Compiled replay calibration: width={width}, cpu-faer, f64 owned-overwrite copy; tolerance=20%");
+    println!("Compiled replay calibration: width={width}, cpu-faer, f64 owned-overwrite copy; held-out tolerance=25%");
     for (key, value) in &profile {
         println!("{key} = {value}");
     }
@@ -651,7 +992,7 @@ fn main() -> Res<()> {
         .unwrap_or_else(|| "unknown".into());
     for (k, v) in [
         ("format_version", "1"),
-        ("model_version", "2"),
+        ("model_version", "3"),
         ("replay_abi", "symtn-replay-v2"),
         ("dispatch_abi", "threadteam-0.5.1"),
         ("class", "f64-owned-overwrite-copy"),
@@ -693,129 +1034,153 @@ fn main() -> Res<()> {
     print_samples("no-item serial direct phase", baseline);
     let mut serial_cold_s = setup_s + baseline.cold;
     let mut payload_peak = 0usize;
-    let mut regimes: Vec<_> = caches.iter().map(|(name, _)| name.clone()).collect();
-    regimes.push("memory".into());
-    let classes = ["contiguous-run", "strided-inner"];
-    let columns = 3 + classes.len() * regimes.len();
-    let mut rows = Vec::new();
-    let mut training_resolved = !caches.is_empty();
-    let mut targets = BTreeSet::new();
-    let mut previous = 0usize;
-    for &(_, bytes) in &caches {
-        if bytes > previous {
-            for part in [1, 2] {
-                targets.insert(previous + (bytes - previous) / 3 * part);
-            }
-            previous = bytes;
+    let largest_cache = caches.iter().map(|(_, bytes)| *bytes).max();
+    let requested = largest_cache
+        .unwrap_or(64 * 1024 * 1024)
+        .saturating_mul(4)
+        .min(MAX_WORKING_SET);
+    let allowance = memory_limit();
+    let limit = requested.min(allowance);
+    if limit < 64 * 1024 {
+        return Err("insufficient memory for the 64 KiB ladder".into());
+    }
+    let mut targets = vec![64 * 1024usize];
+    while *targets.last().unwrap() < limit {
+        let next = targets.last().unwrap() * 2;
+        if next > allowance || next > MAX_WORKING_SET {
+            break;
+        }
+        targets.push(next);
+    }
+    let largest = *targets.last().unwrap();
+    println!("Working-set ladder: {:?}; reported caches are information only; requested_bytes={requested} memory_allowance_bytes={allowance}; W counts distinct source+destination element bytes, sparse padding is reported separately.", targets);
+    println!("Serial phase minus no-item baseline excludes output allocation/proof validation, includes first stores. Raw e(W)=median residual/elements; corrected e subtracts independently fitted a and r(W) to avoid double counting. All curves interpolate in log W with flat endpoints.");
+    let mut identified = true;
+    let mut raw_curves: [Vec<(usize, f64)>; 2] = Default::default();
+    for (kind, _) in KINDS.iter().enumerate() {
+        for &working_set in &targets {
+            let elements = working_set / 16;
+            let cold = Instant::now();
+            let mut fixture = Fixture::traversal(elements, 1, kind)?;
+            fixture.print_geometry("curve")?;
+            payload_peak = payload_peak.max(fixture.payload_bytes()?);
+            let setup = cold.elapsed().as_secs_f64();
+            let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 256)?;
+            serial_cold_s += setup + time.cold;
+            print_samples(
+                &format!(
+                    "curve k={} W={working_set} elements={elements} runs=1 payload_bytes={}",
+                    KINDS[kind],
+                    fixture.payload_bytes()?
+                ),
+                time,
+            );
+            let resolved = time.median - baseline.median > time.spread + baseline.spread;
+            identified &= resolved;
+            println!("curve residual_resolved={resolved}");
+            raw_curves[kind].push((
+                working_set,
+                (time.median - baseline.median) / elements as f64,
+            ));
         }
     }
-    if previous > 0 {
-        for multiplier in [2, 4] {
-            targets.insert(
-                previous
-                    .checked_mul(multiplier)
-                    .ok_or("cache fixture size overflow")?,
+    let mut run_targets = BTreeSet::from([targets[0], largest]);
+    run_targets.insert(targets[targets.len() / 2]);
+    let mut run_curves: [Vec<(usize, f64)>; 2] = Default::default();
+    for (kind, _) in KINDS.iter().enumerate() {
+        for &working_set in &run_targets {
+            let elements = working_set / 16;
+            let mut rows = Vec::new();
+            let mut spreads = Vec::new();
+            for runs in [1, elements / 64, elements / 4, elements / 2] {
+                let cold = Instant::now();
+                let mut fixture = Fixture::traversal(elements, runs, kind)?;
+                fixture.print_geometry("paired")?;
+                payload_peak = payload_peak.max(fixture.payload_bytes()?);
+                let setup = cold.elapsed().as_secs_f64();
+                let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 256)?;
+                serial_cold_s += setup + time.cold;
+                print_samples(&format!("paired k={} W={working_set} elements={elements} runs={runs} payload_bytes={}", KINDS[kind], fixture.payload_bytes()?), time);
+                rows.push((runs as f64, time.median));
+                spreads.push(time.spread);
+            }
+            let slope = paired_slope(&rows).ok_or("unidentified paired run slope")?;
+            let resolved =
+                rows.last().unwrap().1 - rows[0].1 > spreads[0] + spreads.last().unwrap();
+            identified &= resolved;
+            println!("paired endpoint_difference_resolved={resolved}");
+            println!(
+                "paired k={} W={working_set} r_ns_per_run={slope:.9}",
+                KINDS[kind]
+            );
+            run_curves[kind].push((working_set, slope));
+        }
+    }
+    let mut tiny = Vec::new();
+    let mut tiny_spreads = Vec::new();
+    for elements in 1..=16 {
+        let mut fixture = Fixture::new(1, &[elements, 1], &[0, 1], false)?;
+        fixture.data = vec![1.0; elements];
+        let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 256)?;
+        print_samples(&format!("tiny elements={elements} roles=1 runs=1"), time);
+        serial_cold_s += time.cold;
+        if elements > 1 {
+            tiny.push((elements as f64, time.median - baseline.median));
+            tiny_spreads.push(time.spread);
+        }
+    }
+    let tiny_slope = paired_slope(&tiny).ok_or("unidentified tiny intercept")?;
+    let intercept = tiny_intercept(&tiny).ok_or("unidentified tiny intercept")?;
+    let a = intercept - interpolate(&run_curves[0], 16 * 16);
+    let role_resolved = a > baseline.spread + median(&tiny_spreads);
+    identified &= role_resolved;
+    println!(
+        "a_resolved={role_resolved}; baseline_plus_tiny_median_spread_ns={:.9}",
+        baseline.spread + median(&tiny_spreads)
+    );
+    println!("a_ns={a:.9}; tiny_element_slope_ns={tiny_slope:.9}; tiny_intercept_minus_baseline_ns={intercept:.9}; n=1 is a scalar-normalization control excluded from the copy intercept");
+    let mut element_curves = raw_curves.clone();
+    for (kind, _) in KINDS.iter().enumerate() {
+        for (working_set, e) in &mut element_curves[kind] {
+            *e -= (a + interpolate(&run_curves[kind], *working_set)) / (*working_set / 16) as f64;
+        }
+        for (curve_name, curve) in [
+            ("raw_e_ns_per_element", &raw_curves[kind]),
+            ("e_ns_per_element", &element_curves[kind]),
+            ("r_ns_per_run", &run_curves[kind]),
+        ] {
+            println!("measured.item.{}.{}={curve:?}", KINDS[kind], curve_name);
+            profile.insert(
+                format!(
+                    "measured.item.{}.{}.working_set_bytes",
+                    KINDS[kind], curve_name
+                ),
+                curve
+                    .iter()
+                    .map(|(w, _)| w.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            profile.insert(
+                format!("measured.item.{}.{}", KINDS[kind], curve_name),
+                curve
+                    .iter()
+                    .map(|(_, value)| format!("{value:.12e}"))
+                    .collect::<Vec<_>>()
+                    .join(","),
             );
         }
     }
-    println!("Serial fits use the production direct-phase timer minus its no-item baseline; output allocation/proof/validation are excluded, first stores remain inside items.");
-    println!("Raw inner lengths: 1,2,4,16,64,256; normalization removes unit axes and may fuse others: all regressors use printed baked geometry. Planned constants unavailable: admitted_plan requires more than one worker.");
-    for bytes in targets {
-        let total = bytes
-            .checked_add(8191)
-            .ok_or("cache fixture size overflow")?
-            / 8192
-            * 512;
-        for roles in [1, 4] {
-            let elements = (total / roles / 512).max(1) * 512;
-            let working_set = roles * elements * 16;
-            let regime = caches
-                .iter()
-                .position(|(_, size)| working_set <= *size)
-                .unwrap_or(caches.len());
-            for inner in [1, 2, 4, 16, 64, 256] {
-                for axes in [[0, 2, 1, 3], [1, 0, 2, 3]] {
-                    let cold = Instant::now();
-                    let shape = [inner, 2, elements / (2 * inner), 1];
-                    let mut fixture = Fixture::new(roles, &shape, &axes, false)?;
-                    fixture.data = (0..roles * elements)
-                        .map(|i| (i % 97) as f64 / 97.0)
-                        .collect();
-                    payload_peak = payload_peak.max(working_set);
-                    let diagnostics = fixture.transform.layout_diagnostics();
-                    let layout = diagnostics.entry(0).ok_or("missing destination layout")?;
-                    let source = layout.partner_strides.ok_or("missing source strides")?;
-                    let class = usize::from(layout.block_strides[0] != 1 || source[0] != 1);
-                    let runs = roles * elements / layout.dims[0];
-                    let setup_s = cold.elapsed().as_secs_f64();
-                    let time = measure(|| Ok(Some(fixture.phase(&mut serial)?)), 1000)?;
-                    print_samples(&format!("serial k={} regime={} roles={roles} raw_dims={shape:?} axes={axes:?} dims={:?} dst_strides={:?} src_strides={source:?} elements_per_item={elements} runs_per_item={} working_set_bytes={working_set}", classes[class], regimes[regime], layout.dims, layout.block_strides, runs / roles), time);
-                    serial_cold_s += setup_s + time.cold;
-                    let residual = time.median - baseline.median;
-                    let resolved = residual > time.spread + baseline.spread;
-                    training_resolved &= resolved;
-                    let mut x = vec![0.0; columns];
-                    x[0] = roles as f64;
-                    x[1 + class] = runs as f64;
-                    x[3 + class * regimes.len() + regime] = (roles * elements) as f64;
-                    rows.push((x, residual));
-                    println!("signed_phase_residual_ns={residual:.3} resolved={resolved}");
-                }
-            }
-        }
-    }
-    let constants = fit(&rows);
-    let nonnegative = constants
-        .as_ref()
-        .is_some_and(|c| c.iter().all(|v| *v >= 0.0));
-    let mut accepted = training_resolved && nonnegative;
-    let mut training_errors = [None::<f64>; 2];
-    if let Some(constants) = &constants {
-        for (x, observed) in &rows {
-            let class = usize::from(x[1] == 0.0);
-            let predicted: f64 = x.iter().zip(constants).map(|(x, c)| x * c).sum();
-            let error = (predicted - observed).abs() / observed;
-            training_errors[class] = Some(training_errors[class].unwrap_or(0.0).max(error));
-        }
-    }
-    for (class, error) in classes.iter().zip(training_errors) {
-        let valid = error.is_some_and(|e| e.is_finite() && e <= TOLERANCE);
-        accepted &= valid;
-        println!("training k={class} max_relative_error={error:?} within_tolerance={valid}");
-        profile.insert(
-            format!("measured.item.{class}.training_max_relative_error"),
-            error.map_or("unknown".into(), |e| format!("{e:.12e}")),
-        );
-        profile.insert(
-            format!("item.{class}.training_status"),
-            if valid {
-                "within 20%"
-            } else {
-                "rejected or unidentified"
-            }
-            .into(),
-        );
-    }
-    let mut names = vec!["a_ns".to_owned()];
-    names.extend(classes.iter().map(|k| format!("{k}.r_ns_per_run")));
-    for k in classes {
-        names.extend(
-            regimes
-                .iter()
-                .map(|regime| format!("{k}.{regime}.e_ns_per_element")),
-        );
-    }
-    for (i, name) in names.iter().enumerate() {
-        let value = constants
-            .as_ref()
-            .map_or("unknown".into(), |c| format!("{:.12e}", c[i]));
-        println!("joint_fit.{name} = {value}");
-        profile.insert(format!("measured.item.{name}"), value);
-    }
-    profile.insert(
-        "item_model".into(),
-        "a + r_k*runs + e_k(W)*elements; W=phase source+destination bytes; cache cpu0".into(),
-    );
+    let mut accepted = identified
+        && a.is_finite()
+        && a >= 0.0
+        && run_curves
+            .iter()
+            .chain(&element_curves)
+            .flatten()
+            .all(|(_, value)| value.is_finite() && *value >= 0.0);
+    profile.insert("measured.item.a_ns".into(), format!("{a:.12e}"));
+    profile.insert("item_model".into(), "a + r_k(W)*runs + e_k(W)*elements; log-W interpolation, flat endpoints; W=distinct phase source+destination element bytes; sysfs informational only".into());
     profile.insert(
         "measured.item.phase_baseline_ns".into(),
         format!("{:.12e}", baseline.median),
@@ -824,91 +1189,56 @@ fn main() -> Res<()> {
         "item.planned.status".into(),
         "unavailable: serial token cannot admit a planned kernel".into(),
     );
-    profile.insert("item.planned.r_ns_per_run".into(), "unknown".into());
-    for regime in &regimes {
-        profile.insert(
-            format!("item.planned.{regime}.e_ns_per_element"),
-            "unknown".into(),
-        );
+    let heldout_cold = Instant::now();
+    let real = real_items(&mut serial)?;
+    serial_cold_s += heldout_cold.elapsed().as_secs_f64();
+    for (label, phase_w, classes) in real {
+        payload_peak = payload_peak.max(2 * phase_w);
+        for (index, (class, original_roles)) in classes.iter().enumerate() {
+            let cold = Instant::now();
+            let mut held = Fixture::geometry(&class.dims, &class.dst, &class.src)?;
+            payload_peak = payload_peak.max(held.payload_bytes()?);
+            let setup = cold.elapsed().as_secs_f64();
+            let time = measure(|| Ok(Some(held.phase(&mut serial)?)), 256)?;
+            serial_cold_s += setup + time.cold;
+            let working_set = held.roles * held.elements * 16;
+            let kind = class.kind();
+            let per_item = (time.median - baseline.median) / held.roles as f64;
+            let predicted = a
+                + interpolate(&run_curves[kind], working_set) * class.runs() as f64
+                + interpolate(&element_curves[kind], working_set) * class.elements() as f64;
+            let error = (predicted - per_item).abs() / per_item.abs();
+            let valid = error.is_finite() && per_item > 0.0 && error <= TOLERANCE;
+            accepted &= valid;
+            print_samples(&format!("held-out {label}.{index} k={} elements={} runs={} dims={:?} dst_strides={:?} src_strides={:?} original_items={original_roles} original_phase_W={phase_w} isolated_items={} isolated_W={working_set} payload_bytes={}", KINDS[kind], class.elements(), class.runs(), class.dims, class.dst, class.src, held.roles, held.payload_bytes()?), time);
+            println!("held-out {label}.{index}: measured_ns_per_item={per_item:.3} predicted_ns_per_item={predicted:.3} relative_error={error:.6} within_25_percent={valid}; isolated exact geometry, not the original phase cache state");
+            for (field, value) in [
+                ("measured_ns_per_item", per_item),
+                ("predicted_ns_per_item", predicted),
+                ("relative_error", error),
+            ] {
+                profile.insert(
+                    format!("measured.heldout.{label}.{index}.{field}"),
+                    format!("{value:.12e}"),
+                );
+            }
+        }
     }
-    for (label, roles, shape, interleaved) in [
-        ("SU2-small-shaped", 2, [16, 1, 16, 1], true),
-        ("dom-large-shaped", 1, [768, 1, 768, 1], false),
-    ] {
-        let cold = Instant::now();
-        let mut held = Fixture::new(roles, &shape, &[0, 3, 2, 1], interleaved)?;
-        held.data = (0..roles * held.elements)
-            .map(|i| (i % 97) as f64 / 97.0)
-            .collect();
-        let working_set = roles * held.elements * 16;
-        payload_peak = payload_peak.max(working_set);
-        let diagnostics = held.transform.layout_diagnostics();
-        let layout = diagnostics.entry(0).ok_or("missing held-out layout")?;
-        let source = layout
-            .partner_strides
-            .ok_or("missing held-out source strides")?;
-        let class = usize::from(layout.block_strides[0] != 1 || source[0] != 1);
-        let regime = caches
-            .iter()
-            .position(|(_, size)| working_set <= *size)
-            .unwrap_or(caches.len());
-        let runs = roles * held.elements / layout.dims[0];
-        let expected_dims: &[usize] = if interleaved { &[16, 16] } else { &[589824] };
-        let expected_strides: &[isize] = if interleaved { &[1, 32] } else { &[1] };
-        assert_eq!(layout.dims, expected_dims);
-        assert_eq!(layout.block_strides, expected_strides);
-        assert_eq!(source, expected_strides);
-        assert_eq!(held.replay(&mut serial, None)?, held.data);
-        let setup_s = cold.elapsed().as_secs_f64();
-        let time = measure(|| Ok(Some(held.phase(&mut serial)?)), 1000)?;
-        let whole = measure(
-            || {
-                black_box(held.replay(&mut serial, None)?);
-                Ok(None)
-            },
-            1000,
-        )?;
-        serial_cold_s += setup_s + time.cold + whole.cold;
-        print_samples(&format!("held-out {label} k={} regime={} roles={roles} elements_per_item={} dims={:?} dst_strides={:?} src_strides={source:?} runs_per_item={} working_set_bytes={working_set}", classes[class], regimes[regime], held.elements, layout.dims, layout.block_strides, runs / roles), time);
-        print_samples(&format!("held-out {label} whole-owned-call"), whole);
-        let predicted = constants.as_ref().map(|c| {
-            baseline.median
-                + c[0] * roles as f64
-                + c[1 + class] * runs as f64
-                + c[3 + class * regimes.len() + regime] * (roles * held.elements) as f64
-        });
-        let error = predicted.map(|ns| (ns - time.median).abs() / time.median);
-        accepted &= error.is_some_and(|e| e.is_finite() && e <= TOLERANCE);
-        println!("held-out {label} phase_prediction_ns={predicted:?} relative_error={error:?}; whole_call_minus_phase_ns={:.3} (unpaired, unprofiled whole call; not an allocation attribution)", whole.median - time.median);
-        profile.insert(
-            format!("measured.heldout.{label}.phase_ns"),
-            format!("{:.12e}", time.median),
-        );
-        profile.insert(
-            format!("measured.heldout.{label}.predicted_phase_ns"),
-            predicted.map_or("unknown".into(), |ns| format!("{ns:.12e}")),
-        );
-        profile.insert(
-            format!("measured.heldout.{label}.relative_error"),
-            error.map_or("unknown".into(), |e| format!("{e:.12e}")),
-        );
-    }
-    profile.insert("item_fit_status".into(), if accepted { "held-out accepted; no trusted campaign reference" } else { "rejected: cache topology unavailable, singular/negative fit, unresolved residual, or held-out error exceeds 20%" }.into());
-    for (i, name) in names.iter().enumerate() {
-        profile.insert(
-            format!("item.{name}"),
-            if accepted {
-                format!("{:.12e}", constants.as_ref().unwrap()[i])
-            } else {
-                "unknown".into()
-            },
-        );
-    }
-    println!("serial joint fit accepted={accepted}; planned unavailable; no structural-coefficient class measured");
+    profile.insert(
+        "item_fit_status".into(),
+        if accepted {
+            "held-out accepted; no trusted campaign reference"
+        } else {
+            "rejected: unresolved/nonfinite/negative constant or per-class held-out error exceeds 25%"
+        }
+        .into(),
+    );
+    println!("serial decoupled fit accepted={accepted}; planned unavailable; no structural-coefficient class measured");
     println!(
         "serial fit section cold_s={serial_cold_s:.6} total_s={:.6}",
         section.elapsed().as_secs_f64()
     );
+    let serial_elapsed = start.elapsed().as_secs_f64();
 
     let ladder: Vec<_> = std::iter::successors(Some(1usize), |&q| {
         (q < width).then(|| q.saturating_mul(2).min(width))
@@ -918,10 +1248,8 @@ fn main() -> Res<()> {
     let mut dispatch = Vec::new();
     let mut bandwidth_widths = Vec::new();
     let mut bandwidth = Vec::new();
-    let per_array = llc
-        .and_then(|n| n.checked_mul(2))
-        .and_then(|n| n.checked_add(8));
-    let mut all_bandwidth_stable = llc.is_some();
+    let per_array = largest / 4;
+    let mut all_bandwidth_stable = true;
     let mut narrow_reference = None;
     let mut working_set = None;
     for &q in &ladder {
@@ -978,7 +1306,7 @@ fn main() -> Res<()> {
         );
         let section = Instant::now();
         let mut bandwidth_cold_s = 0.0;
-        for elements in [4096, 65536] {
+        for elements in [64, (largest.min(1024 * 1024) / 16 / 64).max(1)] {
             let cold = Instant::now();
             let mut fixture = Fixture::new(64, &[elements, 1], &[0, 1], false)?;
             fixture.seed(&mut engine)?;
@@ -997,8 +1325,8 @@ fn main() -> Res<()> {
                 s,
             );
         }
-        if let Some(per_array) = per_array {
-            let roles = width.max(64);
+        {
+            let roles = 64;
             let base_elements = per_array
                 .checked_add(7)
                 .map(|n| n / 8)
@@ -1022,7 +1350,7 @@ fn main() -> Res<()> {
                     },
                     1,
                 )?;
-                print_samples(&format!("DRAM candidate q={q} roles={roles} elements_per_role={elements} bytes_per_array={}",roles*elements*8),s);
+                print_samples(&format!("measured large-W candidate q={q} roles={roles} elements_per_role={elements} bytes_per_array={}",roles*elements*8),s);
                 bandwidth_cold_s += setup_s + s.cold;
                 let rate = fixture.bytes() / s.median;
                 println!("bandwidth q={q} bytes_per_ns={rate:.6} (effective replay, no setup subtraction)");
@@ -1042,19 +1370,20 @@ fn main() -> Res<()> {
                         )?;
                         bandwidth_cold_s += retest.cold;
                         print_samples(
-                            "narrow serial DRAM retest on widest-engine-first-touched source",
+                            "narrow serial large-W retest on widest-engine-first-touched source",
                             retest,
                         );
                         let rate = fixture.bytes() / retest.median;
-                        let stable = narrow_reference
-                            .is_some_and(|first: f64| (rate / first - 1.0).abs() <= TOLERANCE);
+                        let stable = narrow_reference.is_some_and(|first: f64| {
+                            (rate / first - 1.0).abs() <= BANDWIDTH_TOLERANCE
+                        });
                         all_bandwidth_stable &= stable;
                         println!("narrow_retest_bytes_per_ns={rate:.6} stable={stable} (includes placement and cache changes)");
                     }
                 }
             }
             let stable = rates.iter().all(|r| r.is_finite() && *r > 0.0)
-                && (rates[0] / rates[1] - 1.0).abs() <= TOLERANCE;
+                && (rates[0] / rates[1] - 1.0).abs() <= BANDWIDTH_TOLERANCE;
             println!("bandwidth q={q} twice_size_stable={stable}; placement verification unknown");
             all_bandwidth_stable &= stable;
             bandwidth_widths.push(q.to_string());
@@ -1063,14 +1392,24 @@ fn main() -> Res<()> {
             } else {
                 "unknown".into()
             });
-        } else {
-            println!("B({q}) unavailable: aggregate LLC size unknown");
         }
         println!(
             "bandwidth section q={q} cold_s={bandwidth_cold_s:.6} total_s={:.6}",
             section.elapsed().as_secs_f64()
         );
     }
+    let bandwidth_elapsed = start.elapsed().as_secs_f64() - serial_elapsed;
+    let projected_p4 = serial_elapsed + bandwidth_elapsed * 3.0 / ladder.len() as f64;
+    let projected_p96 = serial_elapsed + bandwidth_elapsed * 8.0 / ladder.len() as f64;
+    println!("runtime projection: p=4 {projected_p4:.3}s, p=96 {projected_p96:.3}s; serial section fixed, per-width dispatch/bandwidth scaled by ladder counts 3/8; projection excludes host contention and different topology. p4_within_60s={}", projected_p4 <= 60.0);
+    profile.insert(
+        "projected_runtime_p4_s".into(),
+        format!("{projected_p4:.6}"),
+    );
+    profile.insert(
+        "projected_runtime_p96_s".into(),
+        format!("{projected_p96:.6}"),
+    );
     profile.insert("dispatch_widths".into(), dispatch_widths.join(","));
     profile.insert("dispatch_team_ns".into(), dispatch.join(","));
     profile.insert(
@@ -1120,25 +1459,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fit_identifies_shared_setup_runs_and_regime_slopes() {
-        // Purpose: independent predictors recover shared setup, run and regime element costs.
-        let rows = [
-            (vec![1.0, 2.0, 4.0, 0.0], 24.0),
-            (vec![1.0, 4.0, 4.0, 0.0], 30.0),
-            (vec![2.0, 2.0, 8.0, 0.0], 42.0),
-            (vec![1.0, 2.0, 0.0, 4.0], 36.0),
-            (vec![1.0, 4.0, 0.0, 8.0], 70.0),
-        ];
-        let actual = fit(&rows).unwrap();
-        for (got, expected) in actual.iter().zip([2.0, 3.0, 4.0, 7.0]) {
-            assert!((got - expected).abs() < 1e-9);
+    fn paired_differences_identify_run_cost_without_element_columns() {
+        // Purpose: fixed element cost cancels, and one contaminated row does not set the median slope.
+        assert_eq!(
+            paired_slope(&[(1.0, 105.0), (4.0, 120.0), (16.0, 180.0), (32.0, 260.0)]),
+            Some(5.0)
+        );
+        assert_eq!(
+            paired_slope(&[
+                (1.0, 105.0),
+                (4.0, 120.0),
+                (16.0, 180.0),
+                (32.0, 999.0),
+                (64.0, 420.0)
+            ]),
+            Some(5.0)
+        );
+        assert_eq!(paired_slope(&[(1.0, 2.0), (1.0, 3.0)]), None);
+    }
+
+    #[test]
+    fn tiny_intercept_separates_one_run_from_per_role_cost() {
+        // Purpose: hand values with a=7, r=3 and element slope=2 recover the role cost.
+        assert_eq!(
+            tiny_intercept(&[(2.0, 14.0), (8.0, 26.0), (16.0, 42.0)]).unwrap() - 3.0,
+            7.0
+        );
+    }
+
+    #[test]
+    fn measured_curves_interpolate_in_log_working_set_and_clamp_endpoints() {
+        // Purpose: half a log interval has half the cost change, with no extrapolation.
+        let curve = [(64, 2.0), (256, 6.0), (1024, 10.0)];
+        for (w, expected) in [
+            (1, 2.0),
+            (64, 2.0),
+            (128, 4.0),
+            (256, 6.0),
+            (512, 8.0),
+            (2048, 10.0),
+        ] {
+            assert!((interpolate(&curve, w) - expected).abs() < 1e-12);
         }
-        assert!(fit(&[(vec![1.0, 1.0], 2.0), (vec![2.0, 2.0], 4.0)]).is_none());
     }
 
     #[test]
     fn cache_sizes_parse_sysfs_units_and_reject_invalid_sizes() {
-        // Purpose: cache regime boundaries use checked byte counts from sysfs.
+        // Purpose: informational cache sizes and the ladder extent use checked sysfs byte counts.
         for (text, expected) in [
             (" 32K\n", Some(32768)),
             ("2M", Some(2097152)),

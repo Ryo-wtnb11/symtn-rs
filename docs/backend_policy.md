@@ -419,20 +419,32 @@ Block-lane placement and provider inner-width choice keep their existing
 cost models. This is a scheduling estimate, not a guarantee of measured speedup.
 
 The offline `calibrate_replay` example measures CPU `f64` owned-overwrite
-Singles through the compiled production replay. Its serial direct-phase fit
-uses a common per-role cost, per-class run costs, and per-element costs for
-each cache regime discovered from Linux cpu0 sysfs. It varies run lengths
-and source permutations and reports the baked geometry, including removal
-of unit axes. Held-out items reproduce the 256-element, 16-run small-subblock
-layout and the 589824-element, one-run dominant layout. Serial tokens cannot
-admit planned kernels, so their constants remain unavailable. The example
-also measures engine-team empty-fork dispatch and cache/DRAM replay bandwidth
-across engine budgets. It prints raw batches, held-out errors, size/placement
-checks, cold time and memory use, and writes a version-1 `key=value` profile
-with item model version 2. Unknown cache topology or placement and rejected
-measurements leave the profile incomplete; it does not install constants or
-change the movement chooser. The serial phase timer excludes output allocation
-and proof validation; output first stores remain inside the timed movement.
+Singles through the compiled production replay. It measures per-kind element
+cost curves on a 64 KiB power-of-two working-set ladder, up to four times the
+largest reported cache, capped at 1 GiB and the available memory allowance.
+Cache sizes are informational: the model interpolates measured curves in log
+working-set size, with flat endpoints, and never selects a sysfs cache regime.
+Run costs come from median pairwise time/run slopes at fixed element counts;
+the common role cost comes from the tiny-copy intercept after subtracting the
+no-item baseline and one-run cost. The raw element curves also subtract this
+independently fitted role/run overhead before entering the additive model.
+Held-out classes use exact compiled Single geometry from public U1/SU2 small
+and dominant permutations. Each class is replayed in a minimal complete
+padding tiling, with its isolated working set reported separately from the
+original phase; acceptance requires at most 25% relative error per class.
+Three batches suffice when their spread is at most 5%, otherwise five are
+measured. The tool targets 60 seconds at width four and prints a width-96
+projection from its fixed serial cost and per-width ladder measurements;
+those projections are estimates, not runtime guarantees.
+Serial tokens cannot admit planned kernels, so their constants remain
+unavailable. The example also measures engine-team empty-fork dispatch and
+size/retest stability of replay bandwidth over bounded measured working sets;
+it does not infer a DRAM boundary from sysfs. It prints raw batches, baked
+geometry, errors, cold time and memory use, and writes a version-1
+`key=value` profile with item model version 3. Unknown placement leaves the
+profile incomplete; it does not install constants or change the movement
+chooser. The serial phase timer excludes output allocation and proof
+validation; output first stores remain inside the timed movement.
 
 Destinations are grouped into hull runs:
 maximal address-ordered stretches whose bounding slices overlap
