@@ -546,7 +546,7 @@ fn inline_pack_and_scatter_keep_their_item_paths() {
             &source_structure,
             &[TreeTransformBlockSpec::multi(
                 vec![0, 1],
-                (0..columns as usize).collect(),
+                (0..columns).collect(),
                 matrix,
             )],
         )
