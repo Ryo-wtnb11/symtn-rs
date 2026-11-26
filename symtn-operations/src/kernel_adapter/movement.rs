@@ -630,23 +630,29 @@ mod tests {
                 assert!(dst[..dst_offset].iter().all(|&value| value == -1.0));
                 assert_eq!(dst[dst_offset + len], -1.0);
 
-                let mut uninit = vec![MaybeUninit::new(-1.0); len + dst_offset + 1];
-                span::<Uninit, _, f64>(
-                    &mut uninit,
-                    &src,
-                    baked,
-                    dst_offset as isize,
-                    src_offset as isize,
-                    &mut [0],
-                    &Write(|value: f64| value),
-                );
+                // The owned-output path: the margins and `span` together
+                // write every slot, and `initialize_owned` returns them.
+                let written = crate::owned_overwrite_buffer::initialize_owned::<f64, ()>(
+                    len + dst_offset + 1,
+                    |uninit| {
+                        for slot in &mut uninit[..dst_offset] {
+                            slot.write(-1.0);
+                        }
+                        uninit[dst_offset + len].write(-1.0);
+                        span::<Uninit, _, f64>(
+                            uninit,
+                            &src,
+                            baked,
+                            dst_offset as isize,
+                            src_offset as isize,
+                            &mut [0],
+                            &Write(|value: f64| value),
+                        );
+                        Ok(())
+                    },
+                )
+                .unwrap();
                 assert_eq!((take_pieces().0, take_blocked_runs()), (pieces, blocked));
-                // SAFETY: every slot was initialized by `MaybeUninit::new`,
-                // and `span` only writes initialized values into slots.
-                let written: Vec<f64> = uninit
-                    .iter()
-                    .map(|slot| unsafe { slot.assume_init() })
-                    .collect();
                 assert_eq!(written, dst);
             }
         }
