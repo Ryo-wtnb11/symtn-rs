@@ -62,6 +62,8 @@ where
 /// adapter's planned overwrite when Strided widens the block on that share
 /// ([`admitted_plan`]), the strided kernel otherwise.
 #[allow(clippy::too_many_arguments)]
+// Leaf paths walk each item inline into their item-list loop (see `span`).
+#[inline(always)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
     gate: &mut LeafGate<'_>,
@@ -418,6 +420,8 @@ where
 /// `dst_start`: the adapter's planned overwrite when Strided widens the
 /// column on that share ([`admitted_plan`]), the strided scatter otherwise.
 #[allow(clippy::too_many_arguments)]
+// Leaf paths walk each item inline into their item-list loop (see `span`).
+#[inline(always)]
 pub(super) fn scatter_column_on_token<A, T>(
     mut exec: crate::host_pool::Exec<'_>,
     gate: &mut LeafGate<'_>,

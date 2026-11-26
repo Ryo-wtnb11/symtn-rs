@@ -99,19 +99,17 @@ pub(crate) enum Update<T> {
 /// innermost; a run that steps by one in both operands is walked as two
 /// slices. `index` is the caller's traversal scratch of the layout's rank.
 ///
-/// Why `#[inline]`: without it, rustc gives each instance of this shared
-/// generic leaf one home codegen unit (the defining module's), and the
-/// role loops that call it live in other modules, so every role pays an
-/// out-of-line call that LLVM never sees across. `#[inline]` is rustc's
-/// `InlineAttr::Hint`, which makes the instance `InstantiationMode::LocalCopy`
-/// in optimized builds: each caller's codegen unit gets its own copy, and
-/// LLVM decides inlining with the caller in view. It forces nothing; this and
-/// its [`odometer`] are the only such attributes in the movement layer.
+/// Why `#[inline(always)]`: every leaf path calls this once per item, and
+/// whether that call stays out of line was an inlining outcome that small
+/// source or flag changes flipped (an out-of-line `span` per item measured
+/// slower on short items). Forced, the walk of each item is part of the
+/// caller's item loop, which runs once per item list (a leaf's job, a pack
+/// column list, a serial phase), on every leaf path alike.
 ///
 /// # Panics
 ///
 /// On an offset outside either slice (bounds-checked indexing).
-#[inline]
+#[inline(always)]
 pub(crate) fn span<S, A, T>(
     dst: &mut [S::Slot],
     src: &[T],
@@ -140,8 +138,8 @@ pub(crate) fn span<S, A, T>(
     // ahead of the general kernel's bodies keeps the odometer's invariants
     // out of registers (spilled and reloaded on every run).
     if inner_dst == 1 && inner_src == 1 {
-        // Why the length test is per call: `len` is the layout's, so runs
-        // that fit one piece keep the plain loop without a piece iterator.
+        // Why the length class is chosen per call: `len` is the layout's, so
+        // one test selects the run kernel for every run of the call.
         if len <= contiguous_piece::<T>() {
             odometer(
                 dims,
@@ -152,10 +150,11 @@ pub(crate) fn span<S, A, T>(
                 index,
                 |dst_base, src_base| {
                     let (dst_start, src_start) = (dst_base as usize, src_base as usize);
-                    let run = dst[dst_start..dst_start + len].iter_mut();
-                    for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
-                        action.element(slot, value);
-                    }
+                    contiguous_blocks::<S, A, T>(
+                        &mut dst[dst_start..dst_start + len],
+                        &src[src_start..src_start + len],
+                        action,
+                    );
                 },
             );
         } else {
@@ -332,9 +331,10 @@ pub(crate) fn span<S, A, T>(
     );
 }
 
-/// The most bytes of one contiguous run [`span`] walks as one element loop.
+/// The most bytes of one contiguous run [`span`] walks in blocks; a longer
+/// run is walked in pieces of at most this size, each one element loop.
 ///
-/// Why a bound: an identity map's loop over a contiguous run is lowered by
+/// Why pieces: an identity map's loop over a contiguous run is lowered by
 /// LLVM to one `memcpy` of the whole run, and libc switches a copy above its
 /// non-temporal threshold to stores that bypass the cache (several times
 /// slower for a multi-megabyte block on a many-core Xeon). glibc's x86
@@ -346,9 +346,51 @@ pub(crate) fn span<S, A, T>(
 const CONTIGUOUS_PIECE_BYTES: usize = 16 << 10;
 
 /// [`CONTIGUOUS_PIECE_BYTES`] in elements of `T` (at least one).
-#[inline]
+#[inline(always)]
 fn contiguous_piece<T>() -> usize {
     (CONTIGUOUS_PIECE_BYTES / size_of::<T>().max(1)).max(1)
+}
+
+/// Elements one block of [`contiguous_blocks`] moves: a small power of two
+/// (one 64-byte line of `f64`).
+const CONTIGUOUS_BLOCK: usize = 8;
+
+/// Applies `action` to every element pair of two equal-length contiguous
+/// runs of at most one piece: whole blocks of [`CONTIGUOUS_BLOCK`] elements,
+/// then the shorter tail, without any libc call.
+///
+/// Why the barriers: LLVM's loop-idiom pass turns a loop of stores of
+/// consecutive loads into one variable-length `memcpy` (a libc call per
+/// run, measured slower for the 128-byte runs of small sectors), and it
+/// merges a loop of constant-size block copies into one such call as well.
+/// It does so only when nothing else in the loop may access memory. An
+/// empty `black_box` after each block and each tail element is an opaque
+/// statement that may (an empty `asm` with a memory clobber, no
+/// instruction), so no loop here is a pure copy: each block stays a
+/// constant-size move that codegen lowers to register or vector moves, and
+/// the tail stays an element loop. Nothing depends on the host: the block
+/// size is a structural constant, and the property holds for every length.
+#[inline(always)]
+fn contiguous_blocks<S, A, T>(dst: &mut [S::Slot], src: &[T], action: &A)
+where
+    T: Copy,
+    S: Store<T>,
+    A: Action<S, T>,
+{
+    #[cfg(test)]
+    tests::observe_blocked_run();
+    let (dst_blocks, dst_tail) = dst.as_chunks_mut::<CONTIGUOUS_BLOCK>();
+    let (src_blocks, src_tail) = src.as_chunks::<CONTIGUOUS_BLOCK>();
+    for (slots, values) in dst_blocks.iter_mut().zip(src_blocks) {
+        for (slot, &value) in slots.iter_mut().zip(values) {
+            action.element(slot, value);
+        }
+        core::hint::black_box(());
+    }
+    for (slot, &value) in dst_tail.iter_mut().zip(src_tail) {
+        action.element(slot, value);
+        core::hint::black_box(());
+    }
 }
 
 /// Applies `action` to every element pair of two equal-length contiguous
@@ -357,7 +399,7 @@ fn contiguous_piece<T>() -> usize {
 /// Why `chunks`, not `chunks_exact`: a piece loop of constant-length copies
 /// is what LLVM's loop-idiom pass merges back into one whole-run `memcpy`;
 /// the last piece's shorter length keeps each piece's length a runtime value.
-#[inline]
+#[inline(always)]
 fn contiguous_pieces<S, A, T>(dst: &mut [S::Slot], src: &[T], action: &A)
 where
     T: Copy,
@@ -378,10 +420,9 @@ where
 /// from the two offsets, the outer axes stepped as one odometer with axis 1
 /// fastest. `index` is the caller's traversal scratch of the layout's rank.
 ///
-/// Why `#[inline]`: this is [`span`]'s own loop, called once per span with
-/// that call's run kernel, and it needs [`span`]'s local copy for the same
-/// codegen-unit reason.
-#[inline]
+/// Why `#[inline(always)]`: this is [`span`]'s own loop, called once per
+/// span with that call's run kernel, and it is forced for the same reason.
+#[inline(always)]
 fn odometer(
     dims: &[usize],
     dst_strides: &[isize],
@@ -513,6 +554,16 @@ mod tests {
         /// The pieces [`contiguous_pieces`] walked on this thread, and the
         /// longest of them.
         static PIECES: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
+        /// The runs [`contiguous_blocks`] walked on this thread.
+        static BLOCKED: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(super) fn observe_blocked_run() {
+        BLOCKED.with(|runs| runs.set(runs.get() + 1));
+    }
+
+    fn take_blocked_runs() -> usize {
+        BLOCKED.with(|runs| runs.replace(0))
     }
 
     pub(super) fn observe_piece(len: usize) {
@@ -526,24 +577,43 @@ mod tests {
         PIECES.with(|pieces| pieces.replace((0, 0)))
     }
 
-    /// What: a contiguous run longer than one piece is walked in pieces of
-    /// at most [`CONTIGUOUS_PIECE_BYTES`] on both stores, so no single copy
-    /// crosses libc's store-strategy switch, and every element lands where a
-    /// plain copy puts it, for lengths around the piece size and unaligned
-    /// starts; a run of one piece is the control that takes no pieces.
+    /// What: a contiguous run of at most one piece is walked in blocks and a
+    /// longer one in pieces of at most [`CONTIGUOUS_PIECE_BYTES`] (each run
+    /// takes exactly one of the two paths), and on both stores every element
+    /// lands where a plain copy puts it, for lengths around the block and
+    /// piece sizes and unaligned starts.
     #[test]
-    fn long_contiguous_runs_copy_in_bounded_pieces() {
+    fn contiguous_runs_copy_in_blocks_or_bounded_pieces() {
         let piece = contiguous_piece::<f64>();
         assert_eq!(piece * size_of::<f64>(), CONTIGUOUS_PIECE_BYTES);
+        let block = CONTIGUOUS_BLOCK;
         let src: Vec<f64> = (0..3 * piece + 8).map(|i| i as f64 + 0.5).collect();
-        for len in [0, 1, piece - 1, piece, piece + 1, 2 * piece + 1] {
+        let lengths = [
+            0,
+            1,
+            block - 1,
+            block,
+            block + 1,
+            2 * block + 1,
+            piece - 1,
+            piece,
+            piece + 1,
+            2 * piece + 1,
+        ];
+        for len in lengths {
             for (dst_offset, src_offset) in [(0, 0), (1, 3), (5, 2)] {
                 let layout = [len];
                 let baked =
                     BakedFusedLayout::from_compiled_normalized_slices(&layout, &[1], &[1], None);
                 let expected = &src[src_offset..src_offset + len];
+                let (pieces, blocked) = match len {
+                    0 => (0, 0),
+                    len if len > piece => (len.div_ceil(piece), 0),
+                    _ => (0, 1),
+                };
                 let mut dst = vec![-1.0; len + dst_offset + 1];
                 take_pieces();
+                take_blocked_runs();
                 span::<Init, _, f64>(
                     &mut dst,
                     &src,
@@ -554,13 +624,13 @@ mod tests {
                     &Write(|value: f64| value),
                 );
                 let (count, longest) = take_pieces();
-                assert_eq!(count, if len > piece { len.div_ceil(piece) } else { 0 });
+                assert_eq!((count, take_blocked_runs()), (pieces, blocked));
                 assert!(longest <= piece);
                 assert_eq!(&dst[dst_offset..dst_offset + len], expected);
                 assert!(dst[..dst_offset].iter().all(|&value| value == -1.0));
                 assert_eq!(dst[dst_offset + len], -1.0);
 
-                let mut uninit = vec![MaybeUninit::<f64>::uninit(); len + dst_offset + 1];
+                let mut uninit = vec![MaybeUninit::new(-1.0); len + dst_offset + 1];
                 span::<Uninit, _, f64>(
                     &mut uninit,
                     &src,
@@ -570,7 +640,14 @@ mod tests {
                     &mut [0],
                     &Write(|value: f64| value),
                 );
-                assert_eq!(take_pieces().0, count);
+                assert_eq!((take_pieces().0, take_blocked_runs()), (pieces, blocked));
+                // SAFETY: every slot was initialized by `MaybeUninit::new`,
+                // and `span` only writes initialized values into slots.
+                let written: Vec<f64> = uninit
+                    .iter()
+                    .map(|slot| unsafe { slot.assume_init() })
+                    .collect();
+                assert_eq!(written, dst);
             }
         }
     }

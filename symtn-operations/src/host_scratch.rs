@@ -189,6 +189,8 @@ impl<T: Copy> PackColumnWriter<'_, T> {
     /// Writes `map(src)` through `layout` as the column starting at `offset`
     /// (relative to this writer), which must be the next unwritten slot. The
     /// layout's destination side must address one dense column-major run.
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     pub(crate) fn write_column(
         &mut self,
         offset: usize,

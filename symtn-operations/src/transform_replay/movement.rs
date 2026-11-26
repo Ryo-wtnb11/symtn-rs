@@ -135,8 +135,13 @@ pub(super) struct MovementConstants {
     bandwidth: Vec<f64>,
     /// The working set the bandwidth ladder was measured at; infinite until then.
     bandwidth_bytes: f64,
+    /// D(q) of a phase fork, measured back to back (the pool is hot).
     dispatch: Vec<Option<Duration>>,
-    /// One empty engine entry's median cost in ns, when measured.
+    /// D(q) of a plan-group chunk's fork, measured after an idle stretch as
+    /// chunks meet it; read only by the group-phase decision.
+    chunk_dispatch: Vec<Option<Duration>>,
+    /// One empty engine entry's median cost in ns, measured after an idle
+    /// stretch as a chunk's regions meet it, when measured.
     entry: Option<f64>,
     reserved_entries: usize,
     attempted: bool,
@@ -157,6 +162,7 @@ impl MovementConstants {
             bandwidth: Vec::new(),
             bandwidth_bytes: f64::INFINITY,
             dispatch: Vec::new(),
+            chunk_dispatch: Vec::new(),
             entry: None,
             reserved_entries: 0,
             attempted: false,
@@ -172,7 +178,8 @@ impl MovementConstants {
     fn retained_bytes(&self) -> usize {
         // The slot already charges its inline value, including the rows.
         self.bandwidth.capacity().max(self.reserved_entries) * std::mem::size_of::<f64>()
-            + self.dispatch.capacity().max(self.reserved_entries)
+            + (self.dispatch.capacity().max(self.reserved_entries)
+                + self.chunk_dispatch.capacity().max(self.reserved_entries))
                 * std::mem::size_of::<Option<Duration>>()
     }
 
@@ -184,6 +191,15 @@ impl MovementConstants {
             .unwrap_or_else(table)
             .as_secs_f64()
             * 1e9
+    }
+
+    /// A chunk fork's D(q): the stretched measurement, else the phase row,
+    /// else the table.
+    fn chunk_dispatch_cost(&self, q: usize, table: impl FnOnce() -> Duration) -> f64 {
+        match self.chunk_dispatch.get(q).copied().flatten() {
+            Some(measured) => measured.as_secs_f64() * 1e9,
+            None => self.dispatch_cost(q, table),
+        }
     }
 }
 
@@ -417,6 +433,7 @@ fn region_with<R>(
                     constants.entry = entry;
                     constants.bandwidth = vec![f64::INFINITY; constants.reserved_entries];
                     constants.dispatch = vec![None; constants.reserved_entries];
+                    constants.chunk_dispatch = vec![None; constants.reserved_entries];
                     measure(
                         &mut exec,
                         deadline.unwrap_or_else(|| Instant::now() + ONLINE_BUDGET),
@@ -430,10 +447,12 @@ fn region_with<R>(
                             / constants.rows[0].e.at(f64::INFINITY),
                     );
                     interpolate_bandwidth(&mut constants.bandwidth);
-                    complete_dispatch(&mut constants.dispatch, |q| {
+                    let table = |q| {
                         exec.token_ref()
                             .dispatch_cost(NonZeroUsize::new(q).unwrap())
-                    });
+                    };
+                    complete_dispatch(&mut constants.dispatch, table);
+                    complete_dispatch(&mut constants.chunk_dispatch, table);
                     constants.generation = next_generation();
                 }
                 op.take().expect("region body runs once")(exec, retained.as_ref())
@@ -690,10 +709,62 @@ pub(super) fn member_phase(
 }
 
 /// Each phase supplies its actual critical path; class remains table data.
+/// Its forks are priced by the back-to-back dispatch row.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64>(
     exec: &lanes::Exec<'_>,
     constants: Option<&Constants>,
+    jobs: usize,
+    working_set: u128,
+    traffic: u128,
+    elements: impl FnOnce() -> [f64; CLASSES],
+    admits: impl Fn(usize, usize) -> bool,
+    prepare: impl Fn(&Costs) -> F,
+) -> usize {
+    width_forks::<D, F>(
+        exec,
+        constants,
+        false,
+        jobs,
+        working_set,
+        traffic,
+        elements,
+        admits,
+        prepare,
+    )
+}
+
+/// [`width`] of the plan-group chunk phase, whose forks each follow a
+/// chunk's serial work and are priced by the chunk dispatch row.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn group_width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64>(
+    exec: &lanes::Exec<'_>,
+    constants: Option<&Constants>,
+    jobs: usize,
+    working_set: u128,
+    traffic: u128,
+    elements: impl FnOnce() -> [f64; CLASSES],
+    admits: impl Fn(usize, usize) -> bool,
+    prepare: impl Fn(&Costs) -> F,
+) -> usize {
+    width_forks::<D, F>(
+        exec,
+        constants,
+        true,
+        jobs,
+        working_set,
+        traffic,
+        elements,
+        admits,
+        prepare,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn width_forks<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64>(
+    exec: &lanes::Exec<'_>,
+    constants: Option<&Constants>,
+    chunk_forks: bool,
     jobs: usize,
     working_set: u128,
     traffic: u128,
@@ -717,10 +788,15 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -
         }
     };
     let dispatch = |q| {
-        constants.dispatch_cost(q, || {
+        let table = || {
             exec.token_ref()
                 .dispatch_cost(NonZeroUsize::new(q).unwrap())
-        })
+        };
+        if chunk_forks {
+            constants.chunk_dispatch_cost(q, table)
+        } else {
+            constants.dispatch_cost(q, table)
+        }
     };
     width_with(
         budget,
@@ -1120,12 +1196,7 @@ fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &m
     // threadteam calibrates a running pool.
     // The chooser's candidate widths, the budget last; `complete_dispatch`
     // interpolates the widths between them, as threadteam's own row does.
-    let budget = exec.budget();
-    let ladder = CANDIDATES
-        .into_iter()
-        .filter(|&q| (2..budget).contains(&q))
-        .chain([budget]);
-    for q in ladder {
+    for q in dispatch_ladder(exec.budget()) {
         let Some(slot) = constants.dispatch.get_mut(q) else {
             continue;
         };
@@ -1154,27 +1225,96 @@ fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &m
     }
 }
 
-/// The median cost of one empty guarded engine entry, the entry every
-/// replay region takes (`host_pool::lane_region`), timed directly so that no
-/// region is observed.
+/// The dispatch widths measured: the chooser's candidates below the
+/// budget, then the budget; `complete_dispatch` fills the widths between.
+fn dispatch_ladder(budget: usize) -> impl Iterator<Item = usize> {
+    CANDIDATES
+        .into_iter()
+        .filter(move |&q| (2..budget).contains(&q))
+        .chain([budget])
+}
+
+/// How long the pool's members stay idle before each stretched sample: the
+/// part a plan-group chunk's serial work (its scatter, often one ownership
+/// run) leaves them idle before its next entry or fork.
+///
+/// Why idle members and not back-to-back samples: an entry or fork onto a
+/// pool the previous one just left costs a fraction of one that follows a
+/// serial stretch (0.3 against 4 µs per entry at 96 threads), and chunks
+/// meet the latter. Calibration cannot see a structure's chunk work, so the
+/// stretch is one fixed length of the order of the measured small-sector
+/// chunks' serial scatter (14-55 µs).
+const CHUNK_STRETCH: Duration = Duration::from_micros(50);
+
+/// Samples per stretched measurement; the measurement is their median.
+const STRETCHED_SAMPLES: usize = 3;
+
+/// Keeps the calling thread busy, and the pool's members idle, for
+/// [`CHUNK_STRETCH`].
+fn idle_stretch() {
+    let start = Instant::now();
+    while start.elapsed() < CHUNK_STRETCH {
+        core::hint::spin_loop();
+    }
+}
+
+/// The median of [`STRETCHED_SAMPLES`] values of `sample`, each taken right
+/// after one `stretch`; `None` once the deadline passes or a sample fails.
+fn stretched_median(
+    deadline: Instant,
+    mut stretch: impl FnMut(),
+    mut sample: impl FnMut() -> Option<f64>,
+) -> Option<f64> {
+    let mut samples = [0.0; STRETCHED_SAMPLES];
+    for value in &mut samples {
+        if Instant::now() >= deadline {
+            return None;
+        }
+        stretch();
+        *value = sample()?;
+    }
+    samples.sort_by(f64::total_cmp);
+    Some(samples[STRETCHED_SAMPLES / 2])
+}
+
+/// The cost of one empty guarded engine entry, the entry every replay
+/// region takes (`host_pool::lane_region`), as a chunk meets it: each
+/// sample follows an idle stretch. Timed directly, so no region is observed.
 fn measure_entry(engine: &mut dyn Engine, deadline: Instant) -> Option<f64> {
     tenferro_cpu::with_cpu_engine(engine, |cpu| {
         cpu.with_exec(|_| ()).ok()?;
-        let mut samples = [0.0; 5];
-        for sample in &mut samples {
-            if Instant::now() >= deadline {
-                return None;
-            }
+        stretched_median(deadline, idle_stretch, || {
             let start = Instant::now();
-            for _ in 0..8 {
-                cpu.with_exec(|_| ()).ok()?;
-            }
-            *sample = start.elapsed().as_secs_f64() * 1e9 / 8.0;
-        }
-        samples.sort_by(f64::total_cmp);
-        Some(samples[2])
+            cpu.with_exec(|_| ()).ok()?;
+            Some(start.elapsed().as_secs_f64() * 1e9)
+        })
     })
     .flatten()
+}
+
+/// The chunk dispatch row: one empty fork per sample at each ladder width,
+/// each after an idle stretch, as a chunk's GEMM batch meets it. Samples
+/// above 20 times the table are rejected, as for the phase row.
+fn measure_chunk_dispatch(
+    exec: &mut lanes::Exec<'_>,
+    deadline: Instant,
+    constants: &mut Constants,
+) {
+    for q in dispatch_ladder(exec.budget()) {
+        let Some(slot) = constants.chunk_dispatch.get_mut(q) else {
+            continue;
+        };
+        let width = NonZeroUsize::new(q).unwrap();
+        let table = exec.token_ref().dispatch_cost(width);
+        let Some(median) = stretched_median(deadline, idle_stretch, || {
+            let start = Instant::now();
+            exec.reborrow().limit(width).into_token().fork(q, |_, _| {});
+            Some(start.elapsed().as_secs_f64() * 1e9)
+        }) else {
+            return;
+        };
+        *slot = validated_dispatch(Duration::from_secs_f64(median * 1e-9), table);
+    }
 }
 
 fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
@@ -1199,6 +1339,7 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
             constants.rows[inner + 2] = row;
         }
     }
+    measure_chunk_dispatch(exec, deadline, constants);
     let p = exec.budget();
     if Instant::now() >= deadline {
         return;
@@ -2689,6 +2830,101 @@ mod tests {
         assert!(fit_row(0, empty, low, high, one, slope).is_none());
     }
 
+    /// Purpose: with the entry cost chunks meet (4 µs) and a measured-like
+    /// dispatch row, a 175-group phase on 96 slots chooses the widest
+    /// chunking, as measured; the back-to-back entry (0.33 µs) is the
+    /// negative control that chooses 24 groups per chunk.
+    #[test]
+    fn group_phase_with_stretched_entry_chooses_few_chunks() {
+        use crate::TreeTransformBlockSpec;
+        let structure = BlockStructure::packed_column_major(1, vec![vec![1]; 350]).unwrap();
+        let transform = TreeTransformStructure::compile_structures(
+            &structure,
+            &structure,
+            &(0..175)
+                .map(|group| {
+                    TreeTransformBlockSpec::multi(
+                        vec![2 * group, 2 * group + 1],
+                        vec![2 * group, 2 * group + 1],
+                        vec![1.0, 0.0, 0.0, 1.0],
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schedule = transform.parallel_schedule();
+        let costs = [(0.0, 0.0, 0.0); CLASSES];
+        // D(q) in µs at the ladder widths, linear between them.
+        let mut row: Vec<Option<Duration>> = vec![None; 97];
+        for (q, micros) in [
+            (2, 0.6),
+            (3, 0.7),
+            (4, 0.9),
+            (6, 1.0),
+            (8, 1.2),
+            (12, 1.7),
+            (16, 2.3),
+            (24, 3.5),
+            (32, 8.4),
+            (48, 15.6),
+            (64, 23.3),
+            (96, 40.8),
+        ] {
+            row[q] = Some(Duration::from_secs_f64(micros * 1e-6));
+        }
+        complete_dispatch(&mut row, |q| Duration::from_nanos(q as u64));
+        let dispatch = |q: usize| row[q].unwrap().as_secs_f64() * 1e9;
+        let prices = Prices {
+            bytes: 8.0,
+            dispatch: &dispatch,
+            bandwidth: &|_| f64::INFINITY,
+            admits: &|_, _| false,
+        };
+        for (entry, expected) in [(4000.0, 96), (330.0, 24)] {
+            let phase = group_phase(schedule, &costs, |_| 400.0, CHUNK_ENTRIES * entry);
+            assert_eq!(
+                choose(
+                    96,
+                    175,
+                    0.0,
+                    |q| phase(q, 96, &prices),
+                    dispatch,
+                    |_| f64::INFINITY
+                ),
+                expected
+            );
+        }
+    }
+
+    /// Purpose: every stretched calibration sample is taken right after its
+    /// own idle stretch, never back to back; a passed deadline is the control
+    /// that takes no sample and yields no measurement.
+    #[test]
+    fn stretched_samples_each_follow_an_idle_stretch() {
+        let log = std::cell::RefCell::new(Vec::new());
+        let median = stretched_median(
+            Instant::now() + Duration::from_secs(3600),
+            || log.borrow_mut().push("stretch"),
+            || {
+                log.borrow_mut().push("sample");
+                Some(log.borrow().len() as f64)
+            },
+        );
+        assert_eq!(
+            *log.borrow(),
+            ["stretch", "sample"].repeat(STRETCHED_SAMPLES)
+        );
+        assert_eq!(median, Some(2.0 * (STRETCHED_SAMPLES / 2 + 1) as f64));
+        log.borrow_mut().clear();
+        let expired = stretched_median(
+            Instant::now(),
+            || log.borrow_mut().push("stretch"),
+            || Some(0.0),
+        );
+        assert_eq!(expired, None);
+        assert!(log.borrow().is_empty());
+    }
+
     /// Purpose: measured dispatch anchors become one non-decreasing row:
     /// linear between anchors, the table scaled to the nearest measured
     /// anchor outside them (before the running maximum), and a lower later
@@ -2813,14 +3049,16 @@ mod tests {
         assert_eq!(
             constants.retained_bytes(),
             constants.reserved_entries
-                * (std::mem::size_of::<f64>() + std::mem::size_of::<Option<Duration>>())
+                * (std::mem::size_of::<f64>() + 2 * std::mem::size_of::<Option<Duration>>())
         );
         constants.bandwidth = Vec::with_capacity(3 * constants.reserved_entries);
         constants.dispatch = Vec::with_capacity(2 * constants.reserved_entries);
+        constants.chunk_dispatch = Vec::with_capacity(2 * constants.reserved_entries);
         assert_eq!(
             constants.retained_bytes(),
             constants.bandwidth.capacity() * std::mem::size_of::<f64>()
-                + constants.dispatch.capacity() * std::mem::size_of::<Option<Duration>>()
+                + (constants.dispatch.capacity() + constants.chunk_dispatch.capacity())
+                    * std::mem::size_of::<Option<Duration>>()
         );
     }
 

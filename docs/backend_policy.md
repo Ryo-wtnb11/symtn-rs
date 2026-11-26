@@ -422,10 +422,26 @@ estimate is the sum of each chunk's maximum group cost. Every chunk also pays
 its three engine entries (pack, GEMM batch, scatter) at the engine's measured
 entry cost (none when unmeasured), and every chunk of more than one group pays
 D at its group count for its batch fork; the chooser's D(q) is the first
-chunk's, which always holds q groups. That estimate conservatively withholds
+chunk's, which always holds q groups. This decision alone reads the chunk
+dispatch row (below) for every D it charges; every other decision reads the
+phase row. That estimate conservatively withholds
 inner movement credit; actual pack and scatter phases choose their own leaves,
-and their forks are priced by their own decisions. It does not predict the dense provider's placement or
-runtime. Only movement elements feed B(q,W); dense time never changes that roof.
+and their forks are priced by their own decisions. A chunk's scatter is also
+priced inside its maximum group cost although it runs serially when the
+chunk's destination hulls form one ownership run; the runs depend on the
+chunk boundaries. With one run per chunk the serial scatter sums to the
+same total at every q, so the omission lowers the absolute T(q) (measured
+430-460 µs of scatter at every q >= 16 against a few µs modeled) and does not
+favor any one q by that total. It does not predict the dense provider's
+placement or runtime. Only movement elements feed B(q,W); dense time never
+changes that roof.
+
+Known unmodeled effect: the Singles width changes the cost of the plan-group
+chunks that follow it. Measured on a 96-thread Xeon Platinum 9242 (permute of
+a small U(1)xSU(2) tensor, group width 24): the chunks cost 440 µs after
+inline Singles, 861 µs after Singles split 24 ways and 1152 µs after 96 ways,
+while the Singles phase itself takes 1120, 177 and 150 µs. No term prices one
+phase's width in another phase's cost.
 
 The schedule compiles per-class setup, run and element totals, planned totals,
 logical traffic and cumulative components over executed jobs. Model-only counts
@@ -544,9 +560,20 @@ is no lower bound. When at least one width is accepted, every width from 2 to p
 is completed from the accepted anchors: linearly between them, and outside them
 the table scaled to the nearest anchor; the row is then made non-decreasing by
 its running maximum, so measured and tabulated widths never mix into a dip.
-Without an accepted width every width keeps the table. The same deadline also
-times one empty guarded engine entry (median of five batches of eight, outside
-any region), which prices plan-group chunks. These measurements affect only symtn's
+Without an accepted width every width keeps the table. This phase row prices
+forks that follow other parallel work. Plan-group chunks meet the pool after a
+chunk's serial work instead, where entries and forks cost several times more
+(an empty entry 0.3 µs back to back against 4 µs after the serial scatter at
+96 threads), so the same deadline also measures, after the movement rows, a
+chunk dispatch row and the engine entry, each sample a single fork or empty
+guarded entry (outside any region) taken right after the calling thread has
+kept the pool idle for a fixed 50 µs stretch, the median of three samples.
+The stretch stands for a chunk's serial work (14-55 µs in the measured
+small-sector fixtures); calibration cannot see a structure's chunks. At 96
+threads the chunk row takes at most 12 widths x 3 samples x (50 µs + D), about
+3 ms, and the entry about 0.2 ms. The chunk row is completed like the phase
+row; an unmeasured or rejected chunk width falls back to the phase row, then
+the table, and an unmeasured entry prices chunks with no entry cost. These measurements affect only symtn's
 movement model; the pool's dispatch table and dense provider remain unchanged.
 Bandwidth uses the same element costs as the serial model:
 E(W) = sum_c(elements_c * e[c](W)), b1(W) = X/E(W), and

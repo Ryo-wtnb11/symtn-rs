@@ -247,7 +247,7 @@ where
                 )
             };
             let jobs = task.recoupling_plan().jobs();
-            let threads = movement::width::<D, _>(
+            let threads = movement::group_width::<D, _>(
                 exec,
                 constants,
                 jobs.len(),

@@ -784,6 +784,8 @@ impl StridedHostKernelAdapter {
     /// adapter's own. Each caller passes a closure of its own macro arm, so
     /// every instance has one call site (see the movement module).
     #[allow(clippy::too_many_arguments)]
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn walk<T, F>(
         &mut self,
         index: Option<&mut [usize]>,
@@ -949,6 +951,8 @@ where
         + Send
         + Sync,
 {
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn add_strided_baked(
         &mut self,
         exec: crate::host_pool::Exec<'_>,
@@ -1073,6 +1077,8 @@ where
         )
     }
 
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn copy_scale_strided_baked(
         &mut self,
         _exec: crate::host_pool::Exec<'_>,
@@ -1107,6 +1113,8 @@ where
     /// The structural coefficient stays in its own type; see
     /// `with_transform_map!`.
     #[allow(clippy::too_many_arguments)]
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn transform_strided_baked<C>(
         &mut self,
         _exec: crate::host_pool::Exec<'_>,
