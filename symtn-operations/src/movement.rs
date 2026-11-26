@@ -86,10 +86,17 @@ impl Planned {
         });
     }
 
+    /// The extremes of two ranges together. "Largest" is the maximum of the
+    /// total order (elements, runs, class): admission depends on elements
+    /// only, and among roles of equal elements more runs mean at least the
+    /// serial time (r >= 0), so the priced role is the structurally largest
+    /// one. A max under a total order is associative and commutative, as the
+    /// segment tree needs.
     pub(crate) fn join(self, other: Self) -> Self {
+        let key = |(class, point): (usize, Point)| (point.elements, point.runs, class);
         Self {
             min: self.min.min(other.min),
-            largest: if other.largest.1.elements > self.largest.1.elements {
+            largest: if key(other.largest) > key(self.largest) {
                 other.largest
             } else {
                 self.largest

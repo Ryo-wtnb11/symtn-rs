@@ -2690,14 +2690,20 @@ mod tests {
     }
 
     /// Purpose: measured dispatch anchors become one non-decreasing row:
-    /// linear between anchors, the table scaled to the nearest anchor
-    /// outside them, and a lower later anchor lifted to the running maximum;
-    /// a row without anchors is the control that keeps the table everywhere.
+    /// linear between anchors, the table scaled to the nearest measured
+    /// anchor outside them (before the running maximum), and a lower later
+    /// anchor lifted to the running maximum; a row without anchors is the
+    /// control that keeps the table everywhere.
+    ///
+    /// With table(q) = 100q ns and anchors 3: 600, 5: 1000, 6: 800 ns, q = 2
+    /// to 8 are 200 * 600/300, 600, (600 + 1000)/2, 1000, max(800, 1000),
+    /// max(700 * 800/600, 1000) and 800 * 800/600 ns. A row holds whole
+    /// nanoseconds (Duration's resolution), so each is checked to 1 ns.
     #[test]
     fn dispatch_anchors_complete_a_monotone_row() {
         let table = |q: usize| Duration::from_nanos(100 * q as u64);
         let ns = |value: Option<Duration>| value.unwrap().as_secs_f64() * 1e9;
-        let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-6);
+        let close = |actual: f64, expected: f64| assert!((actual - expected).abs() <= 1.0);
         let mut values: Vec<Option<Duration>> = vec![None; 9];
         for (q, measured) in [(3, 600), (5, 1000), (6, 800)] {
             values[q] = Some(Duration::from_nanos(measured));
@@ -2707,7 +2713,7 @@ mod tests {
         let expected = [
             200.0 * 600.0 / 300.0,
             600.0,
-            800.0,
+            (600.0 + 1000.0) / 2.0,
             1000.0,
             1000.0,
             1000.0,
