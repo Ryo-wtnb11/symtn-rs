@@ -250,8 +250,12 @@ pub(super) fn assert_written_once(blocks: &[(usize, [usize; 2], [usize; 2])], ma
 }
 
 /// An eager-policy engine of `threads` workers under `strategy`.
+/// Its movement constants price every fork at zero, as its pool declares.
 pub(super) fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
-    crate::host_pool::eager_test_engine(threads).with_batch_policy(CpuBatchPolicy::new(strategy))
+    let mut engine = crate::host_pool::eager_test_engine(threads)
+        .with_batch_policy(CpuBatchPolicy::new(strategy));
+    super::super::movement::install_test_constants(&mut engine, 0.0);
+    engine
 }
 
 /// The error a test executor injects for recoupling group `group`.
@@ -399,7 +403,7 @@ pub(super) fn group_of(error: OperationError) -> String {
 /// costs `ns` at every width.
 pub(super) fn flat_engine(threads: usize, ns: u64, strategy: CpuBatchStrategy) -> CpuEngine {
     let flat = tenferro_cpu::threadteam::WidthCosts::flat(Duration::from_nanos(ns));
-    CpuEngine::new(
+    let mut engine = CpuEngine::new(
         symtn_dense::Pool::builder()
             .threads(threads)
             .dispatch_costs(tenferro_cpu::threadteam::DispatchCosts::new(
@@ -408,7 +412,9 @@ pub(super) fn flat_engine(threads: usize, ns: u64, strategy: CpuBatchStrategy) -
             .build()
             .unwrap(),
     )
-    .with_batch_policy(CpuBatchPolicy::new(strategy))
+    .with_batch_policy(CpuBatchPolicy::new(strategy));
+    super::super::movement::install_test_constants(&mut engine, ns as f64);
+    engine
 }
 
 /// A coefficient whose action on the source value `40` panics.

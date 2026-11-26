@@ -61,7 +61,6 @@ pub(crate) enum TreeTransformDirectItem {
 pub(crate) struct TreeTransformParallelSchedule {
     pub single_movement: crate::movement::Summary,
     pub inactive_movement: crate::movement::Summary,
-    pub group_movement: crate::movement::Summary,
     pub member_pack_movement: crate::movement::Summary,
     pub member_scatter_movement: crate::movement::Summary,
     pub pack_movement: Vec<crate::movement::Summary>,
@@ -123,7 +122,6 @@ impl TreeTransformParallelSchedule {
         ))
         .saturating_add(self.single_movement.retained_bytes())
         .saturating_add(self.inactive_movement.retained_bytes())
-        .saturating_add(self.group_movement.retained_bytes())
         .saturating_add(self.member_pack_movement.retained_bytes())
         .saturating_add(self.member_scatter_movement.retained_bytes())
         .saturating_add(

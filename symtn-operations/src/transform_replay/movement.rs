@@ -3,13 +3,11 @@
 use super::*;
 use crate::movement::{job_range, planned_range, Counts, Job, Planned, Summary, CLASSES};
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use symtn_dense::lanes;
 use tenferro_cpu::threadteam::HostClass;
 
-const ONLINE_BUDGET: Duration = Duration::from_millis(10);
 const ONLINE_WORKING_SETS: [usize; 3] = [64 << 10, 1 << 20, 4 << 20];
 const BUFFER_ELEMENTS: usize = ONLINE_WORKING_SETS[2] / std::mem::size_of::<f64>();
 
@@ -135,14 +133,17 @@ pub(super) struct MovementConstants {
     bandwidth: Vec<f64>,
     /// The working set the bandwidth ladder was measured at; infinite until then.
     bandwidth_bytes: f64,
-    /// D(q) of a phase fork, measured back to back (the pool is hot).
-    dispatch: Vec<Option<Duration>>,
-    /// D(q) of a plan-group chunk's fork, measured after an idle stretch as
-    /// chunks meet it; read only by the group-phase decision.
-    chunk_dispatch: Vec<Option<Duration>>,
-    /// One empty engine entry's median cost in ns, measured after an idle
-    /// stretch as a chunk's regions meet it, when measured.
-    entry: Option<f64>,
+    /// D_item(q) in ns at every candidate width q (NaN elsewhere): an empty
+    /// tree split of q leaves over the whole token, the fork of the item
+    /// phases (Singles, inactive fill, pack, scatter, member ranges).
+    item_dispatch: Vec<f64>,
+    /// D_plan(s) in ns at every leaf share s of a candidate split (NaN
+    /// elsewhere): an empty flat section of s slots, the fork a planned role
+    /// runs inside a leaf (Strided's `for_ranges`).
+    plan_dispatch: Vec<f64>,
+    /// Whether every row was measured; when not, every modeled phase runs
+    /// serially.
+    calibrated: bool,
     reserved_entries: usize,
     attempted: bool,
 }
@@ -161,9 +162,9 @@ impl MovementConstants {
             memory_knees: core::array::from_fn(|c| rows[c % 2].e.memory_knee()),
             bandwidth: Vec::new(),
             bandwidth_bytes: f64::INFINITY,
-            dispatch: Vec::new(),
-            chunk_dispatch: Vec::new(),
-            entry: None,
+            item_dispatch: Vec::new(),
+            plan_dispatch: Vec::new(),
+            calibrated: false,
             reserved_entries: 0,
             attempted: false,
         }
@@ -177,30 +178,28 @@ impl MovementConstants {
 
     fn retained_bytes(&self) -> usize {
         // The slot already charges its inline value, including the rows.
-        self.bandwidth.capacity().max(self.reserved_entries) * std::mem::size_of::<f64>()
-            + (self.dispatch.capacity().max(self.reserved_entries)
-                + self.chunk_dispatch.capacity().max(self.reserved_entries))
-                * std::mem::size_of::<Option<Duration>>()
+        (self.bandwidth.capacity().max(self.reserved_entries)
+            + self.item_dispatch.capacity().max(self.reserved_entries)
+            + self.plan_dispatch.capacity().max(self.reserved_entries))
+            * std::mem::size_of::<f64>()
     }
 
-    fn dispatch_cost(&self, q: usize, table: impl FnOnce() -> Duration) -> f64 {
-        self.dispatch
-            .get(q)
-            .copied()
-            .flatten()
-            .unwrap_or_else(table)
-            .as_secs_f64()
-            * 1e9
+    /// D_item(q); a width outside the measured set is never chosen.
+    fn item_cost(&self, q: usize) -> f64 {
+        measured(&self.item_dispatch, q)
     }
 
-    /// A chunk fork's D(q): the stretched measurement, else the phase row,
-    /// else the table.
-    fn chunk_dispatch_cost(&self, q: usize, table: impl FnOnce() -> Duration) -> f64 {
-        match self.chunk_dispatch.get(q).copied().flatten() {
-            Some(measured) => measured.as_secs_f64() * 1e9,
-            None => self.dispatch_cost(q, table),
-        }
+    /// D_plan(s); a share outside the measured set gets no fan-out credit.
+    fn plan_cost(&self, s: usize) -> f64 {
+        measured(&self.plan_dispatch, s)
     }
+}
+
+fn measured(row: &[f64], width: usize) -> f64 {
+    row.get(width)
+        .copied()
+        .filter(|value| value.is_finite())
+        .unwrap_or(f64::INFINITY)
 }
 
 // Entry creation and measurement both advance the revision, including after eviction.
@@ -364,8 +363,9 @@ pub(super) fn dispatch_key<'a>(
     })
 }
 
-/// The retained value itself records the attempt, including a failed one:
-/// untouched rows remain reference rows until this entry is evicted or trimmed.
+/// The retained value itself records the attempt, including a failed one: a
+/// failed calibration keeps every modeled phase serial until this entry is
+/// evicted or trimmed.
 pub(super) fn region<R>(
     engine: &mut dyn Engine,
     op: impl FnOnce(lanes::Exec<'_>, Option<&Constants>) -> R,
@@ -375,7 +375,7 @@ pub(super) fn region<R>(
 
 fn region_with<R>(
     engine: &mut dyn Engine,
-    measure: impl FnOnce(&mut lanes::Exec<'_>, Instant, &mut Constants),
+    measure: impl FnOnce(&mut lanes::Exec<'_>, &mut Constants) -> bool,
     op: impl FnOnce(lanes::Exec<'_>, Option<&Constants>) -> R,
 ) -> Result<R, OperationError> {
     let mut op = Some(op);
@@ -407,21 +407,12 @@ fn region_with<R>(
         );
     };
     let mut retained = symtn_dense::engine_slot::checkout::<Constants>(engine);
-    let mut deadline = retained.is_none().then(|| Instant::now() + ONLINE_BUDGET);
     if retained.is_none() {
         let mut candidate = Constants::reference(HostClass::detect());
         candidate.reserved_entries = budget + 1;
         symtn_dense::engine_slot::checkin(engine, candidate, Constants::retained_bytes);
         retained = symtn_dense::engine_slot::checkout::<Constants>(engine);
     }
-    // An entry is timed from outside every region, so before entering one.
-    let entry = match retained.as_ref() {
-        Some(constants) if !constants.attempted => {
-            let deadline = *deadline.get_or_insert_with(|| Instant::now() + ONLINE_BUDGET);
-            measure_entry(engine, deadline)
-        }
-        _ => None,
-    };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::host_pool::lane_region(
             engine,
@@ -430,15 +421,10 @@ fn region_with<R>(
                 if let Some(constants) = retained.as_mut().filter(|constants| !constants.attempted)
                 {
                     constants.attempted = true;
-                    constants.entry = entry;
                     constants.bandwidth = vec![f64::INFINITY; constants.reserved_entries];
-                    constants.dispatch = vec![None; constants.reserved_entries];
-                    constants.chunk_dispatch = vec![None; constants.reserved_entries];
-                    measure(
-                        &mut exec,
-                        deadline.unwrap_or_else(|| Instant::now() + ONLINE_BUDGET),
-                        constants,
-                    );
+                    constants.item_dispatch = vec![f64::NAN; constants.reserved_entries];
+                    constants.plan_dispatch = vec![f64::NAN; constants.reserved_entries];
+                    constants.calibrated = measure(&mut exec, constants);
                     constants.memory_knees =
                         core::array::from_fn(|c| constants.rows[c].e.memory_knee());
                     validate_bandwidth(
@@ -447,12 +433,6 @@ fn region_with<R>(
                             / constants.rows[0].e.at(f64::INFINITY),
                     );
                     interpolate_bandwidth(&mut constants.bandwidth);
-                    let table = |q| {
-                        exec.token_ref()
-                            .dispatch_cost(NonZeroUsize::new(q).unwrap())
-                    };
-                    complete_dispatch(&mut constants.dispatch, table);
-                    complete_dispatch(&mut constants.chunk_dispatch, table);
                     constants.generation = next_generation();
                 }
                 op.take().expect("region body runs once")(exec, retained.as_ref())
@@ -518,6 +498,7 @@ pub(super) fn components(counts: &[Counts; CLASSES], costs: &Costs) -> (f64, f64
 
 pub(super) struct Prices<'a> {
     bytes: f64,
+    /// D_plan: the fork of one planned role's fan-out on a leaf's slots.
     dispatch: &'a dyn Fn(usize) -> f64,
     bandwidth: &'a dyn Fn(usize) -> f64,
     admits: &'a dyn Fn(usize, usize) -> bool,
@@ -644,60 +625,6 @@ pub(super) fn prefix_phase<'a>(
     }
 }
 
-/// Engine regions one plan-group chunk enters: its pack, its GEMM batch and
-/// its scatter (`chunk::groups`).
-const CHUNK_ENTRIES: f64 = 3.0;
-
-/// The fixed cost of one plan-group chunk: its engine entries at the
-/// engine's measured entry cost, or none when that was not measured.
-pub(super) fn chunk_fixed(constants: Option<&Constants>) -> f64 {
-    constants
-        .and_then(|constants| constants.entry)
-        .map_or(0.0, |entry| CHUNK_ENTRIES * entry)
-}
-
-/// Consecutive GEMM batches have serial barriers; their dense estimate remains
-/// the provider's, and their movement estimate conservatively withholds fan-out.
-/// Every chunk pays `fixed`, and every chunk of more than one group forks its
-/// batch: the chooser charges the first chunk's D(q), which always holds q
-/// groups (q never exceeds the group count), so the later chunks' forks are
-/// charged here.
-pub(super) fn group_phase<'a>(
-    schedule: &'a TreeTransformParallelSchedule,
-    costs: &Costs,
-    gemm: impl Fn(usize) -> f64 + 'a,
-    fixed: f64,
-) -> impl Fn(usize, usize, &Prices<'_>) -> f64 + 'a {
-    let costs = *costs;
-    move |q, _, prices| {
-        let groups = schedule.pack_movement.len();
-        let mut critical = 0.0;
-        for first in (0..groups).step_by(q) {
-            let end = (first + q).min(groups);
-            critical += fixed;
-            if first > 0 && end - first > 1 {
-                critical += (prices.dispatch)(end - first);
-            }
-            critical += (first..end)
-                .map(|group| {
-                    [
-                        &schedule.pack_movement[group],
-                        &schedule.scatter_movement[group],
-                    ]
-                    .into_iter()
-                    .map(|summary| {
-                        let (a, w) = components(&summary.counts, &costs);
-                        a + w
-                    })
-                    .sum::<f64>()
-                        + gemm(group)
-                })
-                .fold(0.0, f64::max);
-        }
-        critical
-    }
-}
-
 /// Member ranges fuse each role into one serial walk; no retained plan executes.
 pub(super) fn member_phase(
     phase: &Summary,
@@ -709,62 +636,12 @@ pub(super) fn member_phase(
 }
 
 /// Each phase supplies its actual critical path; class remains table data.
-/// Its forks are priced by the back-to-back dispatch row.
+/// A split's fork is priced by D_item and a leaf's planned-role fan-out by
+/// D_plan. Without calibrated constants every modeled phase runs serially.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64>(
     exec: &lanes::Exec<'_>,
     constants: Option<&Constants>,
-    jobs: usize,
-    working_set: u128,
-    traffic: u128,
-    elements: impl FnOnce() -> [f64; CLASSES],
-    admits: impl Fn(usize, usize) -> bool,
-    prepare: impl Fn(&Costs) -> F,
-) -> usize {
-    width_forks::<D, F>(
-        exec,
-        constants,
-        false,
-        jobs,
-        working_set,
-        traffic,
-        elements,
-        admits,
-        prepare,
-    )
-}
-
-/// [`width`] of the plan-group chunk phase, whose forks each follow a
-/// chunk's serial work and are priced by the chunk dispatch row.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn group_width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64>(
-    exec: &lanes::Exec<'_>,
-    constants: Option<&Constants>,
-    jobs: usize,
-    working_set: u128,
-    traffic: u128,
-    elements: impl FnOnce() -> [f64; CLASSES],
-    admits: impl Fn(usize, usize) -> bool,
-    prepare: impl Fn(&Costs) -> F,
-) -> usize {
-    width_forks::<D, F>(
-        exec,
-        constants,
-        true,
-        jobs,
-        working_set,
-        traffic,
-        elements,
-        admits,
-        prepare,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn width_forks<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64>(
-    exec: &lanes::Exec<'_>,
-    constants: Option<&Constants>,
-    chunk_forks: bool,
     jobs: usize,
     working_set: u128,
     traffic: u128,
@@ -779,24 +656,8 @@ fn width_forks<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64
     if let Some(width) = lanes::forced_width(exec, jobs) {
         return width;
     }
-    let reference;
-    let constants = match constants {
-        Some(constants) => constants,
-        None => {
-            reference = Constants::reference(HostClass::detect());
-            &reference
-        }
-    };
-    let dispatch = |q| {
-        let table = || {
-            exec.token_ref()
-                .dispatch_cost(NonZeroUsize::new(q).unwrap())
-        };
-        if chunk_forks {
-            constants.chunk_dispatch_cost(q, table)
-        } else {
-            constants.dispatch_cost(q, table)
-        }
+    let Some(constants) = constants.filter(|constants| constants.calibrated) else {
+        return 1;
     };
     width_with(
         budget,
@@ -808,7 +669,8 @@ fn width_forks<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -> f64
         elements,
         admits,
         prepare,
-        dispatch,
+        |q| constants.item_cost(q),
+        |s| constants.plan_cost(s),
     )
 }
 
@@ -824,6 +686,7 @@ fn width_with<F: Fn(usize, usize, &Prices<'_>) -> f64>(
     admits: impl Fn(usize, usize) -> bool,
     prepare: impl Fn(&Costs) -> F,
     dispatch: impl Fn(usize) -> f64,
+    plan_dispatch: impl Fn(usize) -> f64,
 ) -> usize {
     if budget.min(jobs) <= 1 {
         return 1;
@@ -841,7 +704,7 @@ fn width_with<F: Fn(usize, usize, &Prices<'_>) -> f64>(
     let bandwidth = phase_bandwidth(working_set, traffic, elements(), constants);
     let prices = Prices {
         bytes,
-        dispatch: &dispatch,
+        dispatch: &plan_dispatch,
         bandwidth: &bandwidth,
         admits: &admits,
     };
@@ -1010,16 +873,12 @@ impl Fixture {
 
 fn sample(
     exec: &mut lanes::Exec<'_>,
-    deadline: Instant,
     elements: usize,
     runs: usize,
     inner: usize,
     source: &[f64],
     destination: &mut [MaybeUninit<f64>],
 ) -> Option<f64> {
-    if Instant::now() >= deadline {
-        return None;
-    }
     let fixture = Fixture::new(elements, runs, inner).ok()?;
     let repetitions = if elements <= 16 {
         64
@@ -1030,9 +889,6 @@ fn sample(
     };
     let mut samples = [0.0; 3];
     for time in &mut samples {
-        if Instant::now() >= deadline {
-            return None;
-        }
         let start = Instant::now();
         for _ in 0..repetitions {
             fixture
@@ -1047,18 +903,16 @@ fn sample(
         *time = start.elapsed().as_secs_f64() * 1e9 / repetitions as f64;
     }
     samples.sort_by(f64::total_cmp);
-    (Instant::now() < deadline).then_some(samples[1])
+    Some(samples[1])
 }
 
 fn measure_row(
     exec: &mut lanes::Exec<'_>,
-    deadline: Instant,
     inner: usize,
     source: &[f64],
     destination: &mut [MaybeUninit<f64>],
 ) -> Option<Row> {
-    let mut measure =
-        |elements, runs| sample(exec, deadline, elements, runs, inner, source, destination);
+    let mut measure = |elements, runs| sample(exec, elements, runs, inner, source, destination);
     let empty = measure(0, 1)?;
     let low = measure(2, 1)?;
     let high = measure(16, 1)?;
@@ -1086,8 +940,7 @@ fn measure_row(
 /// kept and attributed to the remaining terms, which is the least-squares
 /// fit of those terms on the same samples. Only a row that is still
 /// non-physical (`e <= 0`) or whose samples are not finite is rejected, and
-/// the caller then keeps the next source (reference table, then the slowest
-/// same-stride row).
+/// the calibration then fails closed.
 fn fit_row(
     inner: usize,
     empty: f64,
@@ -1126,107 +979,8 @@ fn fit_row(
     })
 }
 
-fn bandwidth_fixture_bytes(remaining_ns: f64, dispatch_ns: f64, ns_per_byte: f64) -> usize {
-    if ns_per_byte > 0.0 && ns_per_byte.is_finite() {
-        ((remaining_ns - dispatch_ns).max(0.0) / ns_per_byte) as usize
-    } else {
-        0
-    }
-}
-
-fn validated_dispatch(measured: Duration, table: Duration) -> Option<Duration> {
-    (measured <= table.saturating_mul(20)).then_some(measured)
-}
-
-/// Completes the measured anchors of `values` (indexed by width) into one
-/// non-decreasing row over every width from 2: linear between anchors, the
-/// table scaled to the nearest anchor outside them, then the running
-/// maximum, so measured and tabulated widths never mix into a dip. Without
-/// an anchor every width keeps the table.
-fn complete_dispatch(values: &mut [Option<Duration>], table: impl Fn(usize) -> Duration) {
-    let anchor = |(q, value): (usize, &Option<Duration>)| value.map(|value| (q, value));
-    let Some((first, first_value)) = values.iter().enumerate().skip(2).find_map(anchor) else {
-        return;
-    };
-    let (last, last_value) = values
-        .iter()
-        .enumerate()
-        .skip(2)
-        .rev()
-        .find_map(anchor)
-        .unwrap_or((first, first_value));
-    let scaled = |q: usize, anchor: usize, value: Duration| {
-        let reference = table(anchor).as_secs_f64();
-        if reference > 0.0 {
-            table(q).mul_f64(value.as_secs_f64() / reference)
-        } else {
-            value
-        }
-    };
-    for (q, value) in values.iter_mut().enumerate().take(first).skip(2) {
-        *value = Some(scaled(q, first, first_value));
-    }
-    let mut left = first;
-    while let Some(offset) = values[left + 1..=last].iter().position(Option::is_some) {
-        let right = left + 1 + offset;
-        let (Some(low), Some(high)) = (values[left], values[right]) else {
-            break;
-        };
-        let (low, high) = (low.as_secs_f64(), high.as_secs_f64());
-        for (q, value) in values.iter_mut().enumerate().take(right).skip(left + 1) {
-            let t = (q - left) as f64 / (right - left) as f64;
-            *value = Some(Duration::from_secs_f64(low + t * (high - low)));
-        }
-        left = right;
-    }
-    for (q, value) in values.iter_mut().enumerate().skip(last + 1) {
-        *value = Some(scaled(q, last, last_value));
-    }
-    let mut floor = Duration::ZERO;
-    for value in values.iter_mut().skip(2).flatten() {
-        floor = floor.max(*value);
-        *value = floor;
-    }
-}
-
-fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
-    // ponytail: replace this interim measurement with threadteam's
-    // `Exec::calibrate_dispatch_costs` (tensor4all/threadteam-rs#92, on
-    // threadteam main, not in the pinned release); delete it once the pinned
-    // threadteam calibrates a running pool.
-    // The chooser's candidate widths, the budget last; `complete_dispatch`
-    // interpolates the widths between them, as threadteam's own row does.
-    for q in dispatch_ladder(exec.budget()) {
-        let Some(slot) = constants.dispatch.get_mut(q) else {
-            continue;
-        };
-        if Instant::now() >= deadline {
-            return;
-        }
-        let width = NonZeroUsize::new(q).unwrap();
-        let table = exec.token_ref().dispatch_cost(width);
-        exec.reborrow().limit(width).into_token().fork(q, |_, _| {});
-        let mut samples = [Duration::ZERO; 5];
-        for sample in &mut samples {
-            if Instant::now() >= deadline {
-                return;
-            }
-            let start = Instant::now();
-            for _ in 0..8 {
-                exec.reborrow().limit(width).into_token().fork(q, |_, _| {});
-            }
-            *sample = start.elapsed() / 8;
-        }
-        if Instant::now() >= deadline {
-            return;
-        }
-        samples.sort_unstable();
-        *slot = validated_dispatch(samples[2], table);
-    }
-}
-
-/// The dispatch widths measured: the chooser's candidates below the
-/// budget, then the budget; `complete_dispatch` fills the widths between.
+/// The widths whose D_item is measured: the chooser's candidates below the
+/// budget, then the budget.
 fn dispatch_ladder(budget: usize) -> impl Iterator<Item = usize> {
     CANDIDATES
         .into_iter()
@@ -1234,200 +988,214 @@ fn dispatch_ladder(budget: usize) -> impl Iterator<Item = usize> {
         .chain([budget])
 }
 
-/// How long the pool's members stay idle before each stretched sample: the
-/// part a plan-group chunk's serial work (its scatter, often one ownership
-/// run) leaves them idle before its next entry or fork.
-///
-/// Why idle members and not back-to-back samples: an entry or fork onto a
-/// pool the previous one just left costs a fraction of one that follows a
-/// serial stretch (0.3 against 4 µs per entry at 96 threads), and chunks
-/// meet the latter. Calibration cannot see a structure's chunk work, so the
-/// stretch is one fixed length of the order of the measured small-sector
-/// chunks' serial scatter (14-55 µs).
-const CHUNK_STRETCH: Duration = Duration::from_micros(50);
-
-/// Samples per stretched measurement; the measurement is their median.
-const STRETCHED_SAMPLES: usize = 3;
-
-/// Keeps the calling thread busy, and the pool's members idle, for
-/// [`CHUNK_STRETCH`].
-fn idle_stretch() {
-    let start = Instant::now();
-    while start.elapsed() < CHUNK_STRETCH {
-        core::hint::spin_loop();
-    }
+/// Whether some candidate split of a `budget`-slot token gives a leaf `share`
+/// slots: a balanced split's shares are `floor(budget / q)` and
+/// `ceil(budget / q)`, and the inline candidate (q = 1) keeps the budget.
+fn leaf_share(budget: usize, share: usize) -> bool {
+    share == budget
+        || dispatch_ladder(budget).any(|q| budget / q == share || budget.div_ceil(q) == share)
 }
 
-/// The median of [`STRETCHED_SAMPLES`] values of `sample`, each taken right
-/// after one `stretch`; `None` once the deadline passes or a sample fails.
-fn stretched_median(
-    deadline: Instant,
-    mut stretch: impl FnMut(),
-    mut sample: impl FnMut() -> Option<f64>,
-) -> Option<f64> {
-    let mut samples = [0.0; STRETCHED_SAMPLES];
-    for value in &mut samples {
-        if Instant::now() >= deadline {
+/// Samples per dispatch point; the point is their median, after one warm-up.
+const DISPATCH_SAMPLES: usize = 31;
+
+/// The median duration in ns of [`DISPATCH_SAMPLES`] calls of `once`, after
+/// one warm-up call; `None` when a call fails.
+fn median_ns(mut once: impl FnMut() -> bool) -> Option<f64> {
+    if !once() {
+        return None;
+    }
+    let mut samples = [0.0; DISPATCH_SAMPLES];
+    for sample in &mut samples {
+        let start = Instant::now();
+        if !once() {
             return None;
         }
-        stretch();
-        *value = sample()?;
+        *sample = start.elapsed().as_secs_f64() * 1e9;
     }
     samples.sort_by(f64::total_cmp);
-    Some(samples[STRETCHED_SAMPLES / 2])
+    Some(samples[DISPATCH_SAMPLES / 2])
 }
 
-/// The cost of one empty guarded engine entry, the entry every replay
-/// region takes (`host_pool::lane_region`), as a chunk meets it: each
-/// sample follows an idle stretch. Timed directly, so no region is observed.
-fn measure_entry(engine: &mut dyn Engine, deadline: Instant) -> Option<f64> {
-    tenferro_cpu::with_cpu_engine(engine, |cpu| {
-        cpu.with_exec(|_| ()).ok()?;
-        stretched_median(deadline, idle_stretch, || {
-            let start = Instant::now();
-            cpu.with_exec(|_| ()).ok()?;
-            Some(start.elapsed().as_secs_f64() * 1e9)
-        })
-    })
-    .flatten()
+/// The item phases' split with nothing to do: one job per leaf, no work.
+struct EmptyLeaves(usize);
+
+impl lanes::Work for EmptyLeaves {
+    type Job = ();
+    type Lane = ();
+    type Error = ();
+
+    fn count(&self) -> usize {
+        self.0
+    }
+
+    fn run(&self, _: usize, _: &mut (), _: &mut (), _: lanes::Exec<'_>) -> Result<(), ()> {
+        Ok(())
+    }
 }
 
-/// The chunk dispatch row: one empty fork per sample at each ladder width,
-/// each after an idle stretch, as a chunk's GEMM batch meets it. Samples
-/// above 20 times the table are rejected, as for the phase row.
-fn measure_chunk_dispatch(
-    exec: &mut lanes::Exec<'_>,
-    deadline: Instant,
-    constants: &mut Constants,
-) {
+/// D_item at every candidate width: the production `run_native` with a
+/// `Split` of q leaves over the whole token (as `run_moves`, `pack_chunk`
+/// and the member phase run it), with empty leaves.
+fn measure_item_dispatch(exec: &mut lanes::Exec<'_>, constants: &mut Constants) -> bool {
     for q in dispatch_ladder(exec.budget()) {
-        let Some(slot) = constants.chunk_dispatch.get_mut(q) else {
+        let mut states = vec![(); q];
+        let measured = median_ns(|| {
+            let split = super::chunk::split(q, |_: &mut (), _| Ok::<(), ()>(()));
+            matches!(
+                lanes::run_native(
+                    exec.reborrow(),
+                    &EmptyLeaves(q),
+                    split,
+                    &mut states,
+                    &mut [()]
+                ),
+                Ok(Ok(()))
+            )
+        });
+        let (Some(measured), Some(slot)) = (measured, constants.item_dispatch.get_mut(q)) else {
+            return false;
+        };
+        *slot = measured;
+    }
+    true
+}
+
+/// D_plan at every leaf share: an empty `for_ranges` section of `s` slots on
+/// a token limited to `s`, the primitive Strided's planned update runs
+/// (`copy_plan.rs`: `for_len` limits the token, `parallel_for_each` calls
+/// `for_ranges`).
+///
+/// Why not time a real planned role: Strided widens a role to all `s` slots
+/// only once its copy outweighs the extra sections, which on a 96-slot pool
+/// takes millions of elements; the section itself is the same call either way.
+fn measure_plan_dispatch(exec: &mut lanes::Exec<'_>, constants: &mut Constants) -> bool {
+    let budget = exec.budget();
+    for share in 2..=budget {
+        if !leaf_share(budget, share) {
+            continue;
+        }
+        let Some(width) = NonZeroUsize::new(share) else {
             continue;
         };
-        let width = NonZeroUsize::new(q).unwrap();
-        let table = exec.token_ref().dispatch_cost(width);
-        let Some(median) = stretched_median(deadline, idle_stretch, || {
-            let start = Instant::now();
-            exec.reborrow().limit(width).into_token().fork(q, |_, _| {});
-            Some(start.elapsed().as_secs_f64() * 1e9)
-        }) else {
-            return;
+        let measured = median_ns(|| {
+            exec.reborrow()
+                .limit(width)
+                .into_token()
+                .for_ranges(share, NonZeroUsize::MIN, |_| {});
+            true
+        });
+        let (Some(measured), Some(slot)) = (measured, constants.plan_dispatch.get_mut(share))
+        else {
+            return false;
         };
-        *slot = validated_dispatch(Duration::from_secs_f64(median * 1e-9), table);
+        *slot = measured;
+    }
+    true
+}
+
+/// The bandwidth fixture's leaves: leaf `job` copies source part `job` into
+/// its lane's destination part, serially.
+struct CopyLeaves<'f> {
+    fixture: &'f Fixture,
+    source: &'f [f64],
+    part: usize,
+    parts: usize,
+}
+
+impl<'f> CopyLeaves<'f> {
+    /// Cuts `lane`'s destination before job `cut.job`.
+    fn cut(
+        &self,
+        lane: &mut (usize, &'f mut [MaybeUninit<f64>]),
+        cut: lanes::Cut,
+    ) -> Result<(usize, &'f mut [MaybeUninit<f64>]), ()> {
+        let at = (cut.job - lane.0) * self.part;
+        let (left, right) = core::mem::take(&mut lane.1).split_at_mut(at);
+        lane.1 = left;
+        Ok((cut.job, right))
     }
 }
 
-fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
-    measure_dispatch(exec, deadline, constants);
-    if Instant::now() >= deadline {
-        return;
+impl<'f> lanes::Work for CopyLeaves<'f> {
+    type Job = ();
+    type Lane = (usize, &'f mut [MaybeUninit<f64>]);
+    type Error = ();
+
+    fn count(&self) -> usize {
+        self.parts
     }
-    let setup_start = Instant::now();
-    let source = vec![1.0; BUFFER_ELEMENTS];
-    let mut destination = Vec::<f64>::with_capacity(BUFFER_ELEMENTS);
-    let setup_ns_per_byte = setup_start.elapsed().as_secs_f64() * 1e9
-        / (BUFFER_ELEMENTS * std::mem::size_of::<f64>()) as f64;
-    for inner in 0..2 {
-        if let Some(row) = measure_row(
-            exec,
-            deadline,
-            inner,
-            &source,
-            destination.spare_capacity_mut(),
-        ) {
-            constants.rows[inner] = row;
-            constants.rows[inner + 2] = row;
-        }
+
+    fn run(
+        &self,
+        job: usize,
+        _: &mut (),
+        lane: &mut Self::Lane,
+        exec: lanes::Exec<'_>,
+    ) -> Result<(), ()> {
+        let at = (job - lane.0) * self.part;
+        let destination = lane.1.get_mut(at..at + self.part).ok_or(())?;
+        let source = self
+            .source
+            .get(job * self.part..(job + 1) * self.part)
+            .ok_or(())?;
+        self.fixture
+            .run(exec.limit(NonZeroUsize::MIN), source, destination)
+            .map_err(|_| ())
     }
-    measure_chunk_dispatch(exec, deadline, constants);
+}
+
+/// B(q) on the doubling ladder: q serial copy leaves of the item phases'
+/// split over the whole token, the median of three runs less D_item(q).
+/// The fixture is the row buffers (an `elements`-element source and
+/// destination, about 8 MiB of traffic), so the cap applies from that
+/// working set on.
+fn measure_bandwidth(
+    exec: &mut lanes::Exec<'_>,
+    constants: &mut Constants,
+    source: &[f64],
+    destination: &mut [MaybeUninit<f64>],
+) -> bool {
     let p = exec.budget();
-    if Instant::now() >= deadline {
-        return;
-    }
-    let teardown_start = Instant::now();
-    drop(source);
-    drop(destination);
-    let setup_ns_per_byte = setup_ns_per_byte
-        + teardown_start.elapsed().as_secs_f64() * 1e9
-            / (BUFFER_ELEMENTS * std::mem::size_of::<f64>()) as f64;
-    let ladder = || std::iter::successors(Some(2.min(p)), |&q| (q < p).then(|| (q * 2).min(p)));
-    let dispatch_ns = |q| {
-        constants.dispatch_cost(q, || {
-            exec.token_ref()
-                .dispatch_cost(NonZeroUsize::new(q).unwrap())
-        })
-    };
-    let memory_bytes = constants.rows[0].e.memory_knee() as usize;
-    let ns_per_byte = setup_ns_per_byte
-        + ladder().count() as f64 * constants.rows[0].e.at(memory_bytes as f64)
-            / (2 * std::mem::size_of::<f64>()) as f64;
-    let remaining_ns = deadline
-        .saturating_duration_since(Instant::now())
-        .as_secs_f64()
-        * 1e9;
-    let maximum_bytes =
-        bandwidth_fixture_bytes(remaining_ns, ladder().map(dispatch_ns).sum(), ns_per_byte);
-    // The fixture is the knee, or what first-touch and the whole ladder fit
-    // in the deadline: a cap measured at a working set bounds every larger
-    // one, so `phase_bandwidth` applies it from the fixture's size on. Below
-    // the largest row working set a sample is too short to time.
+    let elements = source.len().min(destination.len()).saturating_sub(p);
     let pair = 2 * std::mem::size_of::<f64>();
-    let fixture_bytes = memory_bytes.min(maximum_bytes.saturating_sub(p * pair));
-    if fixture_bytes < ONLINE_WORKING_SETS[2] {
-        return;
-    }
-    let elements = fixture_bytes / pair;
-    let source = vec![1.0; elements + p];
-    let mut destination = Vec::<f64>::with_capacity(elements + p);
-    for q in ladder() {
-        let dispatch = constants.dispatch_cost(q, || {
-            exec.token_ref()
-                .dispatch_cost(NonZeroUsize::new(q).unwrap())
-        });
-        let remaining_ns = deadline
-            .saturating_duration_since(Instant::now())
-            .as_secs_f64()
-            * 1e9;
-        if bandwidth_fixture_bytes(remaining_ns, dispatch, ns_per_byte) < fixture_bytes {
-            return;
-        }
-        let n = elements.div_ceil(q).max(1);
-        let Some(fixture) = Fixture::new(n, 1, 0).ok() else {
-            continue;
+    let ladder = std::iter::successors(Some(2.min(p)), |&q| (q < p).then(|| (q * 2).min(p)));
+    for q in ladder {
+        let part = elements / q;
+        let Ok(fixture) = Fixture::new(part, 1, 0) else {
+            return false;
         };
-        let Some(destination) = destination.spare_capacity_mut().get_mut(..n * q) else {
-            return;
-        };
-        let pieces: Vec<_> = destination.chunks_mut(n).map(Mutex::new).collect();
-        let failed = AtomicBool::new(false);
-        let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
-        if Instant::now() >= deadline {
-            return;
+        let mut samples = [0.0; 3];
+        for sample in &mut samples {
+            let Some(parts) = destination.get_mut(..part * q) else {
+                return false;
+            };
+            let work = CopyLeaves {
+                fixture: &fixture,
+                source,
+                part,
+                parts: q,
+            };
+            let mut lane = (0, parts);
+            let mut states = vec![(); q];
+            let split = super::chunk::split(q, |lane, cut| work.cut(lane, cut));
+            let start = Instant::now();
+            let ran = lanes::run_native(
+                exec.reborrow(),
+                &work,
+                split,
+                &mut states,
+                core::slice::from_mut(&mut lane),
+            );
+            *sample = start.elapsed().as_secs_f64() * 1e9;
+            if !matches!(ran, Ok(Ok(()))) {
+                return false;
+            }
         }
-        let start = Instant::now();
-        exec.reborrow()
-            .limit(NonZeroUsize::new(q).unwrap())
-            .into_token()
-            .fork(q, |i, token| {
-                let mut piece = pieces[i].lock().unwrap_or_else(PoisonError::into_inner);
-                if fixture
-                    .run(
-                        lanes::Exec::from_token(token, workspace, policy),
-                        &source[i * n..(i + 1) * n],
-                        &mut piece,
-                    )
-                    .is_err()
-                {
-                    failed.store(true, Ordering::Relaxed);
-                }
-            });
-        let elapsed = start.elapsed().as_secs_f64() * 1e9 - dispatch;
-        if Instant::now() < deadline
-            && !failed.load(Ordering::Relaxed)
-            && elapsed.is_finite()
-            && elapsed > 0.0
-        {
-            let bytes = (n * q * pair) as f64;
+        samples.sort_by(f64::total_cmp);
+        let elapsed = samples[1] - constants.item_cost(q);
+        let bytes = (part * q * pair) as f64;
+        if elapsed.is_finite() && elapsed > 0.0 {
             constants.bandwidth[q] = bytes / elapsed;
             constants.bandwidth_bytes = if constants.bandwidth_bytes.is_finite() {
                 constants.bandwidth_bytes.max(bytes)
@@ -1436,6 +1204,47 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
             };
         }
     }
+    true
+}
+
+/// Test support: calibrated constants whose dispatch rows are `ns` at every
+/// width, retained in `engine` so the model prices its forks at the cost the
+/// test engine declares rather than at measured ones. A serial engine keeps
+/// none, as it never calibrates.
+#[cfg(test)]
+pub(super) fn install_test_constants(engine: &mut dyn Engine, ns: f64) {
+    let Some(threads) = tenferro_cpu::with_cpu_engine(engine, |cpu| cpu.num_threads()) else {
+        return;
+    };
+    if threads <= 1 {
+        return;
+    }
+    let mut constants = Constants::reference(HostClass::detect());
+    constants.reserved_entries = threads + 1;
+    constants.bandwidth = vec![f64::INFINITY; threads + 1];
+    constants.item_dispatch = vec![ns; threads + 1];
+    constants.plan_dispatch = vec![ns; threads + 1];
+    constants.calibrated = true;
+    constants.attempted = true;
+    symtn_dense::engine_slot::checkin(engine, constants, Constants::retained_bytes);
+}
+
+/// Every row once, with fixed sample counts and no deadline; `false` (the
+/// calibration fails closed) when any point fails.
+fn calibrate(exec: &mut lanes::Exec<'_>, constants: &mut Constants) -> bool {
+    if !measure_item_dispatch(exec, constants) || !measure_plan_dispatch(exec, constants) {
+        return false;
+    }
+    let source = vec![1.0; BUFFER_ELEMENTS];
+    let mut destination = Vec::<f64>::with_capacity(BUFFER_ELEMENTS);
+    for inner in 0..2 {
+        let Some(row) = measure_row(exec, inner, &source, destination.spare_capacity_mut()) else {
+            return false;
+        };
+        constants.rows[inner] = row;
+        constants.rows[inner + 2] = row;
+    }
+    measure_bandwidth(exec, constants, &source, destination.spare_capacity_mut())
 }
 
 #[cfg(test)]
@@ -1483,73 +1292,6 @@ mod tests {
         );
     }
 
-    /// Purpose: accepted dispatch measurements drive the width and skip table reads;
-    /// absent and rejected measurements are the table-route controls.
-    #[test]
-    fn movement_dispatch_uses_measurement_or_table() {
-        let table = Duration::from_nanos(600);
-        let mut engine = tenferro_cpu::CpuEngine::new(
-            tenferro_cpu::Pool::builder()
-                .threads(2)
-                .dispatch_costs({
-                    let flat = tenferro_cpu::threadteam::WidthCosts::flat(table);
-                    tenferro_cpu::threadteam::DispatchCosts::new(flat, flat, flat)
-                })
-                .build()
-                .unwrap(),
-        );
-        for (sample, expected, table_route, expected_width) in [
-            (Some(0), 0.0, false, 2),
-            (Some(110), 110.0, false, 2),
-            (Some(12_000), 12_000.0, false, 1),
-            (Some(12_001), 600.0, true, 1),
-            (None, 600.0, true, 1),
-        ] {
-            let mut constants = Constants::reference(HostClass::Generic);
-            constants.dispatch = vec![None; 3];
-            constants.dispatch[2] = sample
-                .map(Duration::from_nanos)
-                .and_then(|measured| validated_dispatch(measured, table));
-            let reads = Cell::new(0);
-            assert_eq!(
-                constants.dispatch_cost(2, || {
-                    reads.set(reads.get() + 1);
-                    table
-                }),
-                expected
-            );
-            assert_eq!(reads.get(), usize::from(table_route));
-            crate::host_pool::lane_region(
-                &mut engine,
-                crate::host_pool::HostPoolSite::Replay,
-                |exec| {
-                    assert_eq!(
-                        width::<f64, _>(
-                            &exec,
-                            Some(&constants),
-                            2,
-                            0,
-                            0,
-                            || [0.0; CLASSES],
-                            |_, _| false,
-                            |_| |q, _, _| 400.0 / q as f64,
-                        ),
-                        expected_width
-                    );
-                },
-            )
-            .unwrap();
-        }
-        assert_eq!(
-            validated_dispatch(Duration::ZERO, Duration::ZERO),
-            Some(Duration::ZERO)
-        );
-        assert_eq!(
-            validated_dispatch(Duration::from_nanos(1), Duration::ZERO),
-            None
-        );
-    }
-
     fn memo_key(constants: &Constants) -> DecisionKey {
         DecisionKey {
             budget: 4,
@@ -1576,7 +1318,8 @@ mod tests {
             || phase.counts.map(|count| count.elements as f64),
             |slots, elements| key.carries_team && key.replays_plans && elements >= slots,
             |costs| fixed(phase, costs),
-            |q| constants.dispatch_cost(q, || Duration::from_nanos((q * 23) as u64)),
+            |q| constants.item_cost(q),
+            |s| constants.plan_cost(s),
         )
     }
 
@@ -1604,9 +1347,9 @@ mod tests {
                 }
             }
             constants.memory_knees = core::array::from_fn(|c| constants.rows[c].e.memory_knee());
-            constants.dispatch = (0..=8)
-                .map(|_| Some(Duration::from_nanos(next() % 10000)))
-                .collect();
+            constants.item_dispatch = (0..=8).map(|_| (next() % 10000) as f64).collect();
+            constants.plan_dispatch = (0..=8).map(|_| (next() % 10000) as f64).collect();
+            constants.calibrated = true;
             let mut key = memo_key(&constants);
             key.budget = next() as usize % 8 + 1;
             key.reads_destination = next() % 2 != 0;
@@ -1685,7 +1428,9 @@ mod tests {
         let phases = [phase];
         let identity = Arc::new(());
         let mut constants = Constants::reference(HostClass::Generic);
-        constants.dispatch = vec![Some(Duration::ZERO); 5];
+        constants.item_dispatch = vec![0.0; 5];
+        constants.plan_dispatch = vec![0.0; 5];
+        constants.calibrated = true;
         let mut key = memo_key(&constants);
         key.budget = 2;
         let mut memo = WidthMemo::default();
@@ -1696,7 +1441,8 @@ mod tests {
                 key.budget = 4;
             }
             if change == 2 {
-                constants.dispatch.fill(Some(Duration::from_secs(1)));
+                constants.item_dispatch.fill(1e9);
+                constants.plan_dispatch.fill(1e9);
                 constants.generation = next_generation();
                 key.generation = constants.generation;
             }
@@ -2445,137 +2191,6 @@ mod tests {
         assert_ne!(member_phase(&phase, &costs, 4)(2, 4, &prices), 8.0);
     }
 
-    /// Purpose: dense-dominated groups choose their chunk width from the combined
-    /// cost and serial batch barriers, a later chunk of two groups paying its
-    /// own fork; movement alone is the inline control.
-    #[test]
-    fn group_chunks_price_gemm_and_serial_batch_barriers() {
-        use crate::TreeTransformBlockSpec;
-        let blocks = [100, 1, 100, 1]
-            .into_iter()
-            .flat_map(|rows| [vec![rows], vec![rows]])
-            .collect::<Vec<_>>();
-        let structure = BlockStructure::packed_column_major(1, blocks).unwrap();
-        let transform = TreeTransformStructure::compile_structures(
-            &structure,
-            &structure,
-            &(0..4)
-                .map(|group| {
-                    TreeTransformBlockSpec::multi(
-                        vec![2 * group, 2 * group + 1],
-                        vec![2 * group, 2 * group + 1],
-                        vec![1.0, 0.0, 0.0, 1.0],
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        let schedule = transform.parallel_schedule();
-        let costs = [(0.5, 0.0, 0.0); CLASSES];
-        let dense = [100.0, 1.0, 100.0, 1.0];
-        let phase = group_phase(schedule, &costs, |group| dense[group], 0.0);
-        let dispatch = |q| 10.0 * q as f64;
-        let prices = Prices {
-            bytes: 8.0,
-            dispatch: &dispatch,
-            bandwidth: &|_| f64::INFINITY,
-            admits: &|_, _| false,
-        };
-        assert_eq!(
-            [
-                phase(1, 4, &prices),
-                phase(2, 4, &prices),
-                phase(3, 4, &prices),
-                phase(4, 4, &prices)
-            ],
-            [210.0, 204.0 + 20.0, 105.0, 102.0]
-        );
-        assert_eq!(
-            choose(
-                4,
-                4,
-                0.0,
-                |q| phase(q, 4, &prices),
-                dispatch,
-                |_| f64::INFINITY
-            ),
-            3
-        );
-        assert_eq!(
-            choose(
-                4,
-                4,
-                0.0,
-                |q| group_phase(schedule, &costs, |_| 0.0, 0.0)(q, 4, &prices),
-                dispatch,
-                |_| f64::INFINITY
-            ),
-            1
-        );
-        assert_eq!(
-            choose(
-                4,
-                4,
-                0.0,
-                |q| 102.0_f64.max(210.0 / q as f64),
-                dispatch,
-                |_| f64::INFINITY
-            ),
-            2
-        );
-    }
-
-    /// Purpose: a chunk's fixed cost is paid once per chunk and a later
-    /// chunk's fork once per forking chunk, so a large fixed cost chooses few
-    /// chunks; a zero fixed cost is the control that keeps one group per
-    /// chunk when each fork costs more than the work it splits.
-    #[test]
-    fn group_chunks_pay_their_fixed_cost_and_forks_per_chunk() {
-        use crate::TreeTransformBlockSpec;
-        let structure = BlockStructure::packed_column_major(1, vec![vec![1]; 16]).unwrap();
-        let transform = TreeTransformStructure::compile_structures(
-            &structure,
-            &structure,
-            &(0..8)
-                .map(|group| {
-                    TreeTransformBlockSpec::multi(
-                        vec![2 * group, 2 * group + 1],
-                        vec![2 * group, 2 * group + 1],
-                        vec![1.0, 0.0, 0.0, 1.0],
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        let schedule = transform.parallel_schedule();
-        let costs = [(0.0, 0.0, 0.0); CLASSES];
-        let dispatch = |q| 10.0 * q as f64;
-        let prices = Prices {
-            bytes: 8.0,
-            dispatch: &dispatch,
-            bandwidth: &|_| f64::INFINITY,
-            admits: &|_, _| false,
-        };
-        let free = group_phase(schedule, &costs, |_| 1.0, 0.0);
-        assert_eq!(free(2, 8, &prices), 4.0 + 3.0 * 20.0);
-        let paid = group_phase(schedule, &costs, |_| 1.0, 100.0);
-        assert_eq!(paid(2, 8, &prices), 4.0 * 101.0 + 3.0 * 20.0);
-        for (fixed, expected) in [(0.0, 1), (100.0, 8)] {
-            let phase = group_phase(schedule, &costs, |_| 1.0, fixed);
-            assert_eq!(
-                choose(
-                    8,
-                    8,
-                    0.0,
-                    |q| phase(q, 8, &prices),
-                    dispatch,
-                    |_| f64::INFINITY
-                ),
-                expected
-            );
-        }
-    }
-
     /// Purpose: one runnable job bypasses preparation even on a wider token;
     /// one slot is the matching control for a phase with multiple jobs.
     #[test]
@@ -2830,139 +2445,6 @@ mod tests {
         assert!(fit_row(0, empty, low, high, one, slope).is_none());
     }
 
-    /// Purpose: with the entry cost chunks meet (4 µs) and a measured-like
-    /// dispatch row, a 175-group phase on 96 slots chooses the widest
-    /// chunking, as measured; the back-to-back entry (0.33 µs) is the
-    /// negative control that chooses 24 groups per chunk.
-    #[test]
-    fn group_phase_with_stretched_entry_chooses_few_chunks() {
-        use crate::TreeTransformBlockSpec;
-        let structure = BlockStructure::packed_column_major(1, vec![vec![1]; 350]).unwrap();
-        let transform = TreeTransformStructure::compile_structures(
-            &structure,
-            &structure,
-            &(0..175)
-                .map(|group| {
-                    TreeTransformBlockSpec::multi(
-                        vec![2 * group, 2 * group + 1],
-                        vec![2 * group, 2 * group + 1],
-                        vec![1.0, 0.0, 0.0, 1.0],
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        let schedule = transform.parallel_schedule();
-        let costs = [(0.0, 0.0, 0.0); CLASSES];
-        // D(q) in µs at the ladder widths, linear between them.
-        let mut row: Vec<Option<Duration>> = vec![None; 97];
-        for (q, micros) in [
-            (2, 0.6),
-            (3, 0.7),
-            (4, 0.9),
-            (6, 1.0),
-            (8, 1.2),
-            (12, 1.7),
-            (16, 2.3),
-            (24, 3.5),
-            (32, 8.4),
-            (48, 15.6),
-            (64, 23.3),
-            (96, 40.8),
-        ] {
-            row[q] = Some(Duration::from_secs_f64(micros * 1e-6));
-        }
-        complete_dispatch(&mut row, |q| Duration::from_nanos(q as u64));
-        let dispatch = |q: usize| row[q].unwrap().as_secs_f64() * 1e9;
-        let prices = Prices {
-            bytes: 8.0,
-            dispatch: &dispatch,
-            bandwidth: &|_| f64::INFINITY,
-            admits: &|_, _| false,
-        };
-        for (entry, expected) in [(4000.0, 96), (330.0, 24)] {
-            let phase = group_phase(schedule, &costs, |_| 400.0, CHUNK_ENTRIES * entry);
-            assert_eq!(
-                choose(
-                    96,
-                    175,
-                    0.0,
-                    |q| phase(q, 96, &prices),
-                    dispatch,
-                    |_| f64::INFINITY
-                ),
-                expected
-            );
-        }
-    }
-
-    /// Purpose: every stretched calibration sample is taken right after its
-    /// own idle stretch, never back to back; a passed deadline is the control
-    /// that takes no sample and yields no measurement.
-    #[test]
-    fn stretched_samples_each_follow_an_idle_stretch() {
-        let log = std::cell::RefCell::new(Vec::new());
-        let median = stretched_median(
-            Instant::now() + Duration::from_secs(3600),
-            || log.borrow_mut().push("stretch"),
-            || {
-                log.borrow_mut().push("sample");
-                Some(log.borrow().len() as f64)
-            },
-        );
-        assert_eq!(
-            *log.borrow(),
-            ["stretch", "sample"].repeat(STRETCHED_SAMPLES)
-        );
-        assert_eq!(median, Some(2.0 * (STRETCHED_SAMPLES / 2 + 1) as f64));
-        log.borrow_mut().clear();
-        let expired = stretched_median(
-            Instant::now(),
-            || log.borrow_mut().push("stretch"),
-            || Some(0.0),
-        );
-        assert_eq!(expired, None);
-        assert!(log.borrow().is_empty());
-    }
-
-    /// Purpose: measured dispatch anchors become one non-decreasing row:
-    /// linear between anchors, the table scaled to the nearest measured
-    /// anchor outside them (before the running maximum), and a lower later
-    /// anchor lifted to the running maximum; a row without anchors is the
-    /// control that keeps the table everywhere.
-    ///
-    /// With table(q) = 100q ns and anchors 3: 600, 5: 1000, 6: 800 ns, q = 2
-    /// to 8 are 200 * 600/300, 600, (600 + 1000)/2, 1000, max(800, 1000),
-    /// max(700 * 800/600, 1000) and 800 * 800/600 ns. A row holds whole
-    /// nanoseconds (Duration's resolution), so each is checked to 1 ns.
-    #[test]
-    fn dispatch_anchors_complete_a_monotone_row() {
-        let table = |q: usize| Duration::from_nanos(100 * q as u64);
-        let ns = |value: Option<Duration>| value.unwrap().as_secs_f64() * 1e9;
-        let close = |actual: f64, expected: f64| assert!((actual - expected).abs() <= 1.0);
-        let mut values: Vec<Option<Duration>> = vec![None; 9];
-        for (q, measured) in [(3, 600), (5, 1000), (6, 800)] {
-            values[q] = Some(Duration::from_nanos(measured));
-        }
-        complete_dispatch(&mut values, table);
-        assert!(values[..2].iter().all(Option::is_none));
-        let expected = [
-            200.0 * 600.0 / 300.0,
-            600.0,
-            (600.0 + 1000.0) / 2.0,
-            1000.0,
-            1000.0,
-            1000.0,
-            800.0 * 800.0 / 600.0,
-        ];
-        for (q, expected) in (2..9).zip(expected) {
-            close(ns(values[q]), expected);
-        }
-        let mut unmeasured: Vec<Option<Duration>> = vec![None; 9];
-        complete_dispatch(&mut unmeasured, table);
-        assert!(unmeasured.iter().all(Option::is_none));
-    }
-
     /// Purpose: a bandwidth ladder measured on a fixture smaller than the
     /// knee caps every phase at least that large; an unmeasured fixture size
     /// is the control that applies the cap only from the knee.
@@ -2981,17 +2463,6 @@ mod tests {
         assert!(phase_bandwidth((4 << 20) as f64, working_set, elements, &constants)(4) > 80.0);
         constants.bandwidth_bytes = f64::INFINITY;
         assert!(phase_bandwidth(working_set, working_set, elements, &constants)(4) > 80.0);
-    }
-
-    /// Purpose: remaining calibration time bounds fixture bytes before allocation;
-    /// an insufficient deadline cannot admit a memory-resident fixture.
-    #[test]
-    fn saturated_fixture_must_fit_the_remaining_budget() {
-        let memory_bytes = 64 << 20;
-        assert!(bandwidth_fixture_bytes(1_000_000.0, 1000.0, 0.1) < memory_bytes);
-        assert!(bandwidth_fixture_bytes(9_000_000.0, 1000.0, 0.1) >= memory_bytes);
-        assert_eq!(bandwidth_fixture_bytes(1000.0, 1000.0, 0.1), 0);
-        assert_eq!(bandwidth_fixture_bytes(1000.0, 0.0, f64::INFINITY), 0);
     }
 
     /// Purpose: saturated model counts still feed a finite cost and valid width;
@@ -3048,21 +2519,22 @@ mod tests {
         assert_eq!(constants.bandwidth.capacity(), 0);
         assert_eq!(
             constants.retained_bytes(),
-            constants.reserved_entries
-                * (std::mem::size_of::<f64>() + 2 * std::mem::size_of::<Option<Duration>>())
+            3 * constants.reserved_entries * std::mem::size_of::<f64>()
         );
         constants.bandwidth = Vec::with_capacity(3 * constants.reserved_entries);
-        constants.dispatch = Vec::with_capacity(2 * constants.reserved_entries);
-        constants.chunk_dispatch = Vec::with_capacity(2 * constants.reserved_entries);
+        constants.item_dispatch = Vec::with_capacity(2 * constants.reserved_entries);
+        constants.plan_dispatch = Vec::with_capacity(2 * constants.reserved_entries);
         assert_eq!(
             constants.retained_bytes(),
-            constants.bandwidth.capacity() * std::mem::size_of::<f64>()
-                + (constants.dispatch.capacity() + constants.chunk_dispatch.capacity())
-                    * std::mem::size_of::<Option<Duration>>()
+            (constants.bandwidth.capacity()
+                + constants.item_dispatch.capacity()
+                + constants.plan_dispatch.capacity())
+                * std::mem::size_of::<f64>()
         );
     }
 
-    /// Purpose: a failed retained attempt uses references once, and trimming enables a new attempt.
+    /// Purpose: a failed attempt is retained as uncalibrated and not
+    /// repeated, and trimming enables a new attempt.
     #[test]
     fn failed_calibration_is_retained_until_trim() {
         let mut engine =
@@ -3071,13 +2543,11 @@ mod tests {
         for _ in 0..2 {
             region_with(
                 &mut engine,
-                |_, _, _| calls.set(calls.get() + 1),
-                |_, constants| {
-                    assert_eq!(
-                        constants.unwrap().rows,
-                        [CI_ROWS[0], CI_ROWS[1], CI_ROWS[0], CI_ROWS[1]]
-                    );
+                |_, _| {
+                    calls.set(calls.get() + 1);
+                    false
                 },
+                |_, constants| assert!(!constants.unwrap().calibrated),
             )
             .unwrap();
         }
@@ -3085,11 +2555,66 @@ mod tests {
         symtn_dense::engine_slot::clear(&mut engine);
         region_with(
             &mut engine,
-            |_, _, _| calls.set(calls.get() + 1),
+            |_, _| {
+                calls.set(calls.get() + 1);
+                false
+            },
             |_, constants| assert!(constants.is_some()),
         )
         .unwrap();
         assert_eq!(calls.get(), 2);
+    }
+
+    /// Purpose: without a complete calibration every modeled phase stays
+    /// serial (the fail-closed decision); the same phase on calibrated
+    /// constants is the control that splits.
+    #[test]
+    fn uncalibrated_constants_keep_modeled_phases_serial() {
+        let mut engine =
+            tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(4).build().unwrap());
+        let mut constants = Constants::reference(HostClass::Generic);
+        constants.item_dispatch = vec![0.0; 5];
+        constants.plan_dispatch = vec![0.0; 5];
+        for (calibrated, split) in [(false, false), (true, true)] {
+            constants.calibrated = calibrated;
+            crate::host_pool::lane_region(
+                &mut engine,
+                crate::host_pool::HostPoolSite::Replay,
+                |exec| {
+                    let width = width::<f64, _>(
+                        &exec,
+                        Some(&constants),
+                        8,
+                        0,
+                        0,
+                        || [0.0; CLASSES],
+                        |_, _| false,
+                        |_| |q, _, _| 400.0 / q as f64,
+                    );
+                    assert_eq!(width > 1, split);
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    /// Purpose: every leaf share a candidate split gives (the shares whose
+    /// D_plan the model reads) is a measured share; a share no split gives
+    /// is the control that is not measured.
+    #[test]
+    fn measured_leaf_shares_cover_every_candidate_split() {
+        for budget in 2..=97 {
+            for q in core::iter::once(1).chain(dispatch_ladder(budget)) {
+                leaf_max(0, budget, budget, q, 0, &|_, slots, _| {
+                    assert!(
+                        slots < 2 || leaf_share(budget, slots),
+                        "p={budget}, q={q}, s={slots}"
+                    );
+                    0.0
+                });
+            }
+        }
+        assert!(!leaf_share(96, 5));
     }
 
     /// Purpose: accepted online constants outrank references and survive warm reentry.
@@ -3101,10 +2626,11 @@ mod tests {
         for _ in 0..2 {
             region_with(
                 &mut engine,
-                |_, _, constants| {
+                |_, constants| {
                     calls.set(calls.get() + 1);
                     constants.rows[0].a += 1.0;
-                    constants.dispatch[2] = Some(Duration::from_nanos(110));
+                    constants.item_dispatch[2] = 110.0;
+                    true
                 },
                 |_, constants| {
                     let constants = constants.unwrap();
@@ -3112,10 +2638,8 @@ mod tests {
                     assert_eq!(rows[0].a, CI_ROWS[0].a + 1.0);
                     assert_ne!(rows[0].a, CI_ROWS[0].a);
                     assert_eq!(rows[1], CI_ROWS[1]);
-                    assert_eq!(
-                        constants.dispatch_cost(2, || panic!("retained online dispatch")),
-                        110.0
-                    );
+                    assert!(constants.calibrated);
+                    assert_eq!(constants.item_cost(2), 110.0);
                 },
             )
             .unwrap();
@@ -3129,7 +2653,7 @@ mod tests {
         let mut engine = tenferro_cpu::CpuEngine::serial();
         region_with(
             &mut engine,
-            |_, _, _| panic!("serial calibration"),
+            |_, _| panic!("serial calibration"),
             |_, constants| assert!(constants.is_none()),
         )
         .unwrap();

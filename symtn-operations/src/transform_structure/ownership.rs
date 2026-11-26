@@ -244,7 +244,6 @@ pub(super) fn compile_movement(
     let mut pack_prefix = Vec::with_capacity(schedule.pack_columns.len());
     let mut packs = Vec::with_capacity(schedule.scatter_groups.len());
     let mut scatters = Vec::with_capacity(schedule.scatter_groups.len());
-    let mut groups = Summary::default();
     for group in &schedule.scatter_groups {
         let mut pack = Summary::default();
         for column in &schedule.pack_columns[group.pack.clone()] {
@@ -286,16 +285,12 @@ pub(super) fn compile_movement(
             )?;
         }
         scatter.finish()?;
-        groups.add_totals(&pack)?;
-        groups.add_totals(&scatter)?;
         packs.push(pack);
         scatters.push(scatter);
     }
-    groups.finish()?;
     schedule.member_pack_movement =
         Summary::totals([&inactive, &singles].into_iter().chain(&packs))?;
     schedule.member_scatter_movement = Summary::totals(&scatters)?;
-    schedule.group_movement = groups;
     schedule.pack_movement = packs;
     schedule.pack_prefix = pack_prefix;
     schedule.scatter_movement = scatters;

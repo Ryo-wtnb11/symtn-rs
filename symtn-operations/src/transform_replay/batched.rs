@@ -5,8 +5,8 @@ use crate::transform_structure::TreeTransformDirectItem;
 
 /// Replay direct fills and Singles, then plan groups. One-slot, Sequential and
 /// Inner replays use the serial sequence. Wider Auto replays price every
-/// movement phase and the group chunk width with the same chooser; the group's
-/// GEMM time comes from the dense provider's cost estimate. Inline items keep the caller's
+/// movement phase with the same chooser and run plan groups in chunks of as
+/// many groups as the token has slots. Inline items keep the caller's
 /// whole token (one slot under Sequential), and split leaves get balanced
 /// shares of that whole token. The first failure stops replay.
 /// Callers first refuse a forced policy their executor cannot honor.

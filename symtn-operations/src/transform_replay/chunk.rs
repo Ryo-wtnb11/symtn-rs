@@ -17,7 +17,8 @@ use crate::transform_structure::{
 
 /// One-slot, Sequential and Inner replays use the serial item loop without the
 /// movement model; only Sequential narrows its token. Wider Auto replays price
-/// direct fills, Singles, and plan-group chunk size. Other forced policies keep
+/// direct fills and Singles, and chunk plan groups by the token's width. Other
+/// forced policies keep
 /// their widths, and execution gates decide whether one inline item fans out.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn direct<W, T, D, C>(
@@ -247,33 +248,17 @@ where
                 )
             };
             let jobs = task.recoupling_plan().jobs();
-            let threads = movement::group_width::<D, _>(
-                exec,
-                constants,
-                jobs.len(),
-                schedule.group_movement.working_set as u128,
-                schedule
-                    .group_movement
-                    .logical_traffic(key.reads_destination) as u128,
-                || {
-                    schedule
-                        .group_movement
-                        .counts
-                        .map(|count| count.elements as f64)
-                },
-                |_, _| false,
-                |costs| {
-                    movement::group_phase(
-                        schedule,
-                        costs,
-                        |group| {
-                            lanes::gemm_cost(&jobs[group], D::one().dense_scalar()).as_secs_f64()
-                                * 1e9
-                        },
-                        movement::chunk_fixed(constants),
-                    )
-                },
-            );
+            // Why the widest chunk the token allows, not a modeled width:
+            // chunks run one after another, each paying its engine entries,
+            // pack, one dense batch call and scatter, so fewer chunks never
+            // add symtn-side cost; how the batch call runs its jobs is the
+            // dense backend's decision, which symtn neither sees from a
+            // region nor duplicates. Only the token's width bounds a chunk,
+            // as on main; a wider chunk needs only larger packed scratch
+            // (`chunk_scratch`).
+            let threads = lanes::forced_width(exec, jobs.len())
+                .unwrap_or_else(|| exec.budget().min(jobs.len()))
+                .max(1);
             widths.extend([
                 threads,
                 fixed(&schedule.single_movement),

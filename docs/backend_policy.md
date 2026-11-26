@@ -374,14 +374,17 @@ range. Every executed role contributes its setup, run and element costs:
 
 ```text
 t_i = a[c] + r[c](W) * runs_i + e[c](W) * elements_i
-planned leaf time = min(T_planned, k * D(s) + max(T_planned/s, X_planned/B(s, W)))
+planned leaf time = min(T_planned, k * D_plan(s) + max(T_planned/s, X_planned/B(s, W)))
 tau_leaf = T_serial + planned leaf time
-T(q) = D(q) * [q > 1] + max(max_leaf(tau_leaf), X/B(p, W))
+T(q) = D_item(q) * [q > 1] + max(max_leaf(tau_leaf), X/B(p, W))
 q* = argmin T(q), with ties to smaller q
 ```
 
 Here p is the caller token's slot budget, q its number of leaves, s a leaf's
-actual slot share, and k its number of planned roles. The same expression
+actual slot share, and k its number of planned roles. D_item(q) is the fork
+the item phases run (a tree split of q leaves over the whole token) and
+D_plan(s) the fork one planned role runs on its leaf's s slots (Strided's flat
+`for_ranges` section); both are measured per engine, below. The same expression
 prices q=1 on all p slots. Concurrent leaves share the aggregate bandwidth
 at p slots for every candidate, including inline execution. The planned-leaf expression aggregates each leaf's planned work before
 comparing serial and parallel execution. The candidates are
@@ -395,11 +398,10 @@ classes distinguish contiguous or strided inner traversal, and inactive fill
 from real maps. Copy and non-identity real scale share a class; runtime alpha
 and destination scales never alter the compiled classes. Rows are indexed by
 structural class only; unmeasured fill rows use the same-stride real-map row.
-An unlisted `HostClass` uses the checked-in AMD EPYC 9V45 CI rows, the same
-fallback as `X86_64Avx512`; these seeds are not validated predictions for that
-host. Reference curves interpolate in log W and remain flat outside their knots.
-Beyond the last online knot, an online curve keeps the reference curve's shape,
-scaled to meet that knot.
+Every modeled decision reads online rows; the checked-in AMD EPYC 9V45 CI
+reference curves (used for every `HostClass`) only give an online curve its
+shape beyond the last online knot, scaled to meet that knot. Curves
+interpolate in log W and remain flat outside their knots.
 
 Planned roles are exactly those retaining the compiled Single or scatter plan;
 pack columns, inactive fills and fused member ranges execute serial walks.
@@ -415,26 +417,19 @@ admitted roles between the two are priced serially (an upper bound). No
 runtime pass over individual roles is needed. This policy can withhold inner
 fan-out credit, but never grants it to a rejected role or accumulation.
 
-The plan-group chunk decision adds the dense provider's existing serial GEMM
-estimate to each group's pack and scatter costs. Its q consecutive GEMMs are
-submitted together, with serial barriers between chunks, so the critical-path
-estimate is the sum of each chunk's maximum group cost. Every chunk also pays
-its three engine entries (pack, GEMM batch, scatter) at the engine's measured
-entry cost (none when unmeasured), and every chunk of more than one group pays
-D at its group count for its batch fork; the chooser's D(q) is the first
-chunk's, which always holds q groups. This decision alone reads the chunk
-dispatch row (below) for every D it charges; every other decision reads the
-phase row. That estimate conservatively withholds
-inner movement credit; actual pack and scatter phases choose their own leaves,
-and their forks are priced by their own decisions. A chunk's scatter is also
-priced inside its maximum group cost although it runs serially when the
-chunk's destination hulls form one ownership run; the runs depend on the
-chunk boundaries. With one run per chunk the serial scatter sums to the
-same total at every q, so the omission lowers the absolute T(q) (measured
-430-460 µs of scatter at every q >= 16 against a few µs modeled) and does not
-favor any one q by that total. It does not predict the dense provider's
-placement or runtime. Only movement elements feed B(q,W); dense time never
-changes that roof.
+Plan groups have no width model. A group phase runs its chunks one after
+another (`for chunk in jobs.chunks(threads)`), and each chunk pays its engine
+entries, its pack, one dense batch call over its groups and its scatter, so
+the phase costs the sum over chunks. The per-chunk fixed part is positive, and
+how the batch call runs its jobs is the dense backend's decision, which symtn
+can neither price from inside a region nor duplicate. Fewer chunks therefore
+never add symtn-side cost, and a group phase takes the widest chunk the token
+allows: min(groups, p) groups per chunk under Auto, the forced policy's lanes
+otherwise, one on a serial engine. A wider chunk needs only larger packed
+scratch, sized once per decision. Measured on a 96-thread Xeon Platinum 9242,
+pack, GEMM and scatter per permute of a small U(1)xSU(2) tensor fell at every
+widening, 2201, 818, 685, 614 and 440 µs for 1, 8, 16, 24 and 48 groups per
+chunk. Pack and scatter inside a chunk keep their own priced widths.
 
 Known unmodeled effect: the Singles width changes the cost of the plan-group
 chunks that follow it. Measured on a 96-thread Xeon Platinum 9242 (permute of
@@ -513,9 +508,8 @@ summary construction, sorting or an engine-extension lookup. The operation's
 structure lookup checks at most 16 Weak identities; its exact dispatch-key
 comparison costs O(p) under Auto and O(1) under forced policies. On a miss,
 a fixed chooser costs O(sum_candidate q), with constant-size class arithmetic per leaf and O(log q)
-recursion depth. The plan-group decision visits G groups per candidate to
-price actual batch barriers, and each chunk combines t group summaries once
-in O(t). One effective width returns before cost preparation or element-count
+recursion depth. The plan-group width costs O(1), and each chunk combines t
+group summaries once in O(t). One effective width returns before cost preparation or element-count
 reads.
 
 Single-tensor one-slot, Sequential and Inner replays bypass the movement model
@@ -535,46 +529,50 @@ extension store and fetched once per operation, before preparing all its
 movement decisions. Reference entry creation and completed online updates
 receive fresh process-wide generations, so a workspace cannot reuse widths
 from a different engine entry or an evicted entry's replacement.
-Online measurement is attempted once per retained entry,
-through the real replay writer using shared buffers, within a 10 ms budget
-including fixture construction. The deadline is checked before every fixture.
-Failed or unfinished entries keep the next source and
-are not retried before eviction or `scratch::trim`. Each row uses, in order,
-its online measurement, the checked-in reference for threadteam's HostClass,
-or the slowest available row with the same inner stride. An online row must be
-physical (a >= 0, r >= 0, e > 0). A negative fitted setup or per-run term means
-that term is below the measurement's resolution, not that the host differs: it
-is fixed at zero and each one-run sample's total is attributed to the remaining
-terms (their least-squares fit on the same samples). Only a row that is still
-non-physical (e <= 0), has non-finite samples, or hit the deadline before its
-samples falls back. The reference table
-records the CI CPU, date and run provenance; that run's fit-acceptance flag was
-false, so these rows are measured seeds, not validated phase predictions.
-D(q) uses the engine entry's online empty-fork measurement when available,
-otherwise threadteam's `Exec::dispatch_cost`, including the pool creator's
-overrides. The chooser's candidate widths below p, and p, are measured through
-the running engine's `limit(q)` prefix after warm-up, taking the median of five
-batches of eight empty forks, before the movement fixtures and inside their
-shared 10 ms budget. Samples above 20 times the table value are rejected; there
-is no lower bound. When at least one width is accepted, every width from 2 to p
-is completed from the accepted anchors: linearly between them, and outside them
-the table scaled to the nearest anchor; the row is then made non-decreasing by
-its running maximum, so measured and tabulated widths never mix into a dip.
-Without an accepted width every width keeps the table. This phase row prices
-forks that follow other parallel work. Plan-group chunks meet the pool after a
-chunk's serial work instead, where entries and forks cost several times more
-(an empty entry 0.3 µs back to back against 4 µs after the serial scatter at
-96 threads), so the same deadline also measures, after the movement rows, a
-chunk dispatch row and the engine entry, each sample a single fork or empty
-guarded entry (outside any region) taken right after the calling thread has
-kept the pool idle for a fixed 50 µs stretch, the median of three samples.
-The stretch stands for a chunk's serial work (14-55 µs in the measured
-small-sector fixtures); calibration cannot see a structure's chunks. At 96
-threads the chunk row takes at most 12 widths x 3 samples x (50 µs + D), about
-3 ms, and the entry about 0.2 ms. The chunk row is completed like the phase
-row; an unmeasured or rejected chunk width falls back to the phase row, then
-the table, and an unmeasured entry prices chunks with no entry cost. These measurements affect only symtn's
-movement model; the pool's dispatch table and dense provider remain unchanged.
+Online measurement is attempted once per retained entry and runs to
+completion: fixed sample counts, no deadline, and no row filled from another
+row. It measures, in order:
+
+- D_item(q) at every candidate width q <= p: the production `run_native` with
+  a `Split` of q leaves over the whole token, as Singles, inactive fills,
+  pack, scatter and member ranges run it, with empty leaves; the median of 31
+  calls after one warm-up.
+- D_plan(s) at every leaf share s >= 2 that a candidate split gives
+  (floor(p/q), ceil(p/q) and p): an empty `for_ranges` section of s parts on
+  a token limited to s, the call Strided's planned update makes inside a leaf
+  (`for_len` limits the token, `parallel_for_each` runs `for_ranges`); the
+  median of 31 calls after one warm-up. A real planned role is not timed:
+  Strided widens a role to all s slots only once its copy outweighs the extra
+  sections, which takes millions of elements on a 96-slot pool, and the
+  section is the same call.
+- The two element rows (contiguous and strided), through the real replay
+  writer on shared buffers, three samples per point.
+- B(q) on the doubling ladder 2, 4, ..., p: q serial copy leaves of the item
+  phases' tree split over the whole token on the row buffers (about 8 MiB of
+  traffic), the median of three runs less D_item(q).
+
+A point fails only when a fixture cannot be built, the lane runner refuses
+its supply, or an element row stays non-physical after the refit below. Any
+failure leaves the entry uncalibrated, and an uncalibrated entry runs every
+modeled phase serially (q = 1), which never forks and is the replay's
+semantics on a one-slot engine; plan groups keep their constant-free rule.
+Failed entries are not retried before eviction or `scratch::trim`. An online
+element row must be physical (a >= 0, r >= 0, e > 0). A negative fitted setup
+or per-run term means that term is below the measurement's resolution, not
+that the host differs: it is fixed at zero and each one-run sample's total is
+attributed to the remaining terms (their least-squares fit on the same
+samples). Beyond its largest online working set (4 MiB) an element curve keeps
+the checked-in reference curve's shape, scaled to meet its last online knot;
+the reference table records the CI CPU, date and run provenance. The constants
+depend on timing but not on how many points happened to fit a budget. On a
+96-thread Xeon Platinum 9242 the dispatch rows take 12 x 32 tree splits
+(2-10 µs each) and 11 x 32 sections (0.7-39 µs), about 5 ms together; the
+element rows take a few ms and the 7 bandwidth points about 5 ms. The
+dispatch part grows with the number of candidate widths (at most 12) and
+leaf shares (at most 2 per candidate, about 10) times the fork's cost; the
+bandwidth part shrinks per point as q grows.
+These measurements affect only symtn's movement model; the pool's dispatch
+table and dense provider remain unchanged.
 Bandwidth uses the same element costs as the serial model:
 E(W) = sum_c(elements_c * e[c](W)), b1(W) = X/E(W), and
 B(q, W) = min(q*b1(W), B_sat(q, W)). Setup and run costs remain in S, rather
@@ -592,30 +590,17 @@ computed once per retained constants entry. Compiled counts supply the phase's
 class weights directly, including member and cold-fill element counts, without
 extra cost preparations or allocations.
 
-Bandwidth fixtures are at most the contiguous curve's knee in size and use
-exactly the same q-slot prefix when measuring q, regardless of the caller's
-budget. Each ladder knot is attempted once per retained entry. Measurements
-below the fixture's single-thread memory rate or below the previous accepted
-knot are rejected before linear interpolation in q. Missing widths use the
-nearest accepted endpoint outside the measured range; no accepted measurement
-means infinity. A phase also rejects a prefix below either its own b1(memory W)
-or b1(W), using the nearest accepted endpoint at or above both rates, or
-infinity if none exists. The current-W check covers noise after the knee.
-The row-calibration buffers occupy 8 MiB; they are released before bandwidth
-buffers are allocated lazily, requesting combined payload capacity at most the
-contiguous knee plus 16*(p+1) bytes. Their destination pages are first written by workers.
-Before allocating those buffers, admission bounds their size by the remaining
-deadline using the observed small-buffer allocation, source first-touch and
-teardown rate, the serial element curve, and every remaining ladder dispatch.
-The fixture is the memory knee when that bound accommodates it, and otherwise
-the largest size the bound admits; below the largest row-calibration working
-set (4 MiB) the measurement is skipped and the cap stays unknown. A bandwidth
-measured at a working set bounds the bandwidth of every larger one, so the cap
-applies to phases whose W reaches the smaller of the knee and the measured
-fixture's working set.
-The deadline is checked again before each fixture and after each sample;
-unfinished measurements leave the cap unknown. Source selection never changes
-the formula or chooser.
+Each ladder knot is measured once per retained entry. Measurements below the
+fixture's single-thread memory rate or below the previous accepted knot are
+rejected before linear interpolation in q within the same row. Missing widths
+use the nearest accepted endpoint outside the measured range; no accepted
+measurement means infinity. A phase also rejects a prefix below either its
+own b1(memory W) or b1(W), using the nearest accepted endpoint at or above
+both rates, or infinity if none exists. The current-W check covers noise
+after the knee. A bandwidth measured at a working set bounds the bandwidth of
+every larger one, so the cap applies to phases whose W reaches the smaller of
+the knee and the fixture's working set. Source selection never changes the
+formula or chooser.
 
 A fixed-stride member batch admits all member ranges before writing, resolves
 destination scales once per role, and moves its members around one dense

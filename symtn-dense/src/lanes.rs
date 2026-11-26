@@ -103,20 +103,6 @@ pub fn forced_width(exec: &Exec<'_>, jobs: usize) -> Option<usize> {
     })
 }
 
-/// Internal seam between workspace crates for the block placement's serial
-/// GEMM estimate. This is not a supported user API; scalar values are ignored.
-#[doc(hidden)]
-pub fn gemm_cost(job: &crate::DenseGemmBatchJob, scalar: crate::DenseScalar) -> Duration {
-    use crate::block_kernel::{driver, gemm};
-    let work = match scalar {
-        crate::DenseScalar::F32(_) => gemm::work::<f32>(job),
-        crate::DenseScalar::F64(_) => gemm::work::<f64>(job),
-        crate::DenseScalar::C32(_) => gemm::work::<num_complex::Complex32>(job),
-        crate::DenseScalar::C64(_) => gemm::work::<num_complex::Complex64>(job),
-    };
-    driver::cost(driver::OpKind::Gemm, work, &Default::default())
-}
-
 /// What a job's model depends on besides its serial time, the execution
 /// context and its op's kind: jobs with equal keys and equal serial times get
 /// equal stage widths and equal item times at every width.
