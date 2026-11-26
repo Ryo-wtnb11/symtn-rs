@@ -609,7 +609,7 @@ pub(super) fn prefix_phase<'a>(
             q,
             fill.unwrap_or(0),
             &|range, slots, fill_elements| {
-                let roles = planned_range(planned, range.clone());
+                let roles = planned_range(prefix, planned, range.clone());
                 let movement = prices.leaf(job_range(prefix, range), roles, &costs, slots);
                 let (a, r, e) = costs[2];
                 movement
@@ -1486,6 +1486,7 @@ mod tests {
                                     [Counts::default(); CLASSES]
                                 },
                                 counts,
+                                ..Job::default()
                             }
                         })
                         .collect();
@@ -1770,12 +1771,15 @@ mod tests {
     fn job_roles(job: &Job) -> Planned {
         let mut roles = Planned::default();
         for (class, count) in job.planned.iter().enumerate() {
-            if count.items != 0 {
+            if let (Some(runs), Some(elements)) = (
+                count.runs.checked_div(count.items),
+                count.elements.checked_div(count.items),
+            ) {
                 roles.role(
                     class,
                     crate::movement::Point {
-                        runs: (count.runs / count.items) as usize,
-                        elements: (count.elements / count.items) as usize,
+                        runs: runs as usize,
+                        elements: elements as usize,
                     },
                 );
             }
@@ -1793,7 +1797,7 @@ mod tests {
                 *count = count.add(other).unwrap();
             }
             phase.record_job(&job.counts).unwrap();
-            *phase.planned_jobs.last_mut().unwrap() = job_roles(job);
+            phase.prefix.last_mut().unwrap().roles = job_roles(job);
         }
         phase.finish().unwrap();
         phase
@@ -1813,6 +1817,7 @@ mod tests {
             } else {
                 [Counts::default(); CLASSES]
             },
+            ..Job::default()
         }
     }
 
@@ -2064,7 +2069,11 @@ mod tests {
                             Counts::default()
                         }
                     });
-                    Job { counts, planned }
+                    Job {
+                        counts,
+                        planned,
+                        ..Job::default()
+                    }
                 })
                 .collect::<Vec<_>>();
             let phase = compiled_jobs(&jobs);
@@ -2094,7 +2103,10 @@ mod tests {
                     let roles = jobs[range.clone()]
                         .iter()
                         .fold(Planned::default(), |roles, job| roles.join(job_roles(job)));
-                    assert_eq!(planned_range(&phase.planned_jobs, range.clone()), roles);
+                    assert_eq!(
+                        planned_range(&phase.prefix, &phase.planned_jobs, range.clone()),
+                        roles
+                    );
                     let actual = job_range(&phase.prefix, range);
                     assert_eq!(actual, expected);
                     actual_sum.set(actual_sum.get() + prices.leaf(actual, roles, &costs, slots));

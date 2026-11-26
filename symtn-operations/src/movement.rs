@@ -38,6 +38,9 @@ fn add(a: u64, b: u64) -> Result<u64, OperationError> {
 pub(crate) struct Job {
     pub counts: [Counts; CLASSES],
     pub planned: [Counts; CLASSES],
+    /// This job's own planned extremes, not cumulative: sums and
+    /// differences of jobs carry none.
+    pub roles: Planned,
 }
 
 impl Job {
@@ -49,6 +52,7 @@ impl Job {
         for (left, right) in result.planned.iter_mut().zip(rhs.planned) {
             *left = left.add(right)?;
         }
+        result.roles = Planned::default();
         Ok(result)
     }
 }
@@ -94,34 +98,61 @@ impl Planned {
     }
 }
 
-/// Turns `n` per-job entries into a bottom-up segment tree of `2n` entries:
-/// leaves at `n..2n`, node `i` joining nodes `2i` and `2i + 1`.
-pub(crate) fn planned_tree(nodes: &mut Vec<Planned>) {
-    let n = nodes.len();
-    nodes.resize(2 * n, Planned::default());
-    nodes.copy_within(..n, n);
+/// Builds into `nodes` the internal nodes `1..n` of the bottom-up segment
+/// tree over the `n` jobs of `leaves`, whose leaf `n + k` is job `k`'s
+/// `roles` and whose node `i` joins nodes `2i` and `2i + 1`. One exact
+/// reservation, none for at most one job: compilation adds a constant
+/// number of allocations per phase, not one per job or growth step.
+pub(crate) fn planned_tree(leaves: &[Job], nodes: &mut Vec<Planned>) {
+    let n = leaves.len();
+    nodes.clear();
+    if n < 2 {
+        return;
+    }
+    nodes.reserve_exact(n);
+    nodes.resize(n, Planned::default());
     for i in (1..n).rev() {
-        nodes[i] = nodes[2 * i].join(nodes[2 * i + 1]);
+        let child = |j: usize| {
+            if j >= n {
+                leaves[j - n].roles
+            } else {
+                nodes[j]
+            }
+        };
+        let joined = child(2 * i).join(child(2 * i + 1));
+        nodes[i] = joined;
     }
 }
 
-/// The planned extremes of jobs `range` from a [`planned_tree`], in
-/// O(log jobs); an empty tree plans nothing.
-pub(crate) fn planned_range(tree: &[Planned], range: core::ops::Range<usize>) -> Planned {
-    let n = tree.len() / 2;
+/// The planned extremes of jobs `range` of `leaves` from their
+/// [`planned_tree`] `nodes`, in O(log jobs); without a tree over several
+/// jobs (a phase that plans no role) the range plans nothing.
+pub(crate) fn planned_range(
+    leaves: &[Job],
+    nodes: &[Planned],
+    range: core::ops::Range<usize>,
+) -> Planned {
+    let n = leaves.len();
     let mut result = Planned::default();
-    if n == 0 {
+    if n == 0 || (n > 1 && nodes.len() != n) {
         return result;
     }
+    let node = |j: usize| {
+        if j >= n {
+            leaves[j - n].roles
+        } else {
+            nodes[j]
+        }
+    };
     let (mut lo, mut hi) = (range.start + n, range.end + n);
     while lo < hi {
         if lo % 2 == 1 {
-            result = result.join(tree[lo]);
+            result = result.join(node(lo));
             lo += 1;
         }
         if hi % 2 == 1 {
             hi -= 1;
-            result = result.join(tree[hi]);
+            result = result.join(node(hi));
         }
         lo /= 2;
         hi /= 2;
@@ -149,6 +180,7 @@ pub(crate) fn job_range(prefix: &[Job], range: core::ops::Range<usize>) -> Job {
     Job {
         counts: difference(end.counts, start.counts),
         planned: difference(end.planned, start.planned),
+        roles: Planned::default(),
     }
 }
 
@@ -160,7 +192,7 @@ pub(crate) struct Summary {
     pub planned_roles: Planned,
     /// Cumulative counts in executed-job order, only where a decision reads them.
     pub prefix: Vec<Job>,
-    /// The [`planned_tree`] of each `prefix` job's planned extremes.
+    /// The internal [`planned_tree`] nodes over the `prefix` jobs' roles.
     pub planned_jobs: Vec<Planned>,
     /// The planned extremes of the job being recorded.
     open: Planned,
@@ -189,13 +221,15 @@ impl Summary {
         Job {
             counts: self.counts,
             planned: self.planned,
+            roles: Planned::default(),
         }
     }
 
     pub(crate) fn record_job(&mut self, job: &[Counts; CLASSES]) -> Result<(), OperationError> {
         if job.iter().any(|count| count.items != 0) {
-            self.prefix.push(self.job());
-            self.planned_jobs.push(self.open);
+            let mut job = self.job();
+            job.roles = self.open;
+            self.prefix.push(job);
         }
         self.open = Planned::default();
         Ok(())
@@ -203,9 +237,8 @@ impl Summary {
 
     pub(crate) fn finish(&mut self) -> Result<(), OperationError> {
         self.prefix.shrink_to_fit();
-        if self.planned_jobs.len() == self.prefix.len() {
-            planned_tree(&mut self.planned_jobs);
-            self.planned_jobs.shrink_to_fit();
+        if self.planned_jobs.is_empty() {
+            planned_tree(&self.prefix, &mut self.planned_jobs);
         }
         self.working_set = self
             .extents

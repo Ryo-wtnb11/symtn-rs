@@ -348,7 +348,6 @@ where
                         .map(|&group| &schedule.scatter_movement[group]),
                 )?;
                 prefix.clear();
-                planned.clear();
                 let mut cumulative = crate::movement::Job::default();
                 for (run, &start) in runs.iter().enumerate() {
                     let end = runs.get(run + 1).map_or(groups.len(), |&end| end as usize);
@@ -357,10 +356,11 @@ where
                         cumulative = cumulative.add(schedule.scatter_movement[group].job())?;
                         roles = roles.join(schedule.scatter_movement[group].planned_roles);
                     }
-                    prefix.push(cumulative);
-                    planned.push(roles);
+                    let mut job = cumulative;
+                    job.roles = roles;
+                    prefix.push(job);
                 }
-                crate::movement::planned_tree(planned);
+                crate::movement::planned_tree(&prefix[..], planned);
                 let scatter_width = movement::width::<D, _>(
                     exec,
                     constants,

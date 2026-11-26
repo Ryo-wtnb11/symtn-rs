@@ -445,11 +445,13 @@ A cold pack fill is divided by the same recursive leaf counts as execution.
 With I role intervals, B blocks, F total axis metadata, and G plan groups,
 compilation takes O(I log I + B + F) time and O(I+G) retained metadata.
 For J_s Single jobs, J_z inactive jobs and C pack columns, the new prefix
-payload is `size_of::<Job>() * (J_s + J_z + C)` bytes (192 bytes per entry:
-two arrays of four `(items,runs,elements)` u64 triples), plus
-`2 * size_of::<Planned>() * (J_s + J_z)` bytes of planned-extremes tree (32
-bytes per node on a 64-bit target). Actual capacities are charged, together
-with every Summary and its inline planned totals.
+payload is `size_of::<Job>() * (J_s + J_z + C)` bytes (224 bytes per entry:
+two arrays of four `(items,runs,elements)` u64 triples and the job's own
+32-byte planned extremes, the segment tree's leaves), plus
+`size_of::<Planned>() * J` bytes of internal tree nodes for each phase of J >= 2
+jobs, reserved once at its exact size so compilation adds a constant number of
+allocations per phase. Actual capacities are charged, together with every
+Summary and its inline planned totals.
 Each per-dtype workspace in the engine's retained context keeps decisions for
 at most 16 compiled structures. Entries are ordered by most recent use (LRU);
 a missing structure reuses a dead Weak identity first, then an unused slot,
