@@ -94,6 +94,64 @@ pub(crate) enum Update<T> {
     Axpby(T),
 }
 
+/// Runs `$run` with `$dst_base` and `$src_base` bound to the bases of every
+/// run of axis 0 `$dims` addresses from the two offsets, the outer axes
+/// stepped as one odometer with axis 1 fastest. `$index` is the caller's
+/// traversal scratch of the layout's rank.
+///
+/// Why a macro, not a function taking a closure: a run body passed as a
+/// closure is a function of its own, called once per run, and whether LLVM
+/// inlines it is a cost decision that `#[inline(always)]` on the walk
+/// cannot force (a profile showed it as a standalone function called per
+/// run).
+/// Expanded here, the run body is the loop's own code.
+macro_rules! odometer {
+    (
+        $dims:expr,
+        $dst_strides:expr,
+        $src_strides:expr,
+        $dst_offset:expr,
+        $src_offset:expr,
+        $index:expr,
+        |$dst_base:ident, $src_base:ident| $run:block
+    ) => {{
+        let dims: &[usize] = $dims;
+        let rank = dims.len();
+        // Why the reslices: they state the equal ranks once, so the carry
+        // loop indexes all four slices by `axis < rank` without a check per
+        // slice.
+        let (index, dst_strides, src_strides): (&mut [usize], &[isize], &[isize]) = (
+            &mut $index[..rank],
+            &$dst_strides[..rank],
+            &$src_strides[..rank],
+        );
+        index.fill(0);
+        let (mut dst_cursor, mut src_cursor): (isize, isize) = ($dst_offset, $src_offset);
+        'runs: loop {
+            {
+                let ($dst_base, $src_base) = (dst_cursor, src_cursor);
+                $run
+            }
+            let mut axis = 1;
+            loop {
+                if axis >= rank {
+                    break 'runs;
+                }
+                index[axis] += 1;
+                dst_cursor += dst_strides[axis];
+                src_cursor += src_strides[axis];
+                if index[axis] < dims[axis] {
+                    break;
+                }
+                dst_cursor -= dims[axis] as isize * dst_strides[axis];
+                src_cursor -= dims[axis] as isize * src_strides[axis];
+                index[axis] = 0;
+                axis += 1;
+            }
+        }
+    }};
+}
+
 /// Applies `action` to every `(dst, src)` element pair `layout` addresses
 /// from the two offsets, in one odometer over the fused axes with axis 0
 /// innermost; a run that steps by one in both operands is walked as two
@@ -141,7 +199,7 @@ pub(crate) fn span<S, A, T>(
         // Why the length class is chosen per call: `len` is the layout's, so
         // one test selects the run kernel for every run of the call.
         if len <= contiguous_piece::<T>() {
-            odometer(
+            odometer!(
                 dims,
                 dst_strides,
                 src_strides,
@@ -149,16 +207,18 @@ pub(crate) fn span<S, A, T>(
                 src_offset,
                 index,
                 |dst_base, src_base| {
+                    // Why the plain loop: an identity map lowers it to one
+                    // libc `memcpy` of the run, which baseline-target code
+                    // cannot beat for a short run (see `CONTIGUOUS_PIECE_BYTES`).
                     let (dst_start, src_start) = (dst_base as usize, src_base as usize);
-                    contiguous_blocks::<S, A, T>(
-                        &mut dst[dst_start..dst_start + len],
-                        &src[src_start..src_start + len],
-                        action,
-                    );
-                },
+                    let run = dst[dst_start..dst_start + len].iter_mut();
+                    for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
+                        action.element(slot, value);
+                    }
+                }
             );
         } else {
-            odometer(
+            odometer!(
                 dims,
                 dst_strides,
                 src_strides,
@@ -172,13 +232,13 @@ pub(crate) fn span<S, A, T>(
                         &src[src_start..src_start + len],
                         action,
                     );
-                },
+                }
             );
         }
         return;
     }
     if inner_dst == 0 && inner_src == 0 {
-        odometer(
+        odometer!(
             dims,
             dst_strides,
             src_strides,
@@ -193,7 +253,7 @@ pub(crate) fn span<S, A, T>(
                 for _ in 0..len {
                     action.element(slot, value);
                 }
-            },
+            }
         );
         return;
     }
@@ -211,7 +271,7 @@ pub(crate) fn span<S, A, T>(
                 .and_then(|offset| usize::try_from(offset).ok())
                 .expect("run offset outside usize")
         };
-        odometer(
+        odometer!(
             dims,
             dst_strides,
             src_strides,
@@ -223,7 +283,7 @@ pub(crate) fn span<S, A, T>(
                     let slot = &mut dst[offset(dst_base, inner_dst, position)];
                     action.element(slot, src[offset(src_base, inner_src, position)]);
                 }
-            },
+            }
         );
         return;
     }
@@ -256,7 +316,7 @@ pub(crate) fn span<S, A, T>(
         // iterators gives one counted exit test per element; `step_by` keeps
         // a second remaining-length test per element.
         if inner_src > 0 {
-            odometer(
+            odometer!(
                 dims,
                 dst_strides,
                 src_strides,
@@ -264,9 +324,6 @@ pub(crate) fn span<S, A, T>(
                 src_offset,
                 index,
                 |dst_base, src_base| {
-                    // Why the rebinding: an outlined run body otherwise
-                    // reloads the captured step from memory on every element.
-                    let (step, last, src_size) = (step, last, src_size);
                     let slots = &mut dst[window(dst_base, dst_first, dst_size)];
                     let values = &src[window(src_base, src_first, src_size)];
                     let (body, tail) = slots.split_at_mut(last);
@@ -274,10 +331,10 @@ pub(crate) fn span<S, A, T>(
                         action.element(slot, chunk[0]);
                     }
                     action.element(&mut tail[0], values[src_size - 1]);
-                },
+                }
             );
         } else {
-            odometer(
+            odometer!(
                 dims,
                 dst_strides,
                 src_strides,
@@ -285,7 +342,6 @@ pub(crate) fn span<S, A, T>(
                 src_offset,
                 index,
                 |dst_base, src_base| {
-                    let (step, last, src_size) = (step, last, src_size);
                     let slots = &mut dst[window(dst_base, dst_first, dst_size)];
                     let values = &src[window(src_base, src_first, src_size)];
                     let (body, tail) = slots.split_at_mut(last);
@@ -293,7 +349,7 @@ pub(crate) fn span<S, A, T>(
                         action.element(slot, chunk[step - 1]);
                     }
                     action.element(&mut tail[0], values[0]);
-                },
+                }
             );
         }
         return;
@@ -311,7 +367,7 @@ pub(crate) fn span<S, A, T>(
     // operand stays on its one slot while the other ends the run; a
     // repeated destination is thus updated in source order.
     let (dst_delta, src_delta) = (inner_dst as usize, inner_src as usize);
-    odometer(
+    odometer!(
         dims,
         dst_strides,
         src_strides,
@@ -327,12 +383,12 @@ pub(crate) fn span<S, A, T>(
                 slot = slot.wrapping_add(dst_delta);
                 value = value.wrapping_add(src_delta);
             }
-        },
+        }
     );
 }
 
-/// The most bytes of one contiguous run [`span`] walks in blocks; a longer
-/// run is walked in pieces of at most this size, each one element loop.
+/// The most bytes of one contiguous run [`span`] walks as one element loop; a
+/// longer run is walked in pieces of at most this size, each one such loop.
 ///
 /// Why pieces: an identity map's loop over a contiguous run is lowered by
 /// LLVM to one `memcpy` of the whole run, and libc switches a copy above its
@@ -343,54 +399,18 @@ pub(crate) fn span<S, A, T>(
 /// switch, whatever the host; one call per 16 KiB is a negligible share of
 /// the copy. Scaled and conjugated maps are no `memcpy`, and the pieces only
 /// add one outer loop to them.
+///
+/// Why short runs keep the libc call: code built for the baseline target
+/// moves at most 16 bytes per instruction, so an inline copy of a 128-byte
+/// run takes 16 data moves plus its loop, while libc's runtime-dispatched
+/// `memcpy` takes about 12 instructions for the whole run, call included;
+/// no safe Rust can select wider moves at run time.
 const CONTIGUOUS_PIECE_BYTES: usize = 16 << 10;
 
 /// [`CONTIGUOUS_PIECE_BYTES`] in elements of `T` (at least one).
 #[inline(always)]
 fn contiguous_piece<T>() -> usize {
     (CONTIGUOUS_PIECE_BYTES / size_of::<T>().max(1)).max(1)
-}
-
-/// Elements one block of [`contiguous_blocks`] moves: a small power of two
-/// (one 64-byte line of `f64`).
-const CONTIGUOUS_BLOCK: usize = 8;
-
-/// Applies `action` to every element pair of two equal-length contiguous
-/// runs of at most one piece: whole blocks of [`CONTIGUOUS_BLOCK`] elements,
-/// then the shorter tail, without any libc call.
-///
-/// Why the barriers: LLVM's loop-idiom pass turns a loop of stores of
-/// consecutive loads into one variable-length `memcpy` (a libc call per
-/// run, measured slower for the 128-byte runs of small sectors), and it
-/// merges a loop of constant-size block copies into one such call as well.
-/// It does so only when nothing else in the loop may access memory. An
-/// empty `black_box` after each block and each tail element is an opaque
-/// statement that may (an empty `asm` with a memory clobber, no
-/// instruction), so no loop here is a pure copy: each block stays a
-/// constant-size move that codegen lowers to register or vector moves, and
-/// the tail stays an element loop. Nothing depends on the host: the block
-/// size is a structural constant, and the property holds for every length.
-#[inline(always)]
-fn contiguous_blocks<S, A, T>(dst: &mut [S::Slot], src: &[T], action: &A)
-where
-    T: Copy,
-    S: Store<T>,
-    A: Action<S, T>,
-{
-    #[cfg(test)]
-    tests::observe_blocked_run();
-    let (dst_blocks, dst_tail) = dst.as_chunks_mut::<CONTIGUOUS_BLOCK>();
-    let (src_blocks, src_tail) = src.as_chunks::<CONTIGUOUS_BLOCK>();
-    for (slots, values) in dst_blocks.iter_mut().zip(src_blocks) {
-        for (slot, &value) in slots.iter_mut().zip(values) {
-            action.element(slot, value);
-        }
-        core::hint::black_box(());
-    }
-    for (slot, &value) in dst_tail.iter_mut().zip(src_tail) {
-        action.element(slot, value);
-        core::hint::black_box(());
-    }
 }
 
 /// Applies `action` to every element pair of two equal-length contiguous
@@ -412,53 +432,6 @@ where
         tests::observe_piece(slots.len());
         for (slot, &value) in slots.iter_mut().zip(values) {
             action.element(slot, value);
-        }
-    }
-}
-
-/// Calls `run(dst_base, src_base)` for every run of axis 0 `dims` addresses
-/// from the two offsets, the outer axes stepped as one odometer with axis 1
-/// fastest. `index` is the caller's traversal scratch of the layout's rank.
-///
-/// Why `#[inline(always)]`: this is [`span`]'s own loop, called once per
-/// span with that call's run kernel, and it is forced for the same reason.
-#[inline(always)]
-fn odometer(
-    dims: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    dst_offset: isize,
-    src_offset: isize,
-    index: &mut [usize],
-    mut run: impl FnMut(isize, isize),
-) {
-    let rank = dims.len();
-    // Why the reslices: they state the equal ranks once, so the carry loop
-    // indexes all four slices by `axis < rank` without a check per slice.
-    let (index, dst_strides, src_strides) = (
-        &mut index[..rank],
-        &dst_strides[..rank],
-        &src_strides[..rank],
-    );
-    index.fill(0);
-    let (mut dst_base, mut src_base) = (dst_offset, src_offset);
-    loop {
-        run(dst_base, src_base);
-        let mut axis = 1;
-        loop {
-            if axis >= rank {
-                return;
-            }
-            index[axis] += 1;
-            dst_base += dst_strides[axis];
-            src_base += src_strides[axis];
-            if index[axis] < dims[axis] {
-                break;
-            }
-            dst_base -= dims[axis] as isize * dst_strides[axis];
-            src_base -= dims[axis] as isize * src_strides[axis];
-            index[axis] = 0;
-            axis += 1;
         }
     }
 }
@@ -554,16 +527,6 @@ mod tests {
         /// The pieces [`contiguous_pieces`] walked on this thread, and the
         /// longest of them.
         static PIECES: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
-        /// The runs [`contiguous_blocks`] walked on this thread.
-        static BLOCKED: Cell<usize> = const { Cell::new(0) };
-    }
-
-    pub(super) fn observe_blocked_run() {
-        BLOCKED.with(|runs| runs.set(runs.get() + 1));
-    }
-
-    fn take_blocked_runs() -> usize {
-        BLOCKED.with(|runs| runs.replace(0))
     }
 
     pub(super) fn observe_piece(len: usize) {
@@ -577,16 +540,15 @@ mod tests {
         PIECES.with(|pieces| pieces.replace((0, 0)))
     }
 
-    /// What: a contiguous run of at most one piece is walked in blocks and a
-    /// longer one in pieces of at most [`CONTIGUOUS_PIECE_BYTES`] (each run
-    /// takes exactly one of the two paths), and on both stores every element
-    /// lands where a plain copy puts it, for lengths around the block and
-    /// piece sizes and unaligned starts.
+    /// What: a contiguous run of at most one piece is walked as one loop and
+    /// a longer one in pieces of at most [`CONTIGUOUS_PIECE_BYTES`], and on
+    /// both stores every element lands where a plain copy puts it, for short
+    /// lengths, lengths around the piece size and unaligned starts.
     #[test]
-    fn contiguous_runs_copy_in_blocks_or_bounded_pieces() {
+    fn contiguous_runs_copy_whole_or_in_bounded_pieces() {
         let piece = contiguous_piece::<f64>();
         assert_eq!(piece * size_of::<f64>(), CONTIGUOUS_PIECE_BYTES);
-        let block = CONTIGUOUS_BLOCK;
+        let block = 8;
         let src: Vec<f64> = (0..3 * piece + 8).map(|i| i as f64 + 0.5).collect();
         let lengths = [
             0,
@@ -606,14 +568,9 @@ mod tests {
                 let baked =
                     BakedFusedLayout::from_compiled_normalized_slices(&layout, &[1], &[1], None);
                 let expected = &src[src_offset..src_offset + len];
-                let (pieces, blocked) = match len {
-                    0 => (0, 0),
-                    len if len > piece => (len.div_ceil(piece), 0),
-                    _ => (0, 1),
-                };
+                let pieces = if len > piece { len.div_ceil(piece) } else { 0 };
                 let mut dst = vec![-1.0; len + dst_offset + 1];
                 take_pieces();
-                take_blocked_runs();
                 span::<Init, _, f64>(
                     &mut dst,
                     &src,
@@ -624,7 +581,7 @@ mod tests {
                     &Write(|value: f64| value),
                 );
                 let (count, longest) = take_pieces();
-                assert_eq!((count, take_blocked_runs()), (pieces, blocked));
+                assert_eq!(count, pieces);
                 assert!(longest <= piece);
                 assert_eq!(&dst[dst_offset..dst_offset + len], expected);
                 assert!(dst[..dst_offset].iter().all(|&value| value == -1.0));
@@ -652,7 +609,7 @@ mod tests {
                     },
                 )
                 .unwrap();
-                assert_eq!((take_pieces().0, take_blocked_runs()), (pieces, blocked));
+                assert_eq!(take_pieces().0, pieces);
                 assert_eq!(written, dst);
             }
         }
