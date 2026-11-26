@@ -404,19 +404,27 @@ scaled to meet that knot.
 Planned roles are exactly those retaining the compiled Single or scatter plan;
 pack columns, inactive fills and fused member ranges execute serial walks.
 Credit also requires an overwriting writer whose adapter replays plans, and
-the caller gate's Copy admission on that leaf's token share. A phase compiles
-its smallest planned role size and uses the same cheapest-width `pays`
-predicate as the execution gate. Conservatively, if that minimum is rejected,
-the entire leaf is priced serially, even if larger roles would be admitted.
-No runtime pass over individual roles is needed. This policy can withhold
-inner fan-out credit, but never grants it to a rejected role or accumulation.
+the caller gate's Copy admission on that leaf's token share. A phase compiles,
+per executed job, its smallest planned role size and its largest planned role,
+in a segment tree over the jobs, and a leaf reads its range's two extremes in
+O(log J). Admission uses the same cheapest-width `pays` predicate as the
+execution gate and is monotone in a role's element count: when the leaf's
+slots admit its smallest role, every planned role of the leaf is credited;
+otherwise, when they admit its largest, that role alone is credited and the
+admitted roles between the two are priced serially (an upper bound). No
+runtime pass over individual roles is needed. This policy can withhold inner
+fan-out credit, but never grants it to a rejected role or accumulation.
 
 The plan-group chunk decision adds the dense provider's existing serial GEMM
 estimate to each group's pack and scatter costs. Its q consecutive GEMMs are
 submitted together, with serial barriers between chunks, so the critical-path
-estimate is the sum of each chunk's maximum group cost. That estimate
-conservatively withholds inner movement credit; actual pack and scatter phases
-choose their own leaves. It does not predict the dense provider's placement or
+estimate is the sum of each chunk's maximum group cost. Every chunk also pays
+its three engine entries (pack, GEMM batch, scatter) at the engine's measured
+entry cost (none when unmeasured), and every chunk of more than one group pays
+D at its group count for its batch fork; the chooser's D(q) is the first
+chunk's, which always holds q groups. That estimate conservatively withholds
+inner movement credit; actual pack and scatter phases choose their own leaves,
+and their forks are priced by their own decisions. It does not predict the dense provider's placement or
 runtime. Only movement elements feed B(q,W); dense time never changes that roof.
 
 The schedule compiles per-class setup, run and element totals, planned totals,
@@ -426,19 +434,22 @@ saturated prefix stays conservative. Fixed phases retain cumulative job
 components, and pack columns share one compiled prefix in column order.
 Scatter ownership runs depend on the chosen group chunk. On a decision-key
 miss, the workspace orders each selected chunk's groups, builds its ownership
-runs and reusable movement prefix, and combines its pack/scatter summaries
+runs, reusable movement prefix and planned-extremes tree, and combines its pack/scatter summaries
 before evaluating widths. These aggregates depend on the runtime group width;
-the plan-only counts, extents, planned minimums and pack/job prefixes remain
+the plan-only counts, extents, planned extremes and pack/job prefixes remain
 compiled with the structure. Each modeled leaf reads two prefix entries in
-O(1). There are no per-candidate allocations.
+O(1) and its planned extremes in O(log J). There are no per-candidate
+allocations.
 A cold pack fill is divided by the same recursive leaf counts as execution.
 
 With I role intervals, B blocks, F total axis metadata, and G plan groups,
 compilation takes O(I log I + B + F) time and O(I+G) retained metadata.
 For J_s Single jobs, J_z inactive jobs and C pack columns, the new prefix
 payload is `size_of::<Job>() * (J_s + J_z + C)` bytes (192 bytes per entry:
-two arrays of four `(items,runs,elements)` u64 triples). Actual capacities are
-charged, together with every Summary and its inline planned totals.
+two arrays of four `(items,runs,elements)` u64 triples), plus
+`2 * size_of::<Planned>() * (J_s + J_z)` bytes of planned-extremes tree (32
+bytes per node on a 64-bit target). Actual capacities are charged, together
+with every Summary and its inline planned totals.
 Each per-dtype workspace in the engine's retained context keeps decisions for
 at most 16 compiled structures. Entries are ordered by most recent use (LRU);
 a missing structure reuses a dead Weak identity first, then an unused slot,
@@ -467,8 +478,9 @@ two member decisions. Its allocation charge uses the vector's actual capacity.
 The Auto dispatch key adds `capacity * size_of::<Duration>()` bytes. Retained
 chunk order/run tables charge `capacity * size_of::<ChunkMovement>()` for the
 outer vector, plus each group's `capacity * size_of::<usize>()` and each run
-list's `capacity * size_of::<u32>()` and scatter prefix's
-`capacity * size_of::<Job>()`. Each chunk's inline size includes one additional
+list's `capacity * size_of::<u32>()`, scatter prefix's
+`capacity * size_of::<Job>()` and its planned-extremes tree's
+`capacity * size_of::<Planned>()`. Each chunk's inline size includes one additional
 `usize` for its warm pack width. Temporary aggregate summaries are dropped
 after deciding. The store additionally charges
 `entry_capacity * size_of::<WidthDecision>()`; every initialized entry and
@@ -516,11 +528,17 @@ records the CI CPU, date and run provenance; that run's fit-acceptance flag was
 false, so these rows are measured seeds, not validated phase predictions.
 D(q) uses the engine entry's online empty-fork measurement when available,
 otherwise threadteam's `Exec::dispatch_cost`, including the pool creator's
-overrides. Each width is measured through the running engine's `limit(q)`
-prefix after warm-up, taking the median of five batches of eight empty forks,
-before the movement fixtures and inside their shared 10 ms budget. Samples
-above 20 times the table value are rejected; there is no lower bound. Missing
-or unfinished widths keep the table. These measurements affect only symtn's
+overrides. The chooser's candidate widths below p, and p, are measured through
+the running engine's `limit(q)` prefix after warm-up, taking the median of five
+batches of eight empty forks, before the movement fixtures and inside their
+shared 10 ms budget. Samples above 20 times the table value are rejected; there
+is no lower bound. When at least one width is accepted, every width from 2 to p
+is completed from the accepted anchors: linearly between them, and outside them
+the table scaled to the nearest anchor; the row is then made non-decreasing by
+its running maximum, so measured and tabulated widths never mix into a dip.
+Without an accepted width every width keeps the table. The same deadline also
+times one empty guarded engine entry (median of five batches of eight, outside
+any region), which prices plan-group chunks. These measurements affect only symtn's
 movement model; the pool's dispatch table and dense provider remain unchanged.
 Bandwidth uses the same element costs as the serial model:
 E(W) = sum_c(elements_c * e[c](W)), b1(W) = X/E(W), and
@@ -531,13 +549,15 @@ and cold fills contribute their existing element counts and traffic.
 The terminal value of each measured element curve defines its memory plateau;
 its knee is the first knot after the curve's minimum that reaches that value.
 Online knots and the scaled reference tail both participate. B_sat is infinity
-below the largest knee of the phase's active classes, so a mixed phase uses the
-memory cap only after every active curve has reached its plateau. The knees are
+below the smaller of the largest knee of the phase's active classes and the
+measured bandwidth fixture's working set: a mixed phase uses the memory cap
+only after every active curve has reached its plateau, unless a measured
+fixture already bounds its bandwidth. The knees are
 computed once per retained constants entry. Compiled counts supply the phase's
 class weights directly, including member and cold-fill element counts, without
 extra cost preparations or allocations.
 
-Bandwidth fixtures are at least the contiguous curve's knee in size and use
+Bandwidth fixtures are at most the contiguous curve's knee in size and use
 exactly the same q-slot prefix when measuring q, regardless of the caller's
 budget. Each ladder knot is attempted once per retained entry. Measurements
 below the fixture's single-thread memory rate or below the previous accepted
@@ -552,8 +572,12 @@ contiguous knee plus 16*(p+1) bytes. Their destination pages are first written b
 Before allocating those buffers, admission bounds their size by the remaining
 deadline using the observed small-buffer allocation, source first-touch and
 teardown rate, the serial element curve, and every remaining ladder dispatch.
-If that bound cannot accommodate the full memory knee, the saturated measurement
-is skipped and its cap stays unknown; a smaller cache fixture cannot replace it.
+The fixture is the memory knee when that bound accommodates it, and otherwise
+the largest size the bound admits; below the largest row-calibration working
+set (4 MiB) the measurement is skipped and the cap stays unknown. A bandwidth
+measured at a working set bounds the bandwidth of every larger one, so the cap
+applies to phases whose W reaches the smaller of the knee and the measured
+fixture's working set.
 The deadline is checked again before each fixture and after each sample;
 unfinished measurements leave the cap unknown. Source selection never changes
 the formula or chooser.

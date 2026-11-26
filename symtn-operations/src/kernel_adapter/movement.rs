@@ -140,21 +140,42 @@ pub(crate) fn span<S, A, T>(
     // ahead of the general kernel's bodies keeps the odometer's invariants
     // out of registers (spilled and reloaded on every run).
     if inner_dst == 1 && inner_src == 1 {
-        odometer(
-            dims,
-            dst_strides,
-            src_strides,
-            dst_offset,
-            src_offset,
-            index,
-            |dst_base, src_base| {
-                let (dst_start, src_start) = (dst_base as usize, src_base as usize);
-                let run = dst[dst_start..dst_start + len].iter_mut();
-                for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
-                    action.element(slot, value);
-                }
-            },
-        );
+        // Why the length test is per call: `len` is the layout's, so runs
+        // that fit one piece keep the plain loop without a piece iterator.
+        if len <= contiguous_piece::<T>() {
+            odometer(
+                dims,
+                dst_strides,
+                src_strides,
+                dst_offset,
+                src_offset,
+                index,
+                |dst_base, src_base| {
+                    let (dst_start, src_start) = (dst_base as usize, src_base as usize);
+                    let run = dst[dst_start..dst_start + len].iter_mut();
+                    for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
+                        action.element(slot, value);
+                    }
+                },
+            );
+        } else {
+            odometer(
+                dims,
+                dst_strides,
+                src_strides,
+                dst_offset,
+                src_offset,
+                index,
+                |dst_base, src_base| {
+                    let (dst_start, src_start) = (dst_base as usize, src_base as usize);
+                    contiguous_pieces::<S, A, T>(
+                        &mut dst[dst_start..dst_start + len],
+                        &src[src_start..src_start + len],
+                        action,
+                    );
+                },
+            );
+        }
         return;
     }
     if inner_dst == 0 && inner_src == 0 {
@@ -311,6 +332,48 @@ pub(crate) fn span<S, A, T>(
     );
 }
 
+/// The most bytes of one contiguous run [`span`] walks as one element loop.
+///
+/// Why a bound: an identity map's loop over a contiguous run is lowered by
+/// LLVM to one `memcpy` of the whole run, and libc switches a copy above its
+/// non-temporal threshold to stores that bypass the cache (several times
+/// slower for a multi-megabyte block on a many-core Xeon). glibc's x86
+/// tunable rejects thresholds below 0x4040 bytes and its default derives from
+/// the shared cache size, so a piece of at most 16 KiB never reaches that
+/// switch, whatever the host; one call per 16 KiB is a negligible share of
+/// the copy. Scaled and conjugated maps are no `memcpy`, and the pieces only
+/// add one outer loop to them.
+const CONTIGUOUS_PIECE_BYTES: usize = 16 << 10;
+
+/// [`CONTIGUOUS_PIECE_BYTES`] in elements of `T` (at least one).
+#[inline]
+fn contiguous_piece<T>() -> usize {
+    (CONTIGUOUS_PIECE_BYTES / size_of::<T>().max(1)).max(1)
+}
+
+/// Applies `action` to every element pair of two equal-length contiguous
+/// runs, one bounded piece at a time.
+///
+/// Why `chunks`, not `chunks_exact`: a piece loop of constant-length copies
+/// is what LLVM's loop-idiom pass merges back into one whole-run `memcpy`;
+/// the last piece's shorter length keeps each piece's length a runtime value.
+#[inline]
+fn contiguous_pieces<S, A, T>(dst: &mut [S::Slot], src: &[T], action: &A)
+where
+    T: Copy,
+    S: Store<T>,
+    A: Action<S, T>,
+{
+    let piece = contiguous_piece::<T>();
+    for (slots, values) in dst.chunks_mut(piece).zip(src.chunks(piece)) {
+        #[cfg(test)]
+        tests::observe_piece(slots.len());
+        for (slot, &value) in slots.iter_mut().zip(values) {
+            action.element(slot, value);
+        }
+    }
+}
+
 /// Calls `run(dst_base, src_base)` for every run of axis 0 `dims` addresses
 /// from the two offsets, the outer axes stepped as one odometer with axis 1
 /// fastest. `index` is the caller's traversal scratch of the layout's rank.
@@ -444,6 +507,101 @@ pub(crate) use {with_conjugation, with_payload_map, with_transform_map};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    std::thread_local! {
+        /// The pieces [`contiguous_pieces`] walked on this thread, and the
+        /// longest of them.
+        static PIECES: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
+    }
+
+    pub(super) fn observe_piece(len: usize) {
+        PIECES.with(|pieces| {
+            let (count, longest) = pieces.get();
+            pieces.set((count + 1, longest.max(len)));
+        });
+    }
+
+    fn take_pieces() -> (usize, usize) {
+        PIECES.with(|pieces| pieces.replace((0, 0)))
+    }
+
+    /// What: a contiguous run longer than one piece is walked in pieces of
+    /// at most [`CONTIGUOUS_PIECE_BYTES`] on both stores, so no single copy
+    /// crosses libc's store-strategy switch, and every element lands where a
+    /// plain copy puts it, for lengths around the piece size and unaligned
+    /// starts; a run of one piece is the control that takes no pieces.
+    #[test]
+    fn long_contiguous_runs_copy_in_bounded_pieces() {
+        let piece = contiguous_piece::<f64>();
+        assert_eq!(piece * size_of::<f64>(), CONTIGUOUS_PIECE_BYTES);
+        let src: Vec<f64> = (0..3 * piece + 8).map(|i| i as f64 + 0.5).collect();
+        for len in [0, 1, piece - 1, piece, piece + 1, 2 * piece + 1] {
+            for (dst_offset, src_offset) in [(0, 0), (1, 3), (5, 2)] {
+                let layout = [len];
+                let baked =
+                    BakedFusedLayout::from_compiled_normalized_slices(&layout, &[1], &[1], None);
+                let expected = &src[src_offset..src_offset + len];
+                let mut dst = vec![-1.0; len + dst_offset + 1];
+                take_pieces();
+                span::<Init, _, f64>(
+                    &mut dst,
+                    &src,
+                    baked,
+                    dst_offset as isize,
+                    src_offset as isize,
+                    &mut [0],
+                    &Write(|value: f64| value),
+                );
+                let (count, longest) = take_pieces();
+                assert_eq!(count, if len > piece { len.div_ceil(piece) } else { 0 });
+                assert!(longest <= piece);
+                assert_eq!(&dst[dst_offset..dst_offset + len], expected);
+                assert!(dst[..dst_offset].iter().all(|&value| value == -1.0));
+                assert_eq!(dst[dst_offset + len], -1.0);
+
+                let mut uninit = vec![MaybeUninit::<f64>::uninit(); len + dst_offset + 1];
+                span::<Uninit, _, f64>(
+                    &mut uninit,
+                    &src,
+                    baked,
+                    dst_offset as isize,
+                    src_offset as isize,
+                    &mut [0],
+                    &Write(|value: f64| value),
+                );
+                assert_eq!(take_pieces().0, count);
+            }
+        }
+    }
+
+    /// What: an outer axis of long contiguous runs pieces every run at
+    /// the same bound and keeps each run at its own offsets.
+    #[test]
+    fn every_long_run_of_a_layout_is_pieced() {
+        let piece = contiguous_piece::<f64>();
+        let len = piece + 3;
+        let src: Vec<f64> = (0..3 * len + 7).map(|i| i as f64).collect();
+        let mut dst = vec![0.0; 2 * (len + 2)];
+        take_pieces();
+        span::<Init, _, f64>(
+            &mut dst,
+            &src,
+            BakedFusedLayout::from_compiled_normalized_slices(
+                &[len, 2],
+                &[1, (len + 2) as isize],
+                &[1, (len + 7) as isize],
+                None,
+            ),
+            0,
+            0,
+            &mut [0; 2],
+            &Write(|value: f64| value),
+        );
+        assert_eq!(take_pieces(), (4, piece));
+        assert_eq!(dst[..len], src[..len]);
+        assert_eq!(dst[len + 2..2 * len + 2], src[len + 7..2 * len + 7]);
+    }
 
     /// Stops the traversal at its first element.
     struct StopAtFirst;

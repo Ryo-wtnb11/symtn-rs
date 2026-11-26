@@ -53,6 +53,82 @@ impl Job {
     }
 }
 
+/// The smallest planned role size and the largest planned role of a job
+/// range: the leaf gate's Copy admission is monotone in a role's element
+/// count, so these two decide whether a leaf runs all, at least the largest,
+/// or none of its planned roles with inner fan-out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Planned {
+    /// `usize::MAX` when the range plans no role.
+    pub min: usize,
+    /// The largest planned role's class and counts; zero elements when none.
+    pub largest: (usize, Point),
+}
+
+impl Default for Planned {
+    fn default() -> Self {
+        Self {
+            min: usize::MAX,
+            largest: (0, Point::default()),
+        }
+    }
+}
+
+impl Planned {
+    pub(crate) fn role(&mut self, class: usize, point: Point) {
+        *self = self.join(Self {
+            min: point.elements,
+            largest: (class, point),
+        });
+    }
+
+    pub(crate) fn join(self, other: Self) -> Self {
+        Self {
+            min: self.min.min(other.min),
+            largest: if other.largest.1.elements > self.largest.1.elements {
+                other.largest
+            } else {
+                self.largest
+            },
+        }
+    }
+}
+
+/// Turns `n` per-job entries into a bottom-up segment tree of `2n` entries:
+/// leaves at `n..2n`, node `i` joining nodes `2i` and `2i + 1`.
+pub(crate) fn planned_tree(nodes: &mut Vec<Planned>) {
+    let n = nodes.len();
+    nodes.resize(2 * n, Planned::default());
+    nodes.copy_within(..n, n);
+    for i in (1..n).rev() {
+        nodes[i] = nodes[2 * i].join(nodes[2 * i + 1]);
+    }
+}
+
+/// The planned extremes of jobs `range` from a [`planned_tree`], in
+/// O(log jobs); an empty tree plans nothing.
+pub(crate) fn planned_range(tree: &[Planned], range: core::ops::Range<usize>) -> Planned {
+    let n = tree.len() / 2;
+    let mut result = Planned::default();
+    if n == 0 {
+        return result;
+    }
+    let (mut lo, mut hi) = (range.start + n, range.end + n);
+    while lo < hi {
+        if lo % 2 == 1 {
+            result = result.join(tree[lo]);
+            lo += 1;
+        }
+        if hi % 2 == 1 {
+            hi -= 1;
+            result = result.join(tree[hi]);
+        }
+        lo /= 2;
+        hi /= 2;
+    }
+    result
+}
+
 /// Saturated metadata stays conservative when subtracting cumulative counts.
 pub(crate) fn job_range(prefix: &[Job], range: core::ops::Range<usize>) -> Job {
     let end = prefix[range.end - 1];
@@ -80,10 +156,14 @@ pub(crate) fn job_range(prefix: &[Job], range: core::ops::Range<usize>) -> Job {
 pub(crate) struct Summary {
     pub counts: [Counts; CLASSES],
     pub planned: [Counts; CLASSES],
-    /// Smallest retained planned role; zero when none is planned.
-    pub planned_min: usize,
+    /// The extremes of every retained planned role.
+    pub planned_roles: Planned,
     /// Cumulative counts in executed-job order, only where a decision reads them.
     pub prefix: Vec<Job>,
+    /// The [`planned_tree`] of each `prefix` job's planned extremes.
+    pub planned_jobs: Vec<Planned>,
+    /// The planned extremes of the job being recorded.
+    open: Planned,
     /// Payload elements touched, source and destination included.
     pub working_set: u64,
     pub traffic: u64,
@@ -115,12 +195,18 @@ impl Summary {
     pub(crate) fn record_job(&mut self, job: &[Counts; CLASSES]) -> Result<(), OperationError> {
         if job.iter().any(|count| count.items != 0) {
             self.prefix.push(self.job());
+            self.planned_jobs.push(self.open);
         }
+        self.open = Planned::default();
         Ok(())
     }
 
     pub(crate) fn finish(&mut self) -> Result<(), OperationError> {
         self.prefix.shrink_to_fit();
+        if self.planned_jobs.len() == self.prefix.len() {
+            planned_tree(&mut self.planned_jobs);
+            self.planned_jobs.shrink_to_fit();
+        }
         self.working_set = self
             .extents
             .iter()
@@ -151,13 +237,7 @@ impl Summary {
         for (count, &other) in self.planned.iter_mut().zip(&rhs.planned) {
             *count = count.add(other)?;
         }
-        if rhs.planned_min != 0 {
-            self.planned_min = if self.planned_min == 0 {
-                rhs.planned_min
-            } else {
-                self.planned_min.min(rhs.planned_min)
-            };
-        }
+        self.planned_roles = self.planned_roles.join(rhs.planned_roles);
         self.traffic = add(self.traffic, rhs.traffic)?;
         self.destination_reads = add(self.destination_reads, rhs.destination_reads)?;
         for (buffer, extent) in rhs.extents.iter().enumerate() {
@@ -170,6 +250,7 @@ impl Summary {
 
     pub(crate) fn retained_bytes(&self) -> usize {
         self.prefix.capacity() * core::mem::size_of::<Job>()
+            + self.planned_jobs.capacity() * core::mem::size_of::<Planned>()
     }
 
     pub(crate) fn logical_traffic(&self, read_destination: bool) -> u64 {
@@ -192,11 +273,8 @@ impl Summary {
         let count = self.push(class, point)?;
         if !inactive && layouts.role(layout)?.plan.is_some() {
             self.planned[class] = self.planned[class].add(count)?;
-            self.planned_min = if self.planned_min == 0 {
-                point.elements
-            } else {
-                self.planned_min.min(point.elements)
-            };
+            self.planned_roles.role(class, point);
+            self.open.role(class, point);
         }
         if dst.0 == 1 {
             self.destination_reads = add(self.destination_reads, count.elements)?;

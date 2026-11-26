@@ -1,7 +1,7 @@
 //! One movement model, with engine-local measurements and structural summaries.
 
 use super::*;
-use crate::movement::{job_range, Counts, Job, Summary, CLASSES};
+use crate::movement::{job_range, planned_range, Counts, Job, Planned, Summary, CLASSES};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -133,7 +133,11 @@ pub(super) struct MovementConstants {
     rows: [Row; CLASSES],
     memory_knees: [f64; CLASSES],
     bandwidth: Vec<f64>,
+    /// The working set the bandwidth ladder was measured at; infinite until then.
+    bandwidth_bytes: f64,
     dispatch: Vec<Option<Duration>>,
+    /// One empty engine entry's median cost in ns, when measured.
+    entry: Option<f64>,
     reserved_entries: usize,
     attempted: bool,
 }
@@ -151,7 +155,9 @@ impl MovementConstants {
             rows: [rows[0], rows[1], rows[0], rows[1]],
             memory_knees: core::array::from_fn(|c| rows[c % 2].e.memory_knee()),
             bandwidth: Vec::new(),
+            bandwidth_bytes: f64::INFINITY,
             dispatch: Vec::new(),
+            entry: None,
             reserved_entries: 0,
             attempted: false,
         }
@@ -385,13 +391,21 @@ fn region_with<R>(
         );
     };
     let mut retained = symtn_dense::engine_slot::checkout::<Constants>(engine);
-    let deadline = retained.is_none().then(|| Instant::now() + ONLINE_BUDGET);
+    let mut deadline = retained.is_none().then(|| Instant::now() + ONLINE_BUDGET);
     if retained.is_none() {
         let mut candidate = Constants::reference(HostClass::detect());
         candidate.reserved_entries = budget + 1;
         symtn_dense::engine_slot::checkin(engine, candidate, Constants::retained_bytes);
         retained = symtn_dense::engine_slot::checkout::<Constants>(engine);
     }
+    // An entry is timed from outside every region, so before entering one.
+    let entry = match retained.as_ref() {
+        Some(constants) if !constants.attempted => {
+            let deadline = *deadline.get_or_insert_with(|| Instant::now() + ONLINE_BUDGET);
+            measure_entry(engine, deadline)
+        }
+        _ => None,
+    };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::host_pool::lane_region(
             engine,
@@ -400,6 +414,7 @@ fn region_with<R>(
                 if let Some(constants) = retained.as_mut().filter(|constants| !constants.attempted)
                 {
                     constants.attempted = true;
+                    constants.entry = entry;
                     constants.bandwidth = vec![f64::INFINITY; constants.reserved_entries];
                     constants.dispatch = vec![None; constants.reserved_entries];
                     measure(
@@ -415,6 +430,10 @@ fn region_with<R>(
                             / constants.rows[0].e.at(f64::INFINITY),
                     );
                     interpolate_bandwidth(&mut constants.bandwidth);
+                    complete_dispatch(&mut constants.dispatch, |q| {
+                        exec.token_ref()
+                            .dispatch_cost(NonZeroUsize::new(q).unwrap())
+                    });
                     constants.generation = next_generation();
                 }
                 op.take().expect("region body runs once")(exec, retained.as_ref())
@@ -430,6 +449,9 @@ fn region_with<R>(
     }
 }
 
+/// The candidate widths below the budget; the budget itself is the last.
+const CANDIDATES: [usize; 12] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
+
 /// One candidate ladder and one expression, including inline execution.
 fn choose(
     p: usize,
@@ -442,13 +464,12 @@ fn choose(
     if p.min(jobs) <= 1 {
         return 1;
     }
-    let candidates = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64];
     let mut best = 1;
     let mut time = f64::INFINITY;
     let roof = traffic / bandwidth(p);
-    for q in candidates
+    for q in CANDIDATES
         .into_iter()
-        .chain((!candidates.contains(&p)).then_some(p))
+        .chain((!CANDIDATES.contains(&p)).then_some(p))
     {
         if q > p.min(jobs) {
             continue;
@@ -484,15 +505,35 @@ pub(super) struct Prices<'a> {
 }
 
 impl Prices<'_> {
-    fn leaf(&self, job: Job, minimum: usize, costs: &Costs, slots: usize) -> f64 {
+    /// A leaf of `slots` slots running `job`, whose planned roles have the
+    /// extremes `roles`. The gate's admission is monotone in a role's
+    /// elements, so the leaf runs every planned role with inner fan-out when
+    /// it admits the smallest; otherwise, when it admits the largest, that
+    /// role is credited alone, and the admitted roles between the two are
+    /// priced serially (an upper bound).
+    fn leaf(&self, job: Job, roles: Planned, costs: &Costs, slots: usize) -> f64 {
         let (setup, work) = components(&job.counts, costs);
         let total = setup + work;
-        if slots == 1 || minimum == 0 || !(self.admits)(slots, minimum) {
+        if slots == 1 || roles.min == usize::MAX {
             return total;
         }
-        let (setup, work) = components(&job.planned, costs);
+        let admitted = if (self.admits)(slots, roles.min) {
+            job.planned
+        } else if (self.admits)(slots, roles.largest.1.elements) {
+            let (class, point) = roles.largest;
+            let mut largest = [Counts::default(); CLASSES];
+            largest[class] = Counts {
+                items: 1,
+                runs: u64::try_from(point.runs).unwrap_or(u64::MAX),
+                elements: u64::try_from(point.elements).unwrap_or(u64::MAX),
+            };
+            largest
+        } else {
+            return total;
+        };
+        let (setup, work) = components(&admitted, costs);
         let planned = setup + work;
-        let (count, traffic) = job.planned.iter().zip([2, 2, 1, 1]).fold(
+        let (count, traffic) = admitted.iter().zip([2, 2, 1, 1]).fold(
             (0.0, 0.0),
             |(count, traffic), (item, reads)| {
                 (
@@ -543,17 +584,19 @@ pub(super) fn fixed<'a>(
         &phase.prefix,
         0,
         phase.prefix.len(),
-        phase.planned_min,
+        &phase.planned_jobs,
         costs,
         None,
     )
 }
 
+/// `planned` is the [`planned_tree`](crate::movement::planned_tree) over
+/// `prefix`'s jobs, or empty for a phase that plans no role.
 pub(super) fn prefix_phase<'a>(
     prefix: &'a [Job],
     first: usize,
     jobs: usize,
-    minimum: usize,
+    planned: &'a [Planned],
     costs: &Costs,
     fill: Option<usize>,
 ) -> impl Fn(usize, usize, &Prices<'_>) -> f64 + 'a {
@@ -566,7 +609,8 @@ pub(super) fn prefix_phase<'a>(
             q,
             fill.unwrap_or(0),
             &|range, slots, fill_elements| {
-                let movement = prices.leaf(job_range(prefix, range), minimum, &costs, slots);
+                let roles = planned_range(planned, range.clone());
+                let movement = prices.leaf(job_range(prefix, range), roles, &costs, slots);
                 let (a, r, e) = costs[2];
                 movement
                     + fill.map_or(0.0, |_| {
@@ -581,18 +625,41 @@ pub(super) fn prefix_phase<'a>(
     }
 }
 
+/// Engine regions one plan-group chunk enters: its pack, its GEMM batch and
+/// its scatter (`chunk::groups`).
+const CHUNK_ENTRIES: f64 = 3.0;
+
+/// The fixed cost of one plan-group chunk: its engine entries at the
+/// engine's measured entry cost, or none when that was not measured.
+pub(super) fn chunk_fixed(constants: Option<&Constants>) -> f64 {
+    constants
+        .and_then(|constants| constants.entry)
+        .map_or(0.0, |entry| CHUNK_ENTRIES * entry)
+}
+
 /// Consecutive GEMM batches have serial barriers; their dense estimate remains
 /// the provider's, and their movement estimate conservatively withholds fan-out.
+/// Every chunk pays `fixed`, and every chunk of more than one group forks its
+/// batch: the chooser charges the first chunk's D(q), which always holds q
+/// groups (q never exceeds the group count), so the later chunks' forks are
+/// charged here.
 pub(super) fn group_phase<'a>(
     schedule: &'a TreeTransformParallelSchedule,
     costs: &Costs,
     gemm: impl Fn(usize) -> f64 + 'a,
+    fixed: f64,
 ) -> impl Fn(usize, usize, &Prices<'_>) -> f64 + 'a {
     let costs = *costs;
-    move |q, _, _| {
+    move |q, _, prices| {
+        let groups = schedule.pack_movement.len();
         let mut critical = 0.0;
-        for first in (0..schedule.pack_movement.len()).step_by(q) {
-            critical += (first..(first + q).min(schedule.pack_movement.len()))
+        for first in (0..groups).step_by(q) {
+            let end = (first + q).min(groups);
+            critical += fixed;
+            if first > 0 && end - first > 1 {
+                critical += (prices.dispatch)(end - first);
+            }
+            critical += (first..end)
                 .map(|group| {
                     [
                         &schedule.pack_movement[group],
@@ -748,6 +815,8 @@ fn phase_bandwidth<'a>(
         .copied()
         .find(|value| value.is_finite() && *value >= memory.max(single))
         .unwrap_or(f64::INFINITY);
+    // A cap measured at a working set bounds the bandwidth of every larger one.
+    let knee = knee.min(constants.bandwidth_bytes);
     move |q| {
         let saturated = if working_set >= knee {
             measured.get(q).copied().unwrap_or(f64::INFINITY).max(first)
@@ -964,18 +1033,73 @@ fn validated_dispatch(measured: Duration, table: Duration) -> Option<Duration> {
     (measured <= table.saturating_mul(20)).then_some(measured)
 }
 
-fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
-    // ponytail: replace this interim measurement with the threadteam calibration hook
-    // (tensor4all/threadteam-rs#92);
-    // delete it when threadteam can calibrate a running pool.
-    let budget = exec.budget();
-    for (q, slot) in constants
-        .dispatch
-        .iter_mut()
+/// Completes the measured anchors of `values` (indexed by width) into one
+/// non-decreasing row over every width from 2: linear between anchors, the
+/// table scaled to the nearest anchor outside them, then the running
+/// maximum, so measured and tabulated widths never mix into a dip. Without
+/// an anchor every width keeps the table.
+fn complete_dispatch(values: &mut [Option<Duration>], table: impl Fn(usize) -> Duration) {
+    let anchor = |(q, value): (usize, &Option<Duration>)| value.map(|value| (q, value));
+    let Some((first, first_value)) = values.iter().enumerate().skip(2).find_map(anchor) else {
+        return;
+    };
+    let (last, last_value) = values
+        .iter()
         .enumerate()
-        .take(budget + 1)
         .skip(2)
-    {
+        .rev()
+        .find_map(anchor)
+        .unwrap_or((first, first_value));
+    let scaled = |q: usize, anchor: usize, value: Duration| {
+        let reference = table(anchor).as_secs_f64();
+        if reference > 0.0 {
+            table(q).mul_f64(value.as_secs_f64() / reference)
+        } else {
+            value
+        }
+    };
+    for (q, value) in values.iter_mut().enumerate().take(first).skip(2) {
+        *value = Some(scaled(q, first, first_value));
+    }
+    let mut left = first;
+    while let Some(offset) = values[left + 1..=last].iter().position(Option::is_some) {
+        let right = left + 1 + offset;
+        let (Some(low), Some(high)) = (values[left], values[right]) else {
+            break;
+        };
+        let (low, high) = (low.as_secs_f64(), high.as_secs_f64());
+        for (q, value) in values.iter_mut().enumerate().take(right).skip(left + 1) {
+            let t = (q - left) as f64 / (right - left) as f64;
+            *value = Some(Duration::from_secs_f64(low + t * (high - low)));
+        }
+        left = right;
+    }
+    for (q, value) in values.iter_mut().enumerate().skip(last + 1) {
+        *value = Some(scaled(q, last, last_value));
+    }
+    let mut floor = Duration::ZERO;
+    for value in values.iter_mut().skip(2).flatten() {
+        floor = floor.max(*value);
+        *value = floor;
+    }
+}
+
+fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
+    // ponytail: replace this interim measurement with threadteam's
+    // `Exec::calibrate_dispatch_costs` (tensor4all/threadteam-rs#92, on
+    // threadteam main, not in the pinned release); delete it once the pinned
+    // threadteam calibrates a running pool.
+    // The chooser's candidate widths, the budget last; `complete_dispatch`
+    // interpolates the widths between them, as threadteam's own row does.
+    let budget = exec.budget();
+    let ladder = CANDIDATES
+        .into_iter()
+        .filter(|&q| (2..budget).contains(&q))
+        .chain([budget]);
+    for q in ladder {
+        let Some(slot) = constants.dispatch.get_mut(q) else {
+            continue;
+        };
         if Instant::now() >= deadline {
             return;
         }
@@ -999,6 +1123,29 @@ fn measure_dispatch(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &m
         samples.sort_unstable();
         *slot = validated_dispatch(samples[2], table);
     }
+}
+
+/// The median cost of one empty guarded engine entry, the entry every
+/// replay region takes (`host_pool::lane_region`), timed directly so that no
+/// region is observed.
+fn measure_entry(engine: &mut dyn Engine, deadline: Instant) -> Option<f64> {
+    tenferro_cpu::with_cpu_engine(engine, |cpu| {
+        cpu.with_exec(|_| ()).ok()?;
+        let mut samples = [0.0; 5];
+        for sample in &mut samples {
+            if Instant::now() >= deadline {
+                return None;
+            }
+            let start = Instant::now();
+            for _ in 0..8 {
+                cpu.with_exec(|_| ()).ok()?;
+            }
+            *sample = start.elapsed().as_secs_f64() * 1e9 / 8.0;
+        }
+        samples.sort_by(f64::total_cmp);
+        Some(samples[2])
+    })
+    .flatten()
 }
 
 fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Constants) {
@@ -1050,12 +1197,16 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
         * 1e9;
     let maximum_bytes =
         bandwidth_fixture_bytes(remaining_ns, ladder().map(dispatch_ns).sum(), ns_per_byte);
-    let elements = memory_bytes.div_ceil(2 * std::mem::size_of::<f64>());
-    // A smaller fixture would measure cache bandwidth, so leave B_sat unknown
-    // when first-touch and the whole saturated ladder cannot fit the deadline.
-    if (elements + p).saturating_mul(2 * std::mem::size_of::<f64>()) > maximum_bytes {
+    // The fixture is the knee, or what first-touch and the whole ladder fit
+    // in the deadline: a cap measured at a working set bounds every larger
+    // one, so `phase_bandwidth` applies it from the fixture's size on. Below
+    // the largest row working set a sample is too short to time.
+    let pair = 2 * std::mem::size_of::<f64>();
+    let fixture_bytes = memory_bytes.min(maximum_bytes.saturating_sub(p * pair));
+    if fixture_bytes < ONLINE_WORKING_SETS[2] {
         return;
     }
+    let elements = fixture_bytes / pair;
     let source = vec![1.0; elements + p];
     let mut destination = Vec::<f64>::with_capacity(elements + p);
     for q in ladder() {
@@ -1067,7 +1218,7 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
             .saturating_duration_since(Instant::now())
             .as_secs_f64()
             * 1e9;
-        if bandwidth_fixture_bytes(remaining_ns, dispatch, ns_per_byte) < memory_bytes {
+        if bandwidth_fixture_bytes(remaining_ns, dispatch, ns_per_byte) < fixture_bytes {
             return;
         }
         let n = elements.div_ceil(q).max(1);
@@ -1106,7 +1257,13 @@ fn calibrate(exec: &mut lanes::Exec<'_>, deadline: Instant, constants: &mut Cons
             && elapsed.is_finite()
             && elapsed > 0.0
         {
-            constants.bandwidth[q] = (2 * n * q * std::mem::size_of::<f64>()) as f64 / elapsed;
+            let bytes = (n * q * pair) as f64;
+            constants.bandwidth[q] = bytes / elapsed;
+            constants.bandwidth_bytes = if constants.bandwidth_bytes.is_finite() {
+                constants.bandwidth_bytes.max(bytes)
+            } else {
+                bytes
+            };
         }
     }
 }
@@ -1303,7 +1460,7 @@ mod tests {
                             }
                         })
                         .collect();
-                    let mut phase = compiled_jobs(&jobs, 1);
+                    let mut phase = compiled_jobs(&jobs);
                     phase.traffic = phase.counts.iter().map(|count| count.elements * 2).sum();
                     phase.working_set = phase.traffic;
                     phase.destination_reads = phase.traffic / 2;
@@ -1343,20 +1500,17 @@ mod tests {
     #[test]
     fn memo_recomputes_only_when_budget_or_constants_change() {
         use std::cell::Cell;
-        let phase = compiled_jobs(
-            &vec![
-                Job {
-                    counts: [Counts {
-                        items: 1,
-                        runs: 1,
-                        elements: 1000000
-                    }; CLASSES],
-                    ..Job::default()
-                };
-                8
-            ],
-            0,
-        );
+        let phase = compiled_jobs(&vec![
+            Job {
+                counts: [Counts {
+                    items: 1,
+                    runs: 1,
+                    elements: 1000000
+                }; CLASSES],
+                ..Job::default()
+            };
+            8
+        ]);
         let phases = [phase];
         let identity = Arc::new(());
         let mut constants = Constants::reference(HostClass::Generic);
@@ -1583,9 +1737,25 @@ mod tests {
         .unwrap();
     }
 
-    fn compiled_jobs(jobs: &[Job], minimum: usize) -> Summary {
+    /// The planned extremes of a job whose roles of one class are equal.
+    fn job_roles(job: &Job) -> Planned {
+        let mut roles = Planned::default();
+        for (class, count) in job.planned.iter().enumerate() {
+            if count.items != 0 {
+                roles.role(
+                    class,
+                    crate::movement::Point {
+                        runs: (count.runs / count.items) as usize,
+                        elements: (count.elements / count.items) as usize,
+                    },
+                );
+            }
+        }
+        roles
+    }
+
+    fn compiled_jobs(jobs: &[Job]) -> Summary {
         let mut phase = Summary::default();
-        phase.planned_min = minimum;
         for job in jobs {
             for (count, other) in phase.counts.iter_mut().zip(job.counts) {
                 *count = count.add(other).unwrap();
@@ -1594,6 +1764,7 @@ mod tests {
                 *count = count.add(other).unwrap();
             }
             phase.record_job(&job.counts).unwrap();
+            *phase.planned_jobs.last_mut().unwrap() = job_roles(job);
         }
         phase.finish().unwrap();
         phase
@@ -1646,10 +1817,7 @@ mod tests {
     /// that credit is the serial-item control that exhausts the outer slots.
     #[test]
     fn large_planned_roles_choose_leaves_with_inner_fanout() {
-        let phase = compiled_jobs(
-            &[1, 4, 9, 4, 1].map(|items| uniform_job(items, 24, 0, true)),
-            24,
-        );
+        let phase = compiled_jobs(&[1, 4, 9, 4, 1].map(|items| uniform_job(items, 24, 0, true)));
         assert_eq!(
             synthetic_choice(&phase, 2, true),
             (1, vec![19.0 + 456.0 / 2.0, 1.0 + 336.0])
@@ -1682,7 +1850,7 @@ mod tests {
     fn dominant_serial_job_and_small_jobs_split() {
         let mut jobs = vec![uniform_job(1, 10, 1, false); 100];
         jobs[0] = uniform_job(1, 1000, 1, false);
-        let phase = compiled_jobs(&jobs, 0);
+        let phase = compiled_jobs(&jobs);
         let costs = [(0.0, 0.0, 1.0); CLASSES];
         for budget in [2, 4] {
             for (dispatch_ns, split) in [(10.0, true), (2000.0, false)] {
@@ -1714,7 +1882,7 @@ mod tests {
     fn dominant_admitted_roles_keep_a_split_with_inner_fanout() {
         let mut jobs = vec![uniform_job(1, 20, 0, true); 12];
         jobs[0] = uniform_job(1, 100, 0, true);
-        let phase = compiled_jobs(&jobs, 20);
+        let phase = compiled_jobs(&jobs);
         assert_eq!(
             synthetic_choice(&phase, 2, true),
             (1, vec![12.0 + 320.0 / 2.0, 1.0 + 200.0])
@@ -1741,7 +1909,7 @@ mod tests {
     /// job is the indivisible control.
     #[test]
     fn small_roles_choose_the_budget_without_inner_credit() {
-        let phase = compiled_jobs(&[uniform_job(1, 24, 0, true); 8], 24);
+        let phase = compiled_jobs(&[uniform_job(1, 24, 0, true); 8]);
         for budget in [2, 4] {
             assert_eq!(
                 synthetic_choice(&phase, budget, false),
@@ -1758,12 +1926,64 @@ mod tests {
             );
             assert_eq!(
                 synthetic_choice(
-                    &compiled_jobs(&[uniform_job(8, 24, 0, true)], 24),
+                    &compiled_jobs(&[uniform_job(8, 24, 0, true)]),
                     budget,
                     false
                 ),
                 (1, vec![8.0 * 24.0])
             );
+        }
+    }
+
+    /// Purpose: a leaf credits inner fan-out for the planned roles its slots
+    /// admit, not only when the phase's smallest role is admitted: one large
+    /// role among many small ones keeps a leaf of at least two slots when that
+    /// is predicted faster than the budget's one-slot leaves. Admitting no
+    /// role (what gating on the phase's smallest role gave here) is the
+    /// control that strands the large role on one slot.
+    #[test]
+    fn a_dominant_admitted_role_among_small_roles_keeps_inner_fanout() {
+        let mut jobs = vec![uniform_job(1, 2304, 1, true); 201];
+        jobs[0] = uniform_job(1, 589_824, 1, true);
+        let phase = compiled_jobs(&jobs);
+        let costs = [(7.3, 1.48, 0.2228); CLASSES];
+        let dispatch = |q: usize| 500.0 + 120.0 * q as f64;
+        let bandwidth = |_| f64::INFINITY;
+        for budget in [8, 16] {
+            for (admits_large, fans_out) in [(true, true), (false, false)] {
+                let admits = |slots: usize, elements: usize| {
+                    admits_large && slots >= 2 && elements >= 100_000
+                };
+                let prices = Prices {
+                    bytes: 8.0,
+                    dispatch: &dispatch,
+                    bandwidth: &bandwidth,
+                    admits: &admits,
+                };
+                let model = super::fixed(&phase, &costs);
+                let time = |q| if q > 1 { dispatch(q) } else { 0.0 } + model(q, budget, &prices);
+                let chosen = choose(
+                    budget,
+                    jobs.len(),
+                    0.0,
+                    |q| model(q, budget, &prices),
+                    dispatch,
+                    bandwidth,
+                );
+                let dominant = Cell::new(0);
+                leaf_max(0, jobs.len(), budget, chosen, 0, &|range, slots, _| {
+                    if range.contains(&0) {
+                        dominant.set(slots);
+                    }
+                    0.0
+                });
+                assert_eq!(dominant.get() >= 2, fans_out);
+                if fans_out {
+                    assert!(time(chosen) < time(budget));
+                } else {
+                    assert_eq!(chosen, budget);
+                }
+            }
         }
     }
 
@@ -1781,13 +2001,18 @@ mod tests {
         let serial = uniform_job(2, 100, 4, false);
         let planned = uniform_job(2, 100, 4, true);
         for slots in [1, 2, 4] {
-            assert_eq!(prices.leaf(serial, 100, &costs, slots), 210.0);
+            assert_eq!(
+                prices.leaf(serial, job_roles(&serial), &costs, slots),
+                210.0
+            );
         }
-        assert!(prices.leaf(planned, 100, &costs, 4) < prices.leaf(planned, 100, &costs, 2));
+        let roles = job_roles(&planned);
+        assert!(prices.leaf(planned, roles, &costs, 4) < prices.leaf(planned, roles, &costs, 2));
     }
 
-    /// Purpose: cumulative job components reproduce independent linear scans for
-    /// every range and preserve S_q under the same actual leaf partition.
+    /// Purpose: cumulative job components and the planned-extremes tree
+    /// reproduce independent linear scans for every range and preserve S_q
+    /// under the same actual leaf partition.
     #[test]
     fn prefix_leaf_sums_match_random_linear_scans() {
         let mut seed = 17u64;
@@ -1813,7 +2038,7 @@ mod tests {
                     Job { counts, planned }
                 })
                 .collect::<Vec<_>>();
-            let phase = compiled_jobs(&jobs, 1);
+            let phase = compiled_jobs(&jobs);
             let costs = [(2.0, 3.0, 5.0); CLASSES];
             let prices = Prices {
                 bytes: 8.0,
@@ -1837,9 +2062,13 @@ mod tests {
                             left.elements += right.elements;
                         }
                     }
+                    let roles = jobs[range.clone()]
+                        .iter()
+                        .fold(Planned::default(), |roles, job| roles.join(job_roles(job)));
+                    assert_eq!(planned_range(&phase.planned_jobs, range.clone()), roles);
                     let actual = job_range(&phase.prefix, range);
                     assert_eq!(actual, expected);
-                    actual_sum.set(actual_sum.get() + prices.leaf(actual, 1, &costs, slots));
+                    actual_sum.set(actual_sum.get() + prices.leaf(actual, roles, &costs, slots));
                     let linear_time = |counts: &[Counts; CLASSES]| {
                         counts
                             .iter()
@@ -1993,7 +2222,7 @@ mod tests {
     /// warm scratch is the control without setup or fill traffic.
     #[test]
     fn pack_columns_and_cold_fill_share_add_their_prices() {
-        let phase = compiled_jobs(&[uniform_job(1, 3, 1, false); 4], 0);
+        let phase = compiled_jobs(&[uniform_job(1, 3, 1, false); 4]);
         let costs = [(1.0, 1.0, 1.0); CLASSES];
         let prices = Prices {
             bytes: 8.0,
@@ -2002,11 +2231,11 @@ mod tests {
             admits: &|_, _| false,
         };
         assert_eq!(
-            prefix_phase(&phase.prefix, 0, 4, 0, &costs, Some(8))(2, 4, &prices),
+            prefix_phase(&phase.prefix, 0, 4, &[], &costs, Some(8))(2, 4, &prices),
             16.0
         );
         assert_eq!(
-            prefix_phase(&phase.prefix, 0, 4, 0, &costs, None)(2, 4, &prices),
+            prefix_phase(&phase.prefix, 0, 4, &[], &costs, None)(2, 4, &prices),
             10.0
         );
         let tiny = std::cell::RefCell::new(Vec::new());
@@ -2021,7 +2250,7 @@ mod tests {
     /// per-member setup model is the control with a different total.
     #[test]
     fn member_ranges_price_setup_at_the_executed_width() {
-        let phase = compiled_jobs(&[uniform_job(1, 2, 1, false)], 0);
+        let phase = compiled_jobs(&[uniform_job(1, 2, 1, false)]);
         let costs = [(1.0, 1.0, 1.0); CLASSES];
         let prices = Prices {
             bytes: 8.0,
@@ -2035,7 +2264,8 @@ mod tests {
     }
 
     /// Purpose: dense-dominated groups choose their chunk width from the combined
-    /// cost and serial batch barriers; movement alone is the inline control.
+    /// cost and serial batch barriers, a later chunk of two groups paying its
+    /// own fork; movement alone is the inline control.
     #[test]
     fn group_chunks_price_gemm_and_serial_batch_barriers() {
         use crate::TreeTransformBlockSpec;
@@ -2061,7 +2291,7 @@ mod tests {
         let schedule = transform.parallel_schedule();
         let costs = [(0.5, 0.0, 0.0); CLASSES];
         let dense = [100.0, 1.0, 100.0, 1.0];
-        let phase = group_phase(schedule, &costs, |group| dense[group]);
+        let phase = group_phase(schedule, &costs, |group| dense[group], 0.0);
         let dispatch = |q| 10.0 * q as f64;
         let prices = Prices {
             bytes: 8.0,
@@ -2076,7 +2306,7 @@ mod tests {
                 phase(3, 4, &prices),
                 phase(4, 4, &prices)
             ],
-            [210.0, 204.0, 105.0, 102.0]
+            [210.0, 204.0 + 20.0, 105.0, 102.0]
         );
         assert_eq!(
             choose(
@@ -2094,7 +2324,7 @@ mod tests {
                 4,
                 4,
                 0.0,
-                |q| group_phase(schedule, &costs, |_| 0.0)(q, 4, &prices),
+                |q| group_phase(schedule, &costs, |_| 0.0, 0.0)(q, 4, &prices),
                 dispatch,
                 |_| f64::INFINITY
             ),
@@ -2111,6 +2341,57 @@ mod tests {
             ),
             2
         );
+    }
+
+    /// Purpose: a chunk's fixed cost is paid once per chunk and a later
+    /// chunk's fork once per forking chunk, so a large fixed cost chooses few
+    /// chunks; a zero fixed cost is the control that keeps one group per
+    /// chunk when each fork costs more than the work it splits.
+    #[test]
+    fn group_chunks_pay_their_fixed_cost_and_forks_per_chunk() {
+        use crate::TreeTransformBlockSpec;
+        let structure = BlockStructure::packed_column_major(1, vec![vec![1]; 16]).unwrap();
+        let transform = TreeTransformStructure::compile_structures(
+            &structure,
+            &structure,
+            &(0..8)
+                .map(|group| {
+                    TreeTransformBlockSpec::multi(
+                        vec![2 * group, 2 * group + 1],
+                        vec![2 * group, 2 * group + 1],
+                        vec![1.0, 0.0, 0.0, 1.0],
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schedule = transform.parallel_schedule();
+        let costs = [(0.0, 0.0, 0.0); CLASSES];
+        let dispatch = |q| 10.0 * q as f64;
+        let prices = Prices {
+            bytes: 8.0,
+            dispatch: &dispatch,
+            bandwidth: &|_| f64::INFINITY,
+            admits: &|_, _| false,
+        };
+        let free = group_phase(schedule, &costs, |_| 1.0, 0.0);
+        assert_eq!(free(2, 8, &prices), 4.0 + 3.0 * 20.0);
+        let paid = group_phase(schedule, &costs, |_| 1.0, 100.0);
+        assert_eq!(paid(2, 8, &prices), 4.0 * 101.0 + 3.0 * 20.0);
+        for (fixed, expected) in [(0.0, 1), (100.0, 8)] {
+            let phase = group_phase(schedule, &costs, |_| 1.0, fixed);
+            assert_eq!(
+                choose(
+                    8,
+                    8,
+                    0.0,
+                    |q| phase(q, 8, &prices),
+                    dispatch,
+                    |_| f64::INFINITY
+                ),
+                expected
+            );
+        }
     }
 
     /// Purpose: one runnable job bypasses preparation even on a wider token;
@@ -2314,6 +2595,58 @@ mod tests {
             2.0 * 0.3517858496209 / 0.1558782935818,
         );
         assert_ne!(element.at(134217728.0), 2.0);
+    }
+
+    /// Purpose: measured dispatch anchors become one non-decreasing row:
+    /// linear between anchors, the table scaled to the nearest anchor
+    /// outside them, and a lower later anchor lifted to the running maximum;
+    /// a row without anchors is the control that keeps the table everywhere.
+    #[test]
+    fn dispatch_anchors_complete_a_monotone_row() {
+        let table = |q: usize| Duration::from_nanos(100 * q as u64);
+        let ns = |value: Option<Duration>| value.unwrap().as_secs_f64() * 1e9;
+        let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-6);
+        let mut values: Vec<Option<Duration>> = vec![None; 9];
+        for (q, measured) in [(3, 600), (5, 1000), (6, 800)] {
+            values[q] = Some(Duration::from_nanos(measured));
+        }
+        complete_dispatch(&mut values, table);
+        assert!(values[..2].iter().all(Option::is_none));
+        let expected = [
+            200.0 * 600.0 / 300.0,
+            600.0,
+            800.0,
+            1000.0,
+            1000.0,
+            1000.0,
+            800.0 * 800.0 / 600.0,
+        ];
+        for (q, expected) in (2..9).zip(expected) {
+            close(ns(values[q]), expected);
+        }
+        let mut unmeasured: Vec<Option<Duration>> = vec![None; 9];
+        complete_dispatch(&mut unmeasured, table);
+        assert!(unmeasured.iter().all(Option::is_none));
+    }
+
+    /// Purpose: a bandwidth ladder measured on a fixture smaller than the
+    /// knee caps every phase at least that large; an unmeasured fixture size
+    /// is the control that applies the cap only from the knee.
+    #[test]
+    fn bandwidth_cap_applies_from_the_measured_fixture_size() {
+        let mut constants = Constants::reference(HostClass::Generic);
+        constants.bandwidth = vec![f64::INFINITY, f64::INFINITY, 60.0, 80.0, 80.0];
+        let working_set = (16 << 20) as f64;
+        let elements = [working_set / 16.0, 0.0, 0.0, 0.0];
+        assert!(working_set < constants.memory_knees[0]);
+        constants.bandwidth_bytes = (8 << 20) as f64;
+        assert_eq!(
+            phase_bandwidth(working_set, working_set, elements, &constants)(4),
+            80.0
+        );
+        assert!(phase_bandwidth((4 << 20) as f64, working_set, elements, &constants)(4) > 80.0);
+        constants.bandwidth_bytes = f64::INFINITY;
+        assert!(phase_bandwidth(working_set, working_set, elements, &constants)(4) > 80.0);
     }
 
     /// Purpose: remaining calibration time bounds fixture bytes before allocation;

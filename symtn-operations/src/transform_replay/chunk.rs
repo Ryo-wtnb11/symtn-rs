@@ -188,6 +188,7 @@ pub(super) struct ChunkMovement {
     groups: Vec<usize>,
     runs: Vec<u32>,
     prefix: Vec<crate::movement::Job>,
+    planned: Vec<crate::movement::Planned>,
     warm_pack_width: usize,
 }
 
@@ -196,6 +197,7 @@ impl ChunkMovement {
         self.groups.capacity() * core::mem::size_of::<usize>()
             + self.runs.capacity() * core::mem::size_of::<u32>()
             + self.prefix.capacity() * core::mem::size_of::<crate::movement::Job>()
+            + self.planned.capacity() * core::mem::size_of::<crate::movement::Planned>()
     }
 }
 
@@ -261,9 +263,15 @@ where
                 },
                 |_, _| false,
                 |costs| {
-                    movement::group_phase(schedule, costs, |group| {
-                        lanes::gemm_cost(&jobs[group], D::one().dense_scalar()).as_secs_f64() * 1e9
-                    })
+                    movement::group_phase(
+                        schedule,
+                        costs,
+                        |group| {
+                            lanes::gemm_cost(&jobs[group], D::one().dense_scalar()).as_secs_f64()
+                                * 1e9
+                        },
+                        movement::chunk_fixed(constants),
+                    )
                 },
             );
             widths.extend([
@@ -303,7 +311,7 @@ where
                                 &schedule.pack_prefix,
                                 first,
                                 columns,
-                                0,
+                                &[],
                                 costs,
                                 extra,
                             )
@@ -323,6 +331,7 @@ where
                     groups,
                     runs,
                     prefix,
+                    planned,
                     warm_pack_width: retained_warm_width,
                 } = &mut movement_chunks[index];
                 *retained_warm_width = warm_pack_width;
@@ -339,14 +348,19 @@ where
                         .map(|&group| &schedule.scatter_movement[group]),
                 )?;
                 prefix.clear();
+                planned.clear();
                 let mut cumulative = crate::movement::Job::default();
                 for (run, &start) in runs.iter().enumerate() {
                     let end = runs.get(run + 1).map_or(groups.len(), |&end| end as usize);
+                    let mut roles = crate::movement::Planned::default();
                     for &group in &groups[start as usize..end] {
                         cumulative = cumulative.add(schedule.scatter_movement[group].job())?;
+                        roles = roles.join(schedule.scatter_movement[group].planned_roles);
                     }
                     prefix.push(cumulative);
+                    planned.push(roles);
                 }
+                crate::movement::planned_tree(planned);
                 let scatter_width = movement::width::<D, _>(
                     exec,
                     constants,
@@ -355,16 +369,7 @@ where
                     summary.logical_traffic(key.reads_destination) as u128,
                     || summary.counts.map(|count| count.elements as f64),
                     |slots, elements| key.replays_plans && gate_keys.admits(slots, elements),
-                    |costs| {
-                        movement::prefix_phase(
-                            prefix,
-                            0,
-                            runs.len(),
-                            summary.planned_min,
-                            costs,
-                            None,
-                        )
-                    },
+                    |costs| movement::prefix_phase(prefix, 0, runs.len(), planned, costs, None),
                 );
                 widths.extend([cold_pack_width, scatter_width]);
             }
