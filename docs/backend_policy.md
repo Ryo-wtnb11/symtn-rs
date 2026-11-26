@@ -523,7 +523,13 @@ including fixture construction. The deadline is checked before every fixture.
 Failed or unfinished entries keep the next source and
 are not retried before eviction or `scratch::trim`. Each row uses, in order,
 its online measurement, the checked-in reference for threadteam's HostClass,
-or the slowest available row with the same inner stride. The reference table
+or the slowest available row with the same inner stride. An online row must be
+physical (a >= 0, r >= 0, e > 0). A negative fitted setup or per-run term means
+that term is below the measurement's resolution, not that the host differs: it
+is fixed at zero and each one-run sample's total is attributed to the remaining
+terms (their least-squares fit on the same samples). Only a row that is still
+non-physical (e <= 0), has non-finite samples, or hit the deadline before its
+samples falls back. The reference table
 records the CI CPU, date and run provenance; that run's fit-acceptance flag was
 false, so these rows are measured seeds, not validated phase predictions.
 D(q) uses the engine entry's online empty-fork measurement when available,

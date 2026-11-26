@@ -987,24 +987,53 @@ fn measure_row(
     let low = measure(2, 1)?;
     let high = measure(16, 1)?;
     let mut one = [0.0; 3];
-    let mut run = [(0, 0.0); 3];
+    let mut slope = [0.0; 3];
     let working_sets = [ONLINE_WORKING_SETS, [1024, 8192, 65536]][inner];
     for (i, w) in working_sets.into_iter().enumerate() {
         let n = w / (2 * std::mem::size_of::<f64>());
         one[i] = measure(n, 1)?;
         let many_runs = (n / 2).min(128);
         let many = measure(n, many_runs)?;
-        run[i] = (w, (many - one[i]) / (many_runs - 1) as f64);
+        slope[i] = (many - one[i]) / (many_runs - 1) as f64;
     }
-    let a = low - empty - (high - low) * (2.0 / 14.0) - run[0].1;
-    let element = core::array::from_fn(|i| {
+    fit_row(inner, empty, low, high, one, slope)
+}
+
+/// The row of one class from its samples: `empty`, `low` and `high` are
+/// one-run walks of 0, 2 and 16 elements, `one[i]` a one-run walk of the
+/// class's `i`-th working set and `slope[i]` its measured time per extra run.
+///
+/// The physical row has `a >= 0`, `r >= 0` and `e > 0`. A negative setup or
+/// per-run term means that term is below the measurement's resolution (a
+/// contiguous run costs no measurable time per run), not that the host
+/// differs from the samples: it is fixed at zero, and each one-run total is
+/// kept and attributed to the remaining terms, which is the least-squares
+/// fit of those terms on the same samples. Only a row that is still
+/// non-physical (`e <= 0`) or whose samples are not finite is rejected, and
+/// the caller then keeps the next source (reference table, then the slowest
+/// same-stride row).
+fn fit_row(
+    inner: usize,
+    empty: f64,
+    low: f64,
+    high: f64,
+    one: [f64; 3],
+    slope: [f64; 3],
+) -> Option<Row> {
+    let working_sets = [ONLINE_WORKING_SETS, [1024, 8192, 65536]][inner];
+    let finite = |value: f64| value.is_finite().then_some(value);
+    let run: [(usize, f64); 3] = core::array::from_fn(|i| {
+        (
+            working_sets[i],
+            finite(slope[i]).map_or(f64::NAN, |r| r.max(0.0)),
+        )
+    });
+    let a = finite(low - empty - (high - low) * (2.0 / 14.0) - run[0].1)?.max(0.0);
+    let element: [(usize, f64); 3] = core::array::from_fn(|i| {
         let w = working_sets[i];
         (w, (one[i] - empty - a - run[i].1) / (w / 16) as f64)
     });
-    if !std::iter::once(a)
-        .chain(run.iter().map(|p| p.1))
-        .chain(element.iter().map(|p| p.1))
-        .all(|value| value.is_finite() && value >= 0.0)
+    if !run.iter().all(|p| p.1.is_finite()) || !element.iter().all(|p| p.1.is_finite() && p.1 > 0.0)
     {
         return None;
     }
@@ -2595,6 +2624,57 @@ mod tests {
             2.0 * 0.3517858496209 / 0.1558782935818,
         );
         assert_ne!(element.at(134217728.0), 2.0);
+    }
+
+    /// One-run and many-run samples of the contiguous class with setup 7 ns,
+    /// element costs shaped like a measured Xeon row (2.6-4x the reference)
+    /// and per-run slopes `slope`, as `measure_row` takes them.
+    fn contiguous_samples(element: [f64; 3], slope: [f64; 3]) -> (f64, f64, f64, [f64; 3]) {
+        let (empty, a, small) = (100.0, 7.0, 0.2);
+        let r0 = slope[0].max(0.0);
+        let low = empty + a + r0 + 2.0 * small;
+        let high = empty + a + r0 + 16.0 * small;
+        let one = core::array::from_fn(|i| {
+            empty + a + slope[i].max(0.0) + element[i] * (ONLINE_WORKING_SETS[i] / 16) as f64
+        });
+        (empty, low, high, one)
+    }
+
+    /// Purpose: a per-run slope below resolution (negative) fits r = 0 and
+    /// keeps the measured setup and element costs, not the reference row's;
+    /// the old all-terms-nonnegative rejection is the negative control that
+    /// discarded this row. A non-positive element cost still rejects.
+    #[test]
+    fn negative_run_slopes_fit_zero_and_keep_measured_elements() {
+        let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-9);
+        let element = [0.229, 0.424, 0.619];
+        let slope = [1.9, -9.0, -42.9];
+        let (empty, low, high, one) = contiguous_samples(element, slope);
+        // The previous fit accepted a row only if every unconstrained term
+        // was nonnegative, so these samples fell back to the reference row.
+        assert!(!slope.iter().all(|&r| r >= 0.0));
+        let row = fit_row(0, empty, low, high, one, slope).unwrap();
+        close(row.a, 7.0);
+        let run = row.r.online.unwrap();
+        let fitted = row.e.online.unwrap();
+        for (i, &expected) in element.iter().enumerate() {
+            let bytes = ONLINE_WORKING_SETS[i] as f64;
+            close(run[i].1, slope[i].max(0.0));
+            close(fitted[i].1, expected);
+            close(row.e.at(bytes), expected);
+            assert!(row.e.at(bytes) > 2.0 * CI_ROWS[0].e.at(bytes));
+        }
+
+        let (empty, low, high, one) = contiguous_samples(element, [1.9, 3.0, 4.0]);
+        // A setup below resolution (here -3 ns) fits a = 0.
+        let negative_setup =
+            fit_row(0, empty, low - 10.0, high - 10.0, one, [1.9, 3.0, 4.0]).unwrap();
+        assert_eq!(negative_setup.a, 0.0);
+        assert!(negative_setup.e.online.unwrap().iter().all(|p| p.1 > 0.0));
+        assert!(fit_row(0, empty, low, high, one, [1.9, f64::NAN, 4.0]).is_none());
+
+        let (empty, low, high, one) = contiguous_samples([0.229, -0.01, 0.619], slope);
+        assert!(fit_row(0, empty, low, high, one, slope).is_none());
     }
 
     /// Purpose: measured dispatch anchors become one non-decreasing row:
