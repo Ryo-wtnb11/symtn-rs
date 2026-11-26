@@ -196,45 +196,35 @@ pub(crate) fn span<S, A, T>(
     // ahead of the general kernel's bodies keeps the odometer's invariants
     // out of registers (spilled and reloaded on every run).
     if inner_dst == 1 && inner_src == 1 {
-        // Why the length class is chosen per call: `len` is the layout's, so
-        // one test selects the run kernel for every run of the call.
-        if len <= contiguous_piece::<T>() {
-            odometer!(
+        if len > contiguous_piece::<T>() {
+            long_contiguous_runs::<S, A, T>(
+                dst,
+                src,
                 dims,
                 dst_strides,
                 src_strides,
                 dst_offset,
                 src_offset,
                 index,
-                |dst_base, src_base| {
-                    // Why the plain loop: an identity map lowers it to one
-                    // libc `memcpy` of the run, which baseline-target code
-                    // cannot beat for a short run (see `CONTIGUOUS_PIECE_BYTES`).
-                    let (dst_start, src_start) = (dst_base as usize, src_base as usize);
-                    let run = dst[dst_start..dst_start + len].iter_mut();
-                    for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
-                        action.element(slot, value);
-                    }
-                }
+                action,
             );
-        } else {
-            odometer!(
-                dims,
-                dst_strides,
-                src_strides,
-                dst_offset,
-                src_offset,
-                index,
-                |dst_base, src_base| {
-                    let (dst_start, src_start) = (dst_base as usize, src_base as usize);
-                    contiguous_pieces::<S, A, T>(
-                        &mut dst[dst_start..dst_start + len],
-                        &src[src_start..src_start + len],
-                        action,
-                    );
-                }
-            );
+            return;
         }
+        odometer!(
+            dims,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            index,
+            |dst_base, src_base| {
+                let (dst_start, src_start) = (dst_base as usize, src_base as usize);
+                let run = dst[dst_start..dst_start + len].iter_mut();
+                for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
+                    action.element(slot, value);
+                }
+            }
+        );
         return;
     }
     if inner_dst == 0 && inner_src == 0 {
@@ -411,6 +401,51 @@ const CONTIGUOUS_PIECE_BYTES: usize = 16 << 10;
 #[inline(always)]
 fn contiguous_piece<T>() -> usize {
     (CONTIGUOUS_PIECE_BYTES / size_of::<T>().max(1)).max(1)
+}
+
+/// [`span`] of a layout whose contiguous runs are longer than one piece,
+/// each run walked in [`contiguous_pieces`].
+///
+/// Why out of line, called once per `span` call: inside `span` its piece
+/// loop and the short-run loop are two near-identical odometer loops in one
+/// function, and a profile counted 8 more instructions per short run
+/// (slicing, bounds and arithmetic) than the same short-run source alone.
+/// Out of line, `span`'s short-run arm is the plain loop alone, and this call
+/// adds one call per `span` call whose runs exceed 16 KiB each.
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn long_contiguous_runs<S, A, T>(
+    dst: &mut [S::Slot],
+    src: &[T],
+    dims: &[usize],
+    dst_strides: &[isize],
+    src_strides: &[isize],
+    dst_offset: isize,
+    src_offset: isize,
+    index: &mut [usize],
+    action: &A,
+) where
+    T: Copy,
+    S: Store<T>,
+    A: Action<S, T>,
+{
+    let len = dims[0];
+    odometer!(
+        dims,
+        dst_strides,
+        src_strides,
+        dst_offset,
+        src_offset,
+        index,
+        |dst_base, src_base| {
+            let (dst_start, src_start) = (dst_base as usize, src_base as usize);
+            contiguous_pieces::<S, A, T>(
+                &mut dst[dst_start..dst_start + len],
+                &src[src_start..src_start + len],
+                action,
+            );
+        }
+    );
 }
 
 /// Applies `action` to every element pair of two equal-length contiguous
