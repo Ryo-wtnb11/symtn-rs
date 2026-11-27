@@ -51,7 +51,7 @@ fn close(
 fn eigh_assembly_gemms_and_uploads_do_not_depend_on_the_tree_count() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let small = u1_leg(&[(-1, 2), (0, 1), (1, 2)]);
     // The same five coupled sectors with the same matrix sizes (4, 4, 9, 4,
     // 4), reached through one codomain tree each (`fused`) or through nine

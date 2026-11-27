@@ -42,7 +42,7 @@ where
 #[test]
 fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1 = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
@@ -99,7 +99,7 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
 #[test]
 fn u1_index_contraction_trace_and_decomposition_paths_are_executable() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2)],

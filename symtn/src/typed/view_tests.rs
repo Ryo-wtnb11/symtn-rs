@@ -22,7 +22,7 @@ use crate::error::{Alternative, Error};
 use crate::runtime::Runtime;
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// Runs `f` and returns its value with the number of entries into adjoint
@@ -442,7 +442,7 @@ mod cuda {
                 &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0))
                     .unwrap();
             let what = $what;
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let (v, w) = ($v, $w);
             let mut host = |seed| {
                 TensorMap::<_, $dtype>::rand_with_seed(&mut *cpu, &runtime, [&v], [&v, &w], seed)

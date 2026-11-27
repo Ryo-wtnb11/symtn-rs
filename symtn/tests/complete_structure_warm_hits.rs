@@ -111,7 +111,7 @@ fn warm_eager_calls_hit_complete_structure_cache() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     symtn::cache::clear();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     warm_ops!(
         engine,
         &runtime,

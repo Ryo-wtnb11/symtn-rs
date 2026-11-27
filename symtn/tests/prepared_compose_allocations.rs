@@ -72,7 +72,7 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let stacks = |count, salt| {
         (
             StackedTensorMap::pack(&members::<R, D>(&runtime, &[&v, &v], &[&w], count, salt))
@@ -161,8 +161,8 @@ where
 /// and the foreign workspace, as the error each returns.
 fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other_runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other_runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 3, 1)).unwrap();
     let rhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 3, 2)).unwrap();

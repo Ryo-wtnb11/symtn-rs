@@ -11,7 +11,7 @@ use super::super::{owned_repr, GradedSpace, TensorMap, TypedTensorBody};
 #[test]
 fn spectra_publication_failure_does_not_publish_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let x = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg], [&leg], 1).unwrap();
@@ -39,7 +39,7 @@ fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
     // consistently one entry short, which only a corrupted stack
     // carries), leaves no observable output; the buffer is kept and the
     // next call recovers.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
@@ -120,7 +120,7 @@ fn placement_alone_separates_signatures() {
     // What: the same space and Runtime on different placements (Host,
     // two device ordinals) gives unequal signatures; equal placement
     // gives equal signatures and equal hashes.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -161,8 +161,8 @@ fn first_mismatch_names_each_field_alone() {
     // agrees with `first_mismatch`.
     use super::SignatureField;
 
-    let runtime = Runtime::builder().build().unwrap();
-    let other_runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other_runtime = Runtime::new();
     let q = |charge| U1Irrep::new(charge).unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 2), (q(1), 1)]).unwrap();
     let wide = GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 3), (q(1), 1)]).unwrap();
@@ -206,7 +206,7 @@ fn checked_generic_rule_instance_alone_separates_signatures() {
     use std::sync::Arc;
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = |rank: usize| {
         Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(

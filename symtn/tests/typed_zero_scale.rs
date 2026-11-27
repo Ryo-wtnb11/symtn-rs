@@ -91,7 +91,7 @@ macro_rules! tensor {
 
 macro_rules! check_dense {
     ($engine:ident, $label:expr, $leg:expr, $d:ty) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = $leg;
         let x = tensor!($engine, &runtime, &leg, X, $d);
         let y = tensor!($engine, &runtime, &leg, Y, $d);
@@ -230,7 +230,7 @@ fn unit_destination_factor_keeps_the_sign_of_its_zero_imaginary_part() {
     macro_rules! check {
         ($c:ty, $r:ty) => {{
             let engine = &mut symtn::typed::CpuEngine::serial();
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let leg = u1();
             let source = TensorMap::<_, $c>::from_subblock_fn(
                 engine,
@@ -271,7 +271,7 @@ fn unit_destination_factor_keeps_the_sign_of_its_zero_imaginary_part() {
 #[test]
 fn zero_scale_overwrites_nonfinite_entries_with_signed_zero() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1();
     let x = tensor!(engine, &runtime, &leg, X, f64);
     for factor in [0.0, -0.0] {
@@ -295,7 +295,7 @@ fn zero_scale_overwrites_nonfinite_entries_with_signed_zero() {
 #[test]
 fn compact_diagonal_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],

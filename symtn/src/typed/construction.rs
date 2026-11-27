@@ -93,7 +93,7 @@ where
     /// use std::sync::Arc;
     /// use symtn::sector::{TableRule, TableSector};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
-    /// let runtime = Runtime::builder().build().unwrap();
+    /// let runtime = Runtime::new();
     /// # let engine = &mut symtn::typed::CpuEngine::serial();
     /// let tau = GradedSpace::try_new(
     ///     Arc::new(TableRule::fibonacci()),

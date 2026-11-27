@@ -136,7 +136,7 @@ fn cases<D>(engine: &mut dyn Engine, n: usize)
 where
     D: TensorScalar + numerics::Numeric,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = spaces(n);
     let vd = v.try_dual().unwrap();
     let mixed =

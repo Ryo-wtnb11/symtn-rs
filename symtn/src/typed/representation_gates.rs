@@ -163,7 +163,7 @@ fn owned<R, D, S>(tensor: &TensorMap<R, D, S>) -> &Arc<TypedTensorBody<R, D, S>>
 #[test]
 fn physical_projection_publishes_only_after_success_on_receiver_authority() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let half = su2_irrep(1);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(half.clone(), 1)]).unwrap();
@@ -241,7 +241,7 @@ fn error_chain(error: &dyn std::error::Error) -> String {
 }
 
 fn u1_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<U1FusionRule, f64> {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let left = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -428,7 +428,7 @@ fn typed_zeros_like_is_exact_and_representation_preserving() {
 }
 
 fn su2_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<Su2Rule, f64> {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(provider, [(su2_irrep(0), 2), (su2_irrep(1), 1)]).unwrap();
     TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
@@ -442,7 +442,7 @@ fn u1_matrix_fixture(
     codomain: impl IntoIterator<Item = (i32, usize)>,
     domain: impl IntoIterator<Item = (i32, usize)>,
 ) -> TensorMap<U1FusionRule, f64> {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let codomain = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -587,7 +587,7 @@ const RANK_TWO_COMPOSE: ContractSpec<'static> = ContractSpec {
 };
 
 fn fixture(engine: &mut dyn Engine) -> TensorMap<ZNFusionRule, f64> {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(ZNFusionRule::new(2).unwrap()),
         [(ZNIrrep::new(0, 2).unwrap(), 8)],
@@ -625,7 +625,7 @@ fn clone_copies_no_payload_bytes() {
 /// the odd sector too — so one tensor exposes both twist short-circuit
 /// answers.
 fn fz2_fixture(engine: &mut dyn Engine) -> TensorMap<symtn_core::FermionParityFusionRule, f64> {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(symtn_core::FermionParityFusionRule::new());
     let even_only =
         GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::EVEN, 2)]).unwrap();

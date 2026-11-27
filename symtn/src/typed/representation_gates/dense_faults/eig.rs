@@ -100,7 +100,7 @@ fn assert_defective_eigenpairs(
 fn checked_generic_eig_dense_failure_preserves_the_source() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let _dense = probe::inject_dense(Box::new(eig_fault_spy()));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0x40));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -121,7 +121,7 @@ fn checked_generic_eig_dense_failure_preserves_the_source() {
 #[test]
 fn checked_generic_eig_full_is_complex_and_reconstructs_nonnormal_inputs() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0x41));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let real: TensorMap<_, f64> =
@@ -194,7 +194,7 @@ fn checked_generic_eig_full_is_complex_and_reconstructs_nonnormal_inputs() {
     let dense = compact.materialize(engine).unwrap();
     assert_checked_generic_eig_reconstruction(&dense, &d, &v);
     let _dense = probe::inject_dense(Box::new(eig_fault_spy()));
-    let fault_runtime = Runtime::builder().build().unwrap();
+    let fault_runtime = Runtime::new();
     let fault_provider = Arc::new(CheckedOnlyToy::new(0x42));
     let fault_leg = GradedSpace::try_new(Arc::clone(&fault_provider), [(Label::X, 2)]).unwrap();
     let compact_on = |engine: &mut dyn Engine, leg: &GradedSpace<_>| -> TensorMap<_, Complex64> {
@@ -244,7 +244,7 @@ fn checked_generic_eigh_dense_failure_preserves_the_source() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_fault_spy(&calls, Some(1))));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0x43));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -268,7 +268,7 @@ fn checked_generic_eigh_preflights_all_sectors_and_runs_once_per_sector() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_fault_spy(&calls, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0x44));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 2)]).unwrap();
@@ -311,7 +311,7 @@ fn eig_full_accepts_finite_defective_sectors_in_both_modes_without_a_rank_svd() 
 
     let counts = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(SpyExecutor::counting(&counts)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // `lambda I + N` with `N` the upper shift: a single Jordan chain, so each
     // block of dimension two or more is defective.
     let jordan = |lambda: Complex64, row: usize, col: usize| {
@@ -443,7 +443,7 @@ impl DenseExecutor for NonfiniteEigenvectors {
 fn eig_full_rejects_provider_nonfinite_eigenvectors_in_both_modes() {
     let engine = &mut crate::typed::CpuEngine::serial();
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let checked_leg =
         GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(0)), [(Label::Vacuum, 3)]).unwrap();
     let mf_leg = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), 3)]).unwrap();

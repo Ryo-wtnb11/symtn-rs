@@ -89,7 +89,7 @@ macro_rules! check_rule {
         for (name, operation) in operations {
             let what = format!("{} {name}", $label);
             symtn::cache::clear();
-            let warm = Runtime::builder().build().unwrap();
+            let warm = Runtime::new();
             let _ = {
                 let tensor = tensor!($engine, &warm, &a);
                 operation($engine, &tensor)
@@ -117,7 +117,7 @@ macro_rules! check_rule {
 
             // Clear every cache so the cold Runtime composes from scratch.
             symtn::cache::clear();
-            let cold = Runtime::builder().build().unwrap();
+            let cold = Runtime::new();
             let expected = {
                 let tensor = tensor!($engine, &cold, &b);
                 operation($engine, &tensor)

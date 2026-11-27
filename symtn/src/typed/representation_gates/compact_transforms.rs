@@ -85,7 +85,7 @@ fn absorb_merge_matches_only_complete_asymmetric_interleaved_keys() {
 fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let dense = TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |_, indices| {
@@ -168,7 +168,7 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
 #[test]
 fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let dense =
@@ -223,7 +223,7 @@ fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
 #[test]
 fn mixed_compact_dense_inner_weights_sectors_and_skips_structural_zeros() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let spin0 = su2_irrep(0);
     let spin_half = su2_irrep(1);
     let bond = GradedSpace::try_new(
@@ -311,7 +311,7 @@ fn mixed_compact_dense_inner_weights_sectors_and_skips_structural_zeros() {
 #[test]
 fn mixed_compact_dense_inner_accepts_an_empty_bond() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let bond = GradedSpace::try_new(Arc::new(U1FusionRule), []).unwrap();
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -333,7 +333,7 @@ fn mixed_compact_dense_inner_accepts_an_empty_bond() {
 #[test]
 fn mixed_compact_lazy_inner_maps_non_self_dual_parent_blocks() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let bond = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -398,7 +398,7 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
     // never reach the transform seam and return the same body allocation.
     // Body identity also pins zero payload copies more directly than an
     // allocator byte count can.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1_provider = Arc::new(U1FusionRule);
     let u1_leg = GradedSpace::try_new(
@@ -491,7 +491,7 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
 #[test]
 fn high_rank_identity_has_no_inline_capacity_boundary() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let tensor: TensorMap<U1FusionRule, f64> =
@@ -594,7 +594,7 @@ fn twist_on_a_compact_spectrum_stays_compact() {
 #[test]
 fn diagonal_spectrum_factor_converts_every_value_bitwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0).unwrap();
     let one = U1Irrep::new(1).unwrap();
@@ -789,7 +789,7 @@ fn checked_compact_arms_never_densify_their_spectrum_operand() {
     // What (#1866): checked Generic takes the same compose, contract,
     // rank-(1,1) transform and full trace arms, so a compact operand is read
     // as a spectrum there too.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -840,7 +840,7 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
     // This finite witness exercises the one-term admission; structural zeros
     // have no prescribed sign under a fermionic braid.
     use symtn_core::PreparedTreePairOperation;
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! probe {
         ($engine:ident, $rule:expr, $sectors:expr, $negative_zeros:expr) => {{
             let leg = GradedSpace::try_new(Arc::new($rule), $sectors).unwrap();
@@ -971,7 +971,7 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
 #[test]
 fn compact_fermionic_braid_matches_hand_diagonal_and_complex_sign() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let bond = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule::new()),
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
@@ -1070,7 +1070,7 @@ fn compact_cat_braid_absorb_avoid_dense_source_materializations() {
 #[test]
 fn absorb_compact_source_zeros_shared_off_diagonal_and_preserves_outer_region() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let wide =
         GradedSpace::try_new(Arc::clone(&provider), [(ZNIrrep::new(0, 2).unwrap(), 4)]).unwrap();
@@ -1186,7 +1186,7 @@ fn compact_absorb_handles_strided_prefixes_and_interleaved_sectors() {
 #[test]
 fn compact_cat_and_absorb_preserve_stored_bits_and_zero_structural_cells() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let bond = GradedSpace::try_new(
         Arc::new(ZNFusionRule::new(2).unwrap()),
         [(ZNIrrep::new(0, 2).unwrap(), 2)],
@@ -1279,7 +1279,7 @@ fn checked_compact_trace_reads_the_spectrum_after_admission() {
     // What (#1866): an inadmissible pair is rejected without touching the
     // spectrum, and the admitted full trace reads it from the compiled terms
     // without materializing (it densified after admission before).
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

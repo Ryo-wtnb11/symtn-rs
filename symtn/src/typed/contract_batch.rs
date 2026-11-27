@@ -506,7 +506,7 @@ where
 ///
 /// # fn main() -> Result<(), Error> {
 /// let engine = &mut symtn::typed::CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let rule = Arc::new(U1FusionRule);
 /// let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 2)])?;
 /// let w = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), 3)])?;
@@ -665,7 +665,7 @@ mod failure_tests {
         // whose layout and payload are consistently one entry short, which
         // only a corrupted stack carries), leaves no observable output; the
         // buffer is kept and the next call recovers.
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(U1FusionRule);
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -751,7 +751,7 @@ mod failure_tests {
         // submission, so a corrupted stack never reaches the device)
         // keeps the temporary and the output in the workspace, so the next
         // call uploads neither and recovers.
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(U1FusionRule);
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -878,7 +878,7 @@ mod fermionic_unit_tests {
     #[test]
     fn fermionic_unit_routes_submit_one_member_expanded_core_batch() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = GradedSpace::try_new(
             Arc::new(
                 ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
@@ -995,7 +995,7 @@ mod fermionic_unit_tests {
     #[test]
     fn signed_direct_submits_one_batch_per_present_sign_class() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = GradedSpace::try_new(
             Arc::new(
                 ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
@@ -1083,7 +1083,7 @@ mod fermionic_unit_tests {
     #[test]
     fn signed_direct_can_leave_inactive_destination_blocks() {
         let cpu = &mut crate::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(
             ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap(),
@@ -1207,7 +1207,7 @@ mod fermionic_unit_tests {
     #[cfg(feature = "cuda")]
     #[test]
     fn cuda_dynamic_tree_admission_is_single_only() {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = |charges: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),

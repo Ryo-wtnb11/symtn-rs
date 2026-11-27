@@ -461,7 +461,7 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
     ));
     assert_eq!(crate::typed_facade::completed_transformers(), before);
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let other: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
         engine,
         &other_runtime,

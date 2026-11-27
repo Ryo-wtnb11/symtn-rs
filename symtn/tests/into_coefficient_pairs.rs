@@ -608,24 +608,19 @@ macro_rules! all_dtypes {
 #[test]
 fn every_linear_into_matches_its_eager_oracle_u1() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    all_dtypes!(engine, &Runtime::builder().build().unwrap(), u1(), "U1");
+    all_dtypes!(engine, &Runtime::new(), u1(), "U1");
 }
 
 #[test]
 fn every_linear_into_matches_its_eager_oracle_su2() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    all_dtypes!(engine, &Runtime::builder().build().unwrap(), su2(), "SU2");
+    all_dtypes!(engine, &Runtime::new(), su2(), "SU2");
 }
 
 #[test]
 fn every_linear_into_matches_its_eager_oracle_fz2u1() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    all_dtypes!(
-        engine,
-        &Runtime::builder().build().unwrap(),
-        fz2u1(),
-        "fZ2xU1"
-    );
+    all_dtypes!(engine, &Runtime::new(), fz2u1(), "fZ2xU1");
 }
 
 /// Device `*_into` against the Host `*_into` (already pinned to the eager
@@ -1080,5 +1075,5 @@ fn device_all(rt: &Runtime) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn every_linear_into_matches_the_host_on_the_device() {
-    device_all(&Runtime::builder().build().unwrap());
+    device_all(&Runtime::new());
 }

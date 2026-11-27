@@ -249,7 +249,7 @@ macro_rules! multiplicity_free {
 #[test]
 fn multiplicity_free_host_axis_errors_have_one_variant_per_kind() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     // The operations' engine, apart from the fixtures' one.
     let ops = &mut symtn::typed::CpuEngine::serial();
     multiplicity_free!(
@@ -272,7 +272,7 @@ fn multiplicity_free_host_axis_errors_have_one_variant_per_kind() {
 fn multiplicity_free_device_axis_errors_match_the_host() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free!(
         engine,
         cuda,
@@ -294,7 +294,7 @@ fn checked_generic_axis_errors_are_the_multiplicity_free_facade_errors() {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GenericTensorError;
 
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(

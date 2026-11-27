@@ -40,7 +40,7 @@ macro_rules! no_decision_ops_create_no_root {
     ($name:ident, $d:ty) => {
         #[test]
         fn $name() {
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let v = leg();
             let setup = &mut CpuEngine::serial();
             let x: TensorMap<U1FusionRule, $d> =
@@ -114,7 +114,7 @@ const COMPOSE: ContractSpec<'static> = ContractSpec {
 // initialize, and the GEMMs' dependency calls run on the root they forked.
 #[test]
 fn forking_contraction_creates_one_root() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_leg(&[(-1, 40), (0, 48), (1, 32)]);
     let setup = &mut CpuEngine::serial();
     let x: TensorMap<U1FusionRule, f64> =

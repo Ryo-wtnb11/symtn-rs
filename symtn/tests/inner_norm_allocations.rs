@@ -62,7 +62,7 @@ fn warmed_non_abelian_inner_and_norm_do_not_allocate() {
     let _serial = crate::counting_alloc::serial();
     // What: cold region compilation is observable, while explicit warm-up
     // leaves both public reductions allocation-free on the caller thread.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = non_abelian_space();
     let lhs: TensorMap<Fz2U1Su2Rule, Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 282_401).unwrap();
@@ -98,7 +98,7 @@ fn warmed_non_abelian_inner_and_norm_do_not_allocate() {
 fn warmed_non_abelian_trace_does_not_allocate() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = non_abelian_space();
     let owned: TensorMap<Fz2U1Su2Rule, Complex64> = TensorMap::rand_with_seed(
         engine,
@@ -125,7 +125,7 @@ fn warmed_non_abelian_trace_does_not_allocate() {
 fn warmed_lazy_adjoint_inner_does_not_allocate_in_mixed_or_double_orientation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = non_abelian_space();
     let lhs_parent: TensorMap<Fz2U1Su2Rule, Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 666_301).unwrap();
@@ -158,7 +158,7 @@ fn warmed_lazy_adjoint_inner_does_not_allocate_in_mixed_or_double_orientation() 
 fn warmed_compact_dense_inner_does_not_allocate() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let spin0 = su2_irrep(0);
     let spin_half = su2_irrep(1);
     let space = GradedSpace::try_new(
@@ -241,7 +241,7 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
     // What: checked Generic reductions take their `dim(c)` weights
     // through one fallible closure and never build a per-call weight map
     // (a std `HashMap`), for owned and lazy-adjoint inputs alike.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(GenericToy);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -338,7 +338,7 @@ fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -426,7 +426,7 @@ fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
 fn checked_generic_single_precision_norm_accumulates_wide() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(GenericToy);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -522,7 +522,7 @@ fn warmed_checked_generic_compact_reductions_do_not_densify() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const K: usize = 16;
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(Arc::new(GenericToy), [(GenericLabel::X, K)]).unwrap();
     let compact = TensorMap::<_, Complex64>::diagonal(
         engine,
@@ -617,7 +617,7 @@ fn warmed_complex_symbol_reductions_do_not_allocate() {
     // through the same seam, so warm Ising `inner`, `norm` and `tr` stay
     // allocation-free on the caller thread, owned and lazy.
     use symtn::sector::{TableRule, TableSector};
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         Arc::new(TableRule::ising()),
         [

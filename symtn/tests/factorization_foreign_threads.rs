@@ -42,7 +42,7 @@ fn run(engine: &mut dyn Engine, tensor: &TensorMap<U1FusionRule, f64>) -> Vec<u6
 fn streaming_factorizations_from_rayon_workers_and_threads_match_serial_results() {
     let engine = &mut CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         centered(5).map(|q| (U1Irrep::new(q).unwrap(), 2)),

@@ -259,7 +259,7 @@ fn svd_and_eigh_truncation_keep_tensorkits_sector_at_a_tie() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // TensorKit: svd_trunc/eigh_trunc(id(Rep[U1](0 => 1, 1 => 1, -1 => 1)),
     // truncrank(2)) both return Rep[U1](0 => 1, 1 => 1).
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(u1(0), 1), (u1(1), 1), (u1(-1), 1)],

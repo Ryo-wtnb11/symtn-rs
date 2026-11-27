@@ -169,7 +169,7 @@ mod u1 {
     #[test]
     fn u1_conjugated_contraction_matches_dense_expansion() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         // `-1` and `1` at different degeneracies: `V ≠ V'`.
         let v = leg(&[(-1, 2), (0, 1), (1, 3)]);
         let w = leg(&[(0, 1), (1, 2), (2, 1)]);
@@ -269,7 +269,7 @@ mod su3 {
     #[test]
     fn su3_conjugated_contraction_matches_coupled_block_products() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),

@@ -6,7 +6,7 @@ use symtn::typed::{Direction, Error, GradedSpace, Runtime, TensorMap};
 
 fn main() -> Result<(), Error> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build()?;
+    let rt = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule::new()),
         [(FermionParityIrrep::ODD, 1)],

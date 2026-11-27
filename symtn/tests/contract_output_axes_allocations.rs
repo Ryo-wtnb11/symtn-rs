@@ -97,7 +97,7 @@ macro_rules! assert_no_costlier_than_permute {
 /// change the split's size.
 macro_rules! assert_output_axes_cost {
     ($engine:ident, $provider:expr, $sectors:expr $(,)?) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = GradedSpace::try_new(
             std::sync::Arc::new($provider),
             $sectors.into_iter().map(|s| (s, 3)),

@@ -8,7 +8,7 @@ use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 
 fn main() -> Result<(), Error> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build()?;
+    let rt = Runtime::new();
     let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     let a = TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v], [&v], |_, ij| {
         if ij[0] == ij[1] {

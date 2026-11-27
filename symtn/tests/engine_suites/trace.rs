@@ -122,7 +122,7 @@ on_each_engine! {
     fn traces_match_the_independent_oracles_at_every_dtype<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         every_fixture!(B, device, engine, &runtime, f64);
         every_fixture!(B, device, engine, &runtime, Complex64);
         every_fixture!(B, device, engine, &runtime, f32);
@@ -167,7 +167,7 @@ on_each_engine! {
     fn fz2_trace_is_the_hand_valued_supertrace<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         supertrace!(B, device, engine, &runtime, f64);
         supertrace!(B, device, engine, &runtime, Complex64);
         supertrace!(B, device, engine, &runtime, f32);
@@ -184,7 +184,7 @@ on_each_engine! {
     fn repeated_destinations_accumulate_every_producer<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = u1(&[(-1, 2), (0, 1), (1, 2)]);
         let w = u1(&[(0, 1), (1, 2)]);
         let restricted = |engine: &mut dyn Engine, only: Option<i32>| -> TensorMap<_, f64> {

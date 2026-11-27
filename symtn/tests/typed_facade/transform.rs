@@ -367,7 +367,7 @@ fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
         assert!(matches!(error, symtn::typed::Error::RuleMismatch));
     }
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let foreign = Arc::new(external_z3_tagged(7));
     let foreign_leg =
         GradedSpace::try_new(Arc::clone(&foreign), [(Z3Charge(0), 1), (Z3Charge(1), 1)]).unwrap();
@@ -521,7 +521,7 @@ fn catcodomain_oracle<D: Copy>(lhs: &[D], lhs_rows: usize, rhs: &[D], rhs_rows: 
 fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg(&Arc::new(U1FusionRule), &[(0, 0), (1, 2)]);
     let diagonal: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(
         engine,
@@ -543,7 +543,7 @@ fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
 fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let common = u1_leg(&provider, &[(0, 3)]);
     let left = u1_leg(&provider, &[(0, 2)]);

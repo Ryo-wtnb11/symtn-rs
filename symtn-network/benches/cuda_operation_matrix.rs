@@ -621,9 +621,7 @@ mod device {
             + 'static,
         D: HarnessScalar,
     {
-        let runtime = Runtime::builder()
-            .build()
-            .expect("Runtime for the measured row");
+        let runtime = Runtime::new();
         let mut cpu = CpuEngine::serial();
         let mut cuda = cuda_engine(config);
         symtn_dense::CudaDenseContext::new(&mut cuda)

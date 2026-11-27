@@ -41,7 +41,7 @@ fn fz2u1_leg(charges: i32) -> GradedSpace<Fz2U1> {
 /// `[V^half] ← [V^half]` traced over `pairs`, after three warm-ups.
 macro_rules! warm_trace_calls {
     ($engine:ident, $leg:expr, $half:expr, $pairs:expr) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = $leg;
         let legs = vec![&leg; $half];
         let source = TensorMap::<_, f64>::rand_with_seed(

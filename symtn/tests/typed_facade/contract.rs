@@ -900,7 +900,7 @@ fn typed_contract_parallel_su2_replay_matches_serial() {
         .to_vec()
     }
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let serial = run(&mut symtn::typed::CpuEngine::serial(), &runtime);
     let pool = symtn::typed::Pool::builder().threads(2).build().unwrap();
     let parallel = run(&mut symtn::typed::CpuEngine::new(pool), &runtime);
@@ -1294,7 +1294,7 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let host_lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
     let host_rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
     let lhs = host_lhs.to_cuda(cuda).unwrap();

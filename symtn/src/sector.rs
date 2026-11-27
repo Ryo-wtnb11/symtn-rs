@@ -26,7 +26,7 @@
 //!     EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
 //! )?;
 //! let v = GradedSpace::try_new(Arc::new(rule), [(tau, 2)])?;
-//! let runtime = Runtime::builder().build()?;
+//! let runtime = Runtime::new();
 //! let tensor: TensorMap<_, Complex64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
 //! assert_eq!(tensor.subblock_count(), 1);
 //! # Ok(())

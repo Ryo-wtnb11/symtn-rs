@@ -548,7 +548,7 @@ macro_rules! multiplicity_free {
 #[test]
 fn u1_blocks_match_label_physical_adjoint_and_composition_oracles() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free!(engine, &rt, u1_legs(), "U(1)", |t| physical_case!(
         engine,
         "U(1)",
@@ -560,7 +560,7 @@ fn u1_blocks_match_label_physical_adjoint_and_composition_oracles() {
 #[test]
 fn su2_blocks_match_label_physical_adjoint_and_composition_oracles() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free!(engine, &rt, su2_legs(), "SU(2)", |t| physical_case!(
         engine,
         "SU(2)",
@@ -571,7 +571,7 @@ fn su2_blocks_match_label_physical_adjoint_and_composition_oracles() {
 
 #[test]
 fn fz2u1_blocks_match_label_adjoint_and_composition_oracles() {
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free!(engine, &rt, fz2u1_legs(), "fZ2xU(1)", |t| {
         let _ = t;
     });
@@ -580,7 +580,7 @@ fn fz2u1_blocks_match_label_adjoint_and_composition_oracles() {
 #[test]
 fn compact_diagonal_block_is_its_stored_spectrum() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let (v, _) = u1_legs();
     let spectra = [
         (-1, vec![1.5, -2.0]),
@@ -624,7 +624,7 @@ fn compact_diagonal_block_is_its_stored_spectrum() {
 #[test]
 fn absent_coupled_sector_is_tensorkits_empty_view() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let (v, w) = u1_legs();
     let t =
         TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v, &w], [&v], label_value).unwrap();
@@ -697,7 +697,7 @@ mod su3 {
     }
 
     fn run<D: Val>(engine: &mut dyn Engine, what: &str) {
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let [octet, chiral, dual] = legs();
         let a = label_case::<_, D>(what, &rt, &[&octet, &octet], &[&octet]);
         assert!(
@@ -862,7 +862,7 @@ mod cuda {
     fn device_block_views_address_the_host_block_entries() {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let cuda = &mut crate::common::cuda_engine();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let (v, w) = u1_legs();
         run::<_, f64>(engine, cuda, "U(1) f64", &rt, &v, &w);
         run::<_, Complex64>(engine, cuda, "U(1) c64", &rt, &v, &w);
@@ -880,7 +880,7 @@ mod cuda {
     fn checked_generic_su3_device_block_views_address_the_host_block_entries() {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let cuda = &mut crate::common::cuda_engine();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let [octet, _, _] = super::su3::legs();
         let t = label_case::<_, f64>("SU(3) f64", &rt, &[&octet, &octet], &[&octet]);
         device_case(cuda, "SU(3) f64", &t);

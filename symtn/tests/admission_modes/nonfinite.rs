@@ -12,7 +12,7 @@ in_both_modes! {
     /// the values.
     fn structural_admission_precedes_the_finite_input_stage<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let row = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 1)]).unwrap();
         let col = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 2)]).unwrap();

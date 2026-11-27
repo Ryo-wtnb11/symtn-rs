@@ -30,7 +30,7 @@ use symtn_network::{
 fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 7)]).unwrap();
@@ -534,8 +534,7 @@ fn temporary_order_fixture(engine: &mut dyn Engine, runtime: &Runtime) -> (Vec<U
 /// runtime and on an engine that keeps no contraction scratch (both are
 /// retained across calls), so it is a first execution.
 fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
-    let (oracle_inputs, terms) =
-        temporary_order_fixture(engine, &Runtime::builder().build().unwrap());
+    let (oracle_inputs, terms) = temporary_order_fixture(engine, &Runtime::new());
     let [x, y, z, w, p, q] = &oracle_inputs[..] else {
         unreachable!()
     };
@@ -647,7 +646,7 @@ fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
             t.dense_data().unwrap().len(),
             "{name}: ambiguous size"
         );
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let (inputs, _) = temporary_order_fixture(engine, &runtime);
         let refs = [0, 1]
             .into_iter()
@@ -972,7 +971,7 @@ fn typed_overwrite_worker<D>(engine: &mut dyn Engine, chi: usize, reuse: bool)
 where
     D: AllocationScalar,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), chi)]).unwrap();
@@ -1027,7 +1026,7 @@ where
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let irrep = provider.category().irrep(&[1]).unwrap();
     let fundamental = || irrep.clone();
@@ -1082,7 +1081,7 @@ where
     use symtn::sector::LieGroupFusionRule;
     use symtn_network::{configure_plan_cache, PlanCacheConfig};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -1188,7 +1187,7 @@ fn run_typed_overwrite_worker(
 }
 
 fn lazy_conj_worker(engine: &mut dyn Engine) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy| {
         GradedSpace::try_new(

@@ -111,7 +111,7 @@ fn assert_signs_only<D: Payload>(source: &[D], twisted: &[D], what: &str) {
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 fn real_fill(_trees: &symtn::typed::BlockFusionTrees<impl std::fmt::Debug>, idx: &[usize]) -> f64 {

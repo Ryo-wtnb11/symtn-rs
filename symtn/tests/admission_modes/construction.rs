@@ -51,7 +51,7 @@ in_both_modes! {
     /// sets) is a space mismatch.
     fn structural_constructors_are_identities_and_isometries<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let space = |unit: usize, charged: usize| {
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), unit), (M::charged(), charged)])
@@ -115,7 +115,7 @@ in_both_modes! {
     /// nonzero imaginary part in the real one's layout.
     fn rand_with_seed_is_a_function_of_the_seed<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
             .unwrap();

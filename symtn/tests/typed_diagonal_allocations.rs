@@ -40,7 +40,7 @@ fn dense_payload_bytes() -> u64 {
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 fn runtime() -> &'static Runtime {
-    RUNTIME.get_or_init(|| Runtime::builder().build().unwrap())
+    RUNTIME.get_or_init(Runtime::new)
 }
 
 fn leg() -> GradedSpace<ZNFusionRule> {

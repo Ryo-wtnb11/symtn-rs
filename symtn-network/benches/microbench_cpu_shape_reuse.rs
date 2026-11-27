@@ -461,7 +461,7 @@ fn run_case<R, D>(
     <R as TypedSectorAdmission>::Sector: Clone + Eq,
     D: BenchScalar,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let cold_pattern = patterns[0].clone();
     let mut cold_workspace = NetworkExecutionWorkspace::default();
     let cold = measure(

@@ -216,7 +216,7 @@ macro_rules! assert_lazy_adjoint_reads_and_transforms_match_literal {
 #[test]
 fn u1_rank4_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let complex = u1_rank4(&runtime);
     assert!(complex
         .dense_data()
@@ -240,7 +240,7 @@ fn u1_rank4_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
 #[test]
 fn su2_rank4_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let complex = su2_rank4(&runtime);
     assert!(complex
         .dense_data()
@@ -264,7 +264,7 @@ fn su2_rank4_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
 #[test]
 fn empty_support_lazy_adjoint_materializes_an_empty_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let codomain = u1_leg(&provider, &[(1, 2)], false);
     let domain = u1_leg(&provider, &[(0, 3)], false);
@@ -292,7 +292,7 @@ fn empty_support_lazy_adjoint_materializes_an_empty_payload() {
 #[test]
 fn su2_tr_matches_the_literal_weighted_diagonal_sum_and_conjugates_lazily() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),

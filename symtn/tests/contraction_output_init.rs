@@ -110,7 +110,7 @@ macro_rules! check_owned {
 
 fn u1_case<D: Bits>(seed: u64) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let open = u1(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let bond = u1(&provider, &[(0, 2)]);
@@ -202,7 +202,7 @@ fn u1_owned_contractions_leave_unreachable_charges_exactly_zero_c64() {
 
 fn su2_case<D: Bits>(seed: u64) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     // `[a, c] <- [b]` and `[b] <- [a, c]` couple only to spin 1/2 through the
     // bond; the destination `[a, c] <- [a, c]` also couples to spin 3/2.
@@ -284,7 +284,7 @@ fn empty_support_yields_a_zero_payload_of_the_full_destination_length() {
     // What: `[a] <- [b]` with integer `a` and half-integer `b` has no block at
     // all; composing with `[b] <- [a]` still owns the full `[a] <- [a]`
     // payload (spins 0 and 1: 2*2 + 3*3 elements), every element `+0.0`.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let a = su2(&provider, &[(0, 2), (2, 3)]);
     let b = su2(&provider, &[(1, 3)]);

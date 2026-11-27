@@ -11,7 +11,7 @@ use symtn::typed::{Runtime, TensorMap};
 /// A host Runtime with one dense thread, so results and allocation counts do
 /// not depend on the machine's core count.
 pub fn host_runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// The receiver's own split as leg roles: `rows = 0..nout`.

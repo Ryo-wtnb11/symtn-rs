@@ -50,7 +50,7 @@ fn su2_space(provider: &Arc<Su2Rule>, sectors: &[(usize, usize)]) -> GradedSpace
 /// has coupled charges -1 and 1 that no GEMM writes (inactive blocks).
 fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(seed: u64) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let open = u1_space(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let bond = u1_space(&provider, &[(0, 2)]);
@@ -126,7 +126,7 @@ fn owned_c64_contraction_output_is_one_unzeroed_payload() {
 /// coefficient scratch is converted per structure identity.
 fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     // Destination `[a, c] <- [d, e]` couples to spins 1/2 and 3/2; the bond
     // `b` carries only spin 1/2, so the spin-3/2 block is inactive.
@@ -180,7 +180,7 @@ fn owned_su2_single_precision_contraction_allocates_like_double() {
 /// allocates the temporary alone: what the owned output itself allocates.
 fn moved_output_allocations(r: &[(i32, usize)]) -> (usize, (u64, u64)) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let p = u1_space(&provider, &[(0, 2), (1, 3)]);
     let q = u1_space(&provider, &[(0, 2), (1, 4)]);

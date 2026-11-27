@@ -75,7 +75,7 @@ where
 
 #[test]
 fn the_default_admits_up_to_eps_three_quarters_relative() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let tol = f64::EPSILON.powf(0.75);
     for (factor, admitted) in [(0.97, true), (1.03, false)] {
         let dense = dense(&runtime, factor * tol * 10.0_f64.sqrt());
@@ -87,7 +87,7 @@ fn the_default_admits_up_to_eps_three_quarters_relative() {
 
 #[test]
 fn an_explicit_tolerance_replaces_the_default() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for tol in [64.0 * f64::EPSILON, 1.0e-3] {
         let explicit = HermitianTol::relative(tol).unwrap();
         for (factor, admitted) in [(0.97, true), (1.03, false)] {
@@ -106,7 +106,7 @@ fn an_explicit_tolerance_replaces_the_default() {
 #[test]
 fn a_prepared_plan_fixes_its_tolerance() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let tol = 1.0e-3;
     let near = dense(&runtime, 0.5 * tol * 10.0_f64.sqrt());
     let stack = StackedTensorMap::pack(&[near]).unwrap();
@@ -134,7 +134,7 @@ fn a_prepared_plan_fixes_its_tolerance() {
 #[test]
 fn single_precision_exp_admits_what_its_route_predicate_sends_to_eigh() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = leg();
     // Relative residual 7e-6: above eps(f32)^(3/4) = 6.4e-6, below
     // 64·eps(f32) = 7.6e-6.

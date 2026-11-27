@@ -19,7 +19,7 @@ use symtn::typed::{GradedSpace, LegSelection, TensorMap};
 #[test]
 fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -78,7 +78,7 @@ fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
 #[test]
 fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -136,7 +136,7 @@ fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
 #[test]
 fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -209,7 +209,7 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
 #[test]
 fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

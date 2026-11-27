@@ -170,7 +170,7 @@ const FLIP_ROWS: [(&str, bool, &[usize], Complex64); 4] = [
 #[test]
 fn flip_matches_values_checked_against_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
         for &(name, inverse, legs, want) in &FLIP_ROWS {
@@ -192,7 +192,7 @@ fn flip_matches_values_checked_against_tensorkit() {
 #[test]
 fn twist_scales_every_block_by_the_closed_form_theta() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
         for (inverse, legs) in TWISTS {
@@ -239,7 +239,7 @@ fn twist_scales_every_block_by_the_closed_form_theta() {
 #[test]
 fn twist_and_flip_invert_as_tensorkit_defines() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (f, b) = (Direction::Forward, Direction::Inverse);
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
@@ -283,7 +283,7 @@ fn twist_and_flip_invert_as_tensorkit_defines() {
 #[test]
 fn lazy_adjoint_twist_and_flip_equal_the_materialized_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
         let lazy = t.adjoint(engine).unwrap();
@@ -317,7 +317,7 @@ fn lazy_adjoint_twist_and_flip_equal_the_materialized_adjoint() {
 #[test]
 fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for category in [fibonacci(), ising()] {
         let sectors = category.v.sectors().unwrap();
         let spectrum = sectors
@@ -360,7 +360,7 @@ fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
 #[test]
 fn no_braiding_table_keeps_its_typed_refusals() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap());
     let mixed = space(rule.clone(), &[(1, 2), (3, 1)]);
     let unit = space(rule, &[(1, 2)]);
@@ -403,7 +403,7 @@ fn no_braiding_table_keeps_its_typed_refusals() {
 #[test]
 fn fibonacci_flip_rejects_a_repeated_leg() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let t = operand(&runtime, &fibonacci());
     match t.flip(engine, &[1, 1], Direction::Forward) {
         Err(Error::InvalidArgument(message)) => {

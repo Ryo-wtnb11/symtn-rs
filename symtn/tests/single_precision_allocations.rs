@@ -47,7 +47,7 @@ fn measured<T>(operation: impl FnOnce() -> T) -> (T, usize, usize) {
 }
 
 fn build_runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// A permute at one payload dtype, which is the cheapest public operation
@@ -156,7 +156,7 @@ macro_rules! measure_pipeline {
 fn single_precision_allocates_as_often_as_double_and_half_the_payload_bytes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = u1_space();
 
     let (_, f64_calls, f64_bytes) = measure_pipeline!(engine, &runtime, f64, &space);
@@ -282,7 +282,7 @@ macro_rules! assert_factorization_allocates_like_double {
     ($op:tt) => {{
         let engine = &mut symtn::typed::CpuEngine::serial();
         let _serial = crate::counting_alloc::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let space = u1_space();
 
         let (f64_payload, f64_sectors, f64_calls, f64_bytes) =

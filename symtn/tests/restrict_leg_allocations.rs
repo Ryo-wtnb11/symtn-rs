@@ -46,7 +46,7 @@ fn measure(payload_bytes: usize, operation: impl FnOnce()) -> Measurement {
 /// shape: the measurement and the payload byte count for that scale.
 fn restrict_measurement(scale: usize) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(
         &provider,
@@ -116,7 +116,7 @@ fn restrict_leg_allocates_one_unfilled_payload_and_degeneracy_independent_scratc
 /// `sequential` restricts one leg per call instead, the negative control.
 fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(
         &provider,
@@ -206,7 +206,7 @@ fn restricting_three_legs_is_one_payload_pass() {
 fn the_network_restriction_of_several_axes_fills_no_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0).unwrap();
     let rows = u1_on(&provider, &[(0, 6)]);
@@ -254,7 +254,7 @@ fn the_network_restriction_of_several_axes_fills_no_payload() {
 /// are `scale` times a base shape, keeping a fixed prefix of each sector.
 fn compact_restrict_measurement(scale: usize) -> Measurement {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 2 * scale), (0, 3 * scale)]);
     let source: TensorMap<_, f64> =
@@ -315,7 +315,7 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
     // lazy-adjoint `data()` tile their storage, so neither zero-fills its
     // payload before overwriting every block. For `f64` the base
     // fill was `vec![0.0; len]`, an allocator-zeroed allocation.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 3)]);
@@ -377,7 +377,7 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
 /// payload bytes of one warm call whose previous outputs were dropped.
 fn steady_multi_row_restrict(scale: usize, reach: i32) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(
         &provider,
@@ -455,7 +455,7 @@ fn steady_state_restrict_leg_with_several_row_trees_pays_no_layout_proof() {
 /// call and its payload bytes.
 fn stacked_restrict_measurement(members: usize) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 1)]);
@@ -532,7 +532,7 @@ fn stacked_restrict_leg_allocates_one_unfilled_payload_independent_of_the_member
 /// and embedded payload bytes.
 fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(
         &provider,

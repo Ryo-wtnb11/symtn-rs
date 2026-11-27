@@ -187,7 +187,7 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let densified = probe::record();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -418,7 +418,7 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -514,7 +514,7 @@ fn typed_cuda_lazy_adjoint_contract_and_compose_match_rectangular_host_oracles()
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = |degeneracy| {
         GradedSpace::try_new(
@@ -610,7 +610,7 @@ fn typed_cuda_lazy_adjoint_preserves_fermionic_contract_sign() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(FermionParityFusionRule::new());
     let odd = |is_dual| {
         GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)])
@@ -667,7 +667,7 @@ fn typed_cuda_lazy_adjoint_preserves_fermionic_contract_sign() {
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
     let cpu = &mut crate::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let su2_provider = Arc::new(su2_rule());
     let su2 = GradedSpace::try_new(
@@ -733,7 +733,7 @@ fn device_and_host_operations_refuse_the_other_engine_kind() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
@@ -785,7 +785,7 @@ fn device_contraction_leaves_the_tree_transform_cache_unchanged() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -834,7 +834,7 @@ fn typed_cuda_into_rejects_another_engines_destination_untouched() {
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let other =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -1055,7 +1055,7 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
         let re = fill(trees, ix);
         Complex64::new(re, 0.25 - 0.5 * re)
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let directions = [Direction::Forward, Direction::Inverse];
 
     // fZ2 with a dual codomain leg: both sides, both dualities, repeated legs.
@@ -1302,7 +1302,7 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
         let re = fill(trees, ix);
         Complex64::new(re, 0.25 - 0.5 * re)
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     // U(1) `[V, V*] <- [V]`.
     let u1 = GradedSpace::try_new(

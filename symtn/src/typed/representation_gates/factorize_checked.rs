@@ -8,7 +8,7 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
 
     let solver_calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(fail_second_svd(&solver_calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -150,7 +150,7 @@ fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
     let _dense = probe::inject_dense(Box::new(polar_spy(&Arc::default())));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -205,7 +205,7 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
 
     let svd_calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(polar_spy(&svd_calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -414,7 +414,7 @@ fn checked_compact_diagonal_polar_returns_compact_hand_oracle_without_dense_work
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let _dense = probe::inject_dense(Box::new(polar_spy(&svd_calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -533,7 +533,7 @@ fn checked_compact_diagonal_null_is_empty_by_shape_without_dense_work() {
         ($engine:ident, $dtype:ty) => {{
             let calls = Arc::new(SpyCounts::default());
             let _dense = probe::inject_dense(Box::new(polar_spy(&calls)));
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let provider = Arc::new(
                 LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                     fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -597,7 +597,7 @@ fn checked_compact_diagonal_svd_vals_rounds_at_payload_precision() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -679,7 +679,7 @@ fn checked_compact_diagonal_pinv_does_not_materialize_the_input() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -753,7 +753,7 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
     use num_complex::Complex64;
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -934,7 +934,7 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su3 = GradedSpace::try_new(
         Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -1047,7 +1047,7 @@ fn checked_generic_polar_writes_its_factors_in_place() {
     };
     let gemms = Arc::new(std::sync::Mutex::new(Vec::new()));
     let counts = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

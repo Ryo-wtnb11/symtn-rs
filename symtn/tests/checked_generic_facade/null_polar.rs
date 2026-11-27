@@ -18,7 +18,7 @@ fn checked_generic_polar_lazy_redirects_to_the_opposite_parent_operation() {
     let _serial = crate::counting_alloc::serial();
     // What: lazy adjoints reuse the parent's owned P, return owned W-adjoints,
     // and report the operation requested on the receiver.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, Complex64> =
@@ -89,7 +89,7 @@ fn checked_generic_polar_completes_rank_deficient_and_zero_sectors() {
     let _serial = crate::counting_alloc::serial();
     // What: compact-full SVD completion returns a full isometry/coisometry;
     // P remains Hermitian PSD for rank-deficient and zero matrices.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     for zero in [false, true] {
@@ -164,7 +164,7 @@ fn checked_generic_null_spaces_cover_shape_zero_disjoint_and_side_only_sectors()
     // a tall sector keeps `rows - cols` orthonormal directions annihilating
     // the input even when rank-deficient, zero/side-only directions are kept
     // in full, and the provider authority is retained.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     for small in [0.0, f64::EPSILON, 1.0] {
@@ -305,7 +305,7 @@ fn assert_sun_checked_generic_null_spaces<D>(
 {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -460,7 +460,7 @@ fn assert_sun_checked_generic_polar_qh<D>(
 {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -570,7 +570,7 @@ fn sun_checked_generic_polar_cross_mu_qh_oracles_for_both_dtypes() {
 fn checked_compact_diagonal_polar_publishes_on_the_input_space_without_provider_queries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for dual in [false, true] {
         for fault in ["fail_algebra", "invalid_style"] {
             let provider = Arc::new(CheckedOnlyToy::new_product_probe(1));

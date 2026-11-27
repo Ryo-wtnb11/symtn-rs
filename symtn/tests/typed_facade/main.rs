@@ -525,7 +525,7 @@ fn su2_leg(provider: &Arc<ExternalSu2Rule>, is_dual: bool) -> GradedSpace<Extern
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().expect("runtime builds")
+    Runtime::new()
 }
 
 // ---------------------------------------------------------------------------
@@ -935,7 +935,7 @@ mod typed_is_self_sufficient {
     fn typed_imports_run_an_end_to_end_typed_operation() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let _serial = crate::counting_alloc::serial();
-        let runtime: Runtime = Runtime::builder().build().expect("runtime builds");
+        let runtime: Runtime = Runtime::new();
         let provider = Arc::new(external_z3());
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 2), (Z3Charge(1), 3)])
             .expect("leg is well formed");

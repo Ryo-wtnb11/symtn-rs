@@ -138,7 +138,7 @@ macro_rules! lq_cases {
 fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     lq_cases!(engine, f64, &runtime);
     lq_cases!(engine, Complex64, &runtime);
 }
@@ -284,7 +284,7 @@ mod checked_generic {
     fn checked_generic_polar_and_lq_match_reconstruction_oracles() {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let _serial = crate::counting_alloc::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         cases!(engine, f64, &runtime);
         cases!(engine, Complex64, &runtime);
     }
@@ -310,7 +310,7 @@ mod checked_generic {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let _serial = crate::counting_alloc::serial();
         type Tensor = TensorMap<LieGroupFusionRule, f64>;
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),

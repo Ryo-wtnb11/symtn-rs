@@ -7,7 +7,7 @@ fn checked_generic_compact_reductions_read_only_the_spectrum() {
     // What: a checked Generic compact operand reduces from its stored values,
     // weighted by `dim(X) = 1 + sqrt(2)`, against compact, dense and lazy
     // partners; the dense partner's off-diagonal entries are not read.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let compact = TensorMap::<_, Complex64>::diagonal(
@@ -119,7 +119,7 @@ fn checked_generic_reductions_do_not_requery_the_admitted_fusion_style() {
     let _serial = crate::counting_alloc::serial();
     // Admission fixed the Generic style; a provider whose answer changes
     // afterwards is neither asked again nor able to drop the `dim` weights.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -143,7 +143,7 @@ fn checked_generic_reductions_do_not_requery_the_admitted_fusion_style() {
 fn checked_generic_reduction_dimension_failure_is_typed_and_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -165,7 +165,7 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -221,7 +221,7 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
 fn checked_tr_matches_the_literal_weighted_sum_and_keeps_error_precedence() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 2)]).unwrap();
@@ -326,7 +326,7 @@ fn checked_tr_matches_the_literal_weighted_sum_and_keeps_error_precedence() {
 fn checked_inner_and_norm_take_one_weight_per_sector_and_keep_error_precedence() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 2)]).unwrap();

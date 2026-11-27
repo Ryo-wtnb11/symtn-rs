@@ -155,7 +155,7 @@ fn assert_typed_cuda_svd_trunc_composition_matches_host<R>(
 fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = Arc::new(U1FusionRule);
     let tall = GradedSpace::try_new(
         Arc::clone(&u1),
@@ -324,7 +324,7 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
 fn typed_cuda_svd_compact_handles_large_wide_sector() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let rows =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 8)]).unwrap();
@@ -346,7 +346,7 @@ fn typed_cuda_svd_trunc_composition_handles_large_wide_sector() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     // What: the 8 x 1025 cuSOLVER path composes with a kept prefix on the Host.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let rows =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 8)]).unwrap();
@@ -374,7 +374,7 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     let cuda = &mut crate::common::cuda_engine();
     // What: all truncation policies and supported provider families match the
     // Host semantic oracle without comparing backend-dependent U/Vh gauges.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let rows = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -655,7 +655,7 @@ fn assert_c64_svd_trunc_composition_matches_host<R>(
 fn typed_cuda_c64_svd_matches_host_spectra_and_truncation_policies() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = Arc::new(U1FusionRule);
     let rows = GradedSpace::try_new(
         Arc::clone(&u1),
@@ -720,7 +720,7 @@ fn typed_cuda_su2_svd_trunc_matches_host_at_every_weighted_rank_budget() {
     // What: SU(2) spectra with nontrivial degeneracies and quantum dimensions
     // 1, 2 and 3 take the Host decision at every integer rank budget, most of
     // which land exactly on a cumulative `dim(c)` sum, in f64 and c64.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(su2_rule()),
         [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],

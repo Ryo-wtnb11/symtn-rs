@@ -181,7 +181,7 @@ where
     D: AdvancedLinalgScalar + FactorizationScalar,
     <D as FactorScalar>::Eig: TensorScalar,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut all: Vec<(&str, Rows)> = Vec::new();
 
     let u1 = Arc::new(U1FusionRule);

@@ -91,7 +91,7 @@ macro_rules! su2_control {
         let label = $label;
         let (provider, provider_allocations, provider_bytes, provider_ns) =
             measure_value(|| Arc::new($make));
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let space = |sectors: &[(usize, usize)]| {
             GradedSpace::<$rule>::try_new(
                 Arc::clone(&provider),
@@ -334,7 +334,7 @@ fn main() {
         "su4_repartition" => (4, su_irrep(&[1, 0, 1]), "repartition"),
         _ => panic!("unknown measurement case: {case}"),
     };
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),

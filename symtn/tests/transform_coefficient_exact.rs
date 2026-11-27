@@ -74,7 +74,7 @@ macro_rules! assert_componentwise {
     };
     ($engine:ident, $complex:ty, $real:ty, [$($codomain:expr),* $(,)?], [$($domain:expr),* $(,)?],
      |$t:ident| $body:expr) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let codomain = vec![$($codomain),*];
         let domain = vec![$($domain),*];
         let build = |$engine: &mut dyn Engine, f: &dyn Fn(&BlockFusionTrees<_>, &[usize]) -> $real| {

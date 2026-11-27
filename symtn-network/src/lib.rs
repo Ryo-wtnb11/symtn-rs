@@ -151,7 +151,7 @@ pub use tree::ContractionTree;
 ///
 /// # fn main() -> Result<(), Error> {
 /// let mut engine = CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let v = GradedSpace::try_new(
 ///     Arc::new(U1FusionRule),
 ///     [(U1Irrep::new(-1).unwrap(), 1), (U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],

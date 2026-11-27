@@ -63,7 +63,7 @@ use super::*;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let engine = &mut symtn::typed::CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
 /// // Annotated, so the literals have a type to be.
 /// let t: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(engine,
@@ -530,7 +530,7 @@ where
     /// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let rt = Runtime::builder().build()?;
+    /// let rt = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [-1, 0, 1].map(|q| (U1Irrep::new(q).unwrap(), 1)))?;
     /// let id = TensorMap::<U1FusionRule, f64>::isomorphism(engine, &rt, [&v], [&v])?;
     ///

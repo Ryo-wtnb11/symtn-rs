@@ -1696,7 +1696,7 @@ fn every_payload_dtype_satisfies_both_device_marker_traits() {
 #[test]
 fn a_non_cuda_engine_rejects_every_payload_the_same_way() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg_2_1_2();
 
     fn reject<D: DevicePayload>(

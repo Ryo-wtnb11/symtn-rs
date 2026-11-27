@@ -216,7 +216,7 @@ fn assert_reordered_overwrite<R, D>(
 
 #[test]
 fn contract_overwrite_reorders_non_self_dual_unequal_blocks() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1_provider = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
         Arc::clone(&u1_provider),

@@ -74,7 +74,7 @@ macro_rules! assert_memoized {
 fn warm_multiplicity_free_permute_reuses_the_memoized_destination() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         (-1..=1).map(|q| (U1Irrep::new(q).unwrap(), 2)),

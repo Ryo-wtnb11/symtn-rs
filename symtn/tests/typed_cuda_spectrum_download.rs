@@ -45,7 +45,7 @@ fn delta(before: CudaTransferStats) -> CudaTransferStats {
 fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let bytes = |len: usize| (len * std::mem::size_of::<f64>()) as u64;
     for charges in [1_usize, 9] {
         let half = charges as i32 / 2;

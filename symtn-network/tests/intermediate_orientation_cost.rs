@@ -42,7 +42,7 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
     // is (x, u | y, z) as lhs or (y, z | x, u) as rhs: two codomain legs where
     // the default split has one, a split move either way. Distinct prime
     // degeneracies keep the intermediate payload size unique in the run.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space =
         |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), n)]).unwrap();
     let (x, c, y, z, u, w) = (

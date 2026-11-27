@@ -158,7 +158,7 @@ macro_rules! assert_bit_identical {
 fn u1_su2_owned_transforms_are_bit_identical_across_thread_counts() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (serial, parallel) = (&runtime, &runtime);
     let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(
@@ -190,7 +190,7 @@ fn u1_su2_owned_transforms_are_bit_identical_across_thread_counts() {
 fn u1_owned_transforms_are_bit_identical_across_thread_counts() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (serial, parallel) = (&runtime, &runtime);
     let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(U1FusionRule);
@@ -231,7 +231,7 @@ fn parallel_owned_permute_writes_its_output_without_a_zeroed_payload() {
     // destination-reading replay. (An eager call's per-call workspace also
     // allocates the lane runner's tables and lane scratch, which the serial
     // path does not have.)
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (serial, parallel) = (&runtime, &runtime);
     let parallel_engine = &mut parallel_engine();
     let provider = Arc::new(

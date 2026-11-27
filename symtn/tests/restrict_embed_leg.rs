@@ -231,7 +231,7 @@ fn dense_plan<S: PartialEq + TensorKitPosition, P: Clone + IntoIterator<Item = u
 #[test]
 fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     // Degeneracies asymmetric under c -> -c, so a label/dual mix-up cannot
     // survive by coincidence.
@@ -284,7 +284,7 @@ fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
 #[test]
 fn restrict_keeps_su2_multiplets_intact_for_a_middle_sector_with_offset() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     // Three sectors so that dropping the middle one shifts the dense offsets
     // of the last, and j = 1/2, 1 carry nontrivial multiplet dimensions.
@@ -329,7 +329,7 @@ fn restrict_keeps_su2_multiplets_intact_for_a_middle_sector_with_offset() {
 #[test]
 fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let spectator = u1_on(&provider, &[(-1, 1), (0, 2), (1, 1)]);
@@ -411,7 +411,7 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
 #[test]
 fn restrict_of_a_fermionic_odd_dual_leg_equals_the_isometry_composition() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(FermionParityFusionRule::new());
     let leg = fz2(&provider, &[(false, 2), (true, 3)]).try_dual().unwrap();
     let spectator = fz2(&provider, &[(false, 2), (true, 2)]);
@@ -461,7 +461,7 @@ fn restrict_of_a_fermionic_odd_dual_leg_equals_the_isometry_composition() {
 #[test]
 fn restrict_reads_a_complex_lazy_adjoint_domain_leg_with_a_multi_sector_selection() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let rows = u1_on(&provider, &[(0, 2), (1, 3)]);
     let columns = u1_on(&provider, &[(0, 3), (1, 2)]);
@@ -506,7 +506,7 @@ fn restrict_reads_a_complex_lazy_adjoint_domain_leg_with_a_multi_sector_selectio
 #[test]
 fn restrict_commutes_with_adjoint_under_the_codomain_domain_axis_map() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let rows = u1_on(&provider, &[(0, 2), (1, 3)]);
     let columns = u1_on(&provider, &[(0, 3), (1, 2)]);
@@ -538,7 +538,7 @@ fn restrict_commutes_with_adjoint_under_the_codomain_domain_axis_map() {
 #[test]
 fn full_selection_is_the_identity_and_round_trips_are_exact() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 2), (2, 1)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
@@ -580,7 +580,7 @@ fn full_selection_is_the_identity_and_round_trips_are_exact() {
 #[test]
 fn embed_after_restrict_is_the_orthogonal_projector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let other = u1_on(&provider, &[(0, 2), (1, 1)]);
@@ -636,7 +636,7 @@ fn embed_after_restrict_is_the_orthogonal_projector() {
 #[test]
 fn a_valid_selection_with_no_admissible_block_returns_an_empty_tensor() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     // A rank-(1,0) map with a nonzero charge has no admissible fusion tree.
     let charged = u1_on(&provider, &[(1, 3)]);
@@ -667,7 +667,7 @@ fn a_valid_selection_with_no_admissible_block_returns_an_empty_tensor() {
 #[test]
 fn selections_are_validated_against_their_parent_leg_before_anything_is_built() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(0, 2), (1, 3)]);
     let other = u1_on(&provider, &[(0, 2)]);
@@ -763,7 +763,7 @@ fn selections_are_validated_against_their_parent_leg_before_anything_is_built() 
 #[test]
 fn a_compact_diagonal_restriction_other_than_one_selection_on_both_legs_is_rejected() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(0, 3), (1, 2)]);
     let source: TensorMap<_, f64> =
@@ -820,7 +820,7 @@ fn a_compact_diagonal_restriction_other_than_one_selection_on_both_legs_is_rejec
 #[test]
 fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 4)])
         .try_dual()
@@ -897,7 +897,7 @@ fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
 #[test]
 fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
@@ -1006,7 +1006,7 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
 #[test]
 fn a_rank_five_restriction_still_gathers_one_axis_only() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 2), (0, 2), (1, 3)]);
     let small = u1_on(&provider, &[(0, 1), (1, 2)]);
@@ -1055,7 +1055,7 @@ fn a_rank_five_restriction_still_gathers_one_axis_only() {
 #[test]
 fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let two = Arc::new(ZNFusionRule::new(2).unwrap());
     let three = Arc::new(ZNFusionRule::new(3).unwrap());
     let leg = GradedSpace::try_new(
@@ -1094,7 +1094,7 @@ fn a_selection_built_on_another_rule_is_a_rule_mismatch() {
 #[test]
 fn restriction_commutes_with_permute_and_with_a_contraction_over_an_untouched_leg() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(FermionParityFusionRule::new());
     let leg = fz2(&provider, &[(false, 2), (true, 3)]);
     let spectator = fz2(&provider, &[(false, 2), (true, 2)]);
@@ -1281,7 +1281,7 @@ impl Place {
 /// pure copy, so every entry must match bit for bit.
 macro_rules! assert_exact_restrict_embed {
     ($engine:ident, $dtype:ty, [$($codomain:expr),+], [$($domain:expr),+], $axis:expr, $selected:expr) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let codomain = vec![$($codomain),+];
         let domain = vec![$($domain),+];
         let axis: usize = $axis;
@@ -1471,7 +1471,7 @@ fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
 /// reversed, must give the same bits.
 macro_rules! assert_exact_multi_restrict {
     ($engine:ident, $dtype:ty, [$($codomain:expr),+], [$($domain:expr),*], [$(($axis:expr, $places:expr)),+]) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let codomain = vec![$($codomain),+];
         let domain: Vec<&GradedSpace<_>> = vec![$($domain),*];
         let rank = codomain.len();
@@ -1668,7 +1668,7 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
 /// the materialized source, bit for bit.
 macro_rules! assert_compact_stays_compact {
     ($engine:ident, $dtype:ty, $leg:expr, $places:expr) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = $leg;
         let source = TensorMap::<_, $dtype>::from_subblock_fn(
             $engine,
@@ -1805,7 +1805,7 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
 #[test]
 fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 4), (1, 5), (2, 3)]);
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
@@ -1871,7 +1871,7 @@ fn noncontiguous_positions_match_the_dense_gather_and_scatter_on_su2_and_a_lazy_
 #[test]
 fn kept_positions_are_a_canonical_strictly_increasing_set() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(0, 5), (1, 3), (2, 2)]);
     let zero = U1Irrep::new(0).unwrap();

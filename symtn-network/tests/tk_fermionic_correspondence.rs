@@ -45,7 +45,7 @@ fn scalar(engine: &mut dyn Engine, t: TensorMap<FermionParityFusionRule, f64>) -
 #[test]
 fn fz2_contractions_match_tensorkit() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule::new()),
         [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)],

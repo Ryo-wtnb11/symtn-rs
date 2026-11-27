@@ -61,7 +61,7 @@ fn checked_transform_into_makes_the_eager_provider_queries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(70));
     for (name, eager, into) in OPERATIONS {
         // Why a fresh source per cold call: a source admits its trees once,
@@ -121,7 +121,7 @@ fn checked_transform_into_publishes_nothing_before_the_write() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(71));
     let source = toy_source(&runtime, &provider);
     for (name, eager, into) in OPERATIONS {

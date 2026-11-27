@@ -150,7 +150,7 @@ macro_rules! trace_source {
 /// traces disabled)`.
 macro_rules! warm_lookups {
     ($engine:ident, $leg:expr, $sectors:expr) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let source = trace_source!($engine, &runtime, $leg, $sectors, f64, 2416);
         let calls = |$engine: &mut dyn Engine| {
             for _ in 0..CALLS {
@@ -231,7 +231,7 @@ fn same_bits<T: Bits>(a: &[T], b: &[T]) -> bool {
 macro_rules! check_values {
     ($engine:ident, $label:expr, $leg:expr, $sectors:expr, $scalar:ty) => {{
         let label = $label;
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let source = trace_source!($engine, &runtime, $leg, $sectors, $scalar, 2417);
         let first = source.trace_pairs($engine, PAIRS).unwrap();
         let hits = info(StructureCacheKind::CompletedTreeTransformer).hits();

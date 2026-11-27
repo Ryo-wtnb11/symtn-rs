@@ -17,7 +17,7 @@ use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 fn a_first_contract_on_a_fresh_runtime_does_no_backend_initialization_work() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {

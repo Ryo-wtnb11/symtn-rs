@@ -104,7 +104,7 @@ pub use execute::{NetworkExecutionWorkspace, PlannedNetwork};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut engine = CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)])?;
 /// // a[i, k; i, l] traced over its first codomain and domain legs, then
 /// // contracted with b[l; m] over `l`.

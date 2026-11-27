@@ -172,7 +172,7 @@ fn cuda_pair<R>(
 fn a_noncanonical_cuda_network_runs_and_shares_the_host_plan() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let a =
@@ -213,7 +213,7 @@ fn a_noncanonical_cuda_network_runs_and_shares_the_host_plan() {
 fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     cuda_pair(engine, cuda, &runtime, &u1, 748_100);
     let su2 = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2)]).unwrap();
@@ -526,7 +526,7 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
 fn canonical_cuda_network_executes_complex_payloads_and_still_rejects_the_rest() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
@@ -700,7 +700,7 @@ fn u1_pair(
 fn host_and_cuda_contractions_of_one_topology_use_separate_workspace_pools() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let (a, a_cuda) = u1_pair(engine, cuda, &runtime, &u1, 748_400);
     let (b, b_cuda) = u1_pair(engine, cuda, &runtime, &u1, 748_401);
@@ -735,7 +735,7 @@ fn host_and_cuda_contractions_of_one_topology_use_separate_workspace_pools() {
 fn a_rejected_cuda_call_leases_no_workspace_and_the_next_call_reuses_the_idle_one() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let wrong =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
@@ -785,7 +785,7 @@ fn a_rejected_cuda_call_leases_no_workspace_and_the_next_call_reuses_the_idle_on
 fn equal_length_block_layout_drift_discards_the_device_replay_state() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // Both spaces carry one sector of degeneracy 2, so `[v; v]` has a single
     // 2x2 coupled block and exactly the same `required_len` either way.
     let charge_zero =
@@ -1000,7 +1000,7 @@ fn cuda_chain_reuse_matches_returning<R>(
 fn warm_cuda_destination_reuse_matches_the_returning_chain_for_every_provider() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
@@ -1105,7 +1105,7 @@ fn warm_cuda_chain_uploads_nothing_for_its_reused_destinations() {
 
     let cuda = &mut cuda_engine();
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 4), (U1Irrep::new(1).unwrap(), 2)],
@@ -1178,7 +1178,7 @@ fn warm_cuda_chain_uploads_nothing_for_its_reused_destinations() {
 fn the_device_workspace_is_charged_to_the_workspace_budget() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 8)]).unwrap();
     let (_, device) = cuda_chain_tensors(engine, cuda, &runtime, &u1, 761_400);
 
@@ -1285,7 +1285,7 @@ where
 fn single_precision_device_chains_match_the_host_and_reuse_their_destinations() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 4), (U1Irrep::new(1).unwrap(), 2)],
@@ -1409,7 +1409,7 @@ fn a_warm_single_precision_chain_costs_the_same_calls_and_half_the_bytes() {
 
     let cuda = &mut cuda_engine();
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 4), (U1Irrep::new(1).unwrap(), 2)],
@@ -2080,7 +2080,7 @@ fn su2_space(sectors: &[(usize, usize)]) -> GradedSpace<Su2Rule> {
 fn general_cuda_networks_match_host_and_dense_oracles() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let (v, w, p) = (
         u1_space(&[(-1, 2), (0, 1), (1, 2)]),
@@ -2408,7 +2408,7 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
 
     let cuda = &mut cuda_engine();
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w, p) = (
         u1_space(&[(-1, 2), (0, 1), (1, 2)]),
         u1_space(&[(0, 2), (1, 1)]),
@@ -2469,7 +2469,7 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
 fn rejected_cuda_networks_leave_every_device_state_unchanged() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = u1_space(&[(0, 2), (1, 1)]);
     let wrong = u1_space(&[(0, 3)]);
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&space], [&space], 796_000)
@@ -2513,7 +2513,7 @@ use braiding_probe::{ProbeSector, RealBraidingProbe};
 fn assert_cuda_network_contraction_rejects_non_symmetric<const ANYONIC: bool>() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(RealBraidingProbe::<ANYONIC>), [(ProbeSector, 2)]).unwrap();
     let host_lhs =
@@ -2565,7 +2565,7 @@ fn cuda_execution_reuses_a_caller_owned_workspace_and_network_contract_caches() 
     // cache like Host ones, leasing its pooled workspace on a hit.
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [

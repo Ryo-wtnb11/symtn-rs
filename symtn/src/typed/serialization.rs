@@ -1754,7 +1754,7 @@ where
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let provider = Arc::new(U1FusionRule);
     /// let codec = U1Codec(Arc::clone(&provider));
     /// let space = GradedSpace::try_new(

@@ -73,7 +73,7 @@ fn pair_network() -> Network {
 fn a_warm_network_contract_allocates_no_more_than_its_replay() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let [a, b, c] = u1_operands(engine, &runtime);
     let network = pair_network();
     let planned = network.plan(&[&a, &b], &GreedyDenseOptimizer).unwrap();
@@ -135,7 +135,7 @@ fn a_warm_network_contract_allocates_no_more_than_its_replay() {
 fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)]).unwrap();
     let lhs =

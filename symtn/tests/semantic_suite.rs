@@ -151,7 +151,7 @@ macro_rules! for_each_space {
 #[test]
 fn permute_composition_law() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let mut state = 0x5EED_0001u64;
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
@@ -202,7 +202,7 @@ fn permute_composition_law() {
 #[test]
 fn braid_inverse_roundtrip() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let mut state = 0x5EED_0002u64;
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
@@ -247,7 +247,7 @@ fn braid_inverse_roundtrip() {
 #[test]
 fn bosonic_braid_equals_permute() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let mut state = 0x5EED_0003u64;
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
@@ -285,7 +285,7 @@ fn bosonic_braid_equals_permute() {
 #[test]
 fn yang_baxter_adjacent_swaps() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
@@ -326,7 +326,7 @@ fn yang_baxter_adjacent_swaps() {
 #[test]
 fn adjoint_involution_and_antihomomorphism() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
@@ -368,7 +368,7 @@ fn adjoint_involution_and_antihomomorphism() {
 #[test]
 fn trace_cyclicity() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
@@ -397,7 +397,7 @@ fn trace_cyclicity() {
 #[test]
 fn bosonic_trace_matches_partial_trace_engine() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             if !$fermionic {
@@ -440,7 +440,7 @@ fn bosonic_trace_matches_partial_trace_engine() {
 #[test]
 fn ordinary_trace_of_identity_is_positive_dimension() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
@@ -463,7 +463,7 @@ fn ordinary_trace_of_identity_is_positive_dimension() {
 #[test]
 fn twist_squares_to_identity_and_naturality() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let mut state = 0x5EED_0004u64;
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
@@ -532,7 +532,7 @@ fn twist_squares_to_identity_and_naturality() {
 #[test]
 fn isometry_and_isomorphism_are_isometric() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
@@ -571,7 +571,7 @@ fn isometry_and_isomorphism_are_isometric() {
 #[test]
 fn norm_trace_and_singular_values_measure_the_same_weighted_square() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let provider = $provider;
@@ -620,7 +620,7 @@ fn norm_trace_and_singular_values_measure_the_same_weighted_square() {
 #[test]
 fn contraction_order_independence() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
@@ -732,7 +732,7 @@ fn contraction_order_independence() {
 #[test]
 fn su2_nonuniform_degeneracy_crossed_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(su2_rule());
     let v = GradedSpace::try_new(
         rule,
@@ -787,7 +787,7 @@ fn su2_nonuniform_degeneracy_crossed_contract() {
 #[test]
 fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(FermionParityFusionRule::new());
     let v = GradedSpace::try_new(
         rule,
@@ -832,7 +832,7 @@ fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
 #[test]
 fn triple_product_nonuniform_degeneracy_crossed_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(
         Fz2U1Su2Rule::try_new(
             Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
@@ -904,7 +904,7 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
 #[test]
 fn svd_qr_reconstruction_random_spaces() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let mut state = 0x5EED_0005u64;
     macro_rules! case {
         ($engine:ident, $name:expr, $provider:expr, $vacuum:expr, [$($other:expr),* $(,)?]) => {{
@@ -1058,7 +1058,7 @@ fn weighted_rank_truncation_matches_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     macro_rules! case {
         ($engine:ident, $provider:expr, $pairs:expr, $label_of:expr, $expected:expr, $error:expr) => {{
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let space = GradedSpace::try_new($provider, $pairs).unwrap();
             let label_of = $label_of;
             let mut build = |c0| {

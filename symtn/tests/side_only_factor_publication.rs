@@ -54,7 +54,7 @@ macro_rules! assert_close {
 /// sectors lose rank and the null spaces change.
 macro_rules! side_only_case {
     ($engine:ident, $rule:expr, $left:expr, $phys:expr, $right:expr, $scalar:ty, $value:expr) => {{
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let provider = Arc::new($rule);
         let left = GradedSpace::try_new(Arc::clone(&provider), $left).unwrap();
         let phys = GradedSpace::try_new(Arc::clone(&provider), $phys).unwrap();
@@ -327,7 +327,7 @@ macro_rules! full_qr_lq_bond_case {
 #[cfg(feature = "cgc-gen")]
 macro_rules! multiplicity_free_full_qr_lq_bonds {
     ($engine:ident, $d:ty) => {{
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let provider = Arc::new(U1FusionRule);
         let q = |charge| U1Irrep::new(charge).unwrap();
         let space = |irreps: Vec<(U1Irrep, usize)>| {
@@ -370,7 +370,7 @@ mod checked_generic {
     /// domain-only 6. Both orientations put side-only sectors on each side.
     macro_rules! checked_full_qr_lq_bonds {
         ($engine:ident, $d:ty) => {{
-            let rt = Runtime::builder().build().unwrap();
+            let rt = Runtime::new();
             let provider = Arc::new(
                 LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                     fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -548,7 +548,7 @@ mod checked_generic {
     /// `b = 1² ⊕ 8³ ⊕ 15²` keeps 8 populated.
     macro_rules! checked_literal_side_only {
         ($engine:ident, $d:ty) => {{
-            let rt = Runtime::builder().build().unwrap();
+            let rt = Runtime::new();
             let provider = Arc::new(
                 LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                     fusion_symbols::lie::GroupId::su(3).unwrap(),

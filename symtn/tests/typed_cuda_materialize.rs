@@ -273,7 +273,7 @@ fn fixtures<R, D>(
 fn device_materialize_matches_host_with_one_fresh_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [

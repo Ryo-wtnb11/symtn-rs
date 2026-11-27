@@ -17,7 +17,7 @@ macro_rules! device_round_trip {
     ($cuda:ident, $engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let a = leg(0);
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         device_round_trip!($cuda, $engine, @dtype $label, &runtime, &a, f64);
         device_round_trip!($cuda, $engine, @dtype $label, &runtime, &a, Complex64);
     }};

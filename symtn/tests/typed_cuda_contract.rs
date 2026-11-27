@@ -107,7 +107,7 @@ fn zero_copy_candidates_match_the_host_at_every_dtype() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     fn at<D: DevicePayload>(
         engine: &mut dyn symtn::typed::Engine,
         cuda: &mut dyn symtn::typed::Engine,
@@ -153,7 +153,7 @@ fn identity_adjoint_operands_are_borrowed_by_the_device_dynamic_tree() {
         symmetry: &str,
     ) {
         for index in 0..3 {
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let (case, _) = identity_adjoint_cases::<R, D>(engine, &runtime, v)
                 .into_iter()
                 .nth(index)
@@ -210,11 +210,10 @@ fn copy_c_probes_move_only_c_and_match_the_host_at_every_dtype() {
         symmetry: &str,
         oracle: impl Fn(&mut dyn symtn::typed::Engine, &Case<R, D>) -> TensorMap<R, D>,
     ) {
-        for index in 0..copy_c_probes::<R, D>(engine, &Runtime::builder().build().unwrap(), v).len()
-        {
+        for index in 0..copy_c_probes::<R, D>(engine, &Runtime::new(), v).len() {
             // A fresh Runtime per probe: its scratch high-water mark is this
             // probe's alone.
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let (case, _) = copy_c_probes::<R, D>(engine, &runtime, v).swap_remove(index);
             let name = format!("{symmetry} {} {}", case.name, D::NAME);
             let host = case.host(engine);
@@ -336,8 +335,8 @@ fn rejections_happen_before_any_device_work_and_match_the_host() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other = Runtime::new();
     let case = u1_rank_five::<f64>(engine, &runtime);
     let host_lhs = &case.lhs;
     let host_rhs = &case.rhs;
@@ -442,7 +441,7 @@ fn every_split_matches_the_host_at_every_dtype() {
     let cuda = &mut crate::common::cuda_engine();
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let fixture = u1_rank_five::<f64>(engine, &runtime);
     check_splits(engine, cuda, fixture);
     let fixture = su2_bent::<Complex64>(engine, &runtime);
@@ -496,8 +495,8 @@ fn overwrite_rejections_match_the_host_in_order_and_leave_the_destination_untouc
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other = Runtime::new();
     let case = u1_rank_five::<f64>(engine, &runtime);
     let (host_lhs, host_rhs) = (&case.lhs, &case.rhs);
     let lhs = host_lhs.to_cuda(cuda).unwrap();

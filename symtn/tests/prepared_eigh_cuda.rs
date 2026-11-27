@@ -150,7 +150,7 @@ fn equivalence<R>(
     R: DeviceRule,
     <R as symtn::sector::SectorCodec>::Sector: Debug,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for count in [1, 2, 17] {
         let inputs = hermitian_members(&runtime, &[&leg, &leg], count, 3);
         assert!(inputs[0].subblock_count() > 3, "{label}: several blocks");
@@ -173,7 +173,7 @@ fn device_members_equal_device_eager_and_the_oracle() {
 fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
     let cuda = &mut crate::common::cuda_engine();
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_legs().0;
     let j = su2_irrep;
     let su2 =
@@ -225,7 +225,7 @@ fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
 fn submissions_and_transfers_do_not_depend_on_b() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = su2_legs();
     let mut per_b = BTreeSet::new();
     for count in [1, 2, 17] {
@@ -317,7 +317,7 @@ fn rejected(result: Result<(), BatchError>) -> Vec<(usize, MemberFault)> {
 fn non_hermitian_members_are_named_before_any_solver_launch() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     for count in [3, 17] {
         let mut inputs = hermitian_members(&runtime, &[&leg, &leg], count, 1);
@@ -356,7 +356,7 @@ fn non_hermitian_members_are_named_before_any_solver_launch() {
 fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let h = hermitian_members(&runtime, &[&leg, &leg], 1, 5).remove(0);
     let x = members::<_, f64>(&runtime, &[&leg, &leg], &[&leg, &leg], 1, 9).remove(0);
@@ -416,7 +416,7 @@ fn mixed_scale_admission_verdicts_equal_device_eager_per_member() {
 fn non_finite_entries_and_eigenvalues_reject_their_members() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let mut inputs = single_leg(&runtime, &leg, 5, |_, _, _| 1.0);
     inputs[1] = inputs[1].scale(engine, f64::NAN).unwrap();
@@ -577,7 +577,7 @@ where
 {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (first, _) = spectral_members::<R, D>(&runtime, &leg, 1, 0);
     let plan = EighFullPlan::new(
         engine,
@@ -629,7 +629,7 @@ where
 {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for salt in [3, 4] {
         let inputs = complex_hermitian_members::<R, D>(&runtime, codomain, 1, salt);
         assert!(inputs[0].subblock_count() > 3, "{label}: several blocks");
@@ -675,7 +675,7 @@ where
 {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     // `Sᵀ = S` with imaginary off-diagonal entries: equal to its transpose,
     // not to its conjugate transpose.
@@ -717,7 +717,7 @@ where
 {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let stack = |cuda: &mut dyn symtn::typed::Engine, count| {
         let (inputs, _) = spectral_members::<_, D>(&runtime, &leg, count, 0);
@@ -820,7 +820,7 @@ fn assert_diagonal_only<R, D>(
 fn a_failed_batch_leaves_no_observable_output_and_the_next_call_is_whole() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let good = single_leg(&runtime, &leg, 4, |member, i, j| {
         1.0 + (i + j + member) as f64 / 4.0 + f64::from(u8::from(i == j))

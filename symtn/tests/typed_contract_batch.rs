@@ -129,7 +129,7 @@ where
 #[test]
 fn public_host_batch_matches_reference_steps_and_applicable_physical_basis() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     check(u1_reordered::<f64>(engine, &runtime));
     check(su2_reordered::<f64>(engine, &runtime));
     check(u1_reordered::<symtn::typed::Complex64>(engine, &runtime));
@@ -149,7 +149,7 @@ fn public_host_batch_matches_reference_steps_and_applicable_physical_basis() {
 #[test]
 fn public_host_batch_core_and_swapped_core_match_reference_steps() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     fn probes<R, D>(runtime: &Runtime, v: &GradedSpace<R>)
     where
         R: symtn::sector::TypedSectorAdmission<
@@ -186,7 +186,7 @@ fn public_host_batch_core_and_swapped_core_match_reference_steps() {
 #[test]
 fn swapped_core_uses_rhs_member_length_and_nondefault_output_split() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1(&[(0, 2), (1, 1)]);
     let w = u1(&[(0, 1), (1, 2)]);
     let x = u1(&[(0, 2), (1, 3)]);
@@ -231,7 +231,7 @@ fn swapped_core_uses_rhs_member_length_and_nondefault_output_split() {
 #[test]
 fn binding_errors_do_not_write_destination_and_workspaces_are_independent() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     binding_errors_case(&runtime, u1_reordered::<f64>(engine, &runtime));
     let core = candidate_core_probes::<_, f64>(engine, &runtime, &u1_non_self_dual())
         .into_iter()
@@ -350,7 +350,7 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
 #[test]
 fn public_copy_c_matches_eager() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1(&[(0, 2), (1, 2)]);
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 3).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 4).unwrap();
@@ -389,7 +389,7 @@ fn public_copy_c_matches_eager() {
 
 #[test]
 fn public_copy_c_both_orientations_and_dtypes() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     fn cases<R, D>(runtime: &Runtime, v: &GradedSpace<R>)
     where
         R: symtn::sector::TypedSectorAdmission<
@@ -430,7 +430,7 @@ fn public_copy_c_both_orientations_and_dtypes() {
 
 #[test]
 fn public_copy_c_small_output_winners() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     fn cases<R, D>(runtime: &Runtime, v: &GradedSpace<R>, c: &GradedSpace<R>)
     where
         R: symtn::sector::TypedSectorAdmission<
@@ -478,7 +478,7 @@ fn public_copy_c_small_output_winners() {
 
 #[test]
 fn non_symmetric_braiding_is_rejected_before_plan_compile() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for anyonic in [false, true] {
         let rejected = if anyonic {
             reject_braiding::<true>(&runtime)
@@ -492,7 +492,7 @@ fn non_symmetric_braiding_is_rejected_before_plan_compile() {
 #[test]
 fn twist_bearing_dynamic_tree_matches_literal_tensorkit_steps() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! cases {
         ($engine:ident, $rule:ty, $dtype:ty, $space:expr) => {{
             let space = $space;
@@ -816,7 +816,7 @@ fn check_fermionic_unit_batch<R, D>(
 #[test]
 fn fermionic_unit_direct_and_copy_c_match_tensorkit_steps() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! cases {
         ($engine:ident, $rule:ty, $dtype:ty, $space:expr) => {{
             let space = $space;
@@ -1045,7 +1045,7 @@ fn check_mixed_signed_members<R, D>(
 
 #[test]
 fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! case {
         ($engine:ident, $rule:ty, $dtype:ty, $space:expr) => {{
             let space = $space;
@@ -1108,7 +1108,7 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
 #[test]
 fn partitioned_output_uses_requested_codomain_rank() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let case = u1_reordered::<f64>(engine, &runtime);
     let lhs = StackedTensorMap::pack(&[&case.lhs]).unwrap();
     let rhs = StackedTensorMap::pack(&[&case.rhs]).unwrap();
@@ -1275,7 +1275,7 @@ fn reused_output_follows_changed_inputs_on_every_route() {
     // Core with an inactive block, CopyC (U(1) both orientations, one over
     // an inactive core block, and SU(2)), DynamicTree with an identity output
     // over an inactive block and with source and output transforms.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     fn cases<D: Payload>(engine: &mut dyn Engine, runtime: &Runtime) {
         for case in u1_inactive_cases::<D>(engine, runtime) {
             check_reused_output(&case);

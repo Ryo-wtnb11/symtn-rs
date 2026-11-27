@@ -99,7 +99,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     symtn::cache::clear();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = leg.clone();
     let lhs = tensor(&runtime, &leg, rank);
     let rhs = tensor(&runtime, &leg, rank);

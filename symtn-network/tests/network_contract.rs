@@ -63,7 +63,7 @@ macro_rules! paths {
         #[test]
         fn $name() {
             let engine = &mut symtn::typed::CpuEngine::serial();
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let v = $space;
             let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 1).unwrap();
             let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 2).unwrap();
@@ -224,7 +224,7 @@ fn u1_space(dim: usize) -> GradedSpace<U1FusionRule> {
 #[test]
 fn contract_shares_the_topology_cache_and_counts_hits() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_space(2);
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 10).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 11).unwrap();
@@ -278,7 +278,7 @@ fn contract_shares_the_topology_cache_and_counts_hits() {
 #[test]
 fn contract_rejects_before_the_lookup_and_leaves_the_cache_unchanged() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_space(2);
     let w = u1_space(3);
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 20).unwrap();
@@ -308,7 +308,7 @@ fn contract_rejects_before_the_lookup_and_leaves_the_cache_unchanged() {
         assert_eq!(plan_cache_stats(&runtime), before, "{what}");
     }
 
-    let foreign = Runtime::builder().build().unwrap();
+    let foreign = Runtime::new();
     let elsewhere = TensorMap::<_, f64>::rand_with_seed(engine, &foreign, [&v], [&v], 25).unwrap();
     assert!(network
         .contract(engine, &[&a, &b, &elsewhere])
@@ -319,7 +319,7 @@ fn contract_rejects_before_the_lookup_and_leaves_the_cache_unchanged() {
 #[test]
 fn contract_orders_round_trip_through_save_and_load() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let first = Runtime::builder().build().unwrap();
+    let first = Runtime::new();
     assert_eq!(load_plan_cache(&first, ""), 0);
     let v = u1_space(2);
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &first, [&v], [&v], 40).unwrap();
@@ -330,7 +330,7 @@ fn contract_orders_round_trip_through_save_and_load() {
     assert!(saved.contains("TOPO "));
     assert_eq!(plan_cache_stats(&first).persisted_orders, 1);
 
-    let second = Runtime::builder().build().unwrap();
+    let second = Runtime::new();
     assert_eq!(load_plan_cache(&second, &saved), 1);
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &second, [&v], [&v], 40).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(engine, &second, [&v], [&v], 41).unwrap();

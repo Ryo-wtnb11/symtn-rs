@@ -153,7 +153,7 @@ in_both_modes! {
     /// source with isometric factors on the source's spaces and provider.
     fn svd_qr_lq_reconstruct_with_isometric_factors<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
             .unwrap();
@@ -192,7 +192,7 @@ in_both_modes! {
     /// nothing is a policy, not an error.
     fn truncated_svd_error_is_the_weighted_discarded_spectrum_and_the_residual<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
             .unwrap();
@@ -257,7 +257,7 @@ in_both_modes! {
     /// `S`. Oracle: signed, out-of-order diagonal blocks.
     fn svd_vals_are_sorted_magnitudes_per_sector_in_label_order<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 3), (M::charged(), 2)])
             .unwrap();
@@ -311,7 +311,7 @@ in_both_modes! {
     /// other side is empty.
     fn null_spaces_complete_the_range_and_annihilate_the_source<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
             .unwrap();
@@ -398,7 +398,7 @@ in_both_modes! {
     /// Oracle: hand-diagonalized blocks.
     fn eigh_matches_hand_spectra_and_reconstructs<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 3)])
             .unwrap();
@@ -484,7 +484,7 @@ in_both_modes! {
     /// values too) and a nonfinite block, each with its own reason.
     fn eigh_refuses_invalid_inputs<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let wide = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 2)]).unwrap();
         let narrow = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 1)]).unwrap();
@@ -531,7 +531,7 @@ in_both_modes! {
     /// Oracle: triangular `[[2,1],[0,3]]` (unit) and `diag(-3, 2, 1)`.
     fn eig_matches_hand_spectra_and_the_eigen_equation<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 3)])
             .unwrap();
@@ -610,7 +610,7 @@ in_both_modes! {
     /// every sector. Oracle: hand-built `Q` (unitary) and `H` (positive).
     fn polar_recovers_hand_built_q_and_h<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 2)])
             .unwrap();
@@ -665,7 +665,7 @@ in_both_modes! {
     /// map, and an empty map factors to empty factors.
     fn polar_factor_laws_spaces_and_direction<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
             .unwrap();

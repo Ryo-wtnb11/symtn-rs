@@ -102,7 +102,7 @@ macro_rules! assert_borrowed {
     ($engine:ident, $name:expr, $fixture:ident, $spaces:expr) => {{
         for scale in [1, 4] {
             let (v, x) = $spaces(scale);
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let value = |_: &_, index: &[usize]| 0.25 + index.iter().sum::<usize>() as f64 * 0.125;
             let p: TensorMap<_, f64> =
                 TensorMap::from_subblock_fn($engine, &runtime, [&v, &v], [&v], value).unwrap();

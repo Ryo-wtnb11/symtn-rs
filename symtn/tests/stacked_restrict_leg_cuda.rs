@@ -35,7 +35,7 @@ macro_rules! device_restrict {
         let a = leg(0);
         let dual = a.try_dual().unwrap();
         let other = leg(1);
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         device_restrict!($cuda, $engine, @dtype $label, &runtime, &a, &dual, &other, f64);
         device_restrict!($cuda, $engine, @dtype $label, &runtime, &a, &dual, &other, Complex64);
     }};
@@ -161,7 +161,7 @@ fn device_restrict_leg_is_bit_exact_with_one_gather_per_call() {
     let cuda = &mut crate::common::cuda_engine();
     for_each_symmetry!(engine, device_restrict, cuda);
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let q = |charge| fixtures::U1Irrep::new(charge).unwrap();
     let charged =
         GradedSpace::try_new(std::sync::Arc::new(fixtures::U1FusionRule), [(q(1), 2)]).unwrap();

@@ -32,7 +32,7 @@ use symtn::typed::{GradedSpace, Runtime};
 pub const K: f64 = 32.0;
 
 pub fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// Payload values that a single-precision tensor and its double-precision twin

@@ -32,7 +32,7 @@ where
 fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1_rule = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
@@ -143,7 +143,7 @@ where
 fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),

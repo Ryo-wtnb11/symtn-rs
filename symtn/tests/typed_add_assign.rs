@@ -26,7 +26,7 @@ fn tensor(runtime: &Runtime, n: usize, value: f64) -> TensorMap<U1FusionRule, f6
 fn scale_assign_mutates_unique_dense_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut value = tensor(&runtime, 3, 2.0);
     value.scale_assign(engine, 3.0).unwrap();
     assert_eq!(
@@ -39,7 +39,7 @@ fn scale_assign_mutates_unique_dense_payload() {
 fn axpby_into_updates_a_unique_destination_and_refuses_a_shared_one() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let x = tensor(&runtime, 2, 3.0);
     let mut destination = tensor(&runtime, 2, 2.0);
     x.axpby_into(engine, &mut destination, -1.0, 2.0).unwrap();
@@ -60,7 +60,7 @@ fn axpby_into_updates_a_unique_destination_and_refuses_a_shared_one() {
 fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut destination = tensor(&runtime, 2, 2.0);
     let x = tensor(&runtime, 3, 3.0);
     let error = x
@@ -82,7 +82,7 @@ fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
 fn unique_dense_destinations_are_allocation_free() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut destination = tensor(&runtime, 64, 2.0);
     let x = tensor(&runtime, 64, 3.0);
     let ((), allocs) =

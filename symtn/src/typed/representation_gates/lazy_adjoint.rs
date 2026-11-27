@@ -8,7 +8,7 @@ fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -89,7 +89,7 @@ fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
 #[test]
 fn coupled_block_reads_do_not_materialize_a_lazy_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -264,7 +264,7 @@ fn checked_generic_inv_lazy_is_detached_and_keeps_receiver_cold() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -300,7 +300,7 @@ fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
     // parent, detach the final adjoint, and never publish the lazy cache.
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -380,7 +380,7 @@ fn checked_generic_lazy_adjoint_factorizations_follow_the_rule_table() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -455,7 +455,7 @@ fn checked_generic_exp_lazy_is_owned_and_stays_cold() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -492,7 +492,7 @@ fn checked_generic_lazy_flip_stays_cold_and_keeps_logical_duality() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -894,7 +894,7 @@ fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_bot
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2 = GradedSpace::try_new(
         Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -1129,7 +1129,7 @@ where
 #[test]
 fn adjoint_trace_pairs_stays_parent_native() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1_provider = Arc::new(U1FusionRule);
     let u1_traced = GradedSpace::try_new(
         Arc::clone(&u1_provider),
@@ -1474,7 +1474,7 @@ fn checked_generic_su3_adjoint_contract_and_compose_read_the_parent() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // `8 ⊗ 8 → 8` has outer multiplicity two.
     let leg = GradedSpace::try_new(
         Arc::new(
@@ -1662,7 +1662,7 @@ fn assert_fermionic_contract_and_compose_semantics<D>(
 #[test]
 fn fermionic_lazy_contract_keeps_the_supertrace_distinct_from_compose() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(FermionParityFusionRule::new());
     let leg = GradedSpace::try_new(
         provider,
@@ -1765,7 +1765,7 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
             .unwrap_err(),
     );
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let source_leg = source.codomain().remove(0);
     let other = TensorMap::from_subblock_fn(
         engine,
@@ -1802,7 +1802,7 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
             .unwrap_err(),
     );
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
     let z2_leg = GradedSpace::try_new(
@@ -1833,7 +1833,7 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
 #[test]
 fn lazy_binary_outputs_keep_the_lhs_provider_allocation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let lhs_provider = Arc::new(U1FusionRule);
     let rhs_provider = Arc::new(U1FusionRule);
     assert!(!Arc::ptr_eq(&lhs_provider, &rhs_provider));
@@ -1948,7 +1948,7 @@ fn identity_transforms_preserve_the_cold_lazy_view() {
 #[should_panic(expected = "a lazy adjoint never holds a compact diagonal parent")]
 fn lazy_adjoint_constructor_rejects_a_compact_diagonal_parent() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let bond =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let diagonal = TensorMap::diagonal(
@@ -1974,7 +1974,7 @@ fn lazy_adjoint_constructor_rejects_a_compact_diagonal_parent() {
 fn compact_adjoint_never_enters_the_lazy_representation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let real = TensorMap::diagonal(
@@ -2044,7 +2044,7 @@ fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: `cat` of lazy adjoints on either side equals `cat` of the eager
     // adjoints, over two coupled sectors, without materializing an adjoint.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = |degeneracies: [usize; 2]| {
         GradedSpace::try_new(
@@ -2105,7 +2105,7 @@ fn lazy_cat_matches_eager_adjoint_cat_without_materializing_an_adjoint() {
 #[test]
 fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -2151,7 +2151,7 @@ fn checked_trace_nonselfdual_multiblock_lazy_matches_hand_weighted_trace() {
 #[test]
 fn checked_trace_nonselfdual_multiblock_real_matches_hand_weighted_trace() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::<symtn_core::CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

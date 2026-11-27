@@ -7,7 +7,7 @@ fn compact_diagonal_eigh_full_skips_dense_input_and_solver() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -50,7 +50,7 @@ fn compact_diagonal_eigh_full_skips_dense_input_and_solver() {
 #[test]
 fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     macro_rules! check {
@@ -164,7 +164,7 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
 #[test]
 fn compact_diagonal_eigh_full_signed_zeros_remain_a_valid_eigenbasis() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
@@ -213,7 +213,7 @@ fn compact_diagonal_eigh_full_signed_zeros_remain_a_valid_eigenbasis() {
 #[test]
 fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! check {
         ($engine:ident, $leg:expr, $spectra:expr, $expected:expr) => {{
             let input: TensorMap<_, f64> =
@@ -402,7 +402,7 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let near: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -498,7 +498,7 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
 #[test]
 fn compact_diagonal_eigh_full_changed_roles_match_explicit_dense_permute() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
@@ -573,7 +573,7 @@ fn compact_diagonal_eig_full_skips_dense_input_and_solver() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -612,7 +612,7 @@ fn compact_diagonal_eig_full_skips_dense_input_and_solver() {
 #[test]
 fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     macro_rules! check {
@@ -727,7 +727,7 @@ fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
 #[test]
 fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! check {
         ($engine:ident, $leg:expr, $spectra:expr, $expected:expr) => {{
             let input: TensorMap<_, Complex64> =
@@ -901,7 +901,7 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
 #[test]
 fn compact_diagonal_eig_full_changed_roles_match_explicit_dense_permute() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
@@ -959,7 +959,7 @@ fn compact_diagonal_eig_full_changed_roles_match_explicit_dense_permute() {
 #[test]
 fn compact_diagonal_eig_full_ties_and_signed_zeros_are_valid() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -1030,7 +1030,7 @@ fn compact_diagonal_eig_full_refuses_nonfinite_and_overflowing_values() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     for value in [
@@ -1101,7 +1101,7 @@ fn compact_diagonal_eig_vals_skips_dense_input_and_solver() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
@@ -1150,7 +1150,7 @@ fn compact_diagonal_eig_vals_skips_dense_input_and_solver() {
 #[test]
 fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! check {
         ($engine:ident, $leg:expr, $spectra:expr, $dtype:ty, $expected:expr, $tol:expr) => {{
             let input: TensorMap<_, $dtype> =
@@ -1364,7 +1364,7 @@ fn compact_diagonal_eig_vals_refuses_nonfinite_and_overflowing_values() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     for value in [
@@ -1423,7 +1423,7 @@ fn compact_diagonal_eigh_vals_skips_dense_input_and_solver() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
@@ -1458,7 +1458,7 @@ fn compact_diagonal_eigh_vals_skips_dense_input_and_solver() {
 #[test]
 fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! check {
         ($engine:ident, $leg:expr, $spectra:expr, $dtype:ty, $expected:expr, $tol:expr) => {{
             let input: TensorMap<_, $dtype> =
@@ -1640,7 +1640,7 @@ fn compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let near: TensorMap<_, Complex64> = TensorMap::diagonal(
@@ -1688,7 +1688,7 @@ fn compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
 #[test]
 fn compact_diagonal_eigh_vals_widens_stored_single_precision_values() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let values = [1.0000001_f32, -1.0000002_f32, 0.3_f32];

@@ -222,7 +222,7 @@ macro_rules! device_matches_host {
 // ---------------------------------------------------------------------------
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// Distinct, finite, irrational-ish entries: a permutation of the payload is

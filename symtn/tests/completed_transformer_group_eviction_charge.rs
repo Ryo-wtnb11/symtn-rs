@@ -39,7 +39,7 @@ fn completed_transformer_charge_covers_what_it_frees_after_group_eviction() {
 
     // An SU(2) permute with recoupling (Multi specs), so cache 3's core is
     // bound from cache-4 groups.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let phys = GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(1), 1)]).unwrap();
     let (l, u, r, d) = (
         su2([4, 5, 2, 1]),

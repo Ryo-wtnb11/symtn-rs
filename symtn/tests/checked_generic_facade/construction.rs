@@ -6,7 +6,7 @@ use symtn::sector::LieIrrep;
 fn checked_generic_diagonal_is_compact_canonical_and_provider_owned() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2), (Label::Vacuum, 1)])
         .unwrap()
@@ -102,7 +102,7 @@ fn checked_generic_diagonal_is_compact_canonical_and_provider_owned() {
 fn checked_generic_diagonal_rejects_before_layout_and_preserves_error_precedence() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 2)]).unwrap();
@@ -272,7 +272,7 @@ fn sun_checked_generic_diagonal_constructs_standalone_compact_blocks() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -375,7 +375,7 @@ fn checked_generic_space_algebra_keeps_multiplicity_dimensions_and_failures_type
 fn checked_only_provider_uses_ordinary_typed_ownership_and_vertices() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let first = Arc::new(CheckedOnlyToy::new(0));
     let second = Arc::new(CheckedOnlyToy::new(0));
     let left = GradedSpace::try_new(Arc::clone(&first), [(Label::X, 2)]).unwrap();
@@ -412,7 +412,7 @@ fn checked_only_provider_uses_ordinary_typed_ownership_and_vertices() {
 fn checked_generic_subblocks_decode_transactionally_and_keep_outer_multiplicity() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let tensor: TensorMap<_, f64> =
@@ -482,7 +482,7 @@ fn checked_only_provider_roundtrips_through_typed_cuda_without_algebra_dispatch(
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let codomain =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 2)]).unwrap();
@@ -581,7 +581,7 @@ fn checked_only_provider_roundtrips_through_typed_cuda_without_algebra_dispatch(
 fn checked_errors_stay_typed_and_callback_waits_for_all_decodes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let error = GradedSpace::try_new(Arc::clone(&provider), [(Label::Invalid, 1)]).unwrap_err();
     assert!(matches!(
@@ -611,7 +611,7 @@ fn checked_errors_stay_typed_and_callback_waits_for_all_decodes() {
 fn identity_mismatch_precedes_algebra_queries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let first = Arc::new(CheckedOnlyToy::new(0));
     let other = Arc::new(CheckedOnlyToy::new(1));
     let left = GradedSpace::try_new(Arc::clone(&first), [(Label::X, 1)]).unwrap();
@@ -631,7 +631,7 @@ fn failed_checked_admission_leaves_the_provider_usable() {
     let _serial = crate::counting_alloc::serial();
     // A failed admission must not leave provider-side state behind: the same
     // provider then builds exactly what a provider that never failed builds.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(7));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let fresh = GradedSpace::try_new(Arc::new(CheckedOnlyToy::new(7)), [(Label::X, 1)]).unwrap();
@@ -785,7 +785,7 @@ fn check_generic_structural_constructors<R>(
 #[test]
 fn su3_isomorphism_is_the_equal_tree_identity_with_multiplicity() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // 8 ⊗ 8 contains 8 twice.
     let provider = Arc::new(
         symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
@@ -818,7 +818,7 @@ fn sun_endomorphism_row_and_column_tree_stacking_is_identical() {
         Vec<usize>,
     );
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (n, label) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(

@@ -163,7 +163,7 @@ fn sun_checked_generic_polar_and_pinv_accept_facade_layouts_of_rank_three_and_fo
     // Moore-Penrose laws for pinv.
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -246,7 +246,7 @@ fn checked_generic_pinv_of_a_nan_tensor_is_invalid_argument() {
     // What: the staged checked-Generic pinv never publishes a finite answer
     // for a NaN payload; the finite-input stage answers `InvalidArgument`
     // before any provider SVD, so the kind does not depend on the provider.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 1)]).unwrap();
@@ -300,7 +300,7 @@ fn checked_generic_pinv_of_a_nan_tensor_is_invalid_argument() {
 fn checked_compact_diagonal_pinv_refuses_nonfinite_like_multiplicity_free() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     for value in [f64::NAN, f64::INFINITY] {
@@ -328,7 +328,7 @@ fn checked_compact_diagonal_pinv_refuses_nonfinite_like_multiplicity_free() {
 fn checked_compact_diagonal_pinv_precision_limits_follow_multiplicity_free_semantics() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let bond = GradedSpace::try_new(provider, [(Label::Vacuum, 2), (Label::X, 2)]).unwrap();
 
@@ -521,7 +521,7 @@ fn assert_sun_checked_generic_pinv<D>(
 {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -704,7 +704,7 @@ fn sun_checked_generic_pinv_cross_mu_full_keys_for_both_dtypes() {
 fn checked_compact_diagonal_pinv_keeps_the_input_space_without_provider_queries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for dual in [false, true] {
         for fault in ["fail_algebra", "invalid_style"] {
             let provider = Arc::new(CheckedOnlyToy::new_product_probe(1));

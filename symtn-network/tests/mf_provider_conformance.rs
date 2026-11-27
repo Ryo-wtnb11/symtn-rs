@@ -127,7 +127,7 @@ fn ordinary_network_and_workspace_reuse<R>(
 #[test]
 fn multiplicity_free_public_network_path_matches_typed_oracles() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let z2 = GradedSpace::try_new(
         Arc::new(ZNFusionRule::new(2).unwrap()),

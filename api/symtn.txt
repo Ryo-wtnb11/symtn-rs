@@ -659,18 +659,11 @@ impl<D: core::fmt::Debug> core::fmt::Debug for symtn::typed::PhysicalDense<D>
 pub fn symtn::typed::PhysicalDense<D>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct symtn::typed::Runtime
 impl symtn::typed::Runtime
-pub fn symtn::typed::Runtime::builder() -> symtn::typed::RuntimeBuilder
+pub fn symtn::typed::Runtime::new() -> Self
 impl core::clone::Clone for symtn::typed::Runtime
 pub fn symtn::typed::Runtime::clone(&self) -> symtn::typed::Runtime
 impl core::fmt::Debug for symtn::typed::Runtime
 pub fn symtn::typed::Runtime::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct symtn::typed::RuntimeBuilder
-impl symtn::typed::RuntimeBuilder
-pub fn symtn::typed::RuntimeBuilder::build(self) -> core::result::Result<symtn::typed::Runtime, symtn::typed::Error>
-impl core::default::Default for symtn::typed::RuntimeBuilder
-pub fn symtn::typed::RuntimeBuilder::default() -> symtn::typed::RuntimeBuilder
-impl core::fmt::Debug for symtn::typed::RuntimeBuilder
-pub fn symtn::typed::RuntimeBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct symtn::typed::SectorSpectrum<S, V>
 pub symtn::typed::SectorSpectrum::sector: S
 pub symtn::typed::SectorSpectrum::values: alloc::vec::Vec<V>

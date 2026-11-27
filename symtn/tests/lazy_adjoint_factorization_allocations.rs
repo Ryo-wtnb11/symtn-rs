@@ -189,7 +189,7 @@ macro_rules! assert_excess_is_metadata {
 fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let leg = |scale: usize| {
         GradedSpace::try_new(
@@ -209,7 +209,7 @@ fn checked_lazy_adjoint_factorizations_add_no_payload_allocation() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

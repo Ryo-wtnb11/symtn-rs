@@ -109,7 +109,7 @@ fn every_fixture<D: DevicePayload>(cuda: &mut dyn symtn::typed::Engine, runtime:
 #[ignore = "requires a real CUDA device"]
 fn device_traces_equal_the_host_at_every_dtype() {
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     every_fixture::<f64>(cuda, &runtime);
     every_fixture::<Complex64>(cuda, &runtime);
     every_fixture::<f32>(cuda, &runtime);
@@ -121,7 +121,7 @@ fn device_traces_equal_the_host_at_every_dtype() {
 fn rejections_match_the_host_in_order_and_do_no_device_work() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let case = &u1_cases::<f64>(&runtime)[0];
     let source = case.tensor.to_cuda(cuda).unwrap();
     let _ = source.trace_pairs(cuda, &case.pairs).unwrap();

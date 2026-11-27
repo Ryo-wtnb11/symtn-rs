@@ -20,7 +20,7 @@ Install it with `uv sync --project tools/cotengra-python`, then configure:
 use symtn::typed::Runtime;
 use symtn_network::{configure_plan_cache, CotengraPythonConfig, Optimizer, PlanCacheConfig};
 
-let rt = Runtime::builder().build()?;
+let rt = Runtime::new();
 let optimizer = Optimizer::CotengraPython(
     CotengraPythonConfig::with_uv_project("/absolute/path/to/symtn-rs/tools/cotengra-python"),
 );

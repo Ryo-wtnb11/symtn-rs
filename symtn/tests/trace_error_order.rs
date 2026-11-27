@@ -145,7 +145,7 @@ fn multiplicity_free_host_trace_reports_one_error_per_misuse() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     // The operations' engine, apart from the fixtures' one.
     let ops = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free_matrix!(
         engine,
         ops,
@@ -166,7 +166,7 @@ fn multiplicity_free_host_trace_reports_one_error_per_misuse() {
 fn multiplicity_free_device_trace_reports_the_host_error_per_misuse() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free_matrix!(
         engine,
         cuda,
@@ -187,7 +187,7 @@ fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

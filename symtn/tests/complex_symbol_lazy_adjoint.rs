@@ -136,7 +136,7 @@ fn fixture() -> Fixture {
     )
     .unwrap();
     Fixture {
-        runtime: Runtime::builder().build().unwrap(),
+        runtime: Runtime::new(),
         leg,
     }
 }

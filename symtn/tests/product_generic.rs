@@ -10,7 +10,7 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 #[test]
 fn product_braid_moves_unequal_degeneracies_and_multiplicity_vertices() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(
         ProductFusionRule::<_, _>::try_new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(

@@ -13,7 +13,7 @@ fn repartition_to_current_split_does_not_allocate() {
     let _serial = crate::counting_alloc::serial();
     // What: a repartition which leaves the boundary unchanged only clones Arc
     // handles, preserves provider authority, and performs no heap allocation.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let space = GradedSpace::try_new(
         Arc::clone(&provider),

@@ -101,7 +101,7 @@ fn assert_pair_case<R, D>(
 #[test]
 fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = u1_leg_2_3_2();
     assert_pair_case::<_, f64>(engine, &runtime, &u1, 750_100);
     assert_pair_case::<_, Complex64>(engine, &runtime, &u1, 750_102);
@@ -156,7 +156,7 @@ fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
 #[test]
 fn typed_workspace_pool_registry_evicts_cold_types_and_recreates_them() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = u1_leg_2_3_2();
     assert_pair_case::<_, f64>(engine, &runtime, &u1, 750_200);
     assert_pair_case::<_, Complex64>(engine, &runtime, &u1, 750_202);
@@ -223,7 +223,7 @@ where
 #[test]
 fn pairwise_network_matches_direct_high_rank_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_high_rank_pairwise(engine, &runtime, &u1_leg_2_3_2());
     assert_high_rank_pairwise(engine, &runtime, &su2_leg_2_2_1());
 }
@@ -274,7 +274,7 @@ where
 #[test]
 fn permuted_output_labels_match_ordered_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_permuted_output(engine, &runtime, &u1_leg_2_3_2());
     assert_permuted_output(engine, &runtime, &su2_leg_2_2_1());
 }
@@ -306,7 +306,7 @@ where
 #[test]
 fn single_tensor_network_is_a_permute() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_single_permute(engine, &runtime, &u1_leg_2_3_2());
     assert_single_permute(engine, &runtime, &su2_leg_2_2_1());
 }
@@ -344,7 +344,7 @@ where
 #[test]
 fn scalar_output_with_conj_matches_norm_squared() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_conj_norm(engine, &runtime, &u1_leg_2_3_2());
     assert_conj_norm(engine, &runtime, &su2_leg_2_2_1());
 }
@@ -410,7 +410,7 @@ where
 #[test]
 fn three_tensor_chain_with_conj_matches_manual_contraction() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_three_tensor_chain(engine, &runtime, &u1_leg_2_3_2());
     assert_three_tensor_chain(engine, &runtime, &su2_leg_2_2_1());
 }
@@ -418,7 +418,7 @@ fn three_tensor_chain_with_conj_matches_manual_contraction() {
 #[test]
 fn wrong_input_codomain_split_is_rejected() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = u1_leg_2_3_2();
     let lhs =
         TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&space], [&space], 161)
@@ -439,8 +439,8 @@ fn wrong_input_codomain_split_is_rejected() {
 #[test]
 fn operands_of_different_runtimes_are_a_runtime_mismatch() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other = Runtime::new();
     let space = u1_leg_2_3_2();
     let lhs =
         TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&space], [&space], 165)
@@ -468,7 +468,7 @@ fn operands_of_different_runtimes_are_a_runtime_mismatch() {
 #[test]
 fn contracted_leg_degeneracy_mismatch_spells_out_both_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let lhs_space = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -523,7 +523,7 @@ fn contracted_leg_degeneracy_mismatch_spells_out_both_legs() {
 fn assert_host_network_contraction_rejects_non_symmetric<const ANYONIC: bool>(
     engine: &mut dyn Engine,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(braiding_probe::RealBraidingProbe::<ANYONIC>),
         [(braiding_probe::ProbeSector, 2)],
@@ -579,7 +579,7 @@ fn host_network_contraction_requires_symmetric_braiding() {
 fn network_contract_agrees_across_engine_widths() {
     // A three-tensor chain on legs whose sectors have different degeneracies:
     // each pairwise step has several unequal blocks for the scheduler to split.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg_2_3_2();
     let make = |seed| {
         TensorMap::<_, f64>::rand_with_seed(

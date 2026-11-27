@@ -126,7 +126,7 @@ fn assert_converged(
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// Resolves the fixture's transformer from `TASKS` threads at once, each on

@@ -72,7 +72,7 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let what = |case: &str| format!("{label} {} {case}", D::NAME);
     // A: V ⊗ V ← W, B: W ← V, C: V ← V.
     let a = members::<R, D>(&runtime, &[&v, &v], &[&w], 1, 1).remove(0);
@@ -116,7 +116,7 @@ where
     // `A*B` was checked above, so it can stand in for its own oracle value.
     assert_oracle(&what("(A*B)*C"), &ab.compose(engine, &c).unwrap(), &ab, &c);
 
-    let other = Runtime::builder().build().unwrap();
+    let other = Runtime::new();
     let foreign = members::<R, D>(&other, &[&w], &[&v], 1, 2).remove(0);
     assert!(
         matches!(a.compose(engine, &foreign), Err(Error::RuntimeMismatch)),

@@ -41,7 +41,7 @@ struct Geometry<'a> {
 fn planar_contract_owns_only_its_output() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(TableRule::fibonacci()),
         [(TableSector::new(1), 6), (TableSector::new(2), 8)],

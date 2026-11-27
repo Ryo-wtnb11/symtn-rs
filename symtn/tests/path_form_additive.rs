@@ -16,7 +16,7 @@ use symtn::typed::{
 #[test]
 fn unified_methods_resolve_in_path_form() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let t: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v]).unwrap();
 

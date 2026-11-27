@@ -40,7 +40,7 @@ fn typed_cat_uses_one_output_allocation_without_scratch() {
     // What: a warmed typed catdomain owns exactly one output-sized payload
     // and no per-block allocations — the plan executes into the single final
     // buffer.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let codomain = u1_on(&provider, &[(0, 127)]);
     let left = u1_on(&provider, &[(0, 251)]);
@@ -77,7 +77,7 @@ fn typed_absorb_clones_the_destination_once() {
     let _serial = crate::counting_alloc::serial();
     // What: a warmed typed absorb allocates the destination clone and nothing
     // per block — the merge-join writes prefixes in place.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let mut state = 0x5eed_0582u64;
     let destination: TensorMap<U1FusionRule, f64> = TensorMap::from_subblock_fn(
@@ -116,7 +116,7 @@ fn typed_cat_reads_compact_operands_without_source_sized_buffers() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(ZNFusionRule::new(2).unwrap()),
         [(ZNIrrep::new(0, 2).unwrap(), DEGENERACY)],
@@ -154,7 +154,7 @@ fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(ZNFusionRule::new(2).unwrap()),
         [(ZNIrrep::new(0, 2).unwrap(), DEGENERACY)],
@@ -195,7 +195,7 @@ fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
 fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let wide =
         GradedSpace::try_new(Arc::clone(&provider), [(ZNIrrep::new(0, 2).unwrap(), 128)]).unwrap();
@@ -231,7 +231,7 @@ fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
 fn typed_lazy_adjoint_cat_allocates_only_the_output_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let common = u1_on(&provider, &[(0, 64)]);
     let left = u1_on(&provider, &[(0, 192)]);
@@ -283,7 +283,7 @@ fn typed_lazy_adjoint_cat_allocates_only_the_output_payload() {
 /// Warm allocation calls of one compact-diagonal braid on `$leg`.
 macro_rules! warm_compact_braid_calls {
     ($engine:ident, $leg:expr, $spectrum:expr $(,)?) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let diagonal: TensorMap<_, f64> =
             TensorMap::diagonal($engine, &runtime, $leg, $spectrum).unwrap();
         black_box(diagonal.braid($engine, &[1], &[0], &[0, 1]).unwrap());

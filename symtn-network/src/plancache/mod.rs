@@ -1717,7 +1717,7 @@ mod tests {
     #[test]
     fn a_failed_execution_quarantines_its_lease() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = symtn::typed::Runtime::builder().build().unwrap();
+        let runtime = symtn::typed::Runtime::new();
         let o = rejections(engine, &runtime);
         let tensors = [&o.a, &o.b];
         let network = Network::new(
@@ -1758,7 +1758,7 @@ mod tests {
     #[test]
     fn a_mismatched_written_split_leaves_the_plan_cache_untouched_on_every_path() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = symtn::typed::Runtime::builder().build().unwrap();
+        let runtime = symtn::typed::Runtime::new();
         let o = rejections(engine, &runtime);
         let none = || ();
         for (what, accept, reject, split, rank) in [
@@ -1800,7 +1800,7 @@ mod tests {
     #[test]
     fn host_metadata_rejections_leave_the_plan_cache_untouched_on_every_path() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = symtn::typed::Runtime::builder().build().unwrap();
+        let runtime = symtn::typed::Runtime::new();
         let o = rejections(engine, &runtime);
         let none = || ();
         let accept_pair = |engine: &mut dyn symtn::typed::Engine| pair(engine, &o.a, &o.b);
@@ -1881,7 +1881,7 @@ mod tests {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let cuda = &mut symtn::typed::CudaEngine::open(symtn::typed::CudaDeviceId::from_ordinal(0))
             .unwrap();
-        let runtime = symtn::typed::Runtime::builder().build().unwrap();
+        let runtime = symtn::typed::Runtime::new();
         let h = rejections(engine, &runtime);
         let (probe_a, probe_b) = (
             h.probe_a.to_cuda(&mut *cuda).unwrap(),

@@ -39,7 +39,7 @@ fn mf_optimizers_fall_back_on_all_dim1_gram_topology() {
         );
 
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         configure_plan_cache(
             &rt,
             PlanCacheConfig {

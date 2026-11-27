@@ -165,7 +165,7 @@ fn general_complex(i: usize, j: usize) -> Complex64 {
 #[test]
 fn multiplicity_free_exp_routes_by_the_hermitian_predicate() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg();
     for (what, image, fill, hermitian) in [
         (
@@ -211,7 +211,7 @@ fn boundary_fill(scale: f64) -> impl Fn(usize, usize) -> Complex64 {
 #[test]
 fn multiplicity_free_exp_route_switches_at_the_predicate_boundary() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg();
     let below = exp_of!(engine, &runtime, &leg, f64, boundary_fill(0.5));
     assert!(
@@ -236,7 +236,7 @@ fn checked_and_multiplicity_free_exp_take_the_same_route() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mf = GradedSpace::try_new(
         Arc::new(su2_rule()),
         [0, 1, 2].map(|twice| (su2_irrep(twice), N)),

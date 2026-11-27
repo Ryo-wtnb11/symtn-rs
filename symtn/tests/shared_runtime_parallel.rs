@@ -57,7 +57,7 @@ fn work(rt: &Runtime, seed: u64) -> (f64, f64) {
 
 #[test]
 fn shared_runtime_concurrent_ops_match_serial_bit_for_bit() {
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
 
     // Single-threaded references, one per distinct seed.
     let seeds: Vec<u64> = (0..8).map(|t| 100 + t * 2).collect();

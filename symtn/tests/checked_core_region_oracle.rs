@@ -193,7 +193,7 @@ where
 
 #[test]
 fn generic_toy_core_composition_matches_block_products() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(GenericToy),
         [(GenericLabel::Vacuum, 2), (GenericLabel::X, 3)],
@@ -215,7 +215,7 @@ mod racah {
 
     #[test]
     fn su3_staged_contraction_matches_block_products() {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -306,7 +306,7 @@ mod racah {
     #[test]
     fn checked_su2_staged_contraction_matches_multiplicity_free_and_dense() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let degeneracies = [(0usize, 2usize), (1, 2), (2, 1)];
 
         let mf_v = GradedSpace::try_new(
@@ -498,7 +498,7 @@ pub(crate) mod fermionic {
         D: TensorScalar + numerics::Numeric + std::ops::AddAssign,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = su3_space();
         let dual = v.try_dual().unwrap();
         for uniform in [false, true] {
@@ -589,7 +589,7 @@ pub(crate) mod fermionic {
         D: TensorScalar + numerics::Numeric,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let dual = v.try_dual().unwrap();
         let spaces = [v, &dual];
         // TensorKit copyA/copyB cases followed by mixed-side, reordered contractions.

@@ -210,7 +210,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .skip(1)
         .find(|a| a != "--bench")
         .unwrap_or_default();
-    let runtime = Runtime::builder().build()?;
+    let runtime = Runtime::new();
     println!("case,dtype,target,elements,op,ns/call,ns/element,allocations/call,bytes/call");
     macro_rules! cases {
         ($engine:ident, $d:ty, $name:literal, $w:expr, $c:expr, $n:expr, $abs:expr, $one:expr) => {

@@ -173,7 +173,7 @@ macro_rules! host {
 #[test]
 fn axpby_matches_dense_expansion_on_host() {
     let engine = &mut CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     symmetry!(engine, &rt, u1_legs(), physical_case, host!(engine));
     symmetry!(engine, &rt, su2_legs(), physical_case, host!(engine));
     symmetry!(engine, &rt, fz2u1_legs(), block_case, host!(engine));
@@ -195,7 +195,7 @@ macro_rules! device {
 fn axpby_matches_dense_expansion_on_cuda() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     symmetry!(engine, &rt, u1_legs(), physical_case, device!(cuda));
     symmetry!(engine, &rt, su2_legs(), physical_case, device!(cuda));
     symmetry!(engine, &rt, fz2u1_legs(), block_case, device!(cuda));

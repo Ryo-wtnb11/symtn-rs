@@ -117,7 +117,7 @@ on_each_engine! {
     fn leg_roles_equal_the_permute_composition<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = || (u1_leg(&[(-1, 1), (0, 2), (1, 2)]), u1_leg(&[(0, 1), (1, 2), (2, 1)]).try_dual().unwrap());
         let su2 = || (su2_leg(&[(0, 2), (1, 2), (2, 1)]), su2_leg(&[(1, 1), (2, 2)]).try_dual().unwrap());
         let rule = Arc::new(

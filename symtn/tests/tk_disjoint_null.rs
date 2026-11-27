@@ -12,7 +12,7 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 #[test]
 fn direct_and_lazy_adjoint_disjoint_null_spaces_match_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(U1FusionRule);
     let codomain =
         GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();

@@ -241,7 +241,7 @@ fn warm_loop(stop: &AtomicBool, mut call: impl FnMut()) -> u64 {
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().expect("runtime")
+    Runtime::new()
 }
 
 fn raw(config: &Config) {

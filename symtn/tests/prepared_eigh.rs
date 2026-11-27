@@ -167,7 +167,7 @@ where
         + SectorCodec,
     <R as SectorCodec>::Sector: Debug,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for count in MEMBER_COUNTS {
         let inputs = hermitian_members(&runtime, &[&leg, &leg], count, 3);
         assert!(inputs[0].subblock_count() > 3, "{label}: several blocks");
@@ -185,7 +185,7 @@ fn host_members_equal_host_eager_and_the_dense_oracle() {
 #[test]
 fn plan_supports_independent_workspaces_changing_b_and_rejects_foreign_workspace() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let inputs = hermitian_members(&runtime, &[&leg], 4, 3);
     let four = StackedTensorMap::pack(&inputs).unwrap();
@@ -224,7 +224,7 @@ fn plan_supports_independent_workspaces_changing_b_and_rejects_foreign_workspace
 #[test]
 fn plan_workspace_failure_hides_output_and_recovers() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let good = hermitian_members(&runtime, &[&leg], 3, 11);
     let mut bad = good.clone();
@@ -270,7 +270,7 @@ fn plan_workspace_failure_hides_output_and_recovers() {
 #[test]
 fn plus_minus_lambda_and_degenerate_groups_compare_by_value() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_legs().0;
     let j = su2_irrep;
     let su2 =
@@ -364,7 +364,7 @@ where
 #[test]
 fn mixed_scale_admission_verdicts_equal_eager_per_member() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let inputs = mixed_scale_members(&runtime, &leg);
     let expected: Vec<_> = inputs
@@ -387,7 +387,7 @@ fn mixed_scale_admission_verdicts_equal_eager_per_member() {
 #[test]
 fn every_non_hermitian_or_non_finite_member_is_named() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = su2_legs();
     let mut inputs = hermitian_members(&runtime, &[&leg, &leg], 6, 1);
     let x = members::<_, f64>(&runtime, &[&leg, &leg], &[&leg, &leg], 1, 4).remove(0);
@@ -409,7 +409,7 @@ fn every_non_hermitian_or_non_finite_member_is_named() {
 #[test]
 fn a_non_finite_eigenvalue_rejects_its_members() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     // `M [[1, 1], [1, 1]]`-like sector matrices with `M` near the largest
     // double: finite and Hermitian, but `2M` overflows.
@@ -443,7 +443,7 @@ fn a_non_finite_eigenvalue_rejects_its_members() {
 #[test]
 fn other_splits_signatures_and_non_endomorphisms_are_typed_errors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let inputs = hermitian_members(&runtime, &[&v], 2, 1);
     let stack = StackedTensorMap::pack(&inputs).unwrap();
@@ -478,7 +478,7 @@ fn other_splits_signatures_and_non_endomorphisms_are_typed_errors() {
 #[test]
 fn warm_calls_reuse_the_outputs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = fz2u1_legs();
     let inputs = hermitian_members(&runtime, &[&leg, &leg], 3, 2);
     let stack = StackedTensorMap::pack(&inputs).unwrap();
@@ -561,7 +561,7 @@ fn a_failed_batch_leaves_no_observable_output_and_the_next_call_is_whole() {
     // `None`; the reused buffers of the next successful call hold exactly
     // eager's factors, `d` zero off its diagonal; the same after
     // `take_output` and after a change of `B`.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let good = single_leg(&runtime, &leg, 4, |member, i, j| {
         1.0 + (i + j + member) as f64 / 4.0 + f64::from(u8::from(i == j))
@@ -614,7 +614,7 @@ where
     <R as SectorCodec>::Sector: Debug,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let all = hermitian_members(&runtime, &[&leg, &leg], 17, 21);
     let stack = StackedTensorMap::pack(&all[..1]).unwrap();
     let plan = EighFullPlan::new(engine, &stack, &[0, 1], &[2, 3], HermitianTol::DEFAULT).unwrap();
@@ -760,7 +760,7 @@ where
     D: ComplexPayload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (first, _) = spectral_members::<R, D>(&runtime, &leg, 1, 0);
     let plan = EighFullPlan::new(
         engine,
@@ -816,7 +816,7 @@ where
     D: ComplexPayload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let inputs = complex_hermitian_members::<R, D>(&runtime, codomain, 17, 3);
     assert!(inputs[0].subblock_count() > 3, "{label}: several blocks");
     let stack = StackedTensorMap::pack(&inputs).unwrap();
@@ -849,7 +849,7 @@ fn complex_members_with_several_trees_per_sector_equal_host_eager() {
 
 fn complex_symmetric_member_is_rejected<D: ComplexPayload>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (leg, _) = u1_legs();
     let (mut inputs, _) = spectral_members::<_, D>(&runtime, &leg, 17, 0);
     // `Sᵀ = S` with imaginary off-diagonal entries: equal to its transpose,

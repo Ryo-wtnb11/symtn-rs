@@ -67,7 +67,7 @@ fn solver_calls(orders: &[usize]) -> u64 {
 #[test]
 fn warm_execute_allocates_per_member_only_the_dense_solver_outputs() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (small, orders) = warm_calls(&runtime, 4);
     let (large, _) = warm_calls(&runtime, 12);
     let solver = solver_calls(&orders);

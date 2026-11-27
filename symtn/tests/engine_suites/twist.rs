@@ -74,7 +74,7 @@ on_each_engine! {
     fn a_fermionic_twist_only_keeps_or_negates_an_entry<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
 
         let leg = fz2_leg(false);
         let dual = fz2_leg(true);
@@ -147,7 +147,7 @@ on_each_engine! {
     fn twists_round_trip_exactly_and_trivial_twists_are_clones<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = fz2_leg(false);
         let dual = fz2_leg(true);
         let tensor: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
@@ -203,7 +203,7 @@ on_each_engine! {
     fn a_twist_without_blocks_is_empty_and_a_leg_past_the_rank_is_refused<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let even =
             GradedSpace::try_new(Arc::new(FermionParityFusionRule::new()), [(FermionParityIrrep::EVEN, 2)]).unwrap();
         let odd =

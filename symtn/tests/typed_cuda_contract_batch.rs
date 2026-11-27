@@ -281,7 +281,7 @@ fn signed_core_and_swapped_core_all_device_dtypes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     macro_rules! cases {
         ($engine:ident, $dtype:ty) => {
             for swapped in [false, true] {
@@ -300,7 +300,7 @@ fn signed_core_and_swapped_core_all_device_dtypes() {
 fn signed_fixture_twist_is_nonvacuous_without_a_device() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for space in [fermion_u1()] {
         let dual = space.try_dual().unwrap();
         let a =
@@ -415,7 +415,7 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             FermionParityFusionRule::new(),
@@ -845,7 +845,7 @@ fn public_core_and_swapped_core_match_independent_oracle() {
     let cuda = &mut crate::common::cuda_engine();
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (case, _) in candidate_core_probes::<_, f64>(engine, &runtime, &u1_non_self_dual()) {
         if matches!(case.name, "C1" | "C2") {
             check(engine, cuda, case);
@@ -874,7 +874,7 @@ fn swapped_core_uses_rhs_stride_and_nondefault_split() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1(&[(0, 2), (1, 1)]);
     let w = u1(&[(0, 1), (1, 2)]);
     let x = u1(&[(0, 2), (1, 3)]);
@@ -922,7 +922,7 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let case = u1_inactive_cases::<f64>(engine, &runtime)
         .into_iter()
         .next()
@@ -1022,7 +1022,7 @@ fn a_workspace_moved_to_another_engine_rebuilds_its_device_state() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let first = &mut crate::common::cuda_engine();
     let second = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let case = u1_inactive_cases::<f64>(engine, &runtime)
         .into_iter()
         .next()
@@ -1075,8 +1075,8 @@ fn invalid_bindings_preserve_poisoned_destination() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other_runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other_runtime = Runtime::new();
     let case = candidate_core_probes::<_, f64>(engine, &runtime, &u1_non_self_dual())
         .into_iter()
         .find(|(case, _)| case.name == "C1")
@@ -1147,7 +1147,7 @@ fn negative_only_signed_core_matches_literal_twist() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let odd = symtn::typed::GradedSpace::try_new(
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -1228,7 +1228,7 @@ fn copy_c_nonzero_single_public_admission() {
         engine: &mut dyn symtn::typed::Engine,
         cuda: &mut dyn symtn::typed::Engine,
     ) {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = su2();
         let a = TensorMap::<_, D>::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], fill(3))
             .unwrap();
@@ -1851,7 +1851,7 @@ fn dynamic_tree_single_transform_routes_are_admitted() {
             );
         }
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     bosonic::<f32>(cuda, engine, &runtime);
     bosonic::<num_complex::Complex32>(cuda, engine, &runtime);
     bosonic::<f64>(cuda, engine, &runtime);
@@ -1868,7 +1868,7 @@ fn dynamic_tree_multi_transform_stays_unsupported() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let case = su2_bent::<f64>(engine, &runtime);
     let left = StackedTensorMap::pack(&[&case.lhs])
         .unwrap()
@@ -1890,7 +1890,7 @@ fn nonsymmetric_braiding_is_rejected_before_cuda_execution() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         symtn::typed::GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)])
             .unwrap();

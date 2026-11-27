@@ -263,7 +263,7 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
         )
         .unwrap()
     };
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     {
         let (v, w) = (u1_leg(&[(0, 2), (1, 3)]), u1_leg(&[(0, 2)]));
         check("U1 f64", lease_rows!(engine, runtime, v, w, f64));
@@ -309,7 +309,7 @@ fn checked_compact_trace_reads_the_spectrum_without_materializing() {
         [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
     )
     .unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,

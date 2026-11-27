@@ -6,7 +6,7 @@ fn checked_compact_diagonal_pinv_keeps_a_checked_compact_output() {
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, None, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x60));
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 2), (Label::X, 3)]).unwrap();
@@ -144,7 +144,7 @@ fn checked_generic_pinv_normalized_empty_skips_dense_execution() {
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, None, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0x61));
     let empty = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 0)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&empty], [&empty]).unwrap();
@@ -171,7 +171,7 @@ fn checked_generic_pinv_stages_svd_and_gemm_failures_without_publication() {
         let svd_calls = Arc::new(SpyCounts::default());
         let gemm_calls = Arc::clone(&svd_calls);
         let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, fail_svd, fail_gemm)));
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(CheckedOnlyToy::new(0x62));
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 1)])
             .unwrap();

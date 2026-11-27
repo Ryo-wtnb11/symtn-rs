@@ -8,7 +8,7 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -182,7 +182,7 @@ fn checked_compact_diagonal_eigh_vals_rejects_inconsistent_spectrum_admission() 
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -249,7 +249,7 @@ fn checked_compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_direct
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -336,7 +336,7 @@ fn checked_compact_diagonal_eig_vals_reads_stored_complex_spectrum() {
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -433,7 +433,7 @@ fn checked_compact_diagonal_eig_vals_widens_after_payload_rounding() {
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -571,7 +571,7 @@ fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -656,7 +656,7 @@ fn checked_compact_diagonal_eig_vals_rejects_inconsistent_spectrum_admission() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -721,7 +721,7 @@ fn checked_compact_diagonal_eig_vals_refuses_nonfinite_values() {
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -786,7 +786,7 @@ fn checked_compact_diagonal_eigh_full_avoids_input_materialization_and_solver() 
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -872,7 +872,7 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1086,7 +1086,7 @@ fn checked_compact_diagonal_eig_full_avoids_input_materialization_and_solver() {
     let calls = Arc::new(SpyCounts::default());
     let svd_vals_calls = Arc::clone(&calls);
     let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1200,7 +1200,7 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1464,7 +1464,7 @@ fn checked_compact_diagonal_eig_full_refuses_nonfinite_values() {
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1548,7 +1548,7 @@ fn checked_compact_diagonal_eig_full_rejects_inconsistent_spectrum_admission() {
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1619,7 +1619,7 @@ fn checked_compact_diagonal_eigh_full_applies_the_dense_hermiticity_check_direct
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1713,7 +1713,7 @@ fn checked_compact_diagonal_eigh_full_rejects_inconsistent_spectrum_admission() 
     let engine = &mut crate::typed::CpuEngine::serial();
     use symtn_core::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

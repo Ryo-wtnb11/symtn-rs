@@ -231,7 +231,7 @@ fn benchmark_runtime() -> Result<Runtime, Error> {
             (StructureCacheKind::TreeTransformCoefficients, 0),
         ]);
     }
-    Runtime::builder().build()
+    Ok(Runtime::new())
 }
 
 /// The engine every row runs on: `OP_MATRIX_THREADS` workers (default 1,

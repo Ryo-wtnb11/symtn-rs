@@ -68,7 +68,7 @@ macro_rules! check_fixture {
     ($engine:ident, $label:expr, $leg:expr) => {{
         let label: &str = $label;
         let leg = $leg;
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let mut build = |codomain: [_; 2], domain: [_; 1]| {
             TensorMap::<_, f64>::zeros($engine, &runtime, codomain, domain).unwrap()
         };
@@ -172,7 +172,7 @@ fn checked_generic_rule_instance_separates_signatures() {
     let _serial = crate::counting_alloc::serial();
     // What: SU(3) and SU(4) trivial legs share hom space and block structure
     // (the unit test checks the fields), so the rule alone separates them.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = |rank: usize| {
         Arc::new(
             symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
@@ -216,8 +216,8 @@ fn u1_signature(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) -> Structure
 fn runtime_identity_separates_signatures() {
     let _serial = crate::counting_alloc::serial();
     let leg = u1_leg(-1..=1, 2);
-    let first = Runtime::builder().build().unwrap();
-    let second = Runtime::builder().build().unwrap();
+    let first = Runtime::new();
+    let second = Runtime::new();
     let signature = u1_signature(&first, &leg);
     assert_same(
         &signature,
@@ -228,14 +228,14 @@ fn runtime_identity_separates_signatures() {
 
     // A dead Runtime's signature never matches a Runtime built afterwards.
     drop(first);
-    let third = Runtime::builder().build().unwrap();
+    let third = Runtime::new();
     assert_differ(&signature, &u1_signature(&third, &leg), "after drop");
 }
 
 #[test]
 fn equal_across_clear_structure_caches() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let before = u1_signature(&runtime, &u1_leg(-2..=2, 3));
     clear_structure_caches();
     let after = u1_signature(&runtime, &u1_leg(-2..=2, 3));
@@ -250,7 +250,7 @@ fn equal_across_clear_structure_caches() {
 #[test]
 fn equal_across_complete_owner_eviction() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let before = u1_signature(&runtime, &u1_leg(-3..=3, 5));
     let cache = StructureCacheKind::DegeneracyStructure;
     let before_info = structure_cache_info(cache);
@@ -274,7 +274,7 @@ fn equal_across_complete_owner_eviction() {
 fn equal_for_oversized_structures_above_the_complete_cache_budget() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // An explicit small budget rejects this otherwise ordinary complete layout.
     // Rejected layouts receive distinct process ids but remain semantically
     // equal while each signature owns its independently constructed content.
@@ -305,7 +305,7 @@ fn equal_for_oversized_structures_above_the_complete_cache_budget() {
 #[test]
 fn shared_structure_comparison_does_not_allocate() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg(-2..=2, 2);
     let first = u1_signature(&runtime, &leg);
     let second = u1_signature(&runtime, &leg);

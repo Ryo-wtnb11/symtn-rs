@@ -455,7 +455,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
     /// assert_eq!(id.trace_pairs(engine, &[(0, 1)])?.scalar(engine)?, 2.0);
@@ -922,7 +922,7 @@ mod copy_c_scratch_tests {
     #[test]
     fn copy_c_route_equals_contract_then_permute() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let (a, b) = partial_copy_c_fixture(engine, &runtime);
         let expected = a
             .contract(
@@ -982,7 +982,7 @@ mod copy_c_scratch_tests {
     #[test]
     fn copy_c_contract_into_writes_unreached_elements_through_the_transform() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let (a, b) = partial_copy_c_fixture(engine, &runtime);
         let result = a.contract(engine, &b, &MOVED).unwrap();
         let unreached: Vec<usize> = result
@@ -1049,7 +1049,7 @@ mod copy_c_scratch_tests {
     #[test]
     fn reordered_compact_contract_into_scales_without_densifying() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(U1FusionRule);
         let space = |n| {
             GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), n)]).unwrap()
