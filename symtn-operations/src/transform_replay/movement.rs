@@ -2758,7 +2758,8 @@ mod tests {
             design.map(|(runs, elements)| ([1.0, runs, elements], time(runs, elements)))
         };
         let noisy = [9.0, 149.0, 629.0, 319.0];
-        let cases: [([([f64; 3], f64); 4], [f64; 3]); 4] = [
+        type Walks = [([f64; 3], f64); 4];
+        let cases: [(Walks, [f64; 3]); 4] = [
             (rows(&|r, n| 5.0 + 2.0 * r + 3.0 * n), [5.0, 2.0, 3.0]),
             (
                 rows(&|r, n| -3.0 + 2.0 * r + 3.0 * n),
