@@ -36,6 +36,25 @@ fn roots_of<R>(engine: &mut CpuEngine, op: impl FnOnce(&mut CpuEngine) -> R) -> 
     engine.take_ledger_roots()
 }
 
+/// Runs of a forking op [`forks`] allows before failing.
+const FORK_ATTEMPTS: usize = 100;
+
+/// Whether `op` forks on `engine`: each run must create exactly one root
+/// (`what` names the op), and some run within [`FORK_ATTEMPTS`] must have
+/// more than one task of that root live at once.
+///
+/// Why repeat: `max_live` counts tasks live at the same instant, so a fork
+/// whose tasks the OS runs back to back (the other tests' teams share these
+/// CPUs) reads 1 on that run, while a path that never forks reads 1 on every
+/// run, however many there are.
+fn forks<R>(engine: &mut CpuEngine, what: &str, mut op: impl FnMut(&mut CpuEngine) -> R) -> bool {
+    (0..FORK_ATTEMPTS).any(|_| {
+        let roots = roots_of(engine, &mut op);
+        assert_eq!(roots.len(), 1, "one root for {what}");
+        ledger::max_live(roots[0]) > 1
+    })
+}
+
 macro_rules! no_decision_ops_create_no_root {
     ($name:ident, $d:ty) => {
         #[test]
@@ -91,9 +110,12 @@ macro_rules! no_decision_ops_create_no_root {
             // Why the control: zero roots on an engine that never forks would
             // prove nothing. A nonidentity permute replays its blocks across
             // the team on this same engine.
-            let roots = roots_of(&mut engine, |e| x.permute(e, &[2, 0], &[1]).unwrap());
-            assert_eq!(roots.len(), 1, "one root for the forking permute");
-            assert!(ledger::max_live(roots[0]) > 1, "the permute forks");
+            assert!(
+                forks(&mut engine, "the forking permute", |e| x
+                    .permute(e, &[2, 0], &[1])
+                    .unwrap()),
+                "the permute forks"
+            );
         }
     };
 }
@@ -126,13 +148,12 @@ fn forking_contraction_creates_one_root() {
     let mut engine = team_engine();
     x.permute(&mut engine, &[1], &[0]).unwrap();
     for beta in [0.0, 1.0] {
-        let roots = roots_of(&mut engine, |e| {
-            x.planar_contract_into(e, &y, &COMPOSE, &mut out, 1.0, beta)
-                .unwrap()
-        });
-        assert_eq!(roots.len(), 1, "one root at beta = {beta}");
+        let what = format!("the contraction at beta = {beta}");
         assert!(
-            ledger::max_live(roots[0]) > 1,
+            forks(&mut engine, &what, |e| {
+                x.planar_contract_into(e, &y, &COMPOSE, &mut out, 1.0, beta)
+                    .unwrap()
+            }),
             "the GEMMs fork at beta = {beta}"
         );
     }
