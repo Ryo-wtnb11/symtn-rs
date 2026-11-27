@@ -105,6 +105,7 @@ where
             [..3]
             .try_into()
             .expect("direct phases");
+        let serial = workspace.movement_memo.current().serial;
         workspace.prepare_fused_indices(threads.max(singles_width).max(inactive_width), rank)?;
         let split_inactive = inactive_width > 1;
         let split_singles = singles_width > 1;
@@ -135,6 +136,11 @@ where
             )?;
         }
         let token = exec.reborrow().into_token();
+        let token = if serial {
+            token.limit(core::num::NonZeroUsize::MIN)
+        } else {
+            token
+        };
         let inline = if split_singles {
             InlineSingles::None
         } else {
@@ -360,7 +366,9 @@ where
             }
             Ok(())
         },
-    )
+    )?;
+    movement_memo.current_mut().serial = movement::fails_closed(exec, constants);
+    Ok(())
 }
 
 /// Execute compiled chunks of plan groups, each with an independently priced
@@ -492,7 +500,13 @@ where
         let groups = &movement.chunks[index].groups[..];
         let runs = &movement.chunks[index].runs[..];
         let width = movement.widths[4 + index * 2];
+        let serial = movement.serial;
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
+            let exec = if serial {
+                exec.limit(core::num::NonZeroUsize::MIN)
+            } else {
+                exec
+            };
             let items = Items::Groups {
                 groups,
                 runs,

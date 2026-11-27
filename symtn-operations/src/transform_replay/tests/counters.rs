@@ -695,14 +695,17 @@ fn forced_chunks_preserve_empty_groups_and_inactive_values() {
     assert_eq!(out, values);
 }
 
-/// Purpose: one transitive group ownership run keeps the whole token. Pairs of `[1, 2]` destinations of stride 2 interleave
-/// at `4 i` and `4 i + 1`, and group `i` writes the second block of pair
-/// `i` and the first of pair `i + 1`, so neighbouring group hulls overlap
-/// and every chunk of four groups is one hull run: each scatter column
-/// stays inline on the caller's whole four-slot token.
-#[test]
-fn a_chain_of_overlapping_groups_scatters_inline() {
-    let groups = 12;
+/// `groups` Multi groups whose hulls overlap in a chain (pairs of `[1, 2]`
+/// destinations of stride 2 at `4 i` and `4 i + 1`; group `i` writes the
+/// second block of pair `i` and the first of pair `i + 1`), between two
+/// Singles at the first and last pairs: one ownership run.
+fn overlapping_group_chain(
+    groups: usize,
+) -> (
+    Arc<BlockStructure>,
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+) {
     let dst = blocks(
         &(0..=groups)
             .flat_map(|i| [([1, 2], [1, 2], 4 * i), ([1, 2], [1, 2], 4 * i + 1)])
@@ -726,6 +729,18 @@ fn a_chain_of_overlapping_groups_scatters_inline() {
         1.0,
     ));
     let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
+    (dst, src, transform)
+}
+
+/// Purpose: one transitive group ownership run keeps the whole token. Pairs of `[1, 2]` destinations of stride 2 interleave
+/// at `4 i` and `4 i + 1`, and group `i` writes the second block of pair
+/// `i` and the first of pair `i + 1`, so neighbouring group hulls overlap
+/// and every chunk of four groups is one hull run: each scatter column
+/// stays inline on the caller's whole four-slot token.
+#[test]
+fn a_chain_of_overlapping_groups_scatters_inline() {
+    let groups = 12;
+    let (dst, src, transform) = overlapping_group_chain(groups);
     let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
     let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
     // The two Singles first and last in address order; every scatter
@@ -735,6 +750,34 @@ fn a_chain_of_overlapping_groups_scatters_inline() {
         offers[1..offers.len() - 1].iter().all(|&offer| offer == 4),
         "{offers:?}"
     );
+}
+
+/// Purpose: an Auto engine whose calibration failed fails closed in
+/// execution: a planned Single and every scatter column are offered one slot,
+/// so nothing forks inside a modeled phase and no plan is widened; the same
+/// engine with calibrated constants is the control that offers the whole
+/// four-slot token and widens the planned Single.
+#[test]
+fn a_failed_calibration_runs_modeled_movement_on_one_slot() {
+    let (single_dst, single_src, single) = interleaved_single_pairs(1, 8250);
+    let (chain_dst, chain_src, chain) = overlapping_group_chain(12);
+    for calibrated in [true, false] {
+        let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+        if !calibrated {
+            symtn_dense::engine_slot::clear(&mut engine);
+            super::super::movement::install_test_constants(&mut engine, None);
+        }
+        let offer = if calibrated { 4 } else { 1 };
+        let (offers, _) = recorded(&mut engine, &single, &single_dst, &single_src);
+        assert_eq!(offers, [offer; 2], "calibrated: {calibrated}");
+        let counts = overwrite_counts(&mut engine, &single, &single_dst, &single_src);
+        assert_eq!(counts.widths > 0, calibrated, "{counts:?}");
+        let (offers, _) = recorded(&mut engine, &chain, &chain_dst, &chain_src);
+        assert!(
+            offers[1..offers.len() - 1].iter().all(|&o| o == offer),
+            "calibrated: {calibrated}, {offers:?}"
+        );
+    }
 }
 
 /// `pairs` coupled pairs of `[2, cols]` Singles whose destinations

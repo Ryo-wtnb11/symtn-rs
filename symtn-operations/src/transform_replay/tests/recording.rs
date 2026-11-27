@@ -254,7 +254,7 @@ pub(super) fn assert_written_once(blocks: &[(usize, [usize; 2], [usize; 2])], ma
 pub(super) fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
     let mut engine = crate::host_pool::eager_test_engine(threads)
         .with_batch_policy(CpuBatchPolicy::new(strategy));
-    super::super::movement::install_test_constants(&mut engine, 0.0);
+    super::super::movement::install_test_constants(&mut engine, Some(0.0));
     engine
 }
 
@@ -413,7 +413,7 @@ pub(super) fn flat_engine(threads: usize, ns: u64, strategy: CpuBatchStrategy) -
             .unwrap(),
     )
     .with_batch_policy(CpuBatchPolicy::new(strategy));
-    super::super::movement::install_test_constants(&mut engine, ns as f64);
+    super::super::movement::install_test_constants(&mut engine, Some(ns as f64));
     engine
 }
 

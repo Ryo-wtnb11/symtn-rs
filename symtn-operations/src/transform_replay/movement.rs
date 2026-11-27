@@ -238,6 +238,9 @@ pub(super) struct WidthDecision {
     dispatch: Vec<Duration>,
     pub widths: Vec<usize>,
     pub chunks: Vec<chunk::ChunkMovement>,
+    /// Whether the decision [`fails_closed`]: then every modeled phase's
+    /// movement runs on one slot.
+    pub serial: bool,
 }
 
 impl WidthMemo {
@@ -635,6 +638,17 @@ pub(super) fn member_phase(
     move |q, _, _| setup + members.div_ceil(q) as f64 * work
 }
 
+/// Whether the model is unavailable to an `Auto` region of more than one
+/// slot (no calibrated constants). Such a region fails closed: every modeled
+/// phase takes width one, and its movement runs on one slot of the token, so
+/// no planned role fans out inside it either. Forced policies keep their
+/// widths and whole tokens.
+pub(super) fn fails_closed(exec: &lanes::Exec<'_>, constants: Option<&Constants>) -> bool {
+    exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Auto
+        && exec.budget() > 1
+        && !constants.is_some_and(|constants| constants.calibrated)
+}
+
 /// Each phase supplies its actual critical path; class remains table data.
 /// A split's fork is priced by D_item and a leaf's planned-role fan-out by
 /// D_plan. Without calibrated constants every modeled phase runs serially.
@@ -656,7 +670,7 @@ pub(super) fn width<D: DenseRecouplingScalar, F: Fn(usize, usize, &Prices<'_>) -
     if let Some(width) = lanes::forced_width(exec, jobs) {
         return width;
     }
-    let Some(constants) = constants.filter(|constants| constants.calibrated) else {
+    let Some(constants) = constants.filter(|_| !fails_closed(exec, constants)) else {
         return 1;
     };
     width_with(
@@ -988,6 +1002,14 @@ fn dispatch_ladder(budget: usize) -> impl Iterator<Item = usize> {
         .chain([budget])
 }
 
+/// The widths whose B(q) is measured: the powers of two of
+/// [`dispatch_ladder`], then the budget, so each point's D_item(q) is
+/// measured by construction. The model reads widths between them by linear
+/// interpolation in q.
+fn bandwidth_ladder(budget: usize) -> impl Iterator<Item = usize> {
+    dispatch_ladder(budget).filter(move |&q| q.is_power_of_two() || q == budget)
+}
+
 /// Whether some candidate split of a `budget`-slot token gives a leaf `share`
 /// slots: a balanced split's shares are `floor(budget / q)` and
 /// `ceil(budget / q)`, and the inline candidate (q = 1) keeps the budget.
@@ -1159,8 +1181,7 @@ fn measure_bandwidth(
     let p = exec.budget();
     let elements = source.len().min(destination.len()).saturating_sub(p);
     let pair = 2 * std::mem::size_of::<f64>();
-    let ladder = std::iter::successors(Some(2.min(p)), |&q| (q < p).then(|| (q * 2).min(p)));
-    for q in ladder {
+    for q in bandwidth_ladder(p) {
         let part = elements / q;
         let Ok(fixture) = Fixture::new(part, 1, 0) else {
             return false;
@@ -1195,24 +1216,30 @@ fn measure_bandwidth(
         samples.sort_by(f64::total_cmp);
         let elapsed = samples[1] - constants.item_cost(q);
         let bytes = (part * q * pair) as f64;
+        let Some(slot) = constants.bandwidth.get_mut(q) else {
+            return false;
+        };
         if elapsed.is_finite() && elapsed > 0.0 {
-            constants.bandwidth[q] = bytes / elapsed;
-            constants.bandwidth_bytes = if constants.bandwidth_bytes.is_finite() {
-                constants.bandwidth_bytes.max(bytes)
-            } else {
-                bytes
-            };
+            *slot = bytes / elapsed;
+        } else {
+            return false;
         }
+        constants.bandwidth_bytes = if constants.bandwidth_bytes.is_finite() {
+            constants.bandwidth_bytes.max(bytes)
+        } else {
+            bytes
+        };
     }
     true
 }
 
-/// Test support: calibrated constants whose dispatch rows are `ns` at every
-/// width, retained in `engine` so the model prices its forks at the cost the
-/// test engine declares rather than at measured ones. A serial engine keeps
-/// none, as it never calibrates.
+/// Test support: constants retained in `engine` in place of a calibration.
+/// `Some(ns)` is calibrated with dispatch rows of `ns` at every width, so the
+/// model prices its forks at the cost the test engine declares rather than at
+/// measured ones; `None` is a failed calibration. A serial engine keeps none,
+/// as it never calibrates.
 #[cfg(test)]
-pub(super) fn install_test_constants(engine: &mut dyn Engine, ns: f64) {
+pub(super) fn install_test_constants(engine: &mut dyn Engine, ns: Option<f64>) {
     let Some(threads) = tenferro_cpu::with_cpu_engine(engine, |cpu| cpu.num_threads()) else {
         return;
     };
@@ -1222,9 +1249,10 @@ pub(super) fn install_test_constants(engine: &mut dyn Engine, ns: f64) {
     let mut constants = Constants::reference(HostClass::detect());
     constants.reserved_entries = threads + 1;
     constants.bandwidth = vec![f64::INFINITY; threads + 1];
+    let ns = ns.unwrap_or(f64::NAN);
     constants.item_dispatch = vec![ns; threads + 1];
     constants.plan_dispatch = vec![ns; threads + 1];
-    constants.calibrated = true;
+    constants.calibrated = ns.is_finite();
     constants.attempted = true;
     symtn_dense::engine_slot::checkin(engine, constants, Constants::retained_bytes);
 }
@@ -2565,37 +2593,20 @@ mod tests {
         assert_eq!(calls.get(), 2);
     }
 
-    /// Purpose: without a complete calibration every modeled phase stays
-    /// serial (the fail-closed decision); the same phase on calibrated
-    /// constants is the control that splits.
+    /// Purpose: every bandwidth width has its D_item measured (the ladder is
+    /// a subset of the dispatch ladder) and the budget is always measured;
+    /// a width outside the dispatch ladder (128 of 192 slots) is the control
+    /// the bandwidth ladder skips.
     #[test]
-    fn uncalibrated_constants_keep_modeled_phases_serial() {
-        let mut engine =
-            tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(4).build().unwrap());
-        let mut constants = Constants::reference(HostClass::Generic);
-        constants.item_dispatch = vec![0.0; 5];
-        constants.plan_dispatch = vec![0.0; 5];
-        for (calibrated, split) in [(false, false), (true, true)] {
-            constants.calibrated = calibrated;
-            crate::host_pool::lane_region(
-                &mut engine,
-                crate::host_pool::HostPoolSite::Replay,
-                |exec| {
-                    let width = width::<f64, _>(
-                        &exec,
-                        Some(&constants),
-                        8,
-                        0,
-                        0,
-                        || [0.0; CLASSES],
-                        |_, _| false,
-                        |_| |q, _, _| 400.0 / q as f64,
-                    );
-                    assert_eq!(width > 1, split);
-                },
-            )
-            .unwrap();
+    fn bandwidth_widths_are_dispatch_widths() {
+        for budget in [2, 3, 8, 24, 96, 97, 192, 256] {
+            let dispatch: Vec<_> = dispatch_ladder(budget).collect();
+            let bandwidth: Vec<_> = bandwidth_ladder(budget).collect();
+            assert!(bandwidth.iter().all(|q| dispatch.contains(q)), "p={budget}");
+            assert_eq!(bandwidth.last(), Some(&budget), "p={budget}");
         }
+        assert!(!dispatch_ladder(192).any(|q| q == 128));
+        assert!(!bandwidth_ladder(192).any(|q| q == 128));
     }
 
     /// Purpose: every leaf share a candidate split gives (the shares whose

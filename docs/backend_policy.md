@@ -547,15 +547,22 @@ row. It measures, in order:
   section is the same call.
 - The two element rows (contiguous and strided), through the real replay
   writer on shared buffers, three samples per point.
-- B(q) on the doubling ladder 2, 4, ..., p: q serial copy leaves of the item
-  phases' tree split over the whole token on the row buffers (about 8 MiB of
-  traffic), the median of three runs less D_item(q).
+- B(q) at the powers of two among those candidate widths, and p (so every
+  point's D_item(q) is measured): q serial copy leaves of the item phases'
+  tree split over the whole token on the row buffers (about 8 MiB of
+  traffic), the median of three runs less D_item(q). The model reads widths
+  between these points by linear interpolation in q.
 
-A point fails only when a fixture cannot be built, the lane runner refuses
-its supply, or an element row stays non-physical after the refit below. Any
-failure leaves the entry uncalibrated, and an uncalibrated entry runs every
-modeled phase serially (q = 1), which never forks and is the replay's
-semantics on a one-slot engine; plan groups keep their constant-free rule.
+A point fails when a fixture cannot be built, the lane runner refuses its
+supply, an element row stays non-physical after the refit below, or a
+bandwidth point's time less its D_item is not finite and positive. Any
+failure leaves the entry uncalibrated. An Auto region of more than one slot
+without calibrated constants fails closed: every modeled phase takes width
+one, and the token its movement runs on (inline Singles and inactive fills,
+and each chunk's scatter) is limited to one slot, so no planned role fans
+out inside it either; this is the replay's semantics on a one-slot engine.
+Pack columns run serial walks at width one, and plan groups keep their
+constant-free rule. Forced policies keep their widths and whole tokens.
 Failed entries are not retried before eviction or `scratch::trim`. An online
 element row must be physical (a >= 0, r >= 0, e > 0). A negative fitted setup
 or per-run term means that term is below the measurement's resolution, not
