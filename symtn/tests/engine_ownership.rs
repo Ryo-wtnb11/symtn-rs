@@ -11,7 +11,7 @@
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::{Arc, Barrier};
 
-use symtn::sector::{product_sector, U1FusionRule, U1Irrep};
+use symtn::sector::{ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::{
     ContractSpec, CpuEngine, Direction, Engine, ExecContext, GradedSpace, HermitianTol, LeftPolar,
     Pool, Runtime, TensorMap,
@@ -31,7 +31,8 @@ fn space() -> GradedSpace<U1Su2> {
 
 fn space_with(degeneracies: [usize; 4]) -> GradedSpace<U1Su2> {
     let provider = Arc::new(U1Su2::try_new(U1FusionRule, su2_rule()).unwrap());
-    let sector = |q, twice_spin| product_sector(U1Irrep::new(q).unwrap(), su2_irrep(twice_spin));
+    let sector =
+        |q, twice_spin| ProductSector::new(U1Irrep::new(q).unwrap(), su2_irrep(twice_spin));
     GradedSpace::try_new(
         provider,
         [

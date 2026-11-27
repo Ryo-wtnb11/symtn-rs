@@ -11,10 +11,7 @@
 
 /// Block views returned by `TensorMap::subblock(s)`, and the placement and
 /// storage contracts of a tensor's buffer.
-pub use symtn_core::{
-    BlockLayout, BlockRef, BlockView, HostReadableStorage, Placement, SectorLeg,
-    SectorLegConstructionError, TensorStorage,
-};
+pub use symtn_core::{BlockRef, HostReadableStorage, Placement, SectorLeg, TensorStorage};
 /// The dense-kernel failure carried by `OperationError::Dense`.
 pub use symtn_dense::DenseError;
 /// Per-thread CUDA boundary counters.

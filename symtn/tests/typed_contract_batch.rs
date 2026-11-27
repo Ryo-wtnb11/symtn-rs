@@ -1078,7 +1078,7 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
         fermion_su2()
     );
     use symtn::sector::{
-        product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+        FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
     };
     let odd_only = || {
         GradedSpace::try_new(
@@ -1090,7 +1090,7 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
                 .unwrap(),
             ),
             [(
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
                 2,
             )],
         )

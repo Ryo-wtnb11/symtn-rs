@@ -14,7 +14,7 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -189,7 +189,7 @@ macro_rules! all_symmetries {
         );
         // fZ2 x U(1): codomain-only (even, 2), domain-only (odd, 3).
         let f = |odd: bool, charge| {
-            product_sector(
+            ProductSector::new(
                 if odd {
                     FermionParityIrrep::ODD
                 } else {

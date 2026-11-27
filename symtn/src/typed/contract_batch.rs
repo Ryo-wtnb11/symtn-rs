@@ -821,7 +821,7 @@ mod failure_tests {
 mod fermionic_unit_tests {
     use super::*;
     use crate::sector::{
-        product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule,
+        FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector,
         U1FusionRule, U1Irrep,
     };
     use crate::typed::GradedSpace;
@@ -886,15 +886,15 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
             ],
@@ -906,9 +906,15 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                    2,
+                ),
+                (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                    1,
+                ),
             ],
         )
         .unwrap();
@@ -997,15 +1003,15 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
             ],
@@ -1018,19 +1024,19 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
                     1,
                 ),
             ],
@@ -1042,9 +1048,15 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                    2,
+                ),
+                (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                    1,
+                ),
             ],
         )
         .unwrap();
@@ -1054,7 +1066,7 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [(
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
                 2,
             )],
         )
@@ -1080,15 +1092,15 @@ mod fermionic_unit_tests {
             Arc::clone(&rule),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
             ],
@@ -1098,11 +1110,11 @@ mod fermionic_unit_tests {
             rule,
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
             ],
@@ -1238,19 +1250,19 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
                     1,
                 ),
             ],

@@ -8,7 +8,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{product_sector, U1FusionRule, U1Irrep};
+use symtn::sector::{ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::{CpuEngine, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -83,10 +83,22 @@ fn u1_su2_space(provider: &Arc<U1Su2>) -> GradedSpace<U1Su2> {
     GradedSpace::try_new(
         Arc::clone(provider),
         [
-            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(0)), 18),
-            (product_sector(U1Irrep::new(1).unwrap(), su2_irrep(1)), 14),
-            (product_sector(U1Irrep::new(-1).unwrap(), su2_irrep(1)), 14),
-            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(2)), 12),
+            (
+                ProductSector::new(U1Irrep::new(0).unwrap(), su2_irrep(0)),
+                18,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(1).unwrap(), su2_irrep(1)),
+                14,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(-1).unwrap(), su2_irrep(1)),
+                14,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(0).unwrap(), su2_irrep(2)),
+                12,
+            ),
         ],
     )
     .unwrap()

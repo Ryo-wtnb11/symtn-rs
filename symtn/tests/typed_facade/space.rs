@@ -708,7 +708,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let product_left = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [(
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(1).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD,
             ),
@@ -719,7 +719,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let product_right = GradedSpace::try_new(
         product_provider,
         [(
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(-1).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD,
             ),
@@ -730,7 +730,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let product_fused = product_left.fuse(&product_right).unwrap();
     assert_eq!(
         product_fused
-            .degeneracy(&symtn::sector::product_sector(
+            .degeneracy(&symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(0).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN,
             ))

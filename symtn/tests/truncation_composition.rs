@@ -40,7 +40,7 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     Eigh, GradedSpace, LegSelection, SectorSpectrum, SpectrumMagnitude, Svd, TruncatedSelection,
@@ -470,15 +470,15 @@ fn fermionic_u1_product_svd_composition_matches_the_oracle_for_every_policy() {
         Arc::clone(&provider),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 3,
             ),
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                 2,
             ),
         ],
@@ -488,11 +488,11 @@ fn fermionic_u1_product_svd_composition_matches_the_oracle_for_every_policy() {
         Arc::clone(&provider),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
         ],

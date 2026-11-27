@@ -130,7 +130,7 @@ fn public_u1_irrep_roundtrips_compact_ids_and_fuses() {
 
 #[test]
 fn product_sector_api_exposes_only_generic_composition() {
-    let pair = product_sector(z2_odd(), u1(2));
+    let pair = ProductSector::new(z2_odd(), u1(2));
     let encoded = pair.sector_id_with::<TensorKitProductCodec>();
     assert_eq!(encoded, TensorKitProductCodec::encode(z2_odd(), u1(2)));
     assert_eq!(pair.left(), &z2_odd());

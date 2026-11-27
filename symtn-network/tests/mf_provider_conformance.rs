@@ -10,7 +10,7 @@ use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
+    CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep, ProductSector,
     U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{
@@ -184,11 +184,11 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         Arc::clone(&product_rule),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 1,
             ),
         ],
@@ -203,7 +203,7 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
             if i[0] != i[1] {
                 0.0
             } else if *trees.coupled()
-                == product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap())
+                == ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap())
             {
                 2.0 + i[0] as f64
             } else {
@@ -235,15 +235,15 @@ fn multiplicity_free_public_network_path_matches_typed_oracles() {
         nested_rule,
         [
             (
-                product_sector(
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     su2_irrep(0),
                 ),
                 2,
             ),
             (
-                product_sector(
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     su2_irrep(1),
                 ),
                 1,

@@ -5,8 +5,8 @@ use crate::su2::{su2_irrep, su2_rule};
 use crate::product_codec::ParityProductCodec;
 
 use symtn_sectors::{
-    product_sector, CU1FusionRule, FermionParityFusionRule, FermionParityIrrep, FusionRule,
-    ProductFusionRule, SectorCodec, SectorId, SectorOrderKey, TableRule, U1FusionRule, U1Irrep,
+    CU1FusionRule, FermionParityFusionRule, FermionParityIrrep, FusionRule, ProductFusionRule,
+    ProductSector, SectorCodec, SectorId, SectorOrderKey, TableRule, U1FusionRule, U1Irrep,
     ZNFusionRule,
 };
 
@@ -382,7 +382,7 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
     ];
     let expected_keys = [[4, 0], [3, 1], [3, 0], [0, 1], [0, 0]];
     for ((charge, parity), key) in labels.into_iter().zip(expected_keys) {
-        let label = product_sector(U1Irrep::new(charge).unwrap(), parity);
+        let label = ProductSector::new(U1Irrep::new(charge).unwrap(), parity);
         for sector_key in [
             cantor.sector_order_key(cantor.encode_sector(&label).unwrap()),
             custom.sector_order_key(custom.encode_sector(&label).unwrap()),
@@ -394,7 +394,7 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
     sorted.sort_by_key(|&(charge, parity)| {
         cantor.sector_order_key(
             cantor
-                .encode_sector(&product_sector(U1Irrep::new(charge).unwrap(), parity))
+                .encode_sector(&ProductSector::new(U1Irrep::new(charge).unwrap(), parity))
                 .unwrap(),
         )
     });
@@ -419,8 +419,8 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
         su2_rule(),
     )
     .unwrap();
-    let label = product_sector(
-        product_sector(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
+    let label = ProductSector::new(
+        ProductSector::new(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
         su2_irrep(3),
     );
     assert_eq!(

@@ -20,14 +20,14 @@
 //! A product symmetry needs no new constructor here, and no new type in the
 //! engine. A product of providers *is* a provider — build it with
 //! [`crate::sector::ProductFusionRule::try_new`] and label it with
-//! [`crate::sector::product_sector`] — so this facade drives `fZ2 ⊠ U(1)`, or any
+//! [`crate::sector::ProductSector`] — so this facade drives `fZ2 ⊠ U(1)`, or any
 //! other ordered product of admitted components, through the same
 //! [`GradedSpace::try_new`] and [`TensorMap::zeros`] as a single symmetry:
 //!
 //! ```
 //! use std::sync::Arc;
 //! use symtn::sector::{
-//!     product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, FermionParityIrrep,
+//!     ProductSector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, FermionParityIrrep,
 //! };
 //! use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 //!
@@ -36,8 +36,8 @@
 //! let runtime = Runtime::builder().build()?;
 //! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
 //!
-//! let even = product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap());
-//! let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
+//! let even = ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap());
+//! let odd = ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
 //! let v = GradedSpace::try_new(Arc::new(rule), [(even, 2), (odd, 1)])?;
 //!
 //! let t: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
@@ -55,7 +55,7 @@
 //! ```
 //!
 //! is the left-associated `(fZ2 ⊠ U(1)) ⊠ SU(2)`, whose labels are
-//! `product_sector(product_sector(parity, charge), spin)` — the label nests in
+//! `ProductSector::new(ProductSector::new(parity, charge), spin)` — the label nests in
 //! step with the provider. **Factor order and association are structure, not
 //! an equivalence.** `U(1) ⊠ fZ2` and `fZ2 ⊠ U(1)` are both legal, are
 //! different Rust types with different [`crate::sector::RuleIdentity`]s, and

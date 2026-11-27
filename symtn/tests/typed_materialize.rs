@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
@@ -79,19 +79,19 @@ macro_rules! fz2_u1_leg {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     1,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                     1,
                 ),
             ],

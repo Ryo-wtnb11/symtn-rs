@@ -956,11 +956,11 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
         ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 3
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2
             ),
         ],

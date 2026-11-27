@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Error, GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
@@ -194,7 +194,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
         )
         .unwrap(),
     );
-    let sector = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
+    let sector = ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&fermion), [(sector, 2)]).unwrap();
     let w = GradedSpace::try_new(fermion, [(sector, 2)])
         .unwrap()

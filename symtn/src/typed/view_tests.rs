@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn_core::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 
 use super::probe::{self, Event};
@@ -319,7 +319,7 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
                 } else {
                     FermionParityIrrep::EVEN
                 };
-                (product_sector(parity, U1Irrep::new(q).unwrap()), d)
+                (ProductSector::new(parity, U1Irrep::new(q).unwrap()), d)
             }),
         )
         .unwrap()
@@ -603,7 +603,7 @@ mod cuda {
                     } else {
                         FermionParityIrrep::EVEN
                     };
-                    (product_sector(parity, U1Irrep::new(q).unwrap()), d)
+                    (ProductSector::new(parity, U1Irrep::new(q).unwrap()), d)
                 }),
             )
             .unwrap()

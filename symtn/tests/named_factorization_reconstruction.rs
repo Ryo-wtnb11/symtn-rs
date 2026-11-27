@@ -15,7 +15,7 @@ use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 use symtn::typed::{
@@ -177,15 +177,15 @@ fn fz2_u1_leg() -> GradedSpace<ProductFusionRule<FermionParityFusionRule, U1Fusi
         Arc::new(rule),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                 1,
             ),
         ],

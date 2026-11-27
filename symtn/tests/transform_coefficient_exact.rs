@@ -20,7 +20,7 @@ use symtn::typed::Engine;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -256,7 +256,7 @@ fn u1_times_su2_transforms_scale_componentwise() {
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
     );
     let label = |charge: i32, twice_spin: usize| {
-        product_sector(U1Irrep::new(charge).unwrap(), su2_irrep(twice_spin))
+        ProductSector::new(U1Irrep::new(charge).unwrap(), su2_irrep(twice_spin))
     };
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -297,7 +297,7 @@ fn fermionic_transforms_scale_componentwise() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {
@@ -402,7 +402,7 @@ fn traces_scale_componentwise() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {

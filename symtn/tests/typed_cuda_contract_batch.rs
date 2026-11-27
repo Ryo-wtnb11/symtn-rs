@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     ContractPlan, ContractSpec, ContractWorkspace, CudaStorage, Direction, Error, GradedSpace,
@@ -371,7 +371,7 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
             .unwrap(),
         ),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             2,
         )],
     )
@@ -427,15 +427,15 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
         Arc::clone(&rule),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                 1,
             ),
         ],
@@ -445,11 +445,11 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
         rule,
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
         ],
@@ -1157,7 +1157,7 @@ fn negative_only_signed_core_matches_literal_twist() {
             .unwrap(),
         ),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             2,
         )],
     )

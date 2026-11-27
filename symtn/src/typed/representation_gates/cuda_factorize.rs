@@ -1377,15 +1377,15 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
         Arc::clone(&fermion),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],

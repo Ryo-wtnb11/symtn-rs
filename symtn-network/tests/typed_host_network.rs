@@ -7,11 +7,11 @@ use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
-};
-use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
+};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, Error, TensorScalar};
@@ -128,11 +128,11 @@ fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
         ),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
                 1,
             ),
         ],

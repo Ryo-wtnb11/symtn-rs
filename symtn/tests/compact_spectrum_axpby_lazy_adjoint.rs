@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
@@ -108,7 +108,7 @@ fn u1_wide() -> Vec<U1Irrep> {
 fn fz2_u1() -> Vec<<Fz2U1Rule as symtn::sector::TypedSectorAdmission>::Sector> {
     (-12..12)
         .map(|k| {
-            product_sector(
+            ProductSector::new(
                 if k % 2 == 0 {
                     FermionParityIrrep::EVEN
                 } else {

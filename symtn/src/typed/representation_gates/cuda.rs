@@ -700,11 +700,11 @@ fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
         Arc::clone(&product_provider),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],
@@ -1110,15 +1110,15 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
         ),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                 1,
             ),
         ],
@@ -1136,9 +1136,15 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
             ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), su2_rule()).unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 1),
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                2,
+            ),
+            (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                1,
+            ),
         ],
     )
     .unwrap();

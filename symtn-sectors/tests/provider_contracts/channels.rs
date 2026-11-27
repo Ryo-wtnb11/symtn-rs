@@ -84,7 +84,7 @@ fn product_channels_enumerate_the_left_factor_fastest() {
     let su2_su2 =
         symtn_sectors::ProductFusionRule::<_, _>::try_new(su2_rule(), su2_rule()).unwrap();
     let x = su2_su2
-        .encode_sector(&product_sector(su2_irrep(1), su2_irrep(2)))
+        .encode_sector(&ProductSector::new(su2_irrep(1), su2_irrep(2)))
         .unwrap();
     let channels = su2_su2.try_fusion_channels(x, x).unwrap();
     // Cantor ids of (0,0), (2,0), (0,2), (2,2), (0,4), (2,4).
@@ -116,8 +116,8 @@ fn nested_product_channels_enumerate_the_inner_product_fastest() {
     )
     .unwrap();
     let x = rule
-        .encode_sector(&product_sector(
-            product_sector(su2_irrep(1), ZNIrrep::new(1, 2).unwrap()),
+        .encode_sector(&ProductSector::new(
+            ProductSector::new(su2_irrep(1), ZNIrrep::new(1, 2).unwrap()),
             su2_irrep(1),
         ))
         .unwrap();

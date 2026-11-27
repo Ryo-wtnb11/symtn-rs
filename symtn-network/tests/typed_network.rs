@@ -7,11 +7,11 @@ use symtn::typed::Engine;
 
 use symtn::expert::TensorStorage;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
-};
-use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
+};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, TensorScalar};
@@ -477,7 +477,7 @@ fn fermion_u1_workspace_reuse_tracks_chain_values_and_sector_shapes() {
             Arc::clone(provider),
             spec.iter().map(|&(charge, degeneracy)| {
                 (
-                    product_sector(
+                    ProductSector::new(
                         if charge.rem_euclid(2) == 0 {
                             FermionParityIrrep::EVEN
                         } else {
@@ -538,11 +538,11 @@ fn provider_and_dtype_matrix_matches_direct_contract() {
         product_rule,
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
                 1,
             ),
         ],
@@ -630,7 +630,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     let product_x0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+            ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
             1,
         )],
     )
@@ -638,7 +638,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     let product_x1 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
             2,
         )],
     )
@@ -648,7 +648,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     let product_y = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
             2,
         )],
     )
@@ -656,7 +656,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     let product_z0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(-2).unwrap()),
+            ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(-2).unwrap()),
             1,
         )],
     )
@@ -664,7 +664,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     let product_z1 = GradedSpace::try_new(
         product_rule,
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             1,
         )],
     )

@@ -4,11 +4,11 @@ use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
-};
-use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
+};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex32, Complex64};
@@ -233,7 +233,7 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
             .unwrap(),
         ),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             2,
         )],
     )
@@ -1024,7 +1024,7 @@ fn warm_cuda_destination_reuse_matches_the_returning_chain_for_every_provider() 
             .unwrap(),
         ),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             2,
         )],
     )
@@ -2157,7 +2157,7 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
             Arc::clone(&u1_su2),
             sectors.iter().map(|&(charge, twice, degeneracy)| {
                 (
-                    product_sector(U1Irrep::new(charge).unwrap(), su2_irrep(twice)),
+                    ProductSector::new(U1Irrep::new(charge).unwrap(), su2_irrep(twice)),
                     degeneracy,
                 )
             }),
@@ -2203,7 +2203,7 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
             Arc::clone(&fz2_u1),
             sectors.iter().map(|&(odd, charge, degeneracy)| {
                 (
-                    product_sector(
+                    ProductSector::new(
                         if odd {
                             FermionParityIrrep::ODD
                         } else {
@@ -2250,7 +2250,7 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
             Arc::clone(&fz2_su2),
             sectors.iter().map(|&(odd, twice, degeneracy)| {
                 (
-                    product_sector(
+                    ProductSector::new(
                         if odd {
                             FermionParityIrrep::ODD
                         } else {
@@ -2428,7 +2428,7 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
             Arc::clone(&fz2_u1),
             sectors.iter().map(|&(odd, charge, degeneracy)| {
                 (
-                    product_sector(
+                    ProductSector::new(
                         if odd {
                             FermionParityIrrep::ODD
                         } else {

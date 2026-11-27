@@ -6,14 +6,11 @@ pub fn symtn::cache::clear()
 pub fn symtn::cache::configure_budgets(impl core::iter::traits::collect::IntoIterator<Item = (symtn_core::cache::StructureCacheKind, u64)>)
 pub fn symtn::cache::stats() -> alloc::vec::Vec<symtn_core::cache::StructureCacheInfo>
 pub mod symtn::expert
-pub use symtn::expert::BlockLayout
 pub use symtn::expert::BlockRef
-pub use symtn::expert::BlockView
 pub use symtn::expert::DenseError
 pub use symtn::expert::HostReadableStorage
 pub use symtn::expert::Placement
 pub use symtn::expert::SectorLeg
-pub use symtn::expert::SectorLegConstructionError
 pub use symtn::expert::TensorStorage
 pub use symtn::expert::TreeTransformOperation
 pub use symtn::expert::TreeTransformOperationKind
@@ -84,7 +81,6 @@ pub use symtn::sector::U1Irrep
 pub use symtn::sector::UncertifiedUnitAdmission
 pub use symtn::sector::ZNFusionRule
 pub use symtn::sector::ZNIrrep
-pub use symtn::sector::product_sector
 pub mod symtn::typed
 pub use symtn::typed::BlockKey
 pub use symtn::typed::BlockKeyKind

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use symtn::expert::SectorLeg;
-#[cfg(feature = "cuda")]
-use symtn::sector::product_sector;
 use symtn::sector::FusionRule;
+#[cfg(feature = "cuda")]
+use symtn::sector::ProductSector;
 use symtn::sector::{
     FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep, ZNFusionRule,
 };
@@ -1464,7 +1464,7 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     let product_x0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+            ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
             1,
         )],
     )
@@ -1472,7 +1472,7 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     let product_x1 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
             2,
         )],
     )
@@ -1482,7 +1482,7 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     let product_y = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
             2,
         )],
     )
@@ -1490,7 +1490,7 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     let product_z0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(-2).unwrap()),
+            ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(-2).unwrap()),
             1,
         )],
     )
@@ -1498,7 +1498,7 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     let product_z1 = GradedSpace::try_new(
         product_rule,
         [(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             1,
         )],
     )

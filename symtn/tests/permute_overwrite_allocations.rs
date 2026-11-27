@@ -4,7 +4,7 @@ use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
 
-use symtn::sector::{product_sector, U1FusionRule, U1Irrep};
+use symtn::sector::{ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
 use symtn::typed::{GradedSpace, TensorMap};
 
@@ -31,10 +31,22 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(0)), 8),
-            (product_sector(U1Irrep::new(1).unwrap(), su2_irrep(1)), 6),
-            (product_sector(U1Irrep::new(-1).unwrap(), su2_irrep(1)), 6),
-            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(2)), 4),
+            (
+                ProductSector::new(U1Irrep::new(0).unwrap(), su2_irrep(0)),
+                8,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(1).unwrap(), su2_irrep(1)),
+                6,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(-1).unwrap(), su2_irrep(1)),
+                6,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(0).unwrap(), su2_irrep(2)),
+                4,
+            ),
         ],
     )
     .unwrap();

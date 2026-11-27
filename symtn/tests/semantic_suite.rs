@@ -15,7 +15,7 @@ use symtn::typed::Direction;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep, ZNFusionRule,
 };
 use symtn::typed::{Complex64, Runtime};
@@ -115,22 +115,22 @@ macro_rules! for_each_space {
             ),
             [
                 (
-                    product_sector(
-                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(
+                        ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                         su2_irrep(0),
                     ),
                     1,
                 ),
                 (
-                    product_sector(
-                        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(
+                        ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                         su2_irrep(1),
                     ),
                     1,
                 ),
                 (
-                    product_sector(
-                        product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                    ProductSector::new(
+                        ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                         su2_irrep(0),
                     ),
                     1,
@@ -841,8 +841,8 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
         .unwrap(),
     );
     let label = |parity, charge, spin| {
-        product_sector(
-            product_sector(parity, U1Irrep::new(charge).unwrap()),
+        ProductSector::new(
+            ProductSector::new(parity, U1Irrep::new(charge).unwrap()),
             su2_irrep(spin),
         )
     };
@@ -1008,8 +1008,8 @@ fn svd_qr_reconstruction_random_spaces() {
         .unwrap(),
     );
     let label = |parity, charge, spin| {
-        product_sector(
-            product_sector(parity, U1Irrep::new(charge).unwrap()),
+        ProductSector::new(
+            ProductSector::new(parity, U1Irrep::new(charge).unwrap()),
             su2_irrep(spin),
         )
     };

@@ -32,7 +32,7 @@ use num_complex::Complex64;
 
 use crate::numerics;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -401,7 +401,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {

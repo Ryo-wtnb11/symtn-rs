@@ -80,12 +80,12 @@ impl<T> FactorPair<T> for RightPolar<T> {
         (self.p, self.wh)
     }
 }
-use symtn_core::{product_sector, ProductFusionRule};
 use symtn_core::{
     BlockKey, BlockSpec, BlockStructure, CU1FusionRule, CU1Irrep, FermionParityFusionRule,
     FermionParityIrrep, FusionTreeKey, FusionTreePairKey, U1FusionRule, U1Irrep, ZNFusionRule,
     ZNIrrep,
 };
+use symtn_core::{ProductFusionRule, ProductSector};
 use symtn_dense::{
     DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
     DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite, MatrixOp,

@@ -399,8 +399,8 @@ pub(crate) mod fermionic {
     use super::*;
     use crate::numerics;
     use symtn::sector::{
-        product_sector, CheckedGenericAdmissionMode, FermionParityFusionRule, FermionParityIrrep,
-        LieGroupFusionRule, MultiplicityFreeAdmissionMode, ProductFusionRule,
+        CheckedGenericAdmissionMode, FermionParityFusionRule, FermionParityIrrep,
+        LieGroupFusionRule, MultiplicityFreeAdmissionMode, ProductFusionRule, ProductSector,
     };
     use symtn::typed::{Complex64, Direction, TensorScalar, TypedTensorTwistDispatch};
 
@@ -425,23 +425,23 @@ pub(crate) mod fermionic {
             Arc::new(ProductFusionRule::try_new(su3, FermionParityFusionRule::new()).unwrap()),
             [
                 (
-                    product_sector(su_irrep(&[0, 0]), FermionParityIrrep::EVEN),
+                    ProductSector::new(su_irrep(&[0, 0]), FermionParityIrrep::EVEN),
                     1,
                 ),
                 (
-                    product_sector(su_irrep(&[1, 1]), FermionParityIrrep::ODD),
+                    ProductSector::new(su_irrep(&[1, 1]), FermionParityIrrep::ODD),
                     2,
                 ),
                 (
-                    product_sector(su_irrep(&[1, 1]), FermionParityIrrep::EVEN),
+                    ProductSector::new(su_irrep(&[1, 1]), FermionParityIrrep::EVEN),
                     1,
                 ),
                 (
-                    product_sector(su_irrep(&[1, 0]), FermionParityIrrep::ODD),
+                    ProductSector::new(su_irrep(&[1, 0]), FermionParityIrrep::ODD),
                     1,
                 ),
                 (
-                    product_sector(su_irrep(&[0, 1]), FermionParityIrrep::ODD),
+                    ProductSector::new(su_irrep(&[0, 1]), FermionParityIrrep::ODD),
                     2,
                 ),
             ],
@@ -759,9 +759,15 @@ pub(crate) mod fermionic {
         >,
     ) {
         let labels = [
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 1),
-            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                1,
+            ),
+            (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                1,
+            ),
         ];
         let checked = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(2).unwrap(),

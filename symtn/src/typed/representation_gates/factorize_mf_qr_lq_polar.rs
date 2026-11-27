@@ -399,8 +399,8 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
             },
         ]
     );
-    let even = product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
-    let odd = product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
+    let even = ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
+    let odd = ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
     let fermion = GradedSpace::try_new(
         Arc::new(
             ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())
@@ -825,8 +825,8 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
             },
         ]
     );
-    let even = product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
-    let odd = product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
+    let even = ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
+    let odd = ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
     let fermion = GradedSpace::try_new(
         Arc::new(
             ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())

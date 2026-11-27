@@ -8,7 +8,7 @@ use crate::legs::{su2_leg, u1_leg};
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Eigh, GradedSpace, HermitianTol, OperationError, Qr, Runtime, Svd};
 
@@ -129,7 +129,7 @@ on_each_engine! {
                 Arc::clone(&rule),
                 sectors.iter().map(|&(odd, q, n)| {
                     let parity = if odd { FermionParityIrrep::ODD } else { FermionParityIrrep::EVEN };
-                    (product_sector(parity, U1Irrep::new(q).unwrap()), n)
+                    (ProductSector::new(parity, U1Irrep::new(q).unwrap()), n)
                 }),
             )
             .unwrap()

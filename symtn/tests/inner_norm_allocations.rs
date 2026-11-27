@@ -4,12 +4,12 @@ use std::hint::black_box;
 use std::sync::Arc;
 use symtn::typed::Engine;
 
-use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
-    U1Irrep,
-};
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::{CheckedGenericRigidSymbols, TypedSectorAdmission};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
+};
 use symtn::typed::TensorScalar;
 use symtn::typed::{Complex32, Complex64, GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
@@ -32,8 +32,8 @@ fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
         .unwrap(),
     );
     let label = |parity: u8, charge: i32, twice_spin: usize| {
-        product_sector(
-            product_sector(
+        ProductSector::new(
+            ProductSector::new(
                 if parity == 0 {
                     FermionParityIrrep::EVEN
                 } else {

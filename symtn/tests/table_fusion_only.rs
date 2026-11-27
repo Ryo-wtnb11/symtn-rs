@@ -282,7 +282,7 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
 #[test]
 fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    use symtn_sectors::{product_sector, ZNIrrep};
+    use symtn_sectors::{ProductSector, ZNIrrep};
     let runtime = Runtime::builder().build().unwrap();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -296,11 +296,11 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
         product,
         [
             (
-                product_sector(TableSector::new(1), ZNIrrep::new(0, 2).unwrap()),
+                ProductSector::new(TableSector::new(1), ZNIrrep::new(0, 2).unwrap()),
                 1,
             ),
             (
-                product_sector(TableSector::new(3), ZNIrrep::new(1, 2).unwrap()),
+                ProductSector::new(TableSector::new(3), ZNIrrep::new(1, 2).unwrap()),
                 1,
             ),
         ],

@@ -38,7 +38,7 @@ use num_complex::{Complex32, Complex64};
 
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, ContractSpec, GradedSpace, Runtime, TensorMap};
@@ -155,8 +155,11 @@ fn fz2_su2_leg() -> GradedSpace<FermionSu2> {
     GradedSpace::try_new(
         rule,
         [
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, su2_irrep(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                2,
+            ),
+            (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(2)), 1),
         ],
     )
     .unwrap()
@@ -622,15 +625,15 @@ fn fz2_u1_leg() -> GradedSpace<FermionU1> {
         ),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                 2,
             ),
         ],

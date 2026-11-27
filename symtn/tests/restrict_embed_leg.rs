@@ -24,8 +24,7 @@ use symtn::typed::ContractSpec;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
-    ZNFusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, LegSelection, Runtime, TensorMap};
@@ -907,7 +906,7 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {
@@ -1422,7 +1421,7 @@ fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {
@@ -1616,7 +1615,7 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {
@@ -1776,7 +1775,7 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {

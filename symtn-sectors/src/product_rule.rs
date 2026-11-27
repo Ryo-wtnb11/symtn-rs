@@ -1111,11 +1111,11 @@ mod tests {
     fn label_codec_resolves_by_method_syntax_and_component_ids_round_trip() {
         // What: `encode_sector`/`decode_sector` on a product rule are the label-level
         // `SectorCodec` methods; component ids use the `*_component_ids` pair.
-        use crate::{product_sector, SectorCodec};
+        use crate::{ProductSector, SectorCodec};
 
         let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
             .unwrap();
-        let label = product_sector(FermionParityIrrep::ODD, U1Irrep::new(-3).unwrap());
+        let label = ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-3).unwrap());
         let id = rule.encode_sector(&label).unwrap();
         assert_eq!(rule.decode_sector(id).unwrap(), label);
         let by_ids = rule.encode_component_ids(

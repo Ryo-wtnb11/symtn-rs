@@ -55,7 +55,7 @@ fn su2(provider: &Arc<Su2Rule>, sectors: &[(usize, usize)]) -> GradedSpace<Su2Ru
 }
 
 /// Every element of one block, walked through the view's own layout.
-fn block_values<D: Copy>(view: &symtn::expert::BlockView<'_, D>) -> Vec<D> {
+fn block_values<D: Copy>(view: &symtn_core::BlockView<'_, D>) -> Vec<D> {
     let shape = view.shape();
     let count: usize = shape.iter().product();
     let mut indices = vec![0usize; shape.len()];

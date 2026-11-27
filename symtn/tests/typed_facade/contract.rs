@@ -453,14 +453,14 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
     let codomain = result.codomain();
     assert_eq!(
         codomain[0].sectors().unwrap(),
-        [symtn::sector::product_sector(
+        [symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(1).unwrap(),
             symtn::sector::FermionParityIrrep::EVEN
         )]
     );
     assert_eq!(
         codomain[1].sectors().unwrap(),
-        [symtn::sector::product_sector(
+        [symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(0).unwrap(),
             symtn::sector::FermionParityIrrep::ODD
         )]
@@ -696,7 +696,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
     assert_eq!(result.dense_data().unwrap(), [10.0]);
     assert_eq!(
         result.codomain()[0].sectors().unwrap(),
-        [symtn::sector::product_sector(
+        [symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(2).unwrap(),
             symtn::sector::FermionParityIrrep::EVEN
         )]
@@ -749,19 +749,19 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
     assert_eq!(
         block.codomain_innerlines(),
         [
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(3).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD
             ),
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
