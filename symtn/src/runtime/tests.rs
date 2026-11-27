@@ -709,6 +709,26 @@ fn unique_planning_scratch_is_charged_and_released() {
     assert!(ledger(missed).0 > 0);
 }
 
+/// Drives movement regions with `settle` until `engine`'s calibration has
+/// settled (calibrated, or out of attempts), so no later region changes its
+/// constants' generation and rebuilds retained decisions.
+#[cfg(feature = "cpu-faer")]
+fn settle_calibration(
+    engine: &mut symtn_dense::CpuEngine,
+    mut settle: impl FnMut(&mut symtn_dense::CpuEngine),
+) {
+    for _ in 0..4 {
+        if symtn_operations::movement_calibration_settled(engine) {
+            return;
+        }
+        settle(engine);
+    }
+    assert!(
+        symtn_operations::movement_calibration_settled(engine),
+        "a calibration settles within its attempts"
+    );
+}
+
 /// Purpose: alternating public permutes retain both movement decisions;
 /// trimming the engine forces fresh decisions.
 #[cfg(feature = "cpu-faer")]
@@ -735,6 +755,10 @@ fn repeated_permute_reuses_movement_decisions() {
         173,
     )
     .unwrap();
+    let settle = |engine: &mut symtn_dense::CpuEngine| {
+        drop(source.permute(engine, &[0, 3], &[1, 2]).unwrap());
+    };
+    settle_calibration(&mut engine, settle);
     let take = symtn_operations::take_movement_decision_builds;
     take();
     for (codomain, domain) in [([0, 2], [1, 3]), ([1, 3], [0, 2])] {
@@ -746,6 +770,8 @@ fn repeated_permute_reuses_movement_decisions() {
         assert_eq!(take(), 0, "alternating warm structures");
     }
     crate::scratch::trim(&mut engine);
+    settle_calibration(&mut engine, settle);
+    take();
     drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
     assert!(take() > 0, "trim invalidates retained decisions");
     drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());
@@ -777,6 +803,11 @@ fn movement_decisions_evict_the_least_recently_used_structure() {
         })
         .collect();
     let mut engine = symtn_operations::host_pool::eager_test_engine(2);
+    // A structure outside `sources` settles the calibration first; as the
+    // least recently used entry it is evicted before any of them.
+    settle_calibration(&mut engine, |engine| {
+        drop(sources[0].permute(engine, &[0, 3], &[1, 2]).unwrap());
+    });
     let take = symtn_operations::take_movement_decision_builds;
     take();
     for source in &sources {

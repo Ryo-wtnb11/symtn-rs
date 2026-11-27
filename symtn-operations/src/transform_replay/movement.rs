@@ -376,6 +376,21 @@ pub(super) fn dispatch_key<'a>(
 /// serial until the entry is trimmed or evicted, or the engine is dropped.
 const CALIBRATION_ATTEMPTS: usize = 3;
 
+/// Test probe: whether `engine`'s movement calibration has settled, i.e. it
+/// is calibrated or has used all [`CALIBRATION_ATTEMPTS`], so no later
+/// region can change its constants' generation. An engine that has not
+/// calibrated yet (or is serial) has not settled.
+#[cfg(any(test, feature = "testing"))]
+#[doc(hidden)]
+pub fn movement_calibration_settled(engine: &mut dyn Engine) -> bool {
+    let Some(constants) = symtn_dense::engine_slot::checkout::<Constants>(engine) else {
+        return false;
+    };
+    let settled = constants.calibrated || constants.attempts >= CALIBRATION_ATTEMPTS;
+    symtn_dense::engine_slot::checkin(engine, constants, Constants::retained_bytes);
+    settled
+}
+
 /// The retained value itself records its attempts, failed ones included (see
 /// [`CALIBRATION_ATTEMPTS`]).
 pub(super) fn region<R>(
@@ -915,7 +930,8 @@ fn attempt<T>(mut measure: impl FnMut() -> Option<T>) -> Option<T> {
 }
 
 /// One element-row walk of `elements` elements in `runs` runs, timed as the
-/// minimum of [`WALK_SAMPLES`] samples.
+/// minimum of [`WALK_SAMPLES`] samples after one untimed warm-up run, as
+/// D_item and D_plan take one (see [`DISPATCH_SAMPLES`]).
 ///
 /// Why the minimum, here and for every fixed-workload timing of the
 /// calibration (the walks, D_item and D_plan): the workload is the same in
@@ -938,6 +954,13 @@ fn sample(
     } else {
         1
     };
+    fixture
+        .run(
+            exec.reborrow().limit(NonZeroUsize::MIN),
+            source,
+            destination,
+        )
+        .ok()?;
     let mut fastest = f64::INFINITY;
     for _ in 0..WALK_SAMPLES {
         let start = Instant::now();
@@ -1020,9 +1043,9 @@ fn measure_row(
 /// The physical row has `a >= 0`, `r >= 0` and `e > 0`. A negative setup or
 /// per-run term means that term is below the measurement's resolution (a
 /// contiguous run costs no measurable time per run), not that the host
-/// differs from the samples: it is held at zero and the remaining terms are
-/// refit on the same walks. A row whose element term is still not positive,
-/// or whose fit is not finite, is unusable.
+/// differs from the samples: the fit is the least-squares solution under
+/// `a >= 0` and `r >= 0` (see [`fit_terms`]). A row whose element term is
+/// not positive, or whose fit is not finite, is unusable.
 fn fit_row(inner: usize, walks: &RowWalks) -> Option<Row> {
     let working_sets = [ONLINE_WORKING_SETS, [1024, 8192, 65536]][inner];
     let RowWalks {
@@ -1082,11 +1105,42 @@ fn fit_row(inner: usize, walks: &RowWalks) -> Option<Row> {
     })
 }
 
-/// Least squares of `(setup, runs, elements) · x ≈ y` over `rows`, the
-/// coefficients marked in `fixed` held at zero; a free setup or per-run
-/// coefficient that comes out negative is held at zero and the rest refit.
-/// `None` when the free columns are linearly dependent.
-fn fit_terms(rows: &[([f64; 3], f64)], mut fixed: [bool; 3]) -> Option<[f64; 3]> {
+/// Least squares of `(setup, runs, elements) · x ≈ y` over `rows` subject to
+/// setup >= 0 and runs >= 0, the coefficients marked in `fixed` held at zero.
+///
+/// The exact constrained solution: only the setup and per-run terms are
+/// constrained, so the minimum lies in one of four active sets (neither held
+/// at zero, either one, or both). Each is solved, and the feasible solution
+/// with the least squared residual is kept (the fewest held terms on a tie).
+/// No set's result depends on the order in which terms are examined. `None`
+/// when no active set has linearly independent free columns and a feasible
+/// solution.
+fn fit_terms(rows: &[([f64; 3], f64)], fixed: [bool; 3]) -> Option<[f64; 3]> {
+    let mut best: Option<([f64; 3], f64)> = None;
+    for held in [[false, false], [true, false], [false, true], [true, true]] {
+        let hold = [fixed[0] || held[0], fixed[1] || held[1], fixed[2]];
+        let Some(x) = fit_held(rows, hold) else {
+            continue;
+        };
+        if !x.iter().all(|value| value.is_finite()) || x[0] < 0.0 || x[1] < 0.0 {
+            continue;
+        }
+        let residual: f64 = rows
+            .iter()
+            .map(|(c, y)| (c.iter().zip(&x).map(|(c, x)| c * x).sum::<f64>() - y).powi(2))
+            .sum();
+        match best {
+            Some((_, least)) if least <= residual => {}
+            _ => best = Some((x, residual)),
+        }
+    }
+    best.map(|(x, _)| x)
+}
+
+/// Unconstrained least squares of `(setup, runs, elements) · x ≈ y` over
+/// `rows` with the coefficients marked in `held` at zero; `None` when the
+/// free columns are linearly dependent.
+fn fit_held(rows: &[([f64; 3], f64)], held: [bool; 3]) -> Option<[f64; 3]> {
     // Why the column scaling: element counts reach 2^18 while the setup
     // column is 1, so the normal equations are solved on columns scaled to a
     // largest entry of one, which keeps their determinant test meaningful.
@@ -1098,35 +1152,29 @@ fn fit_terms(rows: &[([f64; 3], f64)], mut fixed: [bool; 3]) -> Option<[f64; 3]>
             1.0
         }
     });
-    loop {
-        let mut normal = [[0.0; 3]; 3];
-        let mut rhs = [0.0; 3];
-        for (x, y) in rows {
-            let x: [f64; 3] = core::array::from_fn(|j| x[j] / scale[j]);
-            for (j, line) in normal.iter_mut().enumerate() {
-                for (k, entry) in line.iter_mut().enumerate() {
-                    *entry += x[j] * x[k];
-                }
-                rhs[j] += x[j] * y;
+    let mut normal = [[0.0; 3]; 3];
+    let mut rhs = [0.0; 3];
+    for (x, y) in rows {
+        let x: [f64; 3] = core::array::from_fn(|j| x[j] / scale[j]);
+        for (j, line) in normal.iter_mut().enumerate() {
+            for (k, entry) in line.iter_mut().enumerate() {
+                *entry += x[j] * x[k];
             }
-        }
-        for (j, &held) in fixed.iter().enumerate() {
-            if held {
-                for line in &mut normal {
-                    line[j] = 0.0;
-                }
-                normal[j] = [0.0; 3];
-                normal[j][j] = 1.0;
-                rhs[j] = 0.0;
-            }
-        }
-        let scaled = solve3(normal, rhs)?;
-        let solution: [f64; 3] = core::array::from_fn(|j| scaled[j] / scale[j]);
-        match (0..2).find(|&j| !fixed[j] && solution[j] < 0.0) {
-            Some(j) => fixed[j] = true,
-            None => return Some(solution),
+            rhs[j] += x[j] * y;
         }
     }
+    for (j, &zero) in held.iter().enumerate() {
+        if zero {
+            for line in &mut normal {
+                line[j] = 0.0;
+            }
+            normal[j] = [0.0; 3];
+            normal[j][j] = 1.0;
+            rhs[j] = 0.0;
+        }
+    }
+    let scaled = solve3(normal, rhs)?;
+    Some(core::array::from_fn(|j| scaled[j] / scale[j]))
 }
 
 /// `m x = b` by Cramer's rule; `None` when `m` is singular to working
@@ -1176,8 +1224,12 @@ fn leaf_share(budget: usize, share: usize) -> bool {
         || dispatch_ladder(budget).any(|q| budget / q == share || budget.div_ceil(q) == share)
 }
 
-/// Samples per dispatch point; the point is their minimum (see [`sample`]),
-/// after one warm-up.
+/// Samples per dispatch point; the point is their minimum (see [`sample`]).
+///
+/// Why one untimed warm-up before the walks and the dispatch timings: the
+/// first run of a fixture or fork can pay one-off costs (first touch of its
+/// pages, first use of its writer or of a parked worker) that are not the
+/// workload's.
 const DISPATCH_SAMPLES: usize = 31;
 
 /// The minimum duration in ns of [`DISPATCH_SAMPLES`] calls of `once`, after
@@ -2691,6 +2743,44 @@ mod tests {
         assert!(row.e.online.unwrap().iter().all(|point| point.1 > 0.0));
     }
 
+    /// Purpose: the constrained fit is the least-squares solution under
+    /// `a >= 0`, `r >= 0` whatever the active set, on the strided first set's
+    /// design: free, setup held, per-run term held, both held. The expected
+    /// values are the exact rational solutions of each active set's normal
+    /// equations (Python `fractions`). For the noisy sample with `r = 0`,
+    /// `y = a + e n` over n = 2, 16, 64, 64 gives `e = Sxy / Sxx = 22705 /
+    /// 3123` and `a = 276.5 - 36.5 e`; holding `a` too, the order-dependent
+    /// clamp's answer, has the larger residual 48987.19 against 48803.91.
+    #[test]
+    fn constrained_fit_picks_the_least_residual_active_set() {
+        let design = [(1.0, 2.0), (1.0, 16.0), (1.0, 64.0), (32.0, 64.0)];
+        let rows = |time: &dyn Fn(f64, f64) -> f64| {
+            design.map(|(runs, elements)| ([1.0, runs, elements], time(runs, elements)))
+        };
+        let noisy = [9.0, 149.0, 629.0, 319.0];
+        let cases: [([([f64; 3], f64); 4], [f64; 3]); 4] = [
+            (rows(&|r, n| 5.0 + 2.0 * r + 3.0 * n), [5.0, 2.0, 3.0]),
+            (
+                rows(&|r, n| -3.0 + 2.0 * r + 3.0 * n),
+                [0.0, 2.0109767470598343, 2.9454116811124647],
+            ),
+            (
+                core::array::from_fn(|i| ([1.0, design[i].0, design[i].1], noisy[i])),
+                [11.13576689081012, 0.0, 22705.0 / 3123.0],
+            ),
+            (
+                rows(&|r, n| -2.0 - r + 3.0 * n),
+                [0.0, 0.0, 2.713440605773781],
+            ),
+        ];
+        for (walks, expected) in cases {
+            let fitted = fit_terms(&walks, [false; 3]).unwrap();
+            for (actual, expected) in fitted.into_iter().zip(expected) {
+                close(actual, expected);
+            }
+        }
+    }
+
     /// Purpose: a row whose element term is not positive, or whose walks
     /// are not finite, is unusable.
     #[test]
@@ -2791,6 +2881,53 @@ mod tests {
                 + constants.plan_dispatch.capacity())
                 * std::mem::size_of::<f64>()
         );
+    }
+
+    /// Purpose: a failed first calibration followed by a successful retry
+    /// advances the constants' generation once, so a decision built under
+    /// the failed attempt is rebuilt exactly once and then stays warm; two
+    /// failed attempts are the control that keeps the generation and the
+    /// decision.
+    #[test]
+    fn a_successful_retry_rebuilds_an_earlier_decision_once() {
+        for (outcomes, rebuilt) in [([false, true, true], true), ([false; 3], false)] {
+            let mut engine = tenferro_cpu::CpuEngine::new(
+                tenferro_cpu::Pool::builder().threads(2).build().unwrap(),
+            );
+            let identity = Arc::new(());
+            let mut memo = WidthMemo::default();
+            let (calls, builds) = (Cell::new(0), Cell::new(0));
+            let mut generations = Vec::new();
+            for _ in 0..3 {
+                region_with(
+                    &mut engine,
+                    |_, _| {
+                        calls.set(calls.get() + 1);
+                        outcomes[calls.get() - 1]
+                    },
+                    |exec, constants| {
+                        let key = decision_key::<f64>(&exec, constants, false, false, 0, 0, 1);
+                        generations.push(key.generation);
+                        memo.update(
+                            key,
+                            Arc::downgrade(&identity),
+                            dispatch_key(&exec),
+                            |widths, _| {
+                                builds.set(builds.get() + 1);
+                                widths.push(1);
+                                Ok(())
+                            },
+                        )
+                        .unwrap();
+                    },
+                )
+                .unwrap();
+            }
+            assert_eq!(calls.get(), if rebuilt { 2 } else { 3 });
+            assert_eq!(generations[0] != generations[1], rebuilt);
+            assert_eq!(generations[1], generations[2]);
+            assert_eq!(builds.get(), 1 + usize::from(rebuilt));
+        }
     }
 
     /// Purpose: a failed calibration is retried at later regions, at most

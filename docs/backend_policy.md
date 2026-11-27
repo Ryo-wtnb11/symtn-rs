@@ -581,8 +581,10 @@ Pack columns run serial walks at width one, and plan groups keep their
 constant-free rule. Forced policies keep their widths and whole tokens.
 An online element row must be physical (a >= 0, r >= 0, e > 0). A negative
 fitted setup or per-run term means that term is below the measurement's
-resolution, not that the host differs: it is held at zero and the remaining
-terms are refit by least squares on the same walks. Beyond its largest online
+resolution, not that the host differs: the fit is the exact least-squares
+solution under a >= 0 and r >= 0, taken as the least-residual feasible
+solution of the four active sets (neither term at zero, either one, both),
+so it does not depend on the order in which terms are examined. Beyond its largest online
 working set (4 MiB) an element curve keeps the checked-in reference curve's
 shape, scaled to meet its last online knot; the reference table records the CI CPU, date and run provenance. The constants
 depend on timing but not on how many points happened to fit a budget. On a
@@ -611,7 +613,8 @@ computed once per retained constants entry. Compiled counts supply the phase's
 class weights directly, including member and cold-fill element counts, without
 extra cost preparations or allocations.
 
-Each ladder knot is measured once per retained entry. Measurements below the
+Each calibration attempt measures every ladder knot (and every other row)
+afresh, and an entry makes at most three attempts. Measurements below the
 fixture's single-thread memory rate or below the previous accepted knot are
 rejected before linear interpolation in q within the same row. Missing widths
 use the nearest accepted endpoint outside the measured range; no accepted
