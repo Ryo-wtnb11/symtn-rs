@@ -201,8 +201,8 @@ pub(crate) mod sealed {
     #[derive(Debug, Default)]
     pub(crate) struct GateKeys {
         bound: usize,
-        /// Each prepared budget and the index of its cost's slot.
-        budgets: Vec<(usize, usize)>,
+        /// Direct budget-to-slot indices; usize::MAX marks an unprepared budget.
+        budgets: Vec<usize>,
         slots: Vec<(core::time::Duration, std::sync::OnceLock<Option<usize>>)>,
         /// Whether the call that prepared the keys is watched.
         #[cfg(test)]
@@ -216,8 +216,30 @@ pub(crate) mod sealed {
         }
     }
 
+    /// Whether some balanced split of root has a leaf of this budget.
+    fn balanced_budget(root: usize, budget: usize) -> bool {
+        budget == root
+            || root / budget > root / (budget + 1)
+            || (root - 1) / (budget - 1) > (root - 1) / budget
+    }
+
+    /// Purpose: the constant-time quotient test covers exactly the budgets
+    /// produced by explicit balanced splits, including nonhalving leaves.
+    #[test]
+    fn balanced_budgets_match_explicit_split_shares() {
+        for root in 2usize..=128 {
+            for budget in 2..=root {
+                let expected = (1..=root).any(|q| root / q == budget || root.div_ceil(q) == budget);
+                assert_eq!(balanced_budget(root, budget), expected);
+            }
+        }
+        assert!(balanced_budget(8, 3));
+        assert!(!balanced_budget(8, 5));
+        assert!(balanced_budget(usize::MAX, usize::MAX));
+    }
+
     impl GateKeys {
-        /// Prepares the keys of `exec`'s halving budgets for gates of
+        /// Prepares keys for every balanced split's leaf budgets for gates of
         /// `bound`, or none when no role is planned (`bound` zero) or
         /// `exec` carries no team.
         pub(crate) fn prepare(&mut self, exec: &mut crate::host_pool::Exec<'_>, bound: usize) {
@@ -227,35 +249,38 @@ pub(crate) mod sealed {
             if bound == 0 || exec.is_serial() || !exec.carries_team() {
                 return;
             }
-            // Split halves a token as threadteam's even fork does, so the
-            // budgets at depth d are the floor and ceil of `root / 2^d`.
+            // A balanced q-way split grants floor(root/q) or ceil(root/q).
+            // Prefix dispatch minima price all reachable budgets in one O(root)
+            // pass; direct budget indices make every leaf lookup O(1), while
+            // only O(sqrt(root)) distinct quotient budgets/cost keys need slots.
             let root = exec.budget().get();
-            let mut divisor = 1usize;
-            while root.div_ceil(divisor) >= 2 {
-                for budget in [root / divisor, root.div_ceil(divisor)] {
-                    if budget < 2 || self.budgets.iter().any(|&(b, _)| b == budget) {
-                        continue;
-                    }
-                    let limited = exec
-                        .reborrow()
-                        .limit(core::num::NonZeroUsize::new(budget).expect("budget >= 2"));
-                    let Some((_, cost)) = LeafGate::cheapest(&limited) else {
-                        continue;
-                    };
-                    let slot = match self.slots.iter().position(|&(c, _)| c == cost) {
-                        Some(slot) => slot,
-                        None => {
-                            self.slots.push((cost, std::sync::OnceLock::new()));
-                            self.slots.len() - 1
-                        }
-                    };
-                    self.budgets.push((budget, slot));
+            self.budgets.resize(root + 1, usize::MAX);
+            let mut cheapest = core::time::Duration::MAX;
+            for budget in 2..=root {
+                let width = core::num::NonZeroUsize::new(budget).expect("budget >= 2");
+                cheapest = cheapest.min(exec.dispatch_cost(width));
+                if cheapest == core::time::Duration::MAX || !balanced_budget(root, budget) {
+                    continue;
                 }
-                let Some(next) = divisor.checked_mul(2) else {
-                    break;
+                let slot = match self.slots.iter().position(|&(cost, _)| cost == cheapest) {
+                    Some(slot) => slot,
+                    None => {
+                        self.slots.push((cheapest, std::sync::OnceLock::new()));
+                        self.slots.len() - 1
+                    }
                 };
-                divisor = next;
+                self.budgets[budget] = slot;
             }
+        }
+
+        /// The same cheapest-width Copy admission used by LeafGate's scan.
+        #[cfg(feature = "tenferro")]
+        pub(crate) fn admits(&self, budget: usize, elements: usize) -> bool {
+            let estimate = execution::KernelClass::Copy.estimate(elements);
+            !estimate.is_zero()
+                && self
+                    .slot(budget)
+                    .is_some_and(|(cost, _)| tenferro_cpu::threadteam::pays_at(estimate, 1, *cost))
         }
 
         /// Marks the keys as `gate`'s call's, for the gates shared from them.
@@ -269,15 +294,14 @@ pub(crate) mod sealed {
             &self,
             budget: usize,
         ) -> Option<&(core::time::Duration, std::sync::OnceLock<Option<usize>>)> {
-            let &(_, slot) = self.budgets.iter().find(|&&(b, _)| b == budget)?;
-            self.slots.get(slot)
+            self.slots.get(*self.budgets.get(budget)?)
         }
 
         /// Bytes of the tables' capacity.
         pub(crate) fn retained_bytes(&self) -> usize {
             self.budgets
                 .capacity()
-                .saturating_mul(core::mem::size_of::<(usize, usize)>())
+                .saturating_mul(core::mem::size_of::<usize>())
                 .saturating_add(self.slots.capacity().saturating_mul(core::mem::size_of::<(
                     core::time::Duration,
                     std::sync::OnceLock<Option<usize>>,
@@ -292,6 +316,10 @@ pub(crate) mod sealed {
     /// `exec`; the default returns `None`, leaving the block to the public
     /// primitive's serial walk.
     pub trait Sealed {
+        fn replays_plans(&self) -> bool {
+            false
+        }
+
         /// A Single block's overwrite `dst = scale * op(src)` by the role's
         /// admitted `plan`. Replay never plans an accumulate: the plan's
         /// `alpha * f(x) + beta * y` multiplies `f(x)` by a payload-typed one,
@@ -756,6 +784,8 @@ impl StridedHostKernelAdapter {
     /// adapter's own. Each caller passes a closure of its own macro arm, so
     /// every instance has one call site (see the movement module).
     #[allow(clippy::too_many_arguments)]
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn walk<T, F>(
         &mut self,
         index: Option<&mut [usize]>,
@@ -834,6 +864,10 @@ impl StridedHostKernelAdapter {
 }
 
 impl sealed::Sealed for StridedHostKernelAdapter {
+    fn replays_plans(&self) -> bool {
+        true
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn planned_transform<T, C>(
         &mut self,
@@ -917,6 +951,8 @@ where
         + Send
         + Sync,
 {
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn add_strided_baked(
         &mut self,
         exec: crate::host_pool::Exec<'_>,
@@ -1041,6 +1077,8 @@ where
         )
     }
 
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn copy_scale_strided_baked(
         &mut self,
         _exec: crate::host_pool::Exec<'_>,
@@ -1075,6 +1113,8 @@ where
     /// The structural coefficient stays in its own type; see
     /// `with_transform_map!`.
     #[allow(clippy::too_many_arguments)]
+    // Leaf paths walk each item inline into their item-list loop (see `span`).
+    #[inline(always)]
     fn transform_strided_baked<C>(
         &mut self,
         _exec: crate::host_pool::Exec<'_>,

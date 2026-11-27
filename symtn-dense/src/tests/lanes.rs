@@ -39,6 +39,33 @@ fn on<R>(engine: &mut CpuEngine, budget: usize, f: impl FnOnce(Exec<'_>) -> R) -
         .unwrap()
 }
 
+/// Purpose: forced widths count executed-job leaves, preserving inner token
+/// shares; Auto is the control that leaves the caller's model in charge.
+#[test]
+fn forced_width_counts_job_leaves_and_caps_runnable_jobs() {
+    for (strategy, expected) in [
+        (BatchStrategy::Auto, [None, None, None, None]),
+        (BatchStrategy::Sequential, [Some(1); 4]),
+        (BatchStrategy::Inner, [Some(1); 4]),
+        (BatchStrategy::Outer, [Some(1), Some(1), Some(3), Some(8)]),
+        (
+            BatchStrategy::Split {
+                lanes: NonZeroUsize::new(3).unwrap(),
+            },
+            [Some(1), Some(1), Some(3), Some(3)],
+        ),
+    ] {
+        let mut engine = engine(8, BatchPolicy::new(strategy), row(60));
+        on(&mut engine, 8, |exec| {
+            assert_eq!(
+                [0, 1, 3, 12].map(|jobs| crate::lanes::forced_width(&exec, jobs)),
+                expected,
+                "{strategy:?}"
+            );
+        });
+    }
+}
+
 /// The baseline placement of jobs of serial times `times` into `tables`:
 /// no grant, so no candidate is scored.
 fn place(exec: &Exec<'_>, times: &[Duration], tables: &mut LaneTables) {
@@ -525,37 +552,29 @@ fn split<E>(threads: usize) -> Split<UnitCut<E>> {
     }
 }
 
-/// `Split` gives every job the token of main's recursive replay split
-/// (`parallel_split`, `threads / 2` logical threads to the left, a two-child
-/// fork halving the token, the odd slot to the left), by hand:
-/// - 6 jobs, 6 threads, budget 6: 3 | 3 on tokens 3 | 3, each half 1 | 2 on
-///   tokens 2 | 1, the two jobs on one slot sharing it: [2, 1, 1, 2, 1, 1];
-/// - 3 jobs, 4 threads, budget 4: 2 | 1 on tokens 2 | 2, the left 1 | 1:
-///   [1, 1, 2];
-/// - 3 jobs, 3 threads, budget 8: 1 | 2 (1 | 2 threads) on tokens 4 | 4, the
-///   right 1 | 1 on tokens 2 | 2: [4, 2, 2];
-/// - 3 jobs, 4 threads, budget 7: 2 | 1 on tokens 4 | 3, the left 1 | 1 on
-///   tokens 2 | 2: [2, 2, 3];
-/// - 1 job, 8 threads, budget 8: a leaf on the whole token: [8].
+/// Each selected width forks the whole token into balanced shares; one
+/// unsplit item is the control retaining the whole token.
 #[test]
-fn split_offers_each_job_the_token_of_mains_recursion() {
-    let mut engine = engine(8, BatchPolicy::default(), row(60));
-    for (jobs, threads, budget, expected) in [
-        (6, 6, 6, vec![2, 1, 1, 2, 1, 1]),
-        (3, 4, 4, vec![1, 1, 2]),
-        (3, 3, 8, vec![4, 2, 2]),
-        (3, 4, 7, vec![2, 2, 3]),
-        (1, 8, 8, vec![8]),
-    ] {
-        let spy = one_stage(jobs, &[]);
-        let (seen, outcome) = run_assigned(&mut engine, budget, &spy, split(threads), 1);
+fn split_leaf_shares_cover_the_whole_token_and_are_balanced() {
+    let p = 8;
+    let mut engine = engine(p, BatchPolicy::default(), row(60));
+    for q in [2, 3, p] {
+        let spy = one_stage(q, &[]);
+        let (seen, outcome) = run_assigned(&mut engine, p, &spy, split(q), 1);
         assert_eq!(outcome, Ok(Ok(())));
+        let shares = offered(&seen);
+        assert_eq!(shares.iter().sum::<usize>(), p);
+        assert!(shares.iter().max().unwrap() - shares.iter().min().unwrap() <= 1);
         assert_eq!(
-            offered(&seen),
-            expected,
-            "{jobs} jobs, {threads} threads, budget {budget}"
+            shares,
+            (0..q)
+                .map(|i| p / q + usize::from(i < p % q))
+                .collect::<Vec<_>>()
         );
     }
+    let (seen, outcome) = run_assigned(&mut engine, p, &one_stage(1, &[]), split(1), 1);
+    assert_eq!(outcome, Ok(Ok(())));
+    assert_eq!(offered(&seen), [p]);
 }
 
 /// Six jobs over two threads split into leaves [0, 1, 2] and [3, 4, 5]:

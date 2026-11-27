@@ -82,10 +82,9 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
     assert_eq!(threaded.scattered_columns, 2);
 }
 
-/// What: the one-worker replay and the chunk replay (`threads > 1` under a
-/// forced `Inner`, which admits the tiny call on two workers where the
-/// executor honors it, `Auto` otherwise) count the same block and column
-/// work and attribute their recoupling to the dense GEMM call.
+/// What: replay on one and two workers, under forced `Inner` where the executor
+/// honors it and `Auto` otherwise, counts the same block and column work and
+/// attributes recoupling to the dense GEMM call.
 #[test]
 fn profiled_multi_attributes_recoupling_to_its_route() {
     let (dst_structure, src_structure, structure) = identity_multi_fixture();

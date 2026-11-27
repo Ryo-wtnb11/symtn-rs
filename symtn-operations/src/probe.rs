@@ -20,9 +20,11 @@ pub(crate) enum Event {
     /// An output element was zero-filled before an owned block overwrite
     /// because the layout was not proved to tile its storage.
     OwnedPrefillElement,
+    /// A movement phase evaluated the width model.
+    MovementModelEvaluation,
 }
 
-const EVENTS: usize = Event::OwnedPrefillElement as usize + 1;
+const EVENTS: usize = Event::MovementModelEvaluation as usize + 1;
 
 struct Probe {
     counts: [usize; EVENTS],
@@ -85,6 +87,12 @@ pub fn take_checked_block_passes() -> CheckedBlockPasses {
 #[doc(hidden)]
 pub fn take_owned_block_prefills() -> usize {
     take(Event::OwnedPrefillElement)
+}
+
+/// Returns and resets this thread's movement width model evaluation count.
+#[doc(hidden)]
+pub fn take_movement_model_evaluations() -> usize {
+    take(Event::MovementModelEvaluation)
 }
 
 /// Which owned writer a write bitmap observes.

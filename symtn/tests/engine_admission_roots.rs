@@ -52,6 +52,9 @@ macro_rules! no_decision_ops_create_no_root {
             let zero = <$d>::from(0.0);
 
             let mut engine = team_engine();
+            // Finish movement calibration before observing roots, so its
+            // probes cannot stand in for the permute's own fork below.
+            x.permute(&mut engine, &[2, 0], &[1]).unwrap();
             let cases: [(&str, Vec<u64>); 7] = [
                 (
                     "axpby_into",
@@ -121,6 +124,7 @@ fn forking_contraction_creates_one_root() {
     assert!(out.subblock_count() > 1, "a multi-block product");
 
     let mut engine = team_engine();
+    x.permute(&mut engine, &[1], &[0]).unwrap();
     for beta in [0.0, 1.0] {
         let roots = roots_of(&mut engine, |e| {
             x.planar_contract_into(e, &y, &COMPOSE, &mut out, 1.0, beta)

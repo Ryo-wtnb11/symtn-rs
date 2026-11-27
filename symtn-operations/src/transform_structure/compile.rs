@@ -355,8 +355,17 @@ impl<T: Copy> TreeTransformStructure<T> {
         )?;
         // Every structural proof above read the raw table; the retained
         // table keeps only the compiled roles replay executes.
+        let extents = (0..layouts.entry_count())
+            .map(
+                |index| match super::schedule::layout_index_range(&layouts, index) {
+                    // Movement estimates cannot reject otherwise valid metadata.
+                    Err(OperationError::ElementCountOverflow) => Ok(Some((isize::MIN, isize::MAX))),
+                    extent => extent,
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
         let layouts = layouts.finish(&blocks, &inactive_dst_layouts)?;
-        super::ownership::record_planned(&mut parallel_schedule, &blocks, &layouts)?;
+        super::ownership::compile_movement(&mut parallel_schedule, &blocks, &layouts, &extents)?;
 
         Ok(Self::from_replay_core(
             Arc::new(TreeTransformReplay {

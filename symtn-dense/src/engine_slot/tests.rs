@@ -99,6 +99,35 @@ fn a_nested_checkin_is_replaced_by_the_outer_one() {
     assert_eq!(super::retained_bytes(engine), charged(Some(&value(8))));
 }
 
+/// Purpose: different payload types coexist without consuming each other's slot.
+#[test]
+fn distinct_payload_types_keep_independent_slots() {
+    let engine = &mut CpuEngine::serial();
+    let first = value(64);
+    let second = 7u16;
+    let expected = charged(Some(&first)) + slot_charge(Some(&second), |_| 0);
+    super::checkin(engine, first, charge);
+    assert!(super::checkout::<u16>(engine).is_none());
+    super::checkin(engine, second, |_| 0);
+    assert_eq!(super::retained_bytes(engine), expected);
+    assert_eq!(super::checkout::<u16>(engine), Some(second));
+    assert_eq!(kept_len(engine), Some(64));
+}
+
+/// Purpose: clearing the family drops every payload type while preserving foreign entries.
+#[test]
+fn clear_removes_all_payload_types_and_keeps_foreign_entries() {
+    let engine = &mut CpuEngine::serial();
+    super::checkin(engine, value(64), charge);
+    super::checkin(engine, 7u16, |_| 0);
+    put_foreign(engine, 1);
+    super::clear(engine);
+    assert_eq!(super::retained_bytes(engine), 0);
+    assert!(super::checkout::<Value>(engine).is_none());
+    assert!(super::checkout::<u16>(engine).is_none());
+    assert!(has_foreign(engine));
+}
+
 #[test]
 fn foreign_reporter_panic_during_checkin_keeps_the_engine_store() {
     let engine = &mut CpuEngine::serial();

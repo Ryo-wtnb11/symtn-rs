@@ -80,18 +80,10 @@ fn enter<R>(
     op: impl FnOnce(symtn_dense::lanes::Exec<'_>) -> R,
 ) -> Result<R, OperationError> {
     let mut op = Some(op);
-    let mut run = |exec: symtn_dense::lanes::Exec<'_>| {
-        observe(site, exec.budget());
-        let op = op.take().expect("region body runs once");
-        op(exec)
-    };
     let ran = tenferro_cpu::with_cpu_engine(engine, |cpu| {
-        let ran = if guarded {
-            cpu.with_exec(|exec| run(exec.reborrow()))
-        } else {
-            cpu.exec().map(&mut run)
-        };
-        ran.map_err(host_region_error)
+        enter_cpu(cpu, site, guarded, |exec| {
+            op.take().expect("region body runs once")(exec)
+        })
     });
     match ran {
         Some(result) => result,
@@ -99,10 +91,34 @@ fn enter<R>(
         // which a CUDA engine does not execute.
         #[cfg(feature = "cuda")]
         None if site == HostPoolSite::PlanCompile && is_cuda_engine(engine) => {
-            Ok(run(symtn_dense::lanes::Exec::serial()))
+            observe(site, 1);
+            Ok(op.take().expect("region body runs once")(
+                symtn_dense::lanes::Exec::serial(),
+            ))
         }
         None => Err(not_a_cpu_engine()),
     }
+}
+
+/// Enter an already identified CPU engine without probing its type again.
+#[cfg(feature = "tenferro")]
+pub(crate) fn enter_cpu<R>(
+    cpu: &mut tenferro_cpu::CpuEngine,
+    site: HostPoolSite,
+    guarded: bool,
+    op: impl FnOnce(symtn_dense::lanes::Exec<'_>) -> R,
+) -> Result<R, OperationError> {
+    let mut op = Some(op);
+    let mut run = |exec: symtn_dense::lanes::Exec<'_>| {
+        observe(site, exec.budget());
+        op.take().expect("region body runs once")(exec)
+    };
+    if guarded {
+        cpu.with_exec(|exec| run(exec.reborrow()))
+    } else {
+        cpu.exec().map(&mut run)
+    }
+    .map_err(host_region_error)
 }
 
 /// Refuses `engine` exactly as a Host region does, without taking its token:

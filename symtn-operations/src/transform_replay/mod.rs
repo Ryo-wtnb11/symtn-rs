@@ -35,6 +35,8 @@ mod coefficients;
 mod entry;
 mod kernels;
 mod member;
+#[cfg(feature = "tenferro")]
+mod movement;
 mod owned;
 #[cfg(test)]
 mod tests;
@@ -180,12 +182,10 @@ pub struct HostTreeTransformWorkspace<T> {
     destination_fills: usize,
     #[cfg(any(test, feature = "testing"))]
     movement_phases: usize,
+    #[cfg(feature = "tenferro")]
+    movement_memo: movement::WidthMemo,
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
-    // One chunk's non-empty scatter groups, in destination order.
-    chunk_scatter_groups: Vec<usize>,
-    // The start, in `chunk_scatter_groups`, of each hull run of that order.
-    chunk_scatter_runs: Vec<u32>,
     // The call's prepared gate cost keys, shared by its split leaves.
     gate_keys: GateKeys,
     // The fused traversal indices of the replay's lanes ([`fused_index_lanes`]):
@@ -215,10 +215,10 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             destination_fills: 0,
             #[cfg(any(test, feature = "testing"))]
             movement_phases: 0,
+            #[cfg(feature = "tenferro")]
+            movement_memo: movement::WidthMemo::default(),
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
-            chunk_scatter_groups: Vec::new(),
-            chunk_scatter_runs: Vec::new(),
             gate_keys: GateKeys::default(),
             fused_indices: smallvec::SmallVec::new(),
             member_scratch: Vec::new(),
@@ -240,18 +240,16 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.coefficient_scratch.capacity() + self.member_alpha.capacity(),
             std::mem::size_of::<T>(),
-        ) + bytes(
-            self.chunk_jobs.capacity(),
-            std::mem::size_of::<DenseGemmBatchJob>(),
-        ) + bytes(
-            self.chunk_runs.capacity()
-                + self.chunk_scatter_groups.capacity()
-                + self.fused_indices_heap_capacity(),
-            std::mem::size_of::<usize>(),
-        ) + bytes(
-            self.chunk_scatter_runs.capacity(),
-            std::mem::size_of::<u32>(),
-        ) + bytes(self.zero_strides.capacity(), std::mem::size_of::<isize>())
+        ) + self.movement_retained_bytes()
+            + bytes(
+                self.chunk_jobs.capacity(),
+                std::mem::size_of::<DenseGemmBatchJob>(),
+            )
+            + bytes(
+                self.chunk_runs.capacity() + self.fused_indices_heap_capacity(),
+                std::mem::size_of::<usize>(),
+            )
+            + bytes(self.zero_strides.capacity(), std::mem::size_of::<isize>())
             + self.gate_keys.retained_bytes()
             + bytes(
                 self.member_scratch.capacity(),
@@ -268,6 +266,17 @@ impl<T> HostTreeTransformWorkspace<T> {
             )
     }
 
+    fn movement_retained_bytes(&self) -> usize {
+        #[cfg(feature = "tenferro")]
+        {
+            self.movement_memo.retained_bytes()
+        }
+        #[cfg(not(feature = "tenferro"))]
+        {
+            0
+        }
+    }
+
     /// Coefficient packs this workspace has converted: a warm replay of the
     /// structure whose pack is installed converts none.
     #[doc(hidden)]
@@ -278,8 +287,8 @@ impl<T> HostTreeTransformWorkspace<T> {
 
     #[cfg(test)]
     /// Packed-destination elements this workspace's parallel replays have
-    /// initialized: a fresh or grown scratch inside the first chunk's pack,
-    /// a short one's tail on the caller; a warm replay initializes none.
+    /// initialized: a fresh or grown scratch inside the first nonempty
+    /// chunk's pack; a warm replay initializes none.
     #[cfg(any(test, feature = "testing"))]
     pub(crate) fn destination_fills(&self) -> usize {
         self.destination_fills

@@ -82,7 +82,6 @@ use tenferro_cpu::threadteam;
 mod placement;
 mod runner;
 
-pub use placement::flat_width;
 pub(crate) use placement::item_time;
 pub(crate) use placement::{allocate, lane_allocations, searchable, slots, LaneAllocationCache};
 use placement::{parallel_split, words, PlaceScratch};
@@ -90,6 +89,19 @@ pub(crate) use runner::recycle;
 use runner::Arena;
 pub(crate) use runner::Placed;
 pub use runner::{run_native, Assignment, Cut, Each, Outcome, Refusal, Split, Work};
+
+/// The forced policy's executed-job leaves, capped by the token and jobs.
+/// `Auto` leaves width selection to the caller's model.
+#[doc(hidden)]
+pub fn forced_width(exec: &Exec<'_>, jobs: usize) -> Option<usize> {
+    (exec.batch_policy().strategy != BatchStrategy::Auto).then(|| {
+        // Inner threads remain inside each job's token; they are not more leaves.
+        exec.batch_decision(&BatchQuery::new(jobs, 0.0))
+            .lanes
+            .clamp(1, exec.budget().max(1))
+            .min(jobs.max(1))
+    })
+}
 
 /// What a job's model depends on besides its serial time, the execution
 /// context and its op's kind: jobs with equal keys and equal serial times get

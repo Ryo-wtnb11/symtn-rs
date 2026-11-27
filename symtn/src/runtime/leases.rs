@@ -2,21 +2,22 @@ use super::*;
 use symtn_dense::Engine;
 
 /// The execution scratch of one operation (tree-transform and contraction
-/// lanes): built for a standalone call and dropped when it returns, kept by a
-/// prepared workspace for its replays, or, for an eager contraction, checked
-/// out of the caller's CPU engine and checked back in ([`crate::scratch`]).
+/// lanes): built for staging or a serial transform and dropped when it returns,
+/// kept by a prepared workspace for its replays, or checked out of the caller's
+/// CPU engine for a multithreaded Host transform replay or eager contraction
+/// and checked back in ([`crate::scratch`]).
 /// It holds only the lanes the operation used (the first inline, any later
 /// one boxed; see [`Ctxs`]), structural state and scratch; the operation runs
 /// on the caller's engine.
 pub(crate) struct ContextLease(TensorExecutionContext);
 
-/// An eager contraction's lease, as the caller's CPU engine keeps it.
+/// A replay or contraction lease, as the caller's CPU engine keeps it.
 ///
 /// Why boxed: the context is about 9.7 KB inline, and checkout, check-in and
 /// every hand-off between them move the lease by value; inline, those moves
 /// cost more per small contraction than the warm lease saves
-/// (`reviews/symtn-2516-overhead.md`). Why only here: a standalone transform
-/// builds its lease per call, where a box would be one more allocation.
+/// (`reviews/symtn-2516-overhead.md`). Serial transforms keep a local context
+/// to avoid the box and extension-store access on that path.
 pub(crate) type EngineLease = Box<ContextLease>;
 
 // The engine's extension store keeps only `Send` values, and an engine lease
@@ -33,7 +34,8 @@ impl ContextLease {
     }
 
     /// The lease the caller's CPU engine keeps from an earlier eager
-    /// contraction, else a fresh one (one allocation, its box). The engine
+    /// contraction or multithreaded Host replay, else a fresh one (one allocation,
+    /// its box). The engine
     /// keeps an empty slot meanwhile, so a nested call builds its own.
     pub(crate) fn checkout(engine: &mut dyn Engine) -> EngineLease {
         symtn_dense::engine_slot::checkout::<EngineLease>(engine)

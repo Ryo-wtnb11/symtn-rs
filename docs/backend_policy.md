@@ -368,67 +368,261 @@ without inactive blocks to initialize, a transform without destination
 scales) only admits the engine, with the Host region's refusals, and takes
 no token from it.
 
-A tree-transform replay follows TensorKit's threaded kernels and main's
-replay. One Host region fixes its width `t`: under `Auto` the engine's
-width, at most the compiled runnable parts (the Singles when their
-destinations are slice-disjoint, else one, or the pack columns, whichever is
-more), when Strided's copy estimate of the whole destination pays for that
-section, and one otherwise; under a forced policy its batch decision
-(`lanes * item_threads`, one for `Sequential`), at most the runnable parts,
-on the caller's whole token. Destinations are grouped into hull runs:
-maximal address-ordered stretches whose bounding slices overlap
-transitively, so distinct runs occupy disjoint address ranges and one
-writer owns each run. In that region the inactive blocks are split over
-their runs when there are two or more and the same copy rule admits more
-than one worker for that many runs, otherwise written inline on the
-caller's token in destination address order; then the Singles: at `t > 1`
-with slice-disjoint destinations split over `t` workers, when they are not
-slice-disjoint but form two or more runs split over those runs unless the
-caller's gate would admit the largest Single with a retained Strided plan
-on the caller's token (then inline, where that plan fans the move out), otherwise
-inline: in block order into a caller-provided destination at `t = 1`
-(main's one-worker replay), in address order into an owned output or at
-`t > 1`. A split part of
-`n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
-workers to its left half and forks its token in two (the odd slot to the
-left); a part of one worker or one item is a leaf, which writes its items
-whole on its token. The Multi groups then replay in chunks of `t`
-consecutive groups: each chunk's pack is split the same way over its
-columns, its jobs go to the executor as one grouped GEMM, and its non-empty
-groups, ordered by destination, are scattered split by group when every
-group's columns and every pair of groups are slice-disjoint, over their hull
-runs when they form two or more and the caller's gate would not admit the
-chunk's largest planned column on the caller's token, and inline on the
-caller's token otherwise. At `t = 1` each group is packed,
-multiplied and scattered in plan order. Every inline move is offered the
-caller's whole token (one slot under a forced `Sequential`), so Strided's
-own rule decides whether one large block's move fans out; an overwrite of a
-block whose role retains a Strided plan writes through that plan when
-Strided's rule (`execution::parallel_width` for a copy of its elements)
-gives it more than one worker. One leaf gate per call on the caller, and
-one per split leaf, answers that rule exactly, scanning the token's
-dispatch costs once and searching widths only for a role at or above the
-smallest paying size; the split leaves of one call share that smallest
-size per cost of their cheapest width, which the caller prepares for every
-leaf budget before the first split, so each such cost is searched at most
-once per call among the leaves, and only when a leaf needs it (the
-caller's own gate may search once more, as before). A leaf stops at its first failure, a split runs both
-halves and returns the left failure first, and the first failing phase or
-GEMM stops the replay. The packed destination of the chunks is sized once
-for the largest chunk; when it must grow it is zero-initialized inside the
-first chunk's pack, each split part its own range.
-A fixed-stride member batch (several members of one transform)
-admits every member's ranges before any write and resolves each
-destination scale once per role, then moves its members (the member axis
-one more strided dimension of each move) around one dense submission of
-every member's GEMMs, ordered plan job outer, member inner, and returns
-the first failure in that order. Each move phase takes the width the
-replay rule admits over the members (under `Auto` the engine's width when
-Strided's copy estimate of the whole batch destination pays for it, under
-a forced policy its batch decision): at one every member moves on the
-caller's token, above it the members split into at most that many
-contiguous ranges, each moving its members as one move per role. An executor that cannot honor a forced
-batch policy (every custom executor) refuses a
+Tree-transform movement prices the jobs it executes: a destination hull run
+for Singles or inactive fills, a pack column, a scatter group run, or a member
+range. Every executed role contributes its setup, run and element costs:
+
+```text
+t_i = a[c] + r[c](W) * runs_i + e[c](W) * elements_i
+planned leaf time = min(T_planned, k * D_plan(s) + max(T_planned/s, X_planned/B(s, W)))
+tau_leaf = T_serial + planned leaf time
+T(q) = D_item(q) * [q > 1] + max(max_leaf(tau_leaf), X/B(p, W))
+q* = argmin T(q), with ties to smaller q
+```
+
+Here p is the caller token's slot budget, q its number of leaves, s a leaf's
+actual slot share, and k its number of planned roles. D_item(q) is the fork
+the item phases run (a tree split of q leaves over the whole token) and
+D_plan(s) the fork one planned role runs on its leaf's s slots (Strided's flat
+`for_ranges` section); both are measured per engine, below. The same expression
+prices q=1 on all p slots. Concurrent leaves share the aggregate bandwidth
+at p slots for every candidate, including inline execution. The planned-leaf expression aggregates each leaf's planned work before
+comparing serial and parallel execution. The candidates are
+`{1,2,3,4,6,8,12,16,24,32,48,64,p}` intersected with `[1,min(p,J)]`, where J
+is the number of runnable jobs.
+
+W bounds source and destination address extents, and X counts structural
+logical reads and writes, including destination reads for accumulation.
+Runtime zero or identity elisions can make this count conservative. Structural
+classes distinguish contiguous or strided inner traversal, and inactive fill
+from real maps. Copy and non-identity real scale share a class; runtime alpha
+and destination scales never alter the compiled classes. Rows are indexed by
+structural class only; unmeasured fill rows use the same-stride real-map row.
+Every modeled decision reads online rows; the checked-in AMD EPYC 9V45 CI
+reference curves (used for every `HostClass`) only give an online curve its
+shape beyond the last online knot, scaled to meet that knot. Curves
+interpolate in log W and remain flat outside their knots.
+
+Planned roles are exactly those retaining the compiled Single or scatter plan;
+pack columns, inactive fills and fused member ranges execute serial walks.
+Credit also requires an overwriting writer whose adapter replays plans, and
+the caller gate's Copy admission on that leaf's token share. A phase compiles,
+per executed job, its smallest planned role size and its largest planned role,
+in a segment tree over the jobs, and a leaf reads its range's two extremes in
+O(log J). Admission uses the same cheapest-width `pays` predicate as the
+execution gate and is monotone in a role's element count: when the leaf's
+slots admit its smallest role, every planned role of the leaf is credited;
+otherwise, when they admit its largest, that role alone is credited and the
+admitted roles between the two are priced serially (an upper bound). No
+runtime pass over individual roles is needed. This policy can withhold inner
+fan-out credit, but never grants it to a rejected role or accumulation.
+
+Plan groups have no width model. A group phase runs its chunks one after
+another (`for chunk in jobs.chunks(threads)`), and each chunk pays its engine
+entries, its pack, one dense batch call over its groups and its scatter, so
+the phase costs the sum over chunks. The per-chunk fixed part is positive, and
+how the batch call runs its jobs is the dense backend's decision, which symtn
+can neither price from inside a region nor duplicate. Fewer chunks therefore
+never add symtn-side cost, and a group phase takes the widest chunk the token
+allows: min(groups, p) groups per chunk under Auto, the forced policy's lanes
+otherwise, one on a serial engine. A wider chunk needs only larger packed
+scratch, sized once per decision. Measured on a 96-thread Xeon Platinum 9242,
+pack, GEMM and scatter per permute of a small U(1)xSU(2) tensor fell at every
+widening, 2201, 818, 685, 614 and 440 µs for 1, 8, 16, 24 and 48 groups per
+chunk. Pack and scatter inside a chunk keep their own priced widths.
+
+Known unmodeled effect: the Singles width changes the cost of the plan-group
+chunks that follow it. Measured on a 96-thread Xeon Platinum 9242 (permute of
+a small U(1)xSU(2) tensor, group width 24): the chunks cost 440 µs after
+inline Singles, 861 µs after Singles split 24 ways and 1152 µs after 96 ways,
+while the Singles phase itself takes 1120, 177 and 150 µs. No term prices one
+phase's width in another phase's cost.
+
+The schedule compiles per-class setup, run and element totals, planned totals,
+logical traffic and cumulative components over executed jobs. Model-only counts
+and envelopes saturate without adding compilation failures; subtracting a
+saturated prefix stays conservative. Fixed phases retain cumulative job
+components, and pack columns share one compiled prefix in column order.
+Scatter ownership runs depend on the chosen group chunk. On a decision-key
+miss, the workspace orders each selected chunk's groups, builds its ownership
+runs, reusable movement prefix and planned-extremes tree, and combines its pack/scatter summaries
+before evaluating widths. These aggregates depend on the runtime group width;
+the plan-only counts, extents, planned extremes and pack/job prefixes remain
+compiled with the structure. Each modeled leaf reads two prefix entries in
+O(1) and its planned extremes in O(log J). There are no per-candidate
+allocations.
+A cold pack fill is divided by the same recursive leaf counts as execution.
+
+With I role intervals, B blocks, F total axis metadata, and G plan groups,
+compilation takes O(I log I + B + F) time and O(I+G) retained metadata.
+For J_s Single jobs, J_z inactive jobs and C pack columns, the new prefix
+payload is `size_of::<Job>() * (J_s + J_z + C)` bytes (224 bytes per entry:
+two arrays of four `(items,runs,elements)` u64 triples and the job's own
+32-byte planned extremes, the segment tree's leaves), plus
+`size_of::<Planned>() * J` bytes of internal tree nodes for each phase of J >= 2
+jobs, reserved once at its exact size so compilation adds a constant number of
+allocations per phase. Actual capacities are charged, together with every
+Summary and its inline planned totals.
+Each per-dtype workspace in the engine's retained context keeps decisions for
+at most 16 compiled structures. Entries are ordered by most recent use (LRU);
+a missing structure reuses a dead Weak identity first, then an unused slot,
+then the least recently used live entry. A changed decision key replaces that
+structure's entry. Replacement reuses the width, dispatch and chunk vector
+capacities, including each chunk's order, run and prefix buffers. Spare chunks
+stay allocated for reuse. The existing `symtn::scratch::trim` drops the retained
+context and all these decisions. The key includes the compiled structure's Weak
+identity, slot budget, constants generation,
+full batch strategy, dtype size, destination-read and plan-replay flags,
+destination scratch length/capacity, and member count. Token team authority
+and, under Auto, the exact dispatch costs at widths 2 through p complete the
+key: these also determine `gate_keys.admits`, together with the compiled plan bound.
+Gate admission therefore participates in memoization rather than being
+assumed constant across engines. Forced strategies, including their parameters,
+are part of the key; `forced_width` still resolves before model evaluation.
+Forced policies retain no dispatch-cost row because their widths do not use it.
+When a cold replay needs a packed-destination fill, the same decision pass
+also prices that pack without the fill. A successful replay installs the warm
+pack width and records the resulting scratch length/capacity, so the second
+identical replay evaluates no model. A failed replay does not advance the key.
+
+For each entry with P phases the width payload is `P * size_of::<usize>()`
+bytes (8P on a 64-bit target): three direct/group decisions plus two per selected chunk, or
+two member decisions. Its allocation charge uses the vector's actual capacity.
+The Auto dispatch key adds `capacity * size_of::<Duration>()` bytes. Retained
+chunk order/run tables charge `capacity * size_of::<ChunkMovement>()` for the
+outer vector, plus each group's `capacity * size_of::<usize>()` and each run
+list's `capacity * size_of::<u32>()`, scatter prefix's
+`capacity * size_of::<Job>()` and its planned-extremes tree's
+`capacity * size_of::<Planned>()`. Each chunk's inline size includes one additional
+`usize` for its warm pack width. Temporary aggregate summaries are dropped
+after deciding. The store additionally charges
+`entry_capacity * size_of::<WidthDecision>()`; every initialized entry and
+spare chunk contributes all of its vector capacities. Each initialized entry
+also conservatively charges the Weak marker's two-usize Arc control block,
+even while the structure shares it. All these charges are included in `HostTreeTransformWorkspace::retained_bytes`.
+Gate keys retain direct budget indices
+(`size_of::<usize>() * capacity`) plus their existing distinct cost/scan slots;
+the existing O(p) preparation pass makes each admission lookup O(1).
+On a key hit each phase reads its width in O(1), without model evaluation,
+summary construction, sorting or an engine-extension lookup. The operation's
+structure lookup checks at most 16 Weak identities; its exact dispatch-key
+comparison costs O(p) under Auto and O(1) under forced policies. On a miss,
+a fixed chooser costs O(sum_candidate q), with constant-size class arithmetic per leaf and O(log q)
+recursion depth. The plan-group width costs O(1), and each chunk combines t
+group summaries once in O(t). One effective width returns before cost preparation or element-count
+reads.
+
+Single-tensor one-slot, Sequential and Inner replays bypass the movement model
+and calibration, using the serial item and plan-group sequence; Inner keeps
+the whole token for inline kernels. Wider Auto replays retain independently
+priced pack and scatter phases even when group chunk width is one.
+A q-way split divides the whole token into nonzero leaf shares summing to p
+and differing by at most one. Job boundaries and slot remainders follow the
+executor's recursive `parallel_split`, rather than flat equal-sized job chunks.
+Each destination ownership run (a maximal address-ordered stretch of
+transitively overlapping hulls) stays with one writer; width cannot exceed
+the number of runs. A leaf stops at its first error; the lowest failing job
+and the first failing phase or GEMM determine replay's error.
+
+Movement constants are retained separately in the caller CPU engine's bounded
+extension store and fetched once per operation, before preparing all its
+movement decisions. Reference entry creation and completed online updates
+receive fresh process-wide generations, so a workspace cannot reuse widths
+from a different engine entry or an evicted entry's replacement.
+Online measurement is attempted once per retained entry and runs to
+completion: fixed sample counts, no deadline, and no row filled from another
+row. It measures, in order:
+
+- D_item(q) at every candidate width q <= p: the production `run_native` with
+  a `Split` of q leaves over the whole token, as Singles, inactive fills,
+  pack, scatter and member ranges run it, with empty leaves; the median of 31
+  calls after one warm-up.
+- D_plan(s) at every leaf share s >= 2 that a candidate split gives
+  (floor(p/q), ceil(p/q) and p): an empty `for_ranges` section of s parts on
+  a token limited to s, the call Strided's planned update makes inside a leaf
+  (`for_len` limits the token, `parallel_for_each` runs `for_ranges`); the
+  median of 31 calls after one warm-up. A real planned role is not timed:
+  Strided widens a role to all s slots only once its copy outweighs the extra
+  sections, which takes millions of elements on a 96-slot pool, and the
+  section is the same call.
+- The two element rows (contiguous and strided), through the real replay
+  writer on shared buffers, three samples per point.
+- B(q) at the powers of two among those candidate widths, and p (so every
+  point's D_item(q) is measured): q serial copy leaves of the item phases'
+  tree split over the whole token on the row buffers (about 8 MiB of
+  traffic), the median of three runs less D_item(q). The model reads widths
+  between these points by linear interpolation in q.
+
+A point fails when a fixture cannot be built, the lane runner refuses its
+supply, an element row stays non-physical after the refit below, or a
+bandwidth point's time less its D_item is not finite and positive. Any
+failure leaves the entry uncalibrated. An Auto region of more than one slot
+without calibrated constants fails closed: every modeled phase takes width
+one, and the token its movement runs on (inline Singles and inactive fills,
+and each chunk's scatter) is limited to one slot, so no planned role fans
+out inside it either; this is the replay's semantics on a one-slot engine.
+Pack columns run serial walks at width one, and plan groups keep their
+constant-free rule. Forced policies keep their widths and whole tokens.
+Failed entries are not retried before eviction or `scratch::trim`. An online
+element row must be physical (a >= 0, r >= 0, e > 0). A negative fitted setup
+or per-run term means that term is below the measurement's resolution, not
+that the host differs: it is fixed at zero and each one-run sample's total is
+attributed to the remaining terms (their least-squares fit on the same
+samples). Beyond its largest online working set (4 MiB) an element curve keeps
+the checked-in reference curve's shape, scaled to meet its last online knot;
+the reference table records the CI CPU, date and run provenance. The constants
+depend on timing but not on how many points happened to fit a budget. On a
+96-thread Xeon Platinum 9242 the dispatch rows take 12 x 32 tree splits
+(2-10 µs each) and 11 x 32 sections (0.7-39 µs), about 5 ms together; the
+element rows take a few ms and the 7 bandwidth points about 5 ms. The
+dispatch part grows with the number of candidate widths (at most 12) and
+leaf shares (at most 2 per candidate, about 10) times the fork's cost; the
+bandwidth part shrinks per point as q grows.
+These measurements affect only symtn's movement model; the pool's dispatch
+table and dense provider remain unchanged.
+Bandwidth uses the same element costs as the serial model:
+E(W) = sum_c(elements_c * e[c](W)), b1(W) = X/E(W), and
+B(q, W) = min(q*b1(W), B_sat(q, W)). Setup and run costs remain in S, rather
+than being charged again in E. Logical destination reads, fused member ranges
+and cold fills contribute their existing element counts and traffic.
+
+The terminal value of each measured element curve defines its memory plateau;
+its knee is the first knot after the curve's minimum that reaches that value.
+Online knots and the scaled reference tail both participate. B_sat is infinity
+below the smaller of the largest knee of the phase's active classes and the
+measured bandwidth fixture's working set: a mixed phase uses the memory cap
+only after every active curve has reached its plateau, unless a measured
+fixture already bounds its bandwidth. The knees are
+computed once per retained constants entry. Compiled counts supply the phase's
+class weights directly, including member and cold-fill element counts, without
+extra cost preparations or allocations.
+
+Each ladder knot is measured once per retained entry. Measurements below the
+fixture's single-thread memory rate or below the previous accepted knot are
+rejected before linear interpolation in q within the same row. Missing widths
+use the nearest accepted endpoint outside the measured range; no accepted
+measurement means infinity. A phase also rejects a prefix below either its
+own b1(memory W) or b1(W), using the nearest accepted endpoint at or above
+both rates, or infinity if none exists. The current-W check covers noise
+after the knee. A bandwidth measured at a working set bounds the bandwidth of
+every larger one, so the cap applies to phases whose W reaches the smaller of
+the knee and the fixture's working set. Source selection never changes the
+formula or chooser.
+
+A fixed-stride member batch admits all member ranges before writing, resolves
+destination scales once per role, and moves its members around one dense
+submission (plan group outer, member inner). For N members, let A be the sum
+of setup costs per role and P the per-member sum of run and element costs.
+Its executed q ranges have critical path A+ceil(N/q)*P because their fused
+walks are serial-only. This expression feeds the same chooser, including q=1
+and the common aggregate bandwidth floor. A cold packed-destination fill is
+also priced by its executed contiguous leaf ranges, and first-written by the
+pack workers; a warm destination needs no fill. Growth within retained capacity
+fills only the missing tail. Forced policies delegate to Tenferro's batch
+decision: its lane count is clamped to the caller's budget and runnable jobs;
+item threads stay inside each leaf token.
+An executor that cannot honor a forced
+batch policy refuses a
 tree-transform replay, owned overwrite or member batch under a forced
 `Inner`, `Outer` or `Split` policy with a typed `Unsupported` before any
 coefficient preparation, write or executor call; `Auto` and `Sequential` run. Accumulating updates
@@ -445,16 +639,18 @@ reduce in another order at another width (faer's matrix-vector route splits
 the contraction over its threads), so results agree within rounding.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
-An eager operation builds its execution scratch (tree-transform pack
-scratch, contraction lanes, a factorization's dense executor) for the call and drops
-it on return, as TensorKit allocates its temporaries per call; a prepared
-plan's workspace keeps that scratch for its replays. The exception is an
-eager Host contraction (`contract`, `contract_into`, `compose`, the planar
-contractions and every network step): its contraction lanes are one entry of
-the caller's `CpuEngine` extension store, kept between calls under that
+Serial Host transforms, transform staging and factorizations build execution
+scratch for the call and drop it on return; a prepared plan's workspace keeps
+its scratch for its replays. Eager Host contractions
+(`contract`, `contract_into`, `compose`, the planar contractions and every
+network step) and multithreaded Host transform replays use one shared context
+entry of the caller's `CpuEngine` extension store, kept between calls under that
 store's entry and byte limits (64 MiB by default) and released by
 [`symtn::scratch::trim`](../symtn/src/scratch.rs); a ledger that does not
-fit is dropped, so that workload allocates its scratch per call. Structural
+fit is dropped, so that workload allocates its scratch per call. Movement
+widths live in that context's replay workspace. Movement constants use
+another typed entry under the same bounded store and trim
+lifecycle; retaining either payload never replaces the other. Structural
 and plan caches take short lookup and publication locks.
 
 A CUDA operation borrows the caller's `CudaEngine` for its duration and

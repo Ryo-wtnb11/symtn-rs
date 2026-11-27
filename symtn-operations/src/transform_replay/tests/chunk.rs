@@ -246,6 +246,42 @@ fn one_worker_singles_follow_the_destination_kinds_order() {
     }
 }
 
+/// Purpose: serial, Sequential and Inner direct replay skip movement-model
+/// preparation; a wider Auto replay is the control that prepares the model.
+#[test]
+fn serial_replay_skips_movement_model_preparation() {
+    let (dst, src, transform) = two_lane_fixture();
+    let task = transform.task_view().unwrap();
+    let source = vec![1.0; src.required_len().unwrap()];
+    for (budget, strategy) in [
+        (1, CpuBatchStrategy::Auto),
+        (4, CpuBatchStrategy::Sequential),
+        (4, CpuBatchStrategy::Inner),
+        (4, CpuBatchStrategy::Auto),
+    ] {
+        let mut workspace = TreeTransformWorkspace::default();
+        let recorder = Recorder::new(task);
+        super::super::chunk::direct(
+            &mut engine(budget, strategy),
+            &mut workspace,
+            task,
+            transform.parallel_schedule(),
+            &mut vec![Mark::default(); dst.required_len().unwrap()],
+            &source,
+            &recorder,
+            &mut (),
+            &mut LeafGate::new(task.layouts().max_planned_elements()),
+        )
+        .unwrap();
+        assert_eq!(
+            recorder
+                .model_prepared
+                .load(std::sync::atomic::Ordering::Relaxed),
+            budget > 1 && strategy == CpuBatchStrategy::Auto,
+        );
+    }
+}
+
 /// What: two of three Multi groups' GEMMs fail. On one worker and on two,
 /// three and four (`Auto` on free dispatch: chunks of two, three and three
 /// groups), the replay stops at the first failing GEMM in plan order: the
@@ -467,5 +503,81 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                 assert!(dense.attempts().is_empty(), "{what}");
             }
         }
+    }
+}
+
+/// Purpose: a one-column inline pack keeps the serial column loop and its
+/// scatter keeps the movement runner; a public Split policy over two groups
+/// splits a multi-column pack through the pack runner instead.
+#[test]
+fn inline_pack_and_scatter_keep_their_item_paths() {
+    let structure = |columns| {
+        let leg = |degeneracy| {
+            symtn_core::SectorLeg::new(
+                (0..columns).map(|sector| (symtn_core::SectorId::new(sector), degeneracy)),
+                false,
+            )
+        };
+        symtn_core::FusionTreeHomSpace::new(
+            symtn_core::FusionProductSpace::new([leg(2)]),
+            symtn_core::FusionProductSpace::new([leg(1)]),
+        )
+        .coupled_subblock_structure_from_leg_degeneracies(&su2_rule())
+        .unwrap()
+    };
+    let destination = structure(2);
+    for (columns, strategy, specs, expected) in [
+        (
+            1,
+            CpuBatchStrategy::Auto,
+            vec![TreeTransformBlockSpec::multi(
+                vec![0, 1],
+                vec![0],
+                vec![2.0, -1.0],
+            )],
+            [2.0, 4.0, -1.0, -2.0],
+        ),
+        (
+            2,
+            CpuBatchStrategy::Split {
+                lanes: core::num::NonZeroUsize::new(2).unwrap(),
+            },
+            vec![
+                TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![2.0, 3.0]),
+                TreeTransformBlockSpec::multi(vec![1], vec![0, 1], vec![-1.0, 4.0]),
+            ],
+            [11.0, 16.0, 11.0, 14.0],
+        ),
+    ] {
+        let source_structure = structure(columns);
+        let transform =
+            TreeTransformStructure::compile_structures(&destination, &source_structure, &specs)
+                .unwrap();
+        let source = (1..=2 * columns)
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        super::super::chunk::replay_paths::take();
+        let out = try_tree_transform_structure_overwrite_owned_raw(
+            &mut engine(2, strategy),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &destination,
+            &source_structure,
+            1,
+            &source,
+            1.0,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        let (pack, moves) = super::super::chunk::replay_paths::take();
+        assert_eq!(out, expected);
+        if columns == 1 {
+            assert_eq!(pack, 0);
+        } else {
+            assert!(pack > 0, "a split pack enters its runner");
+        }
+        assert!(moves > 0, "scatter enters the movement runner");
     }
 }

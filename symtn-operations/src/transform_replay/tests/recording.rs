@@ -4,6 +4,7 @@
 use super::*;
 use crate::kernel_adapter::movement::{Store, Write};
 use crate::transform_structure::TreeTransformDirectItem;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread::ThreadId;
 use symtn_dense::CpuEngine;
@@ -38,6 +39,7 @@ impl Store<f64> for Record {
 pub(super) struct Recorder<'a, const FIRST_TOUCH: bool = false> {
     pub(super) parts: ReplayParts<'a, f64>,
     pub(super) offers: Mutex<Vec<(isize, usize)>>,
+    pub(super) model_prepared: AtomicBool,
 }
 
 impl<'a> Recorder<'a> {
@@ -51,6 +53,7 @@ impl<'a, const FIRST_TOUCH: bool> Recorder<'a, FIRST_TOUCH> {
         Self {
             parts: ReplayParts::new(task),
             offers: Mutex::new(Vec::new()),
+            model_prepared: AtomicBool::new(false),
         }
     }
 
@@ -72,6 +75,11 @@ impl<'a, const FIRST_TOUCH: bool> Recorder<'a, FIRST_TOUCH> {
 impl<const FIRST_TOUCH: bool> DestinationWriter<Mark, f64> for Recorder<'_, FIRST_TOUCH> {
     type Kernels = ();
     const FIRST_TOUCH: bool = FIRST_TOUCH;
+
+    fn reads_destination(&self) -> bool {
+        self.model_prepared.store(true, Ordering::Relaxed);
+        false
+    }
 
     fn kernels(&self) {}
 
@@ -242,8 +250,12 @@ pub(super) fn assert_written_once(blocks: &[(usize, [usize; 2], [usize; 2])], ma
 }
 
 /// An eager-policy engine of `threads` workers under `strategy`.
+/// Its movement constants price every fork at zero, as its pool declares.
 pub(super) fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
-    crate::host_pool::eager_test_engine(threads).with_batch_policy(CpuBatchPolicy::new(strategy))
+    let mut engine = crate::host_pool::eager_test_engine(threads)
+        .with_batch_policy(CpuBatchPolicy::new(strategy));
+    super::super::movement::install_test_constants(&mut engine, Some(0.0));
+    engine
 }
 
 /// The error a test executor injects for recoupling group `group`.
@@ -391,7 +403,7 @@ pub(super) fn group_of(error: OperationError) -> String {
 /// costs `ns` at every width.
 pub(super) fn flat_engine(threads: usize, ns: u64, strategy: CpuBatchStrategy) -> CpuEngine {
     let flat = tenferro_cpu::threadteam::WidthCosts::flat(Duration::from_nanos(ns));
-    CpuEngine::new(
+    let mut engine = CpuEngine::new(
         symtn_dense::Pool::builder()
             .threads(threads)
             .dispatch_costs(tenferro_cpu::threadteam::DispatchCosts::new(
@@ -400,7 +412,9 @@ pub(super) fn flat_engine(threads: usize, ns: u64, strategy: CpuBatchStrategy) -
             .build()
             .unwrap(),
     )
-    .with_batch_policy(CpuBatchPolicy::new(strategy))
+    .with_batch_policy(CpuBatchPolicy::new(strategy));
+    super::super::movement::install_test_constants(&mut engine, Some(ns as f64));
+    engine
 }
 
 /// A coefficient whose action on the source value `40` panics.

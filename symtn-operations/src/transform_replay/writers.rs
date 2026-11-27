@@ -71,20 +71,24 @@ pub(super) trait DestinationWriter<T, D>: Sync {
     /// for the first time (an owned output), not a caller-provided one.
     const FIRST_TOUCH: bool;
 
+    /// Whether this call logically reads each output before updating it.
+    fn reads_destination(&self) -> bool {
+        false
+    }
+
+    fn replays_plans(&self) -> bool {
+        false
+    }
+
     /// A fresh worker's kernel state.
     fn kernels(&self) -> Self::Kernels;
 
     /// The write of direct item `item` from the replayed source `src` (one
     /// member's, in a member replay).
     ///
-    /// Why the writers mark this `#[inline]`: it runs once per item inside
-    /// the item loops of `batched.rs` and `chunk.rs`, which live in other
-    /// modules. Without the hint rustc gives each writer instance one
-    /// home codegen unit (this module's), so every item pays an out-of-line
-    /// call and prologue that LLVM never sees across (measured on the owned
-    /// permute replay of many small Singles, where the call is a visible
-    /// share of each item's work); with it each caller's codegen unit gets
-    /// a local copy, as for `movement::span`.
+    /// Each writer forces inlining into the item loops in `batched.rs` and
+    /// `chunk.rs`: measured owned permutes pay visible per-item call overhead
+    /// when the compiler leaves the writer out of line.
     #[allow(clippy::too_many_arguments)]
     fn direct(
         &self,
@@ -135,11 +139,20 @@ where
     type Kernels = A;
     const FIRST_TOUCH: bool = false;
 
+    fn reads_destination(&self) -> bool {
+        matches!(self.mode, DestinationMode::Axpby(beta) if !beta.is_zero())
+    }
+
+    fn replays_plans(&self) -> bool {
+        self.mode.overwrites() && self.prototype.replays_plans()
+    }
+
     fn kernels(&self) -> A {
         self.prototype.clone()
     }
 
-    #[inline]
+    // Measured per-item call overhead requires inlining into serial and leaf loops.
+    #[inline(always)]
     fn direct(
         &self,
         kernels: &mut A,
@@ -258,9 +271,14 @@ where
     type Kernels = ();
     const FIRST_TOUCH: bool = true;
 
+    fn replays_plans(&self) -> bool {
+        true
+    }
+
     fn kernels(&self) {}
 
-    #[inline]
+    // Measured per-item call overhead requires inlining into serial and leaf loops.
+    #[inline(always)]
     fn direct(
         &self,
         _: &mut (),

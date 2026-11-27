@@ -56,6 +56,27 @@ fn fixture(
     )
 }
 
+fn expert_copy(structure: &BlockStructure) -> Arc<BlockStructure> {
+    Arc::new(
+        BlockStructure::from_blocks_with_rank(
+            structure.rank(),
+            (0..structure.block_count())
+                .map(|index| {
+                    let block = structure.block(index).unwrap();
+                    symtn_core::BlockSpec::with_key(
+                        block.key().clone(),
+                        block.shape().to_vec(),
+                        block.strides().to_vec(),
+                        block.offset(),
+                    )
+                    .unwrap()
+                })
+                .collect(),
+        )
+        .unwrap(),
+    )
+}
+
 fn same_core<T>(
     left: &crate::TreeTransformStructure<T>,
     right: &crate::TreeTransformStructure<T>,
@@ -291,27 +312,7 @@ fn only_canonical_keys_publish_and_hits_rebind_the_callers_structures() {
 
     // What: an equal never-admitted copy is lookup-only: every call builds,
     // nothing is published, and the result equals the canonical one.
-    let copy = |structure: &BlockStructure| {
-        Arc::new(
-            BlockStructure::from_blocks_with_rank(
-                structure.rank(),
-                (0..structure.block_count())
-                    .map(|index| {
-                        let block = structure.block(index).unwrap();
-                        symtn_core::BlockSpec::with_key(
-                            block.key().clone(),
-                            block.shape().to_vec(),
-                            block.strides().to_vec(),
-                            block.offset(),
-                        )
-                        .unwrap()
-                    })
-                    .collect(),
-            )
-            .unwrap(),
-        )
-    };
-    let (expert_dst, expert_src) = (copy(&dst), copy(&src));
+    let (expert_dst, expert_src) = (expert_copy(&dst), expert_copy(&src));
     assert!(!expert_dst.is_canonical() && !expert_src.is_canonical());
     for _ in 0..2 {
         let expert = planning
@@ -331,6 +332,39 @@ fn only_canonical_keys_publish_and_hits_rebind_the_callers_structures() {
         (activity.builds, activity.publications, activity.hits),
         (2, 0, 0)
     );
+}
+
+/// A canonical-key build and a cache-hit rebind retain the same complete
+/// replay payload, including movement counts and prefixes. An independently
+/// rebuilt expert layout is the control against path-dependent normalization.
+#[test]
+fn canonical_build_and_cache_rebind_have_equal_movement_payloads() {
+    let _guard = crate::test_support::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (dst, src, operation) = fixture(12);
+    let mut engine = symtn_dense::CpuEngine::serial();
+    let mut planning = TreeTransformPlanning::default();
+    let canonical = planning
+        .resolve_tree_pair(&mut engine, &U1FusionRule, &operation, &dst, &src, false)
+        .unwrap();
+    let rebound = planning
+        .resolve_tree_pair(&mut engine, &U1FusionRule, &operation, &dst, &src, false)
+        .unwrap();
+    let expert = planning
+        .resolve_tree_pair(
+            &mut engine,
+            &U1FusionRule,
+            &operation,
+            &expert_copy(&dst),
+            &expert_copy(&src),
+            false,
+        )
+        .unwrap();
+    assert!(same_core(&canonical, &rebound));
+    assert!(!same_core(&canonical, &expert));
+    assert_eq!(canonical.replay_core(), rebound.replay_core());
+    assert_eq!(canonical.replay_core(), expert.replay_core());
 }
 
 #[test]
