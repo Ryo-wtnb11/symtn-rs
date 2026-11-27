@@ -10,6 +10,82 @@ use super::*;
 pub type FacadeError<R> =
     <<R as TypedSectorAdmission>::Mode as TypedTensorModeDispatch<R>>::FacadeError;
 
+/// The one bound generic code over a fusion rule names: for
+/// `R: TensorRule<D>`, every Host [`TensorMap`]`<R, D>` and [`GradedSpace`]`<R>`
+/// operation is available, with errors of type [`FacadeError`]`<R>`.
+///
+/// It holds for every built-in and adapted rule, multiplicity-free or checked
+/// Generic. It is blanket-implemented from the crate's sealed mode traits, so
+/// it cannot be implemented by hand and adds no operation of its own.
+/// Factorizations also need `D: FactorizationScalar`.
+///
+/// ```
+/// use std::sync::Arc;
+/// use symtn::sector::{LieGroupFusionRule, U1FusionRule, U1Irrep};
+/// use symtn::typed::{
+///     ExecContext, FacadeError, FactorizationScalar, GradedSpace, Runtime, TensorMap, TensorRule,
+/// };
+///
+/// /// `‖t − U·S·V‖` for the compact SVD of `t` split after its first leg.
+/// fn svd_residual<R, D>(
+///     cx: &mut (impl ExecContext + ?Sized),
+///     t: &TensorMap<R, D>,
+/// ) -> Result<f64, FacadeError<R>>
+/// where
+///     R: TensorRule<D>,
+///     D: FactorizationScalar,
+/// {
+///     let f = t.svd_compact(cx, &[0], &[1])?;
+///     let rebuilt = f.u.compose(cx, &f.s)?.compose(cx, &f.vh)?;
+///     rebuilt.axpby(cx, D::from_real(1.0), t, D::from_real(-1.0))?.norm(cx, 2.0)
+/// }
+///
+/// let engine = &mut symtn::typed::CpuEngine::serial();
+/// let runtime = Runtime::new();
+/// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
+/// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
+/// assert!(svd_residual(engine, &t)? < 1e-12);
+///
+/// // A checked Generic rule satisfies the same bound.
+/// fn generic_over<R: TensorRule<f64>>() {}
+/// generic_over::<LieGroupFusionRule>();
+/// # Ok::<(), symtn::typed::Error>(())
+/// ```
+pub trait TensorRule<D: TensorScalar>:
+    Sized
+    + TypedSectorAdmission<
+        Mode: FusionMode<Self>
+                  + TypedTensorRootDispatch<Self>
+                  + TypedTensorConstructionDispatch<Self, D>
+                  + TypedTensorContractDispatch<Self, D>
+                  + TypedTensorTraceDispatch<Self, D>
+                  + TypedTensorTwistDispatch<Self, D>
+                  + TypedTensorFlipDispatch<Self, D>
+                  + TypedTensorProductDispatch<Self, D>
+                  + TypedTensorUnitDispatch<Self, D>
+                  + TypedTruncationDispatch<Self>,
+    >
+{
+}
+
+impl<R, D> TensorRule<D> for R
+where
+    D: TensorScalar,
+    R: TypedSectorAdmission<
+        Mode: FusionMode<R>
+                  + TypedTensorRootDispatch<R>
+                  + TypedTensorConstructionDispatch<R, D>
+                  + TypedTensorContractDispatch<R, D>
+                  + TypedTensorTraceDispatch<R, D>
+                  + TypedTensorTwistDispatch<R, D>
+                  + TypedTensorFlipDispatch<R, D>
+                  + TypedTensorProductDispatch<R, D>
+                  + TypedTensorUnitDispatch<R, D>
+                  + TypedTruncationDispatch<R>,
+    >,
+{
+}
+
 /// Tensor-side layout admission selected by a provider-owned mode.
 #[doc(hidden)]
 pub trait TypedTensorModeDispatch<R>: typed_admission_private::Sealed

@@ -135,7 +135,8 @@
 //!   `TypedTensorTraceDispatch`, `TypedTruncationDispatch`, and the other
 //!   `Typed*Dispatch` traits of `dispatch.rs`) supplies the mode-specific
 //!   admission, layout and error type (`FacadeError<R>`). The mode impls live
-//!   in `mode_dispatch.rs`.
+//!   in `mode_dispatch.rs`. Code generic over the rule names the one public
+//!   bound [`TensorRule`], which implies all of them.
 //! - **Storage**, from the third parameter of [`TensorMap`]: `S` is `Vec<D>`
 //!   (Host) or `CudaStorage<D>`, and the sealed family traits
 //!   `TransformExec`, `ContractExec`, `PreparedExec`, `TraceExec`,
@@ -407,7 +408,7 @@ mod generic_error;
 pub use generic_error::GenericTensorError;
 mod dispatch;
 pub use dispatch::{
-    BondOutput, BondTransform, FacadeError, TypedAdjointSpace, TypedSpaceModeDispatch,
+    BondOutput, BondTransform, FacadeError, TensorRule, TypedAdjointSpace, TypedSpaceModeDispatch,
     TypedTensorConstructionDispatch, TypedTensorContractDispatch, TypedTensorFlipDispatch,
     TypedTensorModeDispatch, TypedTensorProductDispatch, TypedTensorRootDispatch,
     TypedTensorTraceDispatch, TypedTensorTransformDispatch, TypedTensorTwistDispatch,

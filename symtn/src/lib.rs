@@ -44,7 +44,8 @@
 //! Every public item has exactly one path:
 //!
 //! - [`typed`]: the tensor API — [`typed::Runtime`], [`typed::GradedSpace`],
-//!   [`typed::TensorMap`], their options, results and errors;
+//!   [`typed::TensorMap`], their options, results and errors, and
+//!   [`typed::TensorRule`], the bound generic code over the rule names;
 //! - [`sector`]: the symmetry contract — the built-in fusion rules and their
 //!   labels, category adapters and codecs, and the sealed capability bounds
 //!   used by generic tensor code;
