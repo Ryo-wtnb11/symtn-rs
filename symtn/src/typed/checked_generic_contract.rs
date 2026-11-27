@@ -10,6 +10,7 @@ where
     D: TensorScalar,
 {
     fn trace<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -39,6 +40,7 @@ where
     }
 
     fn trace_into<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -82,6 +84,7 @@ where
     D: TensorScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
     fn trace<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -111,6 +114,7 @@ where
     }
 
     fn trace_into<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -471,11 +475,13 @@ where
         engine: &mut dyn Engine,
         pairs: &[(usize, usize)],
     ) -> Result<Self, FacadeError<R>> {
-        let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider());
+        let braiding =
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider());
         let Some(source) = trace_source(self, braiding, pairs)? else {
             return Ok(self.clone());
         };
         let (space, data) = <R::Mode as TypedTensorTraceDispatch<R, D>>::trace(
+            EXEC,
             engine,
             self,
             |structure| self.compact_full_trace(structure),
@@ -565,13 +571,15 @@ where
         {
             return Err(Error::RuleMismatch.into());
         }
-        let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider());
+        let braiding =
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider());
         let Some(source) = trace_source(self, braiding, pairs)? else {
             return Ok(axpby_into_checked(engine, self, destination, alpha, beta)?);
         };
         // Why the storage body: a lazy adjoint is read through its parent.
         destination_precheck(destination, &source.body.data)?;
         <R::Mode as TypedTensorTraceDispatch<R, D>>::trace_into(
+            EXEC,
             engine,
             self,
             |structure| self.compact_full_trace(structure),

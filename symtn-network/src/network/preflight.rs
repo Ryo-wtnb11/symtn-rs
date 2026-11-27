@@ -197,10 +197,7 @@ where
     if from.is_dual() == into.is_dual() || from.sectors().len() != into.sectors().len() {
         return Ok(false);
     }
-    let dual_of = |sector| {
-        TypedSectorAdmission::try_dual_id(provider, sector)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)
-    };
+    let dual_of = |sector| __network::network_dual_sector(provider, sector);
     for (&sector, &degeneracy) in from.sectors().iter().zip(from.degeneracies()) {
         let dual = dual_of(sector)?;
         if dual_of(dual)? != sector {

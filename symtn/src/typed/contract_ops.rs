@@ -93,6 +93,7 @@ where
             return Err(internal_layout_error("uncached materialization is owned").into());
         };
         let (space, data) = <R::Mode as TypedTensorProductDispatch<R, D>>::product(
+            EXEC,
             &lhs_body.space,
             lhs_body.materialized_dense_data().as_ref(),
             &rhs_body.space,
@@ -401,7 +402,7 @@ where
             }
         }
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
-            engine, self, other, spec, None,
+            EXEC, engine, self, other, spec, None,
         )?;
         Ok(self.published(space, data))
     }
@@ -543,6 +544,7 @@ where
             }
         }
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
+            EXEC,
             engine,
             self,
             other,
@@ -588,12 +590,12 @@ where
     fn admit_braiding(&self, op: BraidingOp) -> Result<(), Error> {
         Ok(symtn_tensors::admit_braiding(
             op,
-            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider()),
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider()),
         )?)
     }
 
     fn is_bosonic(&self) -> bool {
-        <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider())
+        <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider())
             == symtn_core::BraidingStyleKind::Bosonic
     }
 
@@ -718,6 +720,7 @@ where
         let other = other.operand()?;
         let other = &*other;
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
+            EXEC,
             engine,
             self,
             other,
@@ -811,6 +814,7 @@ where
         let other = other.operand()?;
         let other = &*other;
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
+            EXEC,
             engine,
             self,
             other,
@@ -1069,7 +1073,7 @@ where
             }
         }
         let (space, data) =
-            <R::Mode as TypedTensorContractDispatch<R, D>>::compose(engine, self, other)?;
+            <R::Mode as TypedTensorContractDispatch<R, D>>::compose(EXEC, engine, self, other)?;
         Ok(self.published(space, data))
     }
 }

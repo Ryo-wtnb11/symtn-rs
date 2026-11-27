@@ -110,6 +110,7 @@ where
         )
         .map_err(FacadeError::<R>::from)?;
         let space = <R::Mode as TypedTensorRootDispatch<R>>::build_root(
+            EXEC,
             Arc::clone(self.logical_space().provider_arc()),
             homspace,
         )?;

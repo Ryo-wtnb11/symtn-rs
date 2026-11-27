@@ -422,6 +422,7 @@ where
         // Why the storage body: a lazy-adjoint source aliases its parent.
         destination_precheck(destination, &self.storage_body().data)?;
         <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_into(
+            EXEC,
             engine,
             self,
             destination,
@@ -799,14 +800,15 @@ where
         if let TypedTensorRepr::Adjoint(_) = &self.repr {
             if let Some(lazy) =
                 <R::Mode as TypedTensorTransformDispatch<R, D>>::try_lazy_adjoint_transform(
-                    engine, self, &operation,
+                    EXEC, engine, self, &operation,
                 )?
             {
                 return Ok(lazy);
             }
         }
-        let (space, data) =
-            <R::Mode as TypedTensorTransformDispatch<R, D>>::transform(engine, self, operation)?;
+        let (space, data) = <R::Mode as TypedTensorTransformDispatch<R, D>>::transform(
+            EXEC, engine, self, operation,
+        )?;
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::dense(space, data)),
@@ -894,7 +896,7 @@ where
         }
         Ok(match &self.repr {
             TypedTensorRepr::Owned(parent) => {
-                let adjoint = <R::Mode as TypedAdjointSpace<R>>::lazy_adjoint(&parent.space)?;
+                let adjoint = <R::Mode as TypedAdjointSpace<R>>::lazy_adjoint(EXEC, &parent.space)?;
                 Self {
                     runtime: self.runtime.clone(),
                     repr: TypedTensorRepr::Adjoint(Arc::new(TypedAdjointView::new(
@@ -916,9 +918,9 @@ where
         TensorRef {
             base: self,
             adjoint: Some(|tensor| {
-                tensor
-                    .lazy_adjoint()
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::facade_error_into_error)
+                tensor.lazy_adjoint().map_err(|error| {
+                    <R::Mode as TypedTensorModeDispatch<R>>::facade_error_into_error(EXEC, error)
+                })
             }),
         }
     }

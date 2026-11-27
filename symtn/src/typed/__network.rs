@@ -163,3 +163,13 @@ where
 pub fn network_sector_leg<R>(space: &GradedSpace<R>) -> &SectorLeg {
     space.network_sector_leg()
 }
+
+/// The provider's dual of `sector`, its error as the facade error.
+pub fn network_dual_sector<R>(provider: &R, sector: SectorId) -> Result<SectorId, FacadeError<R>>
+where
+    R: TypedSectorAdmission,
+    R::Mode: TypedTensorModeDispatch<R>,
+{
+    TypedSectorAdmission::try_dual_id(provider, sector)
+        .map_err(|error| <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error))
+}

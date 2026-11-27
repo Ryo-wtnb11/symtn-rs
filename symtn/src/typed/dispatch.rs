@@ -20,27 +20,28 @@ where
     type FacadeError: std::error::Error + From<Error> + From<symtn_tensors::OperationError>;
 
     /// Preserves a provider-side admission error.
-    fn map_provider_error(error: R::Error) -> Self::FacadeError;
+    fn map_provider_error(_: ExecToken, error: R::Error) -> Self::FacadeError;
 
     /// The provider's fusion style, which selects TensorKit's
     /// `UniqueFusion` whole-buffer reductions.
     #[doc(hidden)]
-    fn fusion_style(provider: &R) -> symtn_core::FusionStyleKind;
+    fn fusion_style(_: ExecToken, provider: &R) -> symtn_core::FusionStyleKind;
 
     /// The provider's braiding style, which admits contraction and selects
     /// the twist/flip early returns.
     #[doc(hidden)]
-    fn braiding_style(provider: &R) -> symtn_core::BraidingStyleKind;
+    fn braiding_style(_: ExecToken, provider: &R) -> symtn_core::BraidingStyleKind;
 
     /// Lowers a facade error to [`Error`] for the provider-neutral
     /// [`TensorRef`] adjoint constructor.
     #[doc(hidden)]
-    fn facade_error_into_error(error: Self::FacadeError) -> Error;
+    fn facade_error_into_error(_: ExecToken, error: Self::FacadeError) -> Error;
 
     /// TensorKit `blockdim(P, c)`: the reduced dimension of coupled sector
     /// `coupled` in the product space `product`, zero when it does not occur.
     #[doc(hidden)]
     fn coupled_block_dimension(
+        _: ExecToken,
         provider: &R,
         product: &FusionProductSpace,
         coupled: SectorId,
@@ -48,12 +49,14 @@ where
 
     /// The provider's position of `sector` in TensorKit's sector order.
     #[doc(hidden)]
-    fn sector_order_key(provider: &R, sector: SectorId) -> symtn_core::SectorOrderKey;
+    fn sector_order_key(_: ExecToken, provider: &R, sector: SectorId)
+        -> symtn_core::SectorOrderKey;
 
     /// TensorKit `fuse` of two sector contents, `N`-symbol weighted and in
     /// sector-id order.
     #[doc(hidden)]
     fn fuse_sector_content(
+        _: ExecToken,
         provider: &R,
         left: &[(SectorId, usize)],
         right: &[(SectorId, usize)],
@@ -68,12 +71,14 @@ where
 {
     /// Builds one fully admitted root while retaining `provider`.
     fn build_root(
+        _: ExecToken,
         provider: Arc<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError>;
 
     /// Derives the final HomSpace before the existing root admission, in one epoch.
     fn build_root_with(
+        _: ExecToken,
         provider: Arc<R>,
         build_homspace: impl FnOnce() -> Result<FusionTreeHomSpace, Self::FacadeError>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError>;
@@ -88,6 +93,7 @@ where
 {
     /// Builds one fully admitted root while retaining `provider`.
     fn build_construction_root(
+        _: ExecToken,
         provider: Arc<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError>;
@@ -121,6 +127,7 @@ where
     /// bijection, or (when that proof or `require_representable` fails) the
     /// dense replay of the densified spectrum with the same structure.
     fn transform_bond_spectrum(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
@@ -133,6 +140,7 @@ where
     /// [`TypedAdjointSpace`]; the default `None` is for a mode that cannot
     /// hold a lazy adjoint.
     fn try_lazy_adjoint_transform<S: TransformExec<R, D>>(
+        _: ExecToken,
         _engine: &mut dyn Engine,
         _tensor: &TensorMap<R, D, S>,
         _operation: &TreeTransformOperation,
@@ -144,6 +152,7 @@ where
     /// densified) into a fresh destination payload of its storage. A lazy
     /// adjoint never reaches it: `try_lazy_adjoint_transform` takes it first.
     fn transform<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: TreeTransformOperation,
@@ -160,6 +169,7 @@ where
     /// `exact_layout_probe` before `operation` builds the owned one.
     #[allow(clippy::too_many_arguments)]
     fn transform_into<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         destination: &mut TensorMap<R, D, S>,
@@ -297,6 +307,7 @@ where
     /// provider query happens here, so scaling by the returned values never
     /// fails on the provider.
     fn twist_values<'a>(
+        _: ExecToken,
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
@@ -317,6 +328,7 @@ where
 
     /// The admitted space of `homspace`, bound to `space`'s provider.
     fn root(
+        _: ExecToken,
         space: &BoundDynamicFusionMapSpace<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError>;
@@ -328,6 +340,7 @@ where
         reason = "the staged (χ, θ) table is one opaque closure"
     )]
     fn pivotal_values<'a>(
+        _: ExecToken,
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
@@ -344,6 +357,7 @@ where
 {
     /// Executes the F-only product of two owned dense payloads.
     fn product(
+        _: ExecToken,
         lhs_space: &BoundDynamicFusionMapSpace<R>,
         lhs_data: &[D],
         rhs_space: &BoundDynamicFusionMapSpace<R>,
@@ -368,6 +382,7 @@ where
     /// With `planar`, the planar contraction over those admitted orders
     /// ([`TensorMap::planar_contract`]) instead of the ordinary one.
     fn contract<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -383,6 +398,7 @@ where
     /// planning, the storage's write, then the same commit.
     #[allow(clippy::too_many_arguments)]
     fn contract_into<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -396,6 +412,7 @@ where
     /// Composes two operands, a lazy adjoint read through its parent's
     /// payload, into a fresh destination payload of their storage.
     fn compose<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -415,6 +432,7 @@ where
     /// for a single-scalar destination (a compact spectrum) — then the
     /// commit.
     fn trace<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -430,6 +448,7 @@ where
     /// [`TraceExec::trace_into`] kernel, then the same commit.
     #[allow(clippy::too_many_arguments)]
     fn trace_into<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -455,19 +474,22 @@ pub trait TypedSpaceModeDispatch<R>: TypedTensorModeDispatch<R>
 where
     R: TypedSectorAdmission,
 {
-    fn vacuum(provider: &R) -> SectorId;
+    fn vacuum(_: ExecToken, provider: &R) -> SectorId;
     fn fusion_channels(
+        _: ExecToken,
         provider: &R,
         left: SectorId,
         right: SectorId,
     ) -> Result<Vec<SectorId>, <Self as TypedTensorModeDispatch<R>>::FacadeError>;
     fn nsymbol(
+        _: ExecToken,
         provider: &R,
         left: SectorId,
         right: SectorId,
         coupled: SectorId,
     ) -> Result<usize, <Self as TypedTensorModeDispatch<R>>::FacadeError>;
     fn dim(
+        _: ExecToken,
         provider: &R,
         sector: SectorId,
     ) -> Result<f64, <Self as TypedTensorModeDispatch<R>>::FacadeError>;
@@ -484,6 +506,7 @@ where
     R: TypedSectorAdmission,
 {
     fn decide_bond_truncation<V>(
+        _: ExecToken,
         provider: &R,
         spectra: &[symtn_matrixalgebra::SectorSpectrum<V>],
         truncation: &Truncation,
@@ -502,6 +525,7 @@ where
     R: TypedSectorAdmission,
 {
     fn lazy_adjoint(
+        _: ExecToken,
         parent: &BoundDynamicFusionMapSpace<R>,
     ) -> Result<symtn_tensors::LazyAdjointSpace<R>, Self::FacadeError>;
 }
@@ -513,6 +537,7 @@ where
     M::FacadeError: From<<M as symtn_tensors::CoefficientAlgebra<R>>::Error>,
 {
     fn lazy_adjoint(
+        _: ExecToken,
         parent: &BoundDynamicFusionMapSpace<R>,
     ) -> Result<symtn_tensors::LazyAdjointSpace<R>, Self::FacadeError> {
         symtn_tensors::LazyAdjointSpace::new::<M>(parent.clone()).map_err(Into::into)
@@ -527,12 +552,14 @@ where
     D: TensorScalar,
 {
     fn insert_unit(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
     ) -> Result<TensorMap<R, D>, Self::FacadeError>;
 
     fn remove_unit(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         axis: usize,
@@ -549,6 +576,7 @@ where
     D: TensorScalar,
 {
     fn insert_unit(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
@@ -557,6 +585,7 @@ where
     }
 
     fn remove_unit(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         axis: usize,
@@ -574,6 +603,7 @@ where
     D: TensorScalar,
 {
     fn insert_unit(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
@@ -582,6 +612,7 @@ where
     }
 
     fn remove_unit(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         axis: usize,

@@ -164,13 +164,13 @@ where
             seam_op,
             source,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         let provider = self.logical_space().provider();
         let mut decoded = raw
             .into_iter()
             .map(|entry| {
                 Ok(SectorSpectrum {
-                    sector: R::Mode::decode_label(provider, entry.sector)?,
+                    sector: R::Mode::decode_label(EXEC, provider, entry.sector)?,
                     values: entry.values,
                 })
             })
@@ -203,7 +203,7 @@ where
             seam_op,
             source,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         Ok(Qr {
             q: self.factor_output(engine, q)?,
             r: self.factor_output(engine, r)?,
@@ -266,7 +266,7 @@ where
             seam_op,
             source,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
 
@@ -327,13 +327,13 @@ where
             symtn_matrixalgebra::seam::op::EighFull { hermitian_tol },
             source,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         let (v, mut eigenvalues) = out.into_parts();
         let space = symtn_matrixalgebra::seam::spectrum_bond::<R::Mode, _, _>(
             self.logical_space(),
             &eigenvalues,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         Ok(Eigh {
             d: diagonal_factor_on_bound(&self.runtime, space, &mut eigenvalues, D::from_real),
             v: wrap_factor_on(&self.runtime, v),
@@ -360,13 +360,13 @@ where
             symtn_matrixalgebra::seam::op::EigFull,
             source,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         let (v, mut eigenvalues) = out.into_parts();
         let space = symtn_matrixalgebra::seam::spectrum_bond::<R::Mode, _, _>(
             self.logical_space(),
             &eigenvalues,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         Ok(Eig {
             d: diagonal_factor_on_bound(
                 &self.runtime,
@@ -406,7 +406,7 @@ where
             seam_op,
             source,
         )
-        .map_err(R::Mode::map_factor_error)
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))
     }
 
     /// The one body of compact SVD: `s` is a compact diagonal on the fresh
@@ -424,7 +424,7 @@ where
             self.logical_space(),
             &spectrum,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         Ok(Svd {
             u: wrap_factor_on(&self.runtime, u),
             s: diagonal_factor_on_bound(&self.runtime, space, &mut spectrum, D::from_real),
@@ -455,7 +455,7 @@ where
                 self.logical_space(),
                 &spectrum,
             )
-            .map_err(R::Mode::map_factor_error)?;
+            .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
             return Ok(Svd {
                 u: wrap_factor_on(&self.runtime, u),
                 s: diagonal_factor_on_bound(&self.runtime, space, &mut spectrum, D::from_real),
@@ -468,7 +468,7 @@ where
             &row_dimensions,
             &col_dimensions,
         )
-        .map_err(R::Mode::map_factor_error)?;
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))?;
         Ok(Svd {
             u: wrap_factor_on(&self.runtime, u),
             s: wrap_factor_on(&self.runtime, s),

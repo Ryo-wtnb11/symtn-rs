@@ -13,15 +13,21 @@ where
 {
     /// A matrix-algebra error as this mode's facade error.
     fn map_factor_error(
+        _: ExecToken,
         error: <Self as symtn_matrixalgebra::seam::FactorMode<R>>::Error,
     ) -> Self::FacadeError;
 
     /// The public label of a coupled sector the provider's own algebra
     /// produced.
-    fn decode_label(provider: &R, sector: SectorId) -> Result<R::Sector, Self::FacadeError>;
+    fn decode_label(
+        _: ExecToken,
+        provider: &R,
+        sector: SectorId,
+    ) -> Result<R::Sector, Self::FacadeError>;
 
     /// A factor-space root constructor error as this mode's facade error.
     fn map_root_error(
+        _: ExecToken,
         error: <Self as symtn_matrixalgebra::seam::FactorMode<R>>::RootError,
     ) -> Self::FacadeError;
 }
@@ -126,11 +132,12 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    fn map_factor_error(error: symtn_tensors::OperationError) -> Error {
+    fn map_factor_error(_: ExecToken, error: symtn_tensors::OperationError) -> Error {
         error.into()
     }
 
     fn decode_label(
+        _: ExecToken,
         provider: &R,
         sector: SectorId,
     ) -> Result<<R as TypedSectorAdmission>::Sector, Error> {
@@ -140,7 +147,7 @@ where
         Ok(provider.try_decode_label(sector)?)
     }
 
-    fn map_root_error(error: symtn_tensors::OperationError) -> Error {
+    fn map_root_error(_: ExecToken, error: symtn_tensors::OperationError) -> Error {
         error.into()
     }
 }
@@ -153,6 +160,7 @@ where
         > + CheckedGenericFusion,
 {
     fn map_factor_error(
+        _: ExecToken,
         error: symtn_matrixalgebra::seam::CheckedGenericFactorPlanError<
             <R as CheckedGenericFusion>::Error,
         >,
@@ -160,13 +168,18 @@ where
         error.into()
     }
 
-    fn decode_label(provider: &R, sector: SectorId) -> Result<R::Sector, Self::FacadeError> {
+    fn decode_label(
+        _: ExecToken,
+        provider: &R,
+        sector: SectorId,
+    ) -> Result<R::Sector, Self::FacadeError> {
         provider
             .try_decode_label(sector)
             .map_err(|error| GenericTensorError::Plan(CheckedGenericPlanError::Provider(error)))
     }
 
     fn map_root_error(
+        _: ExecToken,
         error: CheckedGenericStructureError<<R as CheckedGenericFusion>::Error>,
     ) -> Self::FacadeError {
         error.into()

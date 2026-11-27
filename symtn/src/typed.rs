@@ -144,9 +144,10 @@
 //!   except `StackExec`, which is payload-only) supply only the storage kernels
 //!   the shared body calls.
 //!
-//! Each kernel takes an `ExecToken` (`storage.rs`), a value only this crate can
-//! construct, so a caller outside the crate can name a kernel but not skip the
-//! admission its body performs.
+//! Each kernel and each `Typed*Dispatch` method takes an `ExecToken`
+//! (`storage.rs`), a value only this crate can construct, so a caller outside
+//! the crate can name a kernel or a mode method but not call it and skip the
+//! admission the typed body performs.
 //!
 //! **CUDA bounds** are stated per impl, not once: each rule-generic `CudaStorage`
 //! impl of a family trait (and each inherent CUDA

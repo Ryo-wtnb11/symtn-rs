@@ -9,11 +9,12 @@ where
     MultiplicityFreeAdmissionMode: symtn_tensors::RigidCoefficientAlgebra<R>
         + symtn_tensors::CoefficientAlgebra<R, Error = symtn_tensors::OperationError>,
 {
-    fn vacuum(provider: &R) -> SectorId {
+    fn vacuum(_: ExecToken, provider: &R) -> SectorId {
         provider.vacuum()
     }
 
     fn fusion_channels(
+        _: ExecToken,
         provider: &R,
         left: SectorId,
         right: SectorId,
@@ -25,6 +26,7 @@ where
     }
 
     fn nsymbol(
+        _: ExecToken,
         provider: &R,
         left: SectorId,
         right: SectorId,
@@ -35,7 +37,7 @@ where
             .map_err(Into::into)
     }
 
-    fn dim(provider: &R, sector: SectorId) -> Result<f64, FacadeError<R>> {
+    fn dim(_: ExecToken, provider: &R, sector: SectorId) -> Result<f64, FacadeError<R>> {
         <Self as symtn_tensors::RigidCoefficientAlgebra<R>>::dim(provider, sector)
             .map_err(Into::into)
     }
@@ -48,11 +50,12 @@ where
             Mode = CheckedGenericAdmissionMode,
         > + CheckedGenericRigidSymbols<Scalar = f64>,
 {
-    fn vacuum(provider: &R) -> SectorId {
+    fn vacuum(_: ExecToken, provider: &R) -> SectorId {
         CheckedGenericFusion::vacuum(provider)
     }
 
     fn fusion_channels(
+        _: ExecToken,
         provider: &R,
         left: SectorId,
         right: SectorId,
@@ -60,10 +63,11 @@ where
         provider
             .try_fusion_channels(left, right)
             .map(|channels| channels.into_iter().collect())
-            .map_err(<Self as TypedTensorModeDispatch<R>>::map_provider_error)
+            .map_err(|error| <Self as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error))
     }
 
     fn nsymbol(
+        _: ExecToken,
         provider: &R,
         left: SectorId,
         right: SectorId,
@@ -71,14 +75,14 @@ where
     ) -> Result<usize, FacadeError<R>> {
         provider
             .try_nsymbol(left, right, coupled)
-            .map_err(<Self as TypedTensorModeDispatch<R>>::map_provider_error)
+            .map_err(|error| <Self as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error))
     }
 
-    fn dim(provider: &R, sector: SectorId) -> Result<f64, FacadeError<R>> {
+    fn dim(_: ExecToken, provider: &R, sector: SectorId) -> Result<f64, FacadeError<R>> {
         <Self as symtn_tensors::RigidCoefficientAlgebra<R>>::dim(provider, sector).map_err(
             |error| match error {
                 symtn_tensors::CheckedGenericPlanError::Provider(error) => {
-                    <Self as TypedTensorModeDispatch<R>>::map_provider_error(error)
+                    <Self as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
                 }
                 other => GenericTensorError::Plan(other),
             },
@@ -95,6 +99,7 @@ where
         + symtn_tensors::CoefficientAlgebra<R, Error = symtn_tensors::OperationError>,
 {
     fn decide_bond_truncation<V>(
+        _: ExecToken,
         provider: &R,
         spectra: &[symtn_matrixalgebra::SectorSpectrum<V>],
         truncation: &Truncation,
@@ -122,6 +127,7 @@ where
         > + CheckedGenericRigidSymbols<Scalar = f64>,
 {
     fn decide_bond_truncation<V>(
+        _: ExecToken,
         provider: &R,
         spectra: &[symtn_matrixalgebra::SectorSpectrum<V>],
         truncation: &Truncation,
@@ -147,27 +153,35 @@ where
 {
     type FacadeError = Error;
 
-    fn map_provider_error(error: <R as TypedSectorAdmission>::Error) -> Self::FacadeError {
+    fn map_provider_error(
+        _: ExecToken,
+        error: <R as TypedSectorAdmission>::Error,
+    ) -> Self::FacadeError {
         error.into()
     }
 
-    fn fusion_style(provider: &R) -> symtn_core::FusionStyleKind {
+    fn fusion_style(_: ExecToken, provider: &R) -> symtn_core::FusionStyleKind {
         symtn_core::FusionRule::fusion_style(provider)
     }
 
-    fn braiding_style(provider: &R) -> symtn_core::BraidingStyleKind {
+    fn braiding_style(_: ExecToken, provider: &R) -> symtn_core::BraidingStyleKind {
         symtn_core::FusionRule::braiding_style(provider)
     }
 
-    fn facade_error_into_error(error: Error) -> Error {
+    fn facade_error_into_error(_: ExecToken, error: Error) -> Error {
         error
     }
 
-    fn sector_order_key(provider: &R, sector: SectorId) -> symtn_core::SectorOrderKey {
+    fn sector_order_key(
+        _: ExecToken,
+        provider: &R,
+        sector: SectorId,
+    ) -> symtn_core::SectorOrderKey {
         symtn_core::FusionRule::sector_order_key(provider, sector)
     }
 
     fn coupled_block_dimension(
+        _: ExecToken,
         provider: &R,
         product: &FusionProductSpace,
         coupled: SectorId,
@@ -180,6 +194,7 @@ where
     }
 
     fn fuse_sector_content(
+        _: ExecToken,
         provider: &R,
         left: &[(SectorId, usize)],
         right: &[(SectorId, usize)],
@@ -202,6 +217,7 @@ where
         + SectorCodec,
 {
     fn build_root(
+        _: ExecToken,
         provider: Arc<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
@@ -212,6 +228,7 @@ where
     }
 
     fn build_root_with(
+        _: ExecToken,
         provider: Arc<R>,
         build_homspace: impl FnOnce() -> Result<FusionTreeHomSpace, Self::FacadeError>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
@@ -234,6 +251,7 @@ where
         + symtn_tensors::RecouplingCoefficientAction<<R as MultiplicityFreeFusionSymbols>::Scalar>,
 {
     fn build_construction_root(
+        _: ExecToken,
         provider: Arc<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
@@ -253,7 +271,10 @@ where
 {
     type FacadeError = GenericTensorError<<R as CheckedGenericFusion>::Error>;
 
-    fn map_provider_error(error: <R as TypedSectorAdmission>::Error) -> Self::FacadeError {
+    fn map_provider_error(
+        _: ExecToken,
+        error: <R as TypedSectorAdmission>::Error,
+    ) -> Self::FacadeError {
         GenericTensorError::Structure(CheckedGenericStructureError::Provider(error))
     }
 
@@ -261,11 +282,11 @@ where
     // style (`validate_checked_generic_style`), so an op on admitted data
     // never asks again and cannot be swayed by a provider whose answer
     // changed since.
-    fn fusion_style(_provider: &R) -> symtn_core::FusionStyleKind {
+    fn fusion_style(_: ExecToken, _provider: &R) -> symtn_core::FusionStyleKind {
         symtn_core::FusionStyleKind::Generic
     }
 
-    fn braiding_style(provider: &R) -> symtn_core::BraidingStyleKind {
+    fn braiding_style(_: ExecToken, provider: &R) -> symtn_core::BraidingStyleKind {
         CheckedGenericFusion::braiding_style(provider)
     }
 
@@ -274,18 +295,23 @@ where
     // adjoint is a broken invariant of an admitted layout. Carrying
     // `GenericTensorError<E>` would need a provider-generic `Error` or a bound
     // on the public `TensorRef`.
-    fn facade_error_into_error(error: Self::FacadeError) -> Error {
+    fn facade_error_into_error(_: ExecToken, error: Self::FacadeError) -> Error {
         match error {
             GenericTensorError::Facade(error) => error,
             _ => Error::Internal("checked-Generic lazy adjoint of an admitted layout"),
         }
     }
 
-    fn sector_order_key(provider: &R, sector: SectorId) -> symtn_core::SectorOrderKey {
+    fn sector_order_key(
+        _: ExecToken,
+        provider: &R,
+        sector: SectorId,
+    ) -> symtn_core::SectorOrderKey {
         CheckedGenericFusion::sector_order_key(provider, sector)
     }
 
     fn coupled_block_dimension(
+        _: ExecToken,
         provider: &R,
         product: &FusionProductSpace,
         coupled: SectorId,
@@ -301,6 +327,7 @@ where
     }
 
     fn fuse_sector_content(
+        _: ExecToken,
         provider: &R,
         left: &[(SectorId, usize)],
         right: &[(SectorId, usize)],
@@ -311,7 +338,7 @@ where
             |a, b| CheckedGenericFusion::try_fusion_channels(provider, a, b),
             |a, b, c| CheckedGenericFusion::try_nsymbol(provider, a, b, c),
         )
-        .map_err(<Self as TypedTensorModeDispatch<R>>::map_provider_error)
+        .map_err(|error| <Self as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error))
     }
 }
 
@@ -323,6 +350,7 @@ where
         > + CheckedGenericFusion,
 {
     fn build_root(
+        _: ExecToken,
         provider: Arc<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
@@ -331,6 +359,7 @@ where
     }
 
     fn build_root_with(
+        _: ExecToken,
         provider: Arc<R>,
         build_homspace: impl FnOnce() -> Result<FusionTreeHomSpace, Self::FacadeError>,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
@@ -350,6 +379,7 @@ where
     D: TensorScalar,
 {
     fn build_construction_root(
+        _: ExecToken,
         provider: Arc<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
@@ -369,6 +399,7 @@ where
     D: TensorScalar + MultiplicityFreeTransformExecution<R>,
 {
     fn transform_bond_spectrum(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
@@ -379,6 +410,7 @@ where
     }
 
     fn try_lazy_adjoint_transform<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: &TreeTransformOperation,
@@ -387,6 +419,7 @@ where
     }
 
     fn transform<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: TreeTransformOperation,
@@ -395,6 +428,7 @@ where
     }
 
     fn transform_into<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         destination: &mut TensorMap<R, D, S>,
@@ -424,6 +458,7 @@ where
     D: TensorScalar,
 {
     fn transform_bond_spectrum(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
@@ -455,6 +490,7 @@ where
     }
 
     fn try_lazy_adjoint_transform<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: &TreeTransformOperation,
@@ -463,6 +499,7 @@ where
     }
 
     fn transform<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: TreeTransformOperation,
@@ -498,6 +535,7 @@ where
     /// No exact-layout probe: its key family is multiplicity-free direct
     /// only, so a checked entry can never hit it.
     fn transform_into<S: TransformExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         destination: &mut TensorMap<R, D, S>,
@@ -552,6 +590,7 @@ where
     type Coeff = R::Scalar;
 
     fn twist_values<'a>(
+        _: ExecToken,
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
@@ -575,6 +614,7 @@ where
     type Coeff = f64;
 
     fn twist_values<'a>(
+        _: ExecToken,
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
@@ -621,6 +661,7 @@ where
     type Coeff = R::Scalar;
 
     fn root(
+        _: ExecToken,
         space: &BoundDynamicFusionMapSpace<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Error> {
@@ -628,6 +669,7 @@ where
     }
 
     fn pivotal_values<'a>(
+        _: ExecToken,
         provider: &'a R,
         _structure: &symtn_core::BlockStructure,
         _codomain_rank: usize,
@@ -653,13 +695,19 @@ where
     type Coeff = f64;
 
     fn root(
+        _: ExecToken,
         space: &BoundDynamicFusionMapSpace<R>,
         homspace: FusionTreeHomSpace,
     ) -> Result<BoundDynamicFusionMapSpace<R>, Self::FacadeError> {
-        <Self as TypedTensorRootDispatch<R>>::build_root(Arc::clone(space.provider_arc()), homspace)
+        <Self as TypedTensorRootDispatch<R>>::build_root(
+            EXEC,
+            Arc::clone(space.provider_arc()),
+            homspace,
+        )
     }
 
     fn pivotal_values<'a>(
+        _: ExecToken,
         provider: &'a R,
         structure: &symtn_core::BlockStructure,
         codomain_rank: usize,
@@ -710,6 +758,7 @@ where
         + symtn_tensors::RecouplingCoefficientAction<<R as MultiplicityFreeFusionSymbols>::Scalar>,
 {
     fn product(
+        _: ExecToken,
         lhs_space: &BoundDynamicFusionMapSpace<R>,
         lhs_data: &[D],
         rhs_space: &BoundDynamicFusionMapSpace<R>,
@@ -731,6 +780,7 @@ where
     D: TensorScalar,
 {
     fn product(
+        _: ExecToken,
         lhs_space: &BoundDynamicFusionMapSpace<R>,
         lhs_data: &[D],
         rhs_space: &BoundDynamicFusionMapSpace<R>,
@@ -753,6 +803,7 @@ where
     D: TensorScalar + MultiplicityFreeContractExecution<R> + MultiplicityFreeTransformExecution<R>,
 {
     fn contract<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -763,6 +814,7 @@ where
     }
 
     fn contract_into<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -776,6 +828,7 @@ where
     }
 
     fn compose<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -793,6 +846,7 @@ where
     D: TensorScalar,
 {
     fn contract<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -805,6 +859,7 @@ where
     }
 
     fn contract_into<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
@@ -850,6 +905,7 @@ where
     }
 
     fn compose<S: ContractExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,

@@ -84,11 +84,11 @@ where
             return Ok(self.clone());
         }
         let provider = self.provider();
-        let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(provider);
+        let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, provider);
         if braiding == symtn_core::BraidingStyleKind::NoBraiding {
             // A unit leg twists by one; any other has no twist to apply.
             let homspace = self.logical_space().space().homspace();
-            let vacuum = <R::Mode as TypedSpaceModeDispatch<R>>::vacuum(provider);
+            let vacuum = <R::Mode as TypedSpaceModeDispatch<R>>::vacuum(EXEC, provider);
             let nout = homspace.codomain().len();
             for &leg in legs {
                 let sectors = if leg < nout {
@@ -138,6 +138,7 @@ where
         let nout = self.codomain_rank();
         let space = self.logical_space();
         let Some(theta) = <R::Mode as TypedTensorTwistDispatch<R, D>>::twist_values(
+            EXEC,
             space.provider(),
             space.space().structure(),
             nout,
@@ -307,7 +308,7 @@ where
         if legs.is_empty() {
             return Ok(self.clone());
         }
-        if <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider())
+        if <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider())
             == symtn_core::BraidingStyleKind::NoBraiding
         {
             let leg = legs[0];
@@ -331,7 +332,7 @@ where
             // space (one canonical layout of one HomSpace), so it is derived
             // from the parent rather than flipped separately, before the
             // pivotal values are staged.
-            let adjoint = <R::Mode as TypedAdjointSpace<R>>::lazy_adjoint(&space)?;
+            let adjoint = <R::Mode as TypedAdjointSpace<R>>::lazy_adjoint(EXEC, &space)?;
             let flipped_parent = parent.flip_onto(space, &occurrences, !inverse)?;
             let TypedTensorRepr::Owned(parent) = &flipped_parent.repr else {
                 return Err(internal_layout_error("a parent flip stays owned").into());
@@ -364,6 +365,7 @@ where
         let nout = self.codomain_rank();
         let data = {
             let values = <R::Mode as TypedTensorFlipDispatch<R, D>>::pivotal_values(
+                EXEC,
                 self.provider(),
                 space.space().structure(),
                 nout,
@@ -401,7 +403,7 @@ where
         let (homspace, occurrences) =
             flip_toggled_homspace(self.logical_space().space().homspace(), legs);
         let space =
-            <R::Mode as TypedTensorFlipDispatch<R, D>>::root(self.logical_space(), homspace)?;
+            <R::Mode as TypedTensorFlipDispatch<R, D>>::root(EXEC, self.logical_space(), homspace)?;
         check_flip_layout_identity(
             self.logical_space().space().structure(),
             space.space().structure(),

@@ -976,6 +976,7 @@ where
     let provider = space.provider();
     let nout = source.codomain_rank();
     let theta = <MultiplicityFreeAdmissionMode as TypedTensorTwistDispatch<R, D>>::twist_values(
+        EXEC,
         provider,
         space.space().structure(),
         nout,

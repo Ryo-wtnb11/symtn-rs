@@ -1,6 +1,6 @@
 //! Stable semantic persistence for the public typed Host representation.
 
-use crate::typed::ExecContext;
+use crate::typed::{ExecContext, EXEC};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -1408,8 +1408,9 @@ where
 {
     let mut encoded = Vec::with_capacity(record.sectors.len());
     for (label, degeneracy) in record.sectors {
-        let id = R::try_encode_label(provider.as_ref(), &label)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+        let id = R::try_encode_label(provider.as_ref(), &label).map_err(|error| {
+            <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+        })?;
         encoded.push((id, degeneracy));
     }
     encoded.sort_unstable_by_key(|entry| entry.0);
@@ -1453,7 +1454,7 @@ where
         FusionProductSpace::new(codomain.iter().map(|leg| leg.leg.clone())),
         FusionProductSpace::new(domain.iter().map(|leg| leg.leg.clone())),
     );
-    <R::Mode as TypedTensorRootDispatch<R>>::build_root(Arc::clone(provider), homspace)
+    <R::Mode as TypedTensorRootDispatch<R>>::build_root(EXEC, Arc::clone(provider), homspace)
 }
 
 fn copy_logical_values<D: Copy, C, F>(
@@ -1596,7 +1597,9 @@ where
     let mut spectrum = Vec::with_capacity(entries.len());
     for (label, values) in entries {
         let sector = R::try_encode_label(provider.as_ref(), &label)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)
+            .map_err(|error| {
+                <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+            })
             .map_err(DecodeError::Facade)?;
         spectrum.push(symtn_matrixalgebra::SectorSpectrum { sector, values });
     }
