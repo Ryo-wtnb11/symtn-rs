@@ -667,7 +667,7 @@ fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
         .unwrap();
         let ir = NetworkIR::from_labels(input_labels, output).unwrap();
         let plan = ContractionPlan::from_steps(&ir, steps).unwrap();
-        let planned = network.plan_with(&refs, plan).unwrap();
+        let planned = network.plan(&refs, &plan).unwrap();
 
         symtn::scratch::trim(engine);
         reset_event_counters();
@@ -997,7 +997,7 @@ where
     });
     let (network, plan) = overwrite_network();
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
-    let planned = network.plan_with(&refs, plan).unwrap();
+    let planned = network.plan(&refs, &plan).unwrap();
     let oracle = tensors[0]
         .contract(engine, &tensors[1], &OVERWRITE_FIRST_SPEC)
         .unwrap()
@@ -1052,7 +1052,7 @@ where
     });
     let (network, plan) = overwrite_network();
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
-    let planned = network.plan_with(&refs, plan).unwrap();
+    let planned = network.plan(&refs, &plan).unwrap();
     let oracle = tensors[0]
         .contract(engine, &tensors[1], &OVERWRITE_FIRST_SPEC)
         .unwrap()

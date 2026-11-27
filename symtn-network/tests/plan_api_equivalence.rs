@@ -1,7 +1,7 @@
 use symtn_network::{
-    active_pair_path_from_tree, dense_steps_from_active_pair_path, greedy_slice, ActivePair,
-    ContractionPlan, DenseContractionOptimizer, DenseCostModel, DenseTensorInfo,
-    GreedyDenseOptimizer, LabelOrderDenseOptimizer, NetworkIR, SliceLabels, TemporaryLabel,
+    greedy_slice, ActivePair, ContractionPlan, DenseContractionOptimizer, DenseCostModel,
+    DenseTensorInfo, GreedyDenseOptimizer, LabelOrderDenseOptimizer, NetworkIR, SliceLabels,
+    TemporaryLabel,
 };
 
 // Format contract: `ContractionPlan::to_text` and `SlicePlan::to_text` write
@@ -41,16 +41,14 @@ fn dense(ir: &NetworkIR, sizes: [[usize; 2]; 3]) -> DenseCostModel {
     .unwrap()
 }
 
-/// Every plan producer (active-pair path, label order, greedy, tree round
-/// trip) and both slice modes write the versioned plan-cache text format.
+/// Every plan producer (active-pair path, label order, greedy) and both slice modes write the versioned plan-cache text format.
 #[test]
 fn plan_producers_write_the_versioned_text_format() {
     let ir = chain_ir();
     let cost = dense(&ir, [[2, 3], [3, 4], [4, 5]]);
     let path = [ActivePair::new(0, 1), ActivePair::new(0, 1)];
     let order = [TemporaryLabel::new("b"), TemporaryLabel::new("c")];
-    let path_steps = dense_steps_from_active_pair_path(&ir, &path, &cost).unwrap();
-    let path_plan = ContractionPlan::from_steps(&ir, path_steps).unwrap();
+    let path_plan = ContractionPlan::from_active_pair_path(&ir, &path, &cost).unwrap();
     assert_eq!(path_plan.to_text(), DENSE_PATH);
 
     let label_steps = DenseContractionOptimizer::optimize(
@@ -74,22 +72,8 @@ fn plan_producers_write_the_versioned_text_format() {
         DENSE_GREEDY
     );
 
-    let tree = path_plan.tree().unwrap();
-    let tree_path = active_pair_path_from_tree(ir.tensors().len(), &tree).unwrap();
-    let tree_steps = dense_steps_from_active_pair_path(&ir, &tree_path, &cost).unwrap();
-    assert_eq!(
-        ContractionPlan::from_steps(&ir, tree_steps)
-            .unwrap()
-            .to_text(),
-        DENSE_PATH
-    );
-
     let internal_cost = dense(&ir, [[2, 2], [2, 8], [8, 2]]);
-    let internal_plan = ContractionPlan::from_steps(
-        &ir,
-        dense_steps_from_active_pair_path(&ir, &path, &internal_cost).unwrap(),
-    )
-    .unwrap();
+    let internal_plan = ContractionPlan::from_active_pair_path(&ir, &path, &internal_cost).unwrap();
     assert_eq!(
         greedy_slice(
             &ir,
@@ -103,11 +87,7 @@ fn plan_producers_write_the_versioned_text_format() {
     );
 
     let output_cost = dense(&ir, [[6, 1], [1, 1], [1, 6]]);
-    let output_plan = ContractionPlan::from_steps(
-        &ir,
-        dense_steps_from_active_pair_path(&ir, &path, &output_cost).unwrap(),
-    )
-    .unwrap();
+    let output_plan = ContractionPlan::from_active_pair_path(&ir, &path, &output_cost).unwrap();
     assert_eq!(
         greedy_slice(
             &ir,

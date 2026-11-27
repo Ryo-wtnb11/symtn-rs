@@ -180,7 +180,7 @@ impl CotengraPythonOptimizer {
         let pairs = path_to_active_pairs(&result.path, ir.tensors().len())?;
         let plan = ContractionPlan::from_steps(
             ir,
-            crate::dense_steps_from_active_pair_path(ir, &pairs, cost_model)?,
+            crate::plan::dense_steps_from_active_pair_path(ir, &pairs, cost_model)?,
         )?;
         let sliced = parse_sliced_labels(ir, cost_model, &result.sliced)?;
         let slice = slice_plan_for_ordered(ir, &plan, cost_model, &sliced);

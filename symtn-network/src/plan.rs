@@ -86,8 +86,7 @@ fn parse_escaped_label(text: &str) -> Option<(String, &str)> {
 /// ];
 /// let cost = DenseCostModel::from_network(&ir, &infos)?;
 /// let path = vec![ActivePair::new(0, 1), ActivePair::new(0, 1)];
-/// let steps = dense_steps_from_active_pair_path(&ir, &path, &cost)?;
-/// let plan = ContractionPlan::from_steps(&ir, steps)?;
+/// let plan = ContractionPlan::from_active_pair_path(&ir, &path, &cost)?;
 /// assert_eq!(plan.active_pair_path()?, path);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -158,8 +157,7 @@ impl ActivePair {
 /// ];
 /// let cost = DenseCostModel::from_network(&ir, &infos)?;
 /// let path = vec![ActivePair::new(0, 1)];
-/// let steps = dense_steps_from_active_pair_path(&ir, &path, &cost)?;
-/// let plan = ContractionPlan::from_steps(&ir, steps)?;
+/// let plan = ContractionPlan::from_active_pair_path(&ir, &path, &cost)?;
 /// let text = plan.to_text();
 /// let restored = ContractionPlan::from_text(&text)?;
 /// assert_eq!(plan.active_pair_path()?, restored.active_pair_path()?);
@@ -192,6 +190,16 @@ impl ContractionPlan {
         Ok(plan)
     }
 
+    /// The plan of an active-pair path (positions in the shrinking list of
+    /// live tensors, results appended), as cotengra and opt_einsum report it.
+    pub fn from_active_pair_path(
+        ir: &NetworkIR,
+        path: &[ActivePair],
+        cost_model: &DenseCostModel,
+    ) -> Result<Self> {
+        Self::from_steps(ir, dense_steps_from_active_pair_path(ir, path, cost_model)?)
+    }
+
     /// Number of original input tensors expected by this plan.
     pub fn tensor_count(&self) -> usize {
         self.tensor_count
@@ -214,8 +222,7 @@ impl ContractionPlan {
 
     /// Return this plan as active-pair positions.
     ///
-    /// This is the inverse representation consumed by
-    /// [`dense_steps_from_active_pair_path`].
+    /// This is the inverse of [`Self::from_active_pair_path`].
     pub fn active_pair_path(&self) -> Result<Vec<ActivePair>> {
         active_pair_path_from_steps(self.tensor_count, &self.steps)
     }
@@ -442,7 +449,7 @@ fn same_label_multiset(a: &[TemporaryLabel], b: &[TemporaryLabel]) -> bool {
     counts.values().all(|&c| c == 0)
 }
 
-pub fn active_pair_path_from_steps(
+pub(crate) fn active_pair_path_from_steps(
     tensor_count: usize,
     steps: &[ContractionStep],
 ) -> Result<Vec<ActivePair>> {
@@ -460,60 +467,7 @@ pub fn active_pair_path_from_steps(
     Ok(path)
 }
 
-/// Convert a contraction tree into active-list pair positions.
-pub fn active_pair_path_from_tree(
-    tensor_count: usize,
-    tree: &ContractionTree,
-) -> Result<Vec<ActivePair>> {
-    let mut active = (0..tensor_count).map(TensorId::new).collect::<Vec<_>>();
-    let mut path = Vec::with_capacity(tensor_count.saturating_sub(1));
-    emit_tree_active_pairs(tree, tensor_count, &mut active, &mut path)?;
-    if active.len() != 1 {
-        return Err(ContractError::InvalidContractionPlan(format!(
-            "tree leaves {} active tensors",
-            active.len()
-        )));
-    }
-    Ok(path)
-}
-
-fn emit_tree_active_pairs(
-    tree: &ContractionTree,
-    tensor_count: usize,
-    active: &mut Vec<TensorId>,
-    path: &mut Vec<ActivePair>,
-) -> Result<TensorId> {
-    match tree {
-        ContractionTree::Leaf { tensor } => {
-            if tensor.index() >= tensor_count {
-                return Err(ContractError::InvalidTensorId {
-                    tensor: tensor.index(),
-                    tensor_count,
-                });
-            }
-            if !active.contains(tensor) {
-                return Err(ContractError::InvalidContractionPlan(format!(
-                    "tree leaf tensor {} is not active",
-                    tensor.index()
-                )));
-            }
-            Ok(*tensor)
-        }
-        ContractionTree::Pair { lhs, rhs, .. } => {
-            let lhs_id = emit_tree_active_pairs(lhs, tensor_count, active, path)?;
-            let rhs_id = emit_tree_active_pairs(rhs, tensor_count, active, path)?;
-            let lhs_position = position_of(active, lhs_id)?;
-            let rhs_position = position_of(active, rhs_id)?;
-            validate_active_pair(lhs_position, rhs_position, active.len())?;
-            path.push(ActivePair::new(lhs_position, rhs_position));
-            let result = TensorId::new(tensor_count + path.len() - 1);
-            remove_pair_and_push_result(active, lhs_position, rhs_position, result);
-            Ok(result)
-        }
-    }
-}
-
-pub fn dense_steps_from_active_pair_path(
+pub(crate) fn dense_steps_from_active_pair_path(
     ir: &NetworkIR,
     path: &[ActivePair],
     cost_model: &DenseCostModel,

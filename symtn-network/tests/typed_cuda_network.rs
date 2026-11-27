@@ -290,7 +290,7 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
         ],
     )
     .unwrap();
-    let planned = chain.plan_with(&refs, chain_order).unwrap();
+    let planned = chain.plan(&refs, &chain_order).unwrap();
     let actual = planned
         .execute(cuda, &refs, &mut NetworkExecutionWorkspace::default())
         .unwrap();

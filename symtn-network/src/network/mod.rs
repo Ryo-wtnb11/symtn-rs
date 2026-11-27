@@ -83,7 +83,7 @@ pub use execute::{NetworkExecutionWorkspace, PlannedNetwork};
 /// public einsum-string parser. Build with
 /// [`Network::new`], then either contract eagerly through the Runtime's plan
 /// cache with [`Network::contract`], or plan explicitly with
-/// [`Network::plan`] / [`Network::plan_with`] and run
+/// [`Network::plan`] (a searched or a given order) and run
 /// [`PlannedNetwork::execute`] (Host or device) with a caller-owned
 /// [`NetworkExecutionWorkspace`].
 ///
