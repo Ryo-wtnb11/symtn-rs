@@ -1690,6 +1690,7 @@ pub fn symtn_operations::permutation_axes_inline(symtn_operations::OutputAxisOrd
 pub fn symtn_operations::scale_raw_strided_kernel_trusted<T>(&mut [T], &[usize], &[isize], isize, T) -> core::result::Result<(), symtn_operations::OperationError> where T: core::marker::Copy + core::ops::arith::Mul<T, Output = T> + num_traits::identities::Zero
 pub fn symtn_operations::scale_value<T>(T, T) -> T where T: core::marker::Copy + core::ops::arith::Mul<T, Output = T> + num_traits::identities::Zero
 pub fn symtn_operations::take_checked_block_passes() -> symtn_operations::CheckedBlockPasses
+pub fn symtn_operations::take_movement_decision_builds() -> usize
 pub fn symtn_operations::take_movement_model_evaluations() -> usize
 pub fn symtn_operations::take_owned_block_prefills() -> usize
 pub fn symtn_operations::tensoradd_raw_strided_kernel<T>(threadteam::exec::Exec<'_>, &mut alloc::vec::Vec<isize>, &mut [T], &[T], &[usize], &[isize], &[isize], isize, isize, bool, T, T) -> core::result::Result<(), symtn_operations::OperationError> where T: core::marker::Copy + core::ops::arith::Add<T, Output = T> + core::ops::arith::Mul<T, Output = T> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::ConjugateValue + core::marker::Send + core::marker::Sync

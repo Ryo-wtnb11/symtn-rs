@@ -529,48 +529,62 @@ extension store and fetched once per operation, before preparing all its
 movement decisions. Reference entry creation and completed online updates
 receive fresh process-wide generations, so a workspace cannot reuse widths
 from a different engine entry or an evicted entry's replacement.
-Online measurement is attempted once per retained entry and runs to
-completion: fixed sample counts, no deadline, and no row filled from another
-row. It measures, in order:
+Online measurement runs to completion: fixed sample counts, no deadline, and
+no row filled from another row. Every fixed-workload timing takes the minimum
+of its samples: the workload is the same in every sample and interference
+(preemption, a parked worker's wake-up) only adds time, so the minimum is the
+least-biased estimate of the workload's own cost, while a median can be a
+scheduler quantum. It measures, in order:
 
 - D_item(q) at every candidate width q <= p: the production `run_native` with
   a `Split` of q leaves over the whole token, as Singles, inactive fills,
-  pack, scatter and member ranges run it, with empty leaves; the median of 31
+  pack, scatter and member ranges run it, with empty leaves; the minimum of 31
   calls after one warm-up.
 - D_plan(s) at every leaf share s >= 2 that a candidate split gives
   (floor(p/q), ceil(p/q) and p): an empty `for_ranges` section of s parts on
   a token limited to s, the call Strided's planned update makes inside a leaf
   (`for_len` limits the token, `parallel_for_each` runs `for_ranges`); the
-  median of 31 calls after one warm-up. A real planned role is not timed:
+  minimum of 31 calls after one warm-up. A real planned role is not timed:
   Strided widens a role to all s slots only once its copy outweighs the extra
   sections, which takes millions of elements on a 96-slot pool, and the
   section is the same call.
 - The two element rows (contiguous and strided), through the real replay
-  writer on shared buffers, three samples per point.
-- B(q) at the powers of two among those candidate widths, and p (so every
-  point's D_item(q) is measured): q serial copy leaves of the item phases'
-  tree split over the whole token on the row buffers (about 8 MiB of
-  traffic), the median of three runs less D_item(q). The model reads widths
+  writer on shared buffers, each walk the minimum of five samples. A row is
+  fit by least squares over all its walks, t = a + r[W] runs + e[W]
+  elements less the fixture's empty-walk overhead: the setup and the first
+  working set's terms from that set's four walks (one run of 2, 16 and n0
+  elements, and 128 or 32 runs of n0), whose (1, runs, elements) columns are
+  independent because the runs take two values and the one-run elements
+  three; each further working set's terms from its one-run and many-run
+  walks, which determine them exactly given the setup.
+- B(q) at the powers of two among those candidate widths, and p: q serial
+  copy leaves of the item phases' tree split over the whole token on the row
+  buffers (about 8 MiB of traffic), each leaf timing its own copy, so B(q) is
+  the bytes moved over the slowest leaf's time and the fork is no part of it;
+  the minimum of that time over three sections. The model reads widths
   between these points by linear interpolation in q.
 
-A point fails when a fixture cannot be built, the lane runner refuses its
-supply, an element row stays non-physical after the refit below, or a
-bandwidth point's time less its D_item is not finite and positive. Any
-failure leaves the entry uncalibrated. An Auto region of more than one slot
+A point is unusable when a fixture cannot be built, the lane runner refuses
+its supply, a timing is not a positive finite time, or an element row stays
+non-physical after the rule below. An unusable point is measured again, at
+most three attempts per point; only then does the calibration fail. A failed
+calibration is retried at a later movement region, at most three
+calibrations per retained entry in all (each one calibration's time, below),
+after which the entry stays uncalibrated until eviction, `scratch::trim` or
+the engine's drop. A failed retry leaves the constants' generation, and so
+every retained decision, unchanged. An Auto region of more than one slot
 without calibrated constants fails closed: every modeled phase takes width
 one, and the token its movement runs on (inline Singles and inactive fills,
 and each chunk's scatter) is limited to one slot, so no planned role fans
 out inside it either; this is the replay's semantics on a one-slot engine.
 Pack columns run serial walks at width one, and plan groups keep their
 constant-free rule. Forced policies keep their widths and whole tokens.
-Failed entries are not retried before eviction or `scratch::trim`. An online
-element row must be physical (a >= 0, r >= 0, e > 0). A negative fitted setup
-or per-run term means that term is below the measurement's resolution, not
-that the host differs: it is fixed at zero and each one-run sample's total is
-attributed to the remaining terms (their least-squares fit on the same
-samples). Beyond its largest online working set (4 MiB) an element curve keeps
-the checked-in reference curve's shape, scaled to meet its last online knot;
-the reference table records the CI CPU, date and run provenance. The constants
+An online element row must be physical (a >= 0, r >= 0, e > 0). A negative
+fitted setup or per-run term means that term is below the measurement's
+resolution, not that the host differs: it is held at zero and the remaining
+terms are refit by least squares on the same walks. Beyond its largest online
+working set (4 MiB) an element curve keeps the checked-in reference curve's
+shape, scaled to meet its last online knot; the reference table records the CI CPU, date and run provenance. The constants
 depend on timing but not on how many points happened to fit a budget. On a
 96-thread Xeon Platinum 9242 the dispatch rows take 12 x 32 tree splits
 (2-10 µs each) and 11 x 32 sections (0.7-39 µs), about 5 ms together; the

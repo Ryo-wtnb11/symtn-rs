@@ -735,11 +735,11 @@ fn repeated_permute_reuses_movement_decisions() {
         173,
     )
     .unwrap();
-    let take = symtn_operations::take_movement_model_evaluations;
+    let take = symtn_operations::take_movement_decision_builds;
     take();
     for (codomain, domain) in [([0, 2], [1, 3]), ([1, 3], [0, 2])] {
         drop(source.permute(&mut engine, &codomain, &domain).unwrap());
-        assert!(take() > 0, "each cold structure evaluates the model");
+        assert!(take() > 0, "each cold structure builds its decisions");
     }
     for (codomain, domain) in [([0, 2], [1, 3]), ([1, 3], [0, 2])] {
         drop(source.permute(&mut engine, &codomain, &domain).unwrap());
@@ -777,7 +777,7 @@ fn movement_decisions_evict_the_least_recently_used_structure() {
         })
         .collect();
     let mut engine = symtn_operations::host_pool::eager_test_engine(2);
-    let take = symtn_operations::take_movement_model_evaluations;
+    let take = symtn_operations::take_movement_decision_builds;
     take();
     for source in &sources {
         drop(source.permute(&mut engine, &[0, 2], &[1, 3]).unwrap());

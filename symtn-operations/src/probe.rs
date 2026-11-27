@@ -22,9 +22,11 @@ pub(crate) enum Event {
     OwnedPrefillElement,
     /// A movement phase evaluated the width model.
     MovementModelEvaluation,
+    /// A replay built its movement decisions (a decision-memo miss).
+    MovementDecisionBuild,
 }
 
-const EVENTS: usize = Event::MovementModelEvaluation as usize + 1;
+const EVENTS: usize = Event::MovementDecisionBuild as usize + 1;
 
 struct Probe {
     counts: [usize; EVENTS],
@@ -93,6 +95,13 @@ pub fn take_owned_block_prefills() -> usize {
 #[doc(hidden)]
 pub fn take_movement_model_evaluations() -> usize {
     take(Event::MovementModelEvaluation)
+}
+
+/// Returns and resets this thread's count of movement decision builds (memo
+/// misses), counted whether or not the movement model was calibrated.
+#[doc(hidden)]
+pub fn take_movement_decision_builds() -> usize {
+    take(Event::MovementDecisionBuild)
 }
 
 /// Which owned writer a write bitmap observes.

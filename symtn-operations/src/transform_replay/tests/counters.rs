@@ -780,6 +780,28 @@ fn a_failed_calibration_runs_modeled_movement_on_one_slot() {
     }
 }
 
+/// Purpose: calibrated constants evaluate the width model for a cold
+/// decision of several jobs; a failed calibration is the control that
+/// decides without evaluating it.
+#[test]
+fn calibrated_constants_evaluate_the_width_model() {
+    let (dst, src, transform) = interleaved_single_pairs(4, 64);
+    for calibrated in [true, false] {
+        let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+        if !calibrated {
+            symtn_dense::engine_slot::clear(&mut engine);
+            super::super::movement::install_test_constants(&mut engine, None);
+        }
+        crate::probe::take_movement_model_evaluations();
+        recorded(&mut engine, &transform, &dst, &src);
+        assert_eq!(
+            crate::probe::take_movement_model_evaluations() > 0,
+            calibrated,
+            "calibrated: {calibrated}"
+        );
+    }
+}
+
 /// `pairs` coupled pairs of `[2, cols]` Singles whose destinations
 /// interleave (strides `[1, 4]`, offsets `4 cols p` and `4 cols p + 2`):
 /// the Singles are not slice-disjoint and form one hull run per pair.

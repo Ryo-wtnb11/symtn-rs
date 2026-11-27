@@ -145,7 +145,8 @@ pub(super) struct MovementConstants {
     /// serially.
     calibrated: bool,
     reserved_entries: usize,
-    attempted: bool,
+    /// Calibrations attempted on this entry, at most [`CALIBRATION_ATTEMPTS`].
+    attempts: usize,
 }
 
 pub(super) type Constants = MovementConstants;
@@ -166,7 +167,7 @@ impl MovementConstants {
             plan_dispatch: Vec::new(),
             calibrated: false,
             reserved_entries: 0,
-            attempted: false,
+            attempts: 0,
         }
     }
 
@@ -293,6 +294,8 @@ impl WidthMemo {
         }
         entry.key = None;
         entry.widths.clear();
+        #[cfg(any(test, feature = "testing"))]
+        crate::probe::add(crate::probe::Event::MovementDecisionBuild, 1);
         build(&mut entry.widths, &mut entry.chunks)?;
         entry.dispatch.clear();
         entry.dispatch.extend(dispatch);
@@ -366,9 +369,15 @@ pub(super) fn dispatch_key<'a>(
     })
 }
 
-/// The retained value itself records the attempt, including a failed one: a
-/// failed calibration keeps every modeled phase serial until this entry is
-/// evicted or trimmed.
+/// Calibrations an engine's constants entry attempts before staying
+/// uncalibrated: a failed calibration is retried at the next movement
+/// region, at most this many times in all per entry (each attempt costs one
+/// calibration's time, bounded below), after which every modeled phase stays
+/// serial until the entry is trimmed or evicted, or the engine is dropped.
+const CALIBRATION_ATTEMPTS: usize = 3;
+
+/// The retained value itself records its attempts, failed ones included (see
+/// [`CALIBRATION_ATTEMPTS`]).
 pub(super) fn region<R>(
     engine: &mut dyn Engine,
     op: impl FnOnce(lanes::Exec<'_>, Option<&Constants>) -> R,
@@ -421,9 +430,10 @@ fn region_with<R>(
             engine,
             crate::host_pool::HostPoolSite::Replay,
             |mut exec| {
-                if let Some(constants) = retained.as_mut().filter(|constants| !constants.attempted)
-                {
-                    constants.attempted = true;
+                if let Some(constants) = retained.as_mut().filter(|constants| {
+                    !constants.calibrated && constants.attempts < CALIBRATION_ATTEMPTS
+                }) {
+                    constants.attempts += 1;
                     constants.bandwidth = vec![f64::INFINITY; constants.reserved_entries];
                     constants.item_dispatch = vec![f64::NAN; constants.reserved_entries];
                     constants.plan_dispatch = vec![f64::NAN; constants.reserved_entries];
@@ -436,7 +446,12 @@ fn region_with<R>(
                             / constants.rows[0].e.at(f64::INFINITY),
                     );
                     interpolate_bandwidth(&mut constants.bandwidth);
-                    constants.generation = next_generation();
+                    // Why not on every attempt: a failed retry leaves the
+                    // decisions what they were (serial), so they stay warm;
+                    // the first attempt and a success change them.
+                    if constants.calibrated || constants.attempts == 1 {
+                        constants.generation = next_generation();
+                    }
                 }
                 op.take().expect("region body runs once")(exec, retained.as_ref())
             },
@@ -885,6 +900,28 @@ impl Fixture {
     }
 }
 
+/// Samples of one fixed-workload timing (an element-row walk); the timing is
+/// their minimum.
+const WALK_SAMPLES: usize = 5;
+
+/// Attempts per calibration point: a point that is still unusable after its
+/// samples is measured again, at most this many times in all, before the
+/// calibration fails.
+const POINT_ATTEMPTS: usize = 3;
+
+/// The first usable result of at most [`POINT_ATTEMPTS`] measurements.
+fn attempt<T>(mut measure: impl FnMut() -> Option<T>) -> Option<T> {
+    (0..POINT_ATTEMPTS).find_map(|_| measure())
+}
+
+/// One element-row walk of `elements` elements in `runs` runs, timed as the
+/// minimum of [`WALK_SAMPLES`] samples.
+///
+/// Why the minimum, here and for every fixed-workload timing of the
+/// calibration (the walks, D_item and D_plan): the workload is the same in
+/// every sample and interference (preemption, a parked worker's wake-up)
+/// only adds time, so the minimum is the least-biased estimate of the
+/// workload's own cost, while a median can be a scheduler quantum.
 fn sample(
     exec: &mut lanes::Exec<'_>,
     elements: usize,
@@ -901,8 +938,8 @@ fn sample(
     } else {
         1
     };
-    let mut samples = [0.0; 3];
-    for time in &mut samples {
+    let mut fastest = f64::INFINITY;
+    for _ in 0..WALK_SAMPLES {
         let start = Instant::now();
         for _ in 0..repetitions {
             fixture
@@ -914,10 +951,24 @@ fn sample(
                 .ok()?;
             std::hint::black_box(&*destination);
         }
-        *time = start.elapsed().as_secs_f64() * 1e9 / repetitions as f64;
+        fastest = fastest.min(start.elapsed().as_secs_f64() * 1e9 / repetitions as f64);
     }
-    samples.sort_by(f64::total_cmp);
-    Some(samples[1])
+    Some(fastest)
+}
+
+/// The walks of one class's row, each the minimum of its samples: `empty`
+/// (no element, the fixture's own overhead), `low` and `high` (one run of 2
+/// and 16 elements), and per working set `i` one run (`one[i]`) and
+/// `runs[i]` runs (`many[i]`) of `elements[i]` elements.
+#[derive(Clone, Copy, Debug)]
+struct RowWalks {
+    empty: f64,
+    low: f64,
+    high: f64,
+    one: [f64; 3],
+    many: [f64; 3],
+    runs: [usize; 3],
+    elements: [usize; 3],
 }
 
 fn measure_row(
@@ -930,57 +981,95 @@ fn measure_row(
     let empty = measure(0, 1)?;
     let low = measure(2, 1)?;
     let high = measure(16, 1)?;
-    let mut one = [0.0; 3];
-    let mut slope = [0.0; 3];
     let working_sets = [ONLINE_WORKING_SETS, [1024, 8192, 65536]][inner];
-    for (i, w) in working_sets.into_iter().enumerate() {
-        let n = w / (2 * std::mem::size_of::<f64>());
+    let elements = working_sets.map(|w| w / (2 * std::mem::size_of::<f64>()));
+    let runs = elements.map(|n| (n / 2).min(128));
+    let mut one = [0.0; 3];
+    let mut many = [0.0; 3];
+    for (i, (&n, &m)) in elements.iter().zip(&runs).enumerate() {
         one[i] = measure(n, 1)?;
-        let many_runs = (n / 2).min(128);
-        let many = measure(n, many_runs)?;
-        slope[i] = (many - one[i]) / (many_runs - 1) as f64;
+        many[i] = measure(n, m)?;
     }
-    fit_row(inner, empty, low, high, one, slope)
+    fit_row(
+        inner,
+        &RowWalks {
+            empty,
+            low,
+            high,
+            one,
+            many,
+            runs,
+            elements,
+        },
+    )
 }
 
-/// The row of one class from its samples: `empty`, `low` and `high` are
-/// one-run walks of 0, 2 and 16 elements, `one[i]` a one-run walk of the
-/// class's `i`-th working set and `slope[i]` its measured time per extra run.
+/// The row of one class from its walks, by least squares over every sampled
+/// size of `t = a + r[W] runs + e[W] elements` (each walk less `empty`, the
+/// fixture's own overhead).
+///
+/// The setup `a` and the first working set's `r`, `e` are fit on that set's
+/// four walks: one run of 2, 16 and `elements[0]` elements and `runs[0]`
+/// runs of `elements[0]`. Their design columns (1, runs, elements) are
+/// linearly independent because the runs take two values (1 and
+/// `runs[0] > 1`) and the one-run elements three. Each further working set's
+/// `r`, `e` are then fit on its two walks (one run and `runs[i] > 1` runs of
+/// the same elements), which determine them exactly given `a`; this is the
+/// joint least-squares solution, since those terms appear in no other walk.
 ///
 /// The physical row has `a >= 0`, `r >= 0` and `e > 0`. A negative setup or
 /// per-run term means that term is below the measurement's resolution (a
 /// contiguous run costs no measurable time per run), not that the host
-/// differs from the samples: it is fixed at zero, and each one-run total is
-/// kept and attributed to the remaining terms, which is the least-squares
-/// fit of those terms on the same samples. Only a row that is still
-/// non-physical (`e <= 0`) or whose samples are not finite is rejected, and
-/// the calibration then fails closed.
-fn fit_row(
-    inner: usize,
-    empty: f64,
-    low: f64,
-    high: f64,
-    one: [f64; 3],
-    slope: [f64; 3],
-) -> Option<Row> {
+/// differs from the samples: it is held at zero and the remaining terms are
+/// refit on the same walks. A row whose element term is still not positive,
+/// or whose fit is not finite, is unusable.
+fn fit_row(inner: usize, walks: &RowWalks) -> Option<Row> {
     let working_sets = [ONLINE_WORKING_SETS, [1024, 8192, 65536]][inner];
-    let finite = |value: f64| value.is_finite().then_some(value);
-    let run: [(usize, f64); 3] = core::array::from_fn(|i| {
-        (
-            working_sets[i],
-            finite(slope[i]).map_or(f64::NAN, |r| r.max(0.0)),
-        )
-    });
-    let a = finite(low - empty - (high - low) * (2.0 / 14.0) - run[0].1)?.max(0.0);
-    let element: [(usize, f64); 3] = core::array::from_fn(|i| {
-        let w = working_sets[i];
-        (w, (one[i] - empty - a - run[i].1) / (w / 16) as f64)
-    });
-    if !run.iter().all(|p| p.1.is_finite()) || !element.iter().all(|p| p.1.is_finite() && p.1 > 0.0)
-    {
-        return None;
+    let RowWalks {
+        empty,
+        low,
+        high,
+        one,
+        many,
+        runs,
+        elements,
+    } = *walks;
+    let walk = |runs: usize, elements: usize, time: f64| {
+        ([1.0, runs as f64, elements as f64], time - empty)
+    };
+    let first = fit_terms(
+        &[
+            walk(1, 2, low),
+            walk(1, 16, high),
+            walk(1, elements[0], one[0]),
+            walk(runs[0], elements[0], many[0]),
+        ],
+        [false; 3],
+    )?;
+    let a = first[0];
+    let mut run = [(0, 0.0); 3];
+    let mut element = [(0, 0.0); 3];
+    for (i, &w) in working_sets.iter().enumerate() {
+        let terms = if i == 0 {
+            first
+        } else {
+            fit_terms(
+                &[
+                    walk(1, elements[i], one[i] - a),
+                    walk(runs[i], elements[i], many[i] - a),
+                ],
+                [true, false, false],
+            )?
+        };
+        run[i] = (w, terms[1]);
+        element[i] = (w, terms[2]);
     }
-    Some(Row {
+    let physical = a.is_finite()
+        && run.iter().all(|point| point.1.is_finite())
+        && element
+            .iter()
+            .all(|point| point.1.is_finite() && point.1 > 0.0);
+    physical.then_some(Row {
         a,
         r: Curve {
             points: CI_ROWS[inner].r.points,
@@ -991,6 +1080,75 @@ fn fit_row(
             online: Some(element),
         },
     })
+}
+
+/// Least squares of `(setup, runs, elements) · x ≈ y` over `rows`, the
+/// coefficients marked in `fixed` held at zero; a free setup or per-run
+/// coefficient that comes out negative is held at zero and the rest refit.
+/// `None` when the free columns are linearly dependent.
+fn fit_terms(rows: &[([f64; 3], f64)], mut fixed: [bool; 3]) -> Option<[f64; 3]> {
+    // Why the column scaling: element counts reach 2^18 while the setup
+    // column is 1, so the normal equations are solved on columns scaled to a
+    // largest entry of one, which keeps their determinant test meaningful.
+    let scale: [f64; 3] = core::array::from_fn(|j| {
+        let largest = rows.iter().fold(0.0_f64, |m, (x, _)| m.max(x[j].abs()));
+        if largest > 0.0 {
+            largest
+        } else {
+            1.0
+        }
+    });
+    loop {
+        let mut normal = [[0.0; 3]; 3];
+        let mut rhs = [0.0; 3];
+        for (x, y) in rows {
+            let x: [f64; 3] = core::array::from_fn(|j| x[j] / scale[j]);
+            for (j, line) in normal.iter_mut().enumerate() {
+                for (k, entry) in line.iter_mut().enumerate() {
+                    *entry += x[j] * x[k];
+                }
+                rhs[j] += x[j] * y;
+            }
+        }
+        for (j, &held) in fixed.iter().enumerate() {
+            if held {
+                for line in &mut normal {
+                    line[j] = 0.0;
+                }
+                normal[j] = [0.0; 3];
+                normal[j][j] = 1.0;
+                rhs[j] = 0.0;
+            }
+        }
+        let scaled = solve3(normal, rhs)?;
+        let solution: [f64; 3] = core::array::from_fn(|j| scaled[j] / scale[j]);
+        match (0..2).find(|&j| !fixed[j] && solution[j] < 0.0) {
+            Some(j) => fixed[j] = true,
+            None => return Some(solution),
+        }
+    }
+}
+
+/// `m x = b` by Cramer's rule; `None` when `m` is singular to working
+/// precision (its entries are at most a few in size after column scaling).
+fn solve3(m: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
+    let det = |c: [[f64; 3]; 3]| {
+        c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1])
+            - c[0][1] * (c[1][0] * c[2][2] - c[1][2] * c[2][0])
+            + c[0][2] * (c[1][0] * c[2][1] - c[1][1] * c[2][0])
+    };
+    let whole = det(m);
+    if whole.is_finite() && whole.abs() > 1e-12 {
+        Some(core::array::from_fn(|k| {
+            let mut column = m;
+            for (line, &value) in column.iter_mut().zip(&b) {
+                line[k] = value;
+            }
+            det(column) / whole
+        }))
+    } else {
+        None
+    }
 }
 
 /// The widths whose D_item is measured: the chooser's candidates below the
@@ -1018,25 +1176,26 @@ fn leaf_share(budget: usize, share: usize) -> bool {
         || dispatch_ladder(budget).any(|q| budget / q == share || budget.div_ceil(q) == share)
 }
 
-/// Samples per dispatch point; the point is their median, after one warm-up.
+/// Samples per dispatch point; the point is their minimum (see [`sample`]),
+/// after one warm-up.
 const DISPATCH_SAMPLES: usize = 31;
 
-/// The median duration in ns of [`DISPATCH_SAMPLES`] calls of `once`, after
-/// one warm-up call; `None` when a call fails.
-fn median_ns(mut once: impl FnMut() -> bool) -> Option<f64> {
+/// The minimum duration in ns of [`DISPATCH_SAMPLES`] calls of `once`, after
+/// one warm-up call; `None` when a call fails or the minimum is not a
+/// positive finite time.
+fn min_ns(mut once: impl FnMut() -> bool) -> Option<f64> {
     if !once() {
         return None;
     }
-    let mut samples = [0.0; DISPATCH_SAMPLES];
-    for sample in &mut samples {
+    let mut fastest = f64::INFINITY;
+    for _ in 0..DISPATCH_SAMPLES {
         let start = Instant::now();
         if !once() {
             return None;
         }
-        *sample = start.elapsed().as_secs_f64() * 1e9;
+        fastest = fastest.min(start.elapsed().as_secs_f64() * 1e9);
     }
-    samples.sort_by(f64::total_cmp);
-    Some(samples[DISPATCH_SAMPLES / 2])
+    (fastest.is_finite() && fastest > 0.0).then_some(fastest)
 }
 
 /// The item phases' split with nothing to do: one job per leaf, no work.
@@ -1062,18 +1221,20 @@ impl lanes::Work for EmptyLeaves {
 fn measure_item_dispatch(exec: &mut lanes::Exec<'_>, constants: &mut Constants) -> bool {
     for q in dispatch_ladder(exec.budget()) {
         let mut states = vec![(); q];
-        let measured = median_ns(|| {
-            let split = super::chunk::split(q, |_: &mut (), _| Ok::<(), ()>(()));
-            matches!(
-                lanes::run_native(
-                    exec.reborrow(),
-                    &EmptyLeaves(q),
-                    split,
-                    &mut states,
-                    &mut [()]
-                ),
-                Ok(Ok(()))
-            )
+        let measured = attempt(|| {
+            min_ns(|| {
+                let split = super::chunk::split(q, |_: &mut (), _| Ok::<(), ()>(()));
+                matches!(
+                    lanes::run_native(
+                        exec.reborrow(),
+                        &EmptyLeaves(q),
+                        split,
+                        &mut states,
+                        &mut [()]
+                    ),
+                    Ok(Ok(()))
+                )
+            })
         });
         let (Some(measured), Some(slot)) = (measured, constants.item_dispatch.get_mut(q)) else {
             return false;
@@ -1100,12 +1261,15 @@ fn measure_plan_dispatch(exec: &mut lanes::Exec<'_>, constants: &mut Constants) 
         let Some(width) = NonZeroUsize::new(share) else {
             continue;
         };
-        let measured = median_ns(|| {
-            exec.reborrow()
-                .limit(width)
-                .into_token()
-                .for_ranges(share, NonZeroUsize::MIN, |_| {});
-            true
+        let measured = attempt(|| {
+            min_ns(|| {
+                exec.reborrow().limit(width).into_token().for_ranges(
+                    share,
+                    NonZeroUsize::MIN,
+                    |_| {},
+                );
+                true
+            })
         });
         let (Some(measured), Some(slot)) = (measured, constants.plan_dispatch.get_mut(share))
         else {
@@ -1117,7 +1281,8 @@ fn measure_plan_dispatch(exec: &mut lanes::Exec<'_>, constants: &mut Constants) 
 }
 
 /// The bandwidth fixture's leaves: leaf `job` copies source part `job` into
-/// its lane's destination part, serially.
+/// its lane's destination part, serially, and records its own copy time in
+/// ns as its job state.
 struct CopyLeaves<'f> {
     fixture: &'f Fixture,
     source: &'f [f64],
@@ -1140,7 +1305,7 @@ impl<'f> CopyLeaves<'f> {
 }
 
 impl<'f> lanes::Work for CopyLeaves<'f> {
-    type Job = ();
+    type Job = f64;
     type Lane = (usize, &'f mut [MaybeUninit<f64>]);
     type Error = ();
 
@@ -1151,7 +1316,7 @@ impl<'f> lanes::Work for CopyLeaves<'f> {
     fn run(
         &self,
         job: usize,
-        _: &mut (),
+        time: &mut f64,
         lane: &mut Self::Lane,
         exec: lanes::Exec<'_>,
     ) -> Result<(), ()> {
@@ -1161,15 +1326,24 @@ impl<'f> lanes::Work for CopyLeaves<'f> {
             .source
             .get(job * self.part..(job + 1) * self.part)
             .ok_or(())?;
+        let start = Instant::now();
         self.fixture
             .run(exec.limit(NonZeroUsize::MIN), source, destination)
-            .map_err(|_| ())
+            .map_err(|_| ())?;
+        *time = start.elapsed().as_secs_f64() * 1e9;
+        Ok(())
     }
 }
 
-/// B(q) on the doubling ladder: q serial copy leaves of the item phases'
-/// split over the whole token, the median of three runs less D_item(q).
-/// The fixture is the row buffers (an `elements`-element source and
+/// Sections per bandwidth point; the point takes their fastest.
+const BANDWIDTH_SECTIONS: usize = 3;
+
+/// B(q) at each [`bandwidth_ladder`] width: q serial copy leaves of the item
+/// phases' split over the whole token, each timing its own copy, so B(q) is
+/// the bytes moved over the slowest leaf's time and the fork is no part of
+/// it. The point takes the minimum of that slowest time over
+/// [`BANDWIDTH_SECTIONS`] sections (a fixed workload, see [`sample`]). The
+/// fixture is the row buffers (an `elements`-element source and
 /// destination, about 8 MiB of traffic), so the cap applies from that
 /// working set on.
 fn measure_bandwidth(
@@ -1186,44 +1360,38 @@ fn measure_bandwidth(
         let Ok(fixture) = Fixture::new(part, 1, 0) else {
             return false;
         };
-        let mut samples = [0.0; 3];
-        for sample in &mut samples {
-            let Some(parts) = destination.get_mut(..part * q) else {
-                return false;
-            };
-            let work = CopyLeaves {
-                fixture: &fixture,
-                source,
-                part,
-                parts: q,
-            };
-            let mut lane = (0, parts);
-            let mut states = vec![(); q];
-            let split = super::chunk::split(q, |lane, cut| work.cut(lane, cut));
-            let start = Instant::now();
-            let ran = lanes::run_native(
-                exec.reborrow(),
-                &work,
-                split,
-                &mut states,
-                core::slice::from_mut(&mut lane),
-            );
-            *sample = start.elapsed().as_secs_f64() * 1e9;
-            if !matches!(ran, Ok(Ok(()))) {
-                return false;
+        let slowest = attempt(|| {
+            let mut fastest = f64::INFINITY;
+            for _ in 0..BANDWIDTH_SECTIONS {
+                let parts = destination.get_mut(..part * q)?;
+                let work = CopyLeaves {
+                    fixture: &fixture,
+                    source,
+                    part,
+                    parts: q,
+                };
+                let mut lane = (0, parts);
+                let mut times = vec![0.0; q];
+                let split = super::chunk::split(q, |lane, cut| work.cut(lane, cut));
+                let ran = lanes::run_native(
+                    exec.reborrow(),
+                    &work,
+                    split,
+                    &mut times,
+                    core::slice::from_mut(&mut lane),
+                );
+                if !matches!(ran, Ok(Ok(()))) {
+                    return None;
+                }
+                fastest = fastest.min(times.iter().copied().fold(0.0, f64::max));
             }
-        }
-        samples.sort_by(f64::total_cmp);
-        let elapsed = samples[1] - constants.item_cost(q);
+            (fastest.is_finite() && fastest > 0.0).then_some(fastest)
+        });
         let bytes = (part * q * pair) as f64;
-        let Some(slot) = constants.bandwidth.get_mut(q) else {
+        let (Some(slowest), Some(slot)) = (slowest, constants.bandwidth.get_mut(q)) else {
             return false;
         };
-        if elapsed.is_finite() && elapsed > 0.0 {
-            *slot = bytes / elapsed;
-        } else {
-            return false;
-        }
+        *slot = bytes / slowest;
         constants.bandwidth_bytes = if constants.bandwidth_bytes.is_finite() {
             constants.bandwidth_bytes.max(bytes)
         } else {
@@ -1253,7 +1421,7 @@ pub(super) fn install_test_constants(engine: &mut dyn Engine, ns: Option<f64>) {
     constants.item_dispatch = vec![ns; threads + 1];
     constants.plan_dispatch = vec![ns; threads + 1];
     constants.calibrated = ns.is_finite();
-    constants.attempted = true;
+    constants.attempts = CALIBRATION_ATTEMPTS;
     symtn_dense::engine_slot::checkin(engine, constants, Constants::retained_bytes);
 }
 
@@ -1266,7 +1434,9 @@ fn calibrate(exec: &mut lanes::Exec<'_>, constants: &mut Constants) -> bool {
     let source = vec![1.0; BUFFER_ELEMENTS];
     let mut destination = Vec::<f64>::with_capacity(BUFFER_ELEMENTS);
     for inner in 0..2 {
-        let Some(row) = measure_row(exec, inner, &source, destination.spare_capacity_mut()) else {
+        let Some(row) =
+            attempt(|| measure_row(exec, inner, &source, destination.spare_capacity_mut()))
+        else {
             return false;
         };
         constants.rows[inner] = row;
@@ -2422,55 +2592,117 @@ mod tests {
         assert_ne!(element.at(134217728.0), 2.0);
     }
 
-    /// One-run and many-run samples of the contiguous class with setup 7 ns,
-    /// element costs shaped like a measured Xeon row (2.6-4x the reference)
-    /// and per-run slopes `slope`, as `measure_row` takes them.
-    fn contiguous_samples(element: [f64; 3], slope: [f64; 3]) -> (f64, f64, f64, [f64; 3]) {
-        let (empty, a, small) = (100.0, 7.0, 0.2);
-        let r0 = slope[0].max(0.0);
-        let low = empty + a + r0 + 2.0 * small;
-        let high = empty + a + r0 + 16.0 * small;
-        let one = core::array::from_fn(|i| {
-            empty + a + slope[i].max(0.0) + element[i] * (ONLINE_WORKING_SETS[i] / 16) as f64
-        });
-        (empty, low, high, one)
+    /// The walks of class `inner` that the row `a`, `r[i]`, `e[i]` produces
+    /// exactly, over a fixture overhead of 100 ns.
+    fn exact_walks(inner: usize, a: f64, r: [f64; 3], e: [f64; 3]) -> RowWalks {
+        let working_sets = [ONLINE_WORKING_SETS, [1024, 8192, 65536]][inner];
+        let elements = working_sets.map(|w| w / 16);
+        let runs = elements.map(|n| (n / 2).min(128));
+        let empty = 100.0;
+        let time =
+            |i: usize, runs: usize, n: usize| empty + a + runs as f64 * r[i] + n as f64 * e[i];
+        RowWalks {
+            empty,
+            low: time(0, 1, 2),
+            high: time(0, 1, 16),
+            one: core::array::from_fn(|i| time(i, 1, elements[i])),
+            many: core::array::from_fn(|i| time(i, runs[i], elements[i])),
+            runs,
+            elements,
+        }
     }
 
-    /// Purpose: a per-run slope below resolution (negative) fits r = 0 and
-    /// keeps the measured setup and element costs, not the reference row's;
-    /// the old all-terms-nonnegative rejection is the negative control that
-    /// discarded this row. A non-positive element cost still rejects.
+    fn close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() <= 1e-9 * expected.abs().max(1.0),
+            "{actual} != {expected}"
+        );
+    }
+
+    /// Purpose: the least-squares fit over every walk recovers each term of
+    /// a row that produced the walks exactly, for both strides.
     #[test]
-    fn negative_run_slopes_fit_zero_and_keep_measured_elements() {
-        let close = |actual: f64, expected: f64| assert!((actual - expected).abs() < 1e-9);
-        let element = [0.229, 0.424, 0.619];
-        let slope = [1.9, -9.0, -42.9];
-        let (empty, low, high, one) = contiguous_samples(element, slope);
-        // The previous fit accepted a row only if every unconstrained term
-        // was nonnegative, so these samples fell back to the reference row.
-        assert!(!slope.iter().all(|&r| r >= 0.0));
-        let row = fit_row(0, empty, low, high, one, slope).unwrap();
-        close(row.a, 7.0);
-        let run = row.r.online.unwrap();
-        let fitted = row.e.online.unwrap();
-        for (i, &expected) in element.iter().enumerate() {
-            let bytes = ONLINE_WORKING_SETS[i] as f64;
-            close(run[i].1, slope[i].max(0.0));
-            close(fitted[i].1, expected);
-            close(row.e.at(bytes), expected);
-            assert!(row.e.at(bytes) > 2.0 * CI_ROWS[0].e.at(bytes));
+    fn row_fit_recovers_every_term_of_an_exact_row() {
+        let (r, e) = ([1.9, 1.5, 0.9], [0.229, 0.424, 0.619]);
+        for inner in 0..2 {
+            let row = fit_row(inner, &exact_walks(inner, 7.0, r, e)).unwrap();
+            close(row.a, 7.0);
+            let fitted = row.r.online.unwrap().into_iter().zip(row.e.online.unwrap());
+            for ((run, element), (&r, &e)) in fitted.zip(r.iter().zip(&e)) {
+                close(run.1, r);
+                close(element.1, e);
+            }
         }
+    }
 
-        let (empty, low, high, one) = contiguous_samples(element, [1.9, 3.0, 4.0]);
-        // A setup below resolution (here -3 ns) fits a = 0.
-        let negative_setup =
-            fit_row(0, empty, low - 10.0, high - 10.0, one, [1.9, 3.0, 4.0]).unwrap();
-        assert_eq!(negative_setup.a, 0.0);
-        assert!(negative_setup.e.online.unwrap().iter().all(|p| p.1 > 0.0));
-        assert!(fit_row(0, empty, low, high, one, [1.9, f64::NAN, 4.0]).is_none());
+    /// Purpose: walks whose two smallest sizes are inverted by interference
+    /// (a 2-element walk slower than the 16-element one, measured on a
+    /// 3-vCPU CI host) still give a physical row, because every walk enters
+    /// the fit; a setup and element term taken from the two smallest walks,
+    /// as before, is the negative control that comes out non-physical.
+    #[test]
+    fn row_fit_uses_every_walk_against_an_inverted_small_pair() {
+        let (empty, low, high) = (274.8, 1969.4, 1602.9);
+        let one = [1937.5, 9125.0, 67343.75];
+        let slope = [78.629, 80.543, 50.360];
+        let elements = [64, 512, 4096];
+        let runs = [32, 128, 128];
+        let many = core::array::from_fn(|i| one[i] + slope[i] * (runs[i] - 1) as f64);
+        let walks = RowWalks {
+            empty,
+            low,
+            high,
+            one,
+            many,
+            runs,
+            elements,
+        };
+        let row = fit_row(1, &walks).unwrap();
+        assert!(row.e.online.unwrap().iter().all(|point| point.1 > 0.0));
+        let two_point_setup = low - empty - (high - low) * (2.0 / 14.0) - slope[0];
+        assert!(one[0] - empty - two_point_setup - slope[0] <= 0.0);
+    }
 
-        let (empty, low, high, one) = contiguous_samples([0.229, -0.01, 0.619], slope);
-        assert!(fit_row(0, empty, low, high, one, slope).is_none());
+    /// Purpose: a setup or per-run term below resolution (negative in the
+    /// free fit) is held at zero and the remaining terms refit on the same
+    /// walks; exact walks are the control that keeps every term.
+    #[test]
+    fn sub_resolution_terms_are_held_at_zero() {
+        let (r, e) = ([1.9, 0.0, 0.9], [0.229, 0.424, 0.619]);
+        let mut walks = exact_walks(0, 7.0, r, e);
+        walks.many[1] -= 50.0;
+        let row = fit_row(0, &walks).unwrap();
+        assert_eq!(row.r.online.unwrap()[1].1, 0.0);
+        let e1 = row.e.online.unwrap()[1].1;
+        assert!((e1 - e[1]).abs() <= 50.0 / walks.elements[1] as f64, "{e1}");
+        close(row.e.online.unwrap()[0].1, e[0]);
+
+        let mut walks = exact_walks(0, 0.0, [1.9, 1.5, 0.9], e);
+        for time in [
+            &mut walks.low,
+            &mut walks.high,
+            &mut walks.one[0],
+            &mut walks.many[0],
+        ] {
+            *time -= 3.0;
+        }
+        let row = fit_row(0, &walks).unwrap();
+        assert_eq!(row.a, 0.0);
+        assert!(row.e.online.unwrap().iter().all(|point| point.1 > 0.0));
+    }
+
+    /// Purpose: a row whose element term is not positive, or whose walks
+    /// are not finite, is unusable.
+    #[test]
+    fn unusable_rows_are_rejected() {
+        let e = [0.229, 0.424, 0.619];
+        let mut walks = exact_walks(0, 7.0, [1.9, 1.5, 0.9], e);
+        walks.one[1] = walks.empty;
+        walks.many[1] = walks.empty;
+        assert!(fit_row(0, &walks).is_none());
+        let mut walks = exact_walks(0, 7.0, [1.9, 1.5, 0.9], e);
+        walks.many[2] = f64::NAN;
+        assert!(fit_row(0, &walks).is_none());
     }
 
     /// Purpose: a bandwidth ladder measured on a fixture smaller than the
@@ -2561,14 +2793,15 @@ mod tests {
         );
     }
 
-    /// Purpose: a failed attempt is retained as uncalibrated and not
-    /// repeated, and trimming enables a new attempt.
+    /// Purpose: a failed calibration is retried at later regions, at most
+    /// [`CALIBRATION_ATTEMPTS`] times per entry, then stays uncalibrated;
+    /// trimming enables new attempts.
     #[test]
     fn failed_calibration_is_retained_until_trim() {
         let mut engine =
             tenferro_cpu::CpuEngine::new(tenferro_cpu::Pool::builder().threads(2).build().unwrap());
         let calls = Cell::new(0);
-        for _ in 0..2 {
+        for _ in 0..CALIBRATION_ATTEMPTS + 2 {
             region_with(
                 &mut engine,
                 |_, _| {
@@ -2579,7 +2812,7 @@ mod tests {
             )
             .unwrap();
         }
-        assert_eq!(calls.get(), 1);
+        assert_eq!(calls.get(), CALIBRATION_ATTEMPTS);
         symtn_dense::engine_slot::clear(&mut engine);
         region_with(
             &mut engine,
@@ -2590,7 +2823,7 @@ mod tests {
             |_, constants| assert!(constants.is_some()),
         )
         .unwrap();
-        assert_eq!(calls.get(), 2);
+        assert_eq!(calls.get(), CALIBRATION_ATTEMPTS + 1);
     }
 
     /// Purpose: every bandwidth width has its D_item measured (the ladder is
