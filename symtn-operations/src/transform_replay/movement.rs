@@ -735,7 +735,7 @@ fn width_with<F: Fn(usize, usize, &Prices<'_>) -> f64>(
     if budget.min(jobs) <= 1 {
         return 1;
     }
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     crate::probe::add(crate::probe::Event::MovementModelEvaluation, 1);
     let bytes = bytes as f64;
     let working_set = working_set as f64 * bytes;
@@ -1037,8 +1037,10 @@ fn measure_row(
 /// linearly independent because the runs take two values (1 and
 /// `runs[0] > 1`) and the one-run elements three. Each further working set's
 /// `r`, `e` are then fit on its two walks (one run and `runs[i] > 1` runs of
-/// the same elements), which determine them exactly given `a`; this is the
-/// joint least-squares solution, since those terms appear in no other walk.
+/// the same elements) given `a`; this is the joint least-squares solution,
+/// since those terms appear in no other walk. The two walks determine the
+/// terms exactly when the per-run term is non-negative; otherwise it is held
+/// at zero and `e` is their least-squares fit, leaving opposite residuals.
 ///
 /// The physical row has `a >= 0`, `r >= 0` and `e > 0`. A negative setup or
 /// per-run term means that term is below the measurement's resolution (a
@@ -1208,10 +1210,9 @@ fn dispatch_ladder(budget: usize) -> impl Iterator<Item = usize> {
         .chain([budget])
 }
 
-/// The widths whose B(q) is measured: the powers of two of
-/// [`dispatch_ladder`], then the budget, so each point's D_item(q) is
-/// measured by construction. The model reads widths between them by linear
-/// interpolation in q.
+/// The widths whose B(q) is measured: the powers of two among the chooser's
+/// candidate widths ([`dispatch_ladder`]), then the budget. The model reads
+/// widths between them by linear interpolation in q.
 fn bandwidth_ladder(budget: usize) -> impl Iterator<Item = usize> {
     dispatch_ladder(budget).filter(move |&q| q.is_power_of_two() || q == budget)
 }
@@ -1477,8 +1478,11 @@ pub(super) fn install_test_constants(engine: &mut dyn Engine, ns: Option<f64>) {
     symtn_dense::engine_slot::checkin(engine, constants, Constants::retained_bytes);
 }
 
-/// Every row once, with fixed sample counts and no deadline; `false` (the
-/// calibration fails closed) when any point fails.
+/// One calibration attempt, with fixed sample counts and no deadline: D_item,
+/// D_plan, the two element rows, then B(q), each point measured afresh with
+/// at most [`POINT_ATTEMPTS`] tries. The first point that stays unusable
+/// ends the attempt with `false` (the calibration fails closed); the points
+/// after it are not measured.
 fn calibrate(exec: &mut lanes::Exec<'_>, constants: &mut Constants) -> bool {
     if !measure_item_dispatch(exec, constants) || !measure_plan_dispatch(exec, constants) {
         return false;
@@ -2964,20 +2968,15 @@ mod tests {
         assert_eq!(calls.get(), CALIBRATION_ATTEMPTS + 1);
     }
 
-    /// Purpose: every bandwidth width has its D_item measured (the ladder is
-    /// a subset of the dispatch ladder) and the budget is always measured;
-    /// a width outside the dispatch ladder (128 of 192 slots) is the control
-    /// the bandwidth ladder skips.
+    /// Purpose: the bandwidth knots ascend and end at the budget, so linear
+    /// interpolation in q covers every width the chooser reads.
     #[test]
-    fn bandwidth_widths_are_dispatch_widths() {
+    fn bandwidth_knots_ascend_to_the_budget() {
         for budget in [2, 3, 8, 24, 96, 97, 192, 256] {
-            let dispatch: Vec<_> = dispatch_ladder(budget).collect();
             let bandwidth: Vec<_> = bandwidth_ladder(budget).collect();
-            assert!(bandwidth.iter().all(|q| dispatch.contains(q)), "p={budget}");
+            assert!(bandwidth.windows(2).all(|w| w[0] < w[1]), "p={budget}");
             assert_eq!(bandwidth.last(), Some(&budget), "p={budget}");
         }
-        assert!(!dispatch_ladder(192).any(|q| q == 128));
-        assert!(!bandwidth_ladder(192).any(|q| q == 128));
     }
 
     /// Purpose: every leaf share a candidate split gives (the shares whose

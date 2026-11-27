@@ -529,8 +529,8 @@ extension store and fetched once per operation, before preparing all its
 movement decisions. Reference entry creation and completed online updates
 receive fresh process-wide generations, so a workspace cannot reuse widths
 from a different engine entry or an evicted entry's replacement.
-Online measurement runs to completion: fixed sample counts, no deadline, and
-no row filled from another row. Every fixed-workload timing takes the minimum
+Online measurement has no deadline: fixed sample counts, bounded attempts
+(below), and no row filled from another row. Every fixed-workload timing takes the minimum
 of its samples: the workload is the same in every sample and interference
 (preemption, a parked worker's wake-up) only adds time, so the minimum is the
 least-biased estimate of the workload's own cost, while a median can be a
@@ -549,14 +549,17 @@ scheduler quantum. It measures, in order:
   sections, which takes millions of elements on a 96-slot pool, and the
   section is the same call.
 - The two element rows (contiguous and strided), through the real replay
-  writer on shared buffers, each walk the minimum of five samples. A row is
-  fit by least squares over all its walks, t = a + r[W] runs + e[W]
-  elements less the fixture's empty-walk overhead: the setup and the first
-  working set's terms from that set's four walks (one run of 2, 16 and n0
-  elements, and 128 or 32 runs of n0), whose (1, runs, elements) columns are
-  independent because the runs take two values and the one-run elements
-  three; each further working set's terms from its one-run and many-run
-  walks, which determine them exactly given the setup.
+  writer on shared buffers, each walk the minimum of five samples after one
+  untimed warm-up walk. A row is fit by least squares over all its walks,
+  t = a + r[W] runs + e[W] elements less the fixture's empty-walk overhead:
+  the setup and the first working set's terms from that set's four walks
+  (one run of 2, 16 and n0 elements, and 128 or 32 runs of n0), whose
+  (1, runs, elements) columns are independent because the runs take two
+  values and the one-run elements three; each further working set's terms
+  from its one-run and many-run walks given the setup. Those two walks
+  determine the set's terms exactly when its per-run term comes out
+  non-negative; otherwise that term is held at zero and the element term is
+  their least-squares fit, which leaves opposite residuals on the two walks.
 - B(q) at the powers of two among those candidate widths, and p: q serial
   copy leaves of the item phases' tree split over the whole token on the row
   buffers (about 8 MiB of traffic), each leaf timing its own copy, so B(q) is
@@ -564,10 +567,13 @@ scheduler quantum. It measures, in order:
   the minimum of that time over three sections. The model reads widths
   between these points by linear interpolation in q.
 
-A point is unusable when a fixture cannot be built, the lane runner refuses
-its supply, a timing is not a positive finite time, or an element row stays
+A point (one D_item or D_plan width, one whole element row, one B(q) width)
+is unusable when a fixture cannot be built, the lane runner refuses its
+supply, a timing is not a positive finite time, or an element row stays
 non-physical after the rule below. An unusable point is measured again, at
-most three attempts per point; only then does the calibration fail. A failed
+most three attempts per point; only then does the calibration attempt fail,
+and it stops there: the points after it in the order above are not
+measured in that attempt. A failed
 calibration is retried at a later movement region, at most three
 calibrations per retained entry in all (each one calibration's time, below),
 after which the entry stays uncalibrated until eviction, `scratch::trim` or
@@ -609,12 +615,15 @@ below the smaller of the largest knee of the phase's active classes and the
 measured bandwidth fixture's working set: a mixed phase uses the memory cap
 only after every active curve has reached its plateau, unless a measured
 fixture already bounds its bandwidth. The knees are
-computed once per retained constants entry. Compiled counts supply the phase's
+recomputed from the rows after every calibration attempt, failed ones
+included (a failed entry's constants are not read: it fails closed). Compiled counts supply the phase's
 class weights directly, including member and cold-fill element counts, without
 extra cost preparations or allocations.
 
-Each calibration attempt measures every ladder knot (and every other row)
-afresh, and an entry makes at most three attempts. Measurements below the
+Each calibration attempt restarts measurement from the first point, and an
+entry makes at most three attempts; an attempt that completes has measured
+every ladder knot and every row afresh, while one that fails stops at its
+failing point. Measurements below the
 fixture's single-thread memory rate or below the previous accepted knot are
 rejected before linear interpolation in q within the same row. Missing widths
 use the nearest accepted endpoint outside the measured range; no accepted

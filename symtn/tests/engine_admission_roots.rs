@@ -11,6 +11,7 @@ use symtn::sector::U1FusionRule;
 use symtn::typed::{ContractSpec, CpuEngine, GradedSpace, Runtime, TensorMap};
 use symtn_operations::host_pool::eager_test_engine;
 use tenferro_cpu::threadteam::ledger;
+use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 use crate::legs::u1_leg;
 
@@ -39,20 +40,30 @@ fn roots_of<R>(engine: &mut CpuEngine, op: impl FnOnce(&mut CpuEngine) -> R) -> 
 /// Runs of a forking op [`forks`] allows before failing.
 const FORK_ATTEMPTS: usize = 100;
 
-/// Whether `op` forks on `engine`: each run must create exactly one root
-/// (`what` names the op), and some run within [`FORK_ATTEMPTS`] must have
-/// more than one task of that root live at once.
+/// Whether `op` forks on `engine` under the forced `Outer` policy: each run
+/// must create exactly one root (`what` names the op), and some run within
+/// [`FORK_ATTEMPTS`] must have more than one task of that root live at once.
+/// The engine's policy is restored afterwards.
+///
+/// Why forced: movement calibration runs only in an `Auto` region, and its
+/// dispatch measurements fork on the region's root, so under `Auto` a
+/// pending calibration could supply the live tasks while the op itself ran
+/// serially. A forced policy takes its widths from the policy, not the
+/// model, so no calibration runs and only the op's own sections can fork.
 ///
 /// Why repeat: `max_live` counts tasks live at the same instant, so a fork
 /// whose tasks the OS runs back to back (the other tests' teams share these
 /// CPUs) reads 1 on that run, while a path that never forks reads 1 on every
 /// run, however many there are.
 fn forks<R>(engine: &mut CpuEngine, what: &str, mut op: impl FnMut(&mut CpuEngine) -> R) -> bool {
-    (0..FORK_ATTEMPTS).any(|_| {
+    let auto = engine.set_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
+    let forked = (0..FORK_ATTEMPTS).any(|_| {
         let roots = roots_of(engine, &mut op);
         assert_eq!(roots.len(), 1, "one root for {what}");
         ledger::max_live(roots[0]) > 1
-    })
+    });
+    engine.set_batch_policy(auto);
+    forked
 }
 
 macro_rules! no_decision_ops_create_no_root {
@@ -71,9 +82,6 @@ macro_rules! no_decision_ops_create_no_root {
             let zero = <$d>::from(0.0);
 
             let mut engine = team_engine();
-            // Finish movement calibration before observing roots, so its
-            // probes cannot stand in for the permute's own fork below.
-            x.permute(&mut engine, &[2, 0], &[1]).unwrap();
             let cases: [(&str, Vec<u64>); 7] = [
                 (
                     "axpby_into",
@@ -146,8 +154,12 @@ fn forking_contraction_creates_one_root() {
     assert!(out.subblock_count() > 1, "a multi-block product");
 
     let mut engine = team_engine();
-    x.permute(&mut engine, &[1], &[0]).unwrap();
     for beta in [0.0, 1.0] {
+        let roots = roots_of(&mut engine, |e| {
+            x.planar_contract_into(e, &y, &COMPOSE, &mut out, 1.0, beta)
+                .unwrap()
+        });
+        assert_eq!(roots.len(), 1, "one root at beta = {beta}");
         let what = format!("the contraction at beta = {beta}");
         assert!(
             forks(&mut engine, &what, |e| {

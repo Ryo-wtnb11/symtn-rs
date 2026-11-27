@@ -792,10 +792,10 @@ fn calibrated_constants_evaluate_the_width_model() {
             symtn_dense::engine_slot::clear(&mut engine);
             super::super::movement::install_test_constants(&mut engine, None);
         }
-        crate::probe::take_movement_model_evaluations();
+        crate::probe::take(crate::probe::Event::MovementModelEvaluation);
         recorded(&mut engine, &transform, &dst, &src);
         assert_eq!(
-            crate::probe::take_movement_model_evaluations() > 0,
+            crate::probe::take(crate::probe::Event::MovementModelEvaluation) > 0,
             calibrated,
             "calibrated: {calibrated}"
         );

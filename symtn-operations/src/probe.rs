@@ -2,8 +2,8 @@
 //! [`Event`] counts, consumed through [`take`], plus the armed write
 //! bitmaps of the owned writers.
 //!
-//! The ledger exists under the `testing` feature because symtn-tensors tests
-//! read the two public takers; the bitmaps are this crate's own tests.
+//! The ledger exists under the `testing` feature because symtn-tensors and
+//! symtn tests read its public takers; the bitmaps are this crate's own tests.
 //! Process-global observation (`host_pool`'s pool observations) is not a
 //! probe and stays with its owner.
 
@@ -21,6 +21,7 @@ pub(crate) enum Event {
     /// because the layout was not proved to tile its storage.
     OwnedPrefillElement,
     /// A movement phase evaluated the width model.
+    #[cfg(test)]
     MovementModelEvaluation,
     /// A replay built its movement decisions (a decision-memo miss).
     MovementDecisionBuild,
@@ -89,12 +90,6 @@ pub fn take_checked_block_passes() -> CheckedBlockPasses {
 #[doc(hidden)]
 pub fn take_owned_block_prefills() -> usize {
     take(Event::OwnedPrefillElement)
-}
-
-/// Returns and resets this thread's movement width model evaluation count.
-#[doc(hidden)]
-pub fn take_movement_model_evaluations() -> usize {
-    take(Event::MovementModelEvaluation)
 }
 
 /// Returns and resets this thread's count of movement decision builds (memo
