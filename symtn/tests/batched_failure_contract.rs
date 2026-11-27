@@ -11,13 +11,13 @@ use crate::prepared;
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
 
-use symtn::expert::{
-    DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
-    DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite, MatrixOp,
-};
 use symtn::sector::U1FusionRule;
 use symtn::typed::{
     ComposePlan, ContractPlan, ContractSpec, Error, Runtime, StackedTensorMap, TensorMap,
+};
+use symtn_dense::{
+    DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
+    DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite, MatrixOp,
 };
 
 use prepared::{members, u1_legs};

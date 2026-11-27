@@ -48,8 +48,7 @@
 //! - [`sector`]: the symmetry contract — the built-in fusion rules and their
 //!   labels, category adapters and codecs, and the sealed capability bounds
 //!   used by generic tensor code;
-//! - [`expert`]: storage, block views, the dense executor seam and cache
-//!   observability;
+//! - [`expert`]: storage, block views and transfer observability;
 //! - `krylov` (feature `krylov`): the [krylov](https://docs.rs/krylov)
 //!   crate re-exported, with Host [`typed::TensorMap`] as its vector type
 //!   and the caller's [`typed::ExecContext`] as its execution context.

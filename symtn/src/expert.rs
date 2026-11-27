@@ -2,8 +2,8 @@
 //! rather than what it is mathematically.
 //!
 //! This is the one module for representation queries, block views, storage
-//! and placement, the injectable dense executor, and process-wide transfer
-//! observability; structure caches are controlled through [`crate::cache`].
+//! and placement, and process-wide transfer observability; structure caches
+//! are controlled through [`crate::cache`].
 //! Every tensor operation has its single public path on
 //! [`crate::typed::TensorMap`]; nothing here is a second path to one.
 //! [`crate::typed::TensorMap::diagview`] is the user-layer reader of a
@@ -15,21 +15,11 @@ pub use symtn_core::{
     BlockLayout, BlockRef, BlockView, HostReadableStorage, Placement, SectorLeg,
     SectorLegConstructionError, TensorStorage,
 };
+/// The dense-kernel failure carried by `OperationError::Dense`.
+pub use symtn_dense::DenseError;
 /// Per-thread CUDA boundary counters.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{cuda_transfer_stats, reset_cuda_transfer_stats, CudaTransferStats};
-/// The device context one CUDA operation borrows the caller's engine
-/// through, and the device buffer inside a `CudaStorage`.
-#[cfg(feature = "cuda")]
-pub use symtn_dense::{CudaDenseContext, CudaDenseStorage};
-/// The dense executor seam and the types its methods exchange; every
-/// numerical method takes the caller's engine.
-pub use symtn_dense::{
-    DefaultDenseExecutor, DenseBackend, DenseDType, DenseDotConfig, DenseError, DenseExecutor,
-    DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned, DenseRead,
-    DenseScalar, DenseTensor, DenseView, DenseViewMut, DenseWrite, FactorDest, FactorFailure,
-    FactorPlacement, MatrixOp,
-};
 /// The tree-transform descriptor carried by `OperationError` variants.
 pub use symtn_tensors::{TreeTransformOperation, TreeTransformOperationKind};
 

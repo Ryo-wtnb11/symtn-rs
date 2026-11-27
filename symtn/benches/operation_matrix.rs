@@ -21,10 +21,7 @@ use symtn::typed::{
 };
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::expert::DefaultDenseExecutor;
 use symtn::expert::{BlockRef, SectorLeg};
-use symtn::expert::{DenseExecutor, DenseGemmBatchJob, MatrixOp};
-use symtn::expert::{DenseView, DenseViewMut};
 use symtn::sector::SectorId;
 use symtn::sector::{
     BraidingStyleKind, CheckedGenericFusion, FusionRule, FusionStyleKind, RuleIdentity, SectorVec,
@@ -33,6 +30,9 @@ use symtn::typed::FactorScalar;
 use symtn::typed::FusionTreeKey;
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace};
 use symtn_dense::strided_batch_runs;
+use symtn_dense::DefaultDenseExecutor;
+use symtn_dense::{DenseExecutor, DenseGemmBatchJob, MatrixOp};
+use symtn_dense::{DenseView, DenseViewMut};
 use symtn_matrixalgebra::seam::{
     factor, op, CheckedGenericFactorPlanError, EigFullDyn, FactorSource, SvdFactorsDyn,
 };
@@ -251,7 +251,7 @@ fn benchmark_engine(threads: usize) -> Result<CpuEngine, Box<dyn std::error::Err
     })
 }
 
-fn benchmark_dense_executor() -> Result<DefaultDenseExecutor, symtn::expert::DenseError> {
+fn benchmark_dense_executor() -> Result<DefaultDenseExecutor, symtn_dense::DenseError> {
     Ok(DefaultDenseExecutor::new())
 }
 
@@ -448,7 +448,7 @@ fn execute_adapter<T: OrientedScalar>(
     rhs_op: MatrixOp,
     alpha: T,
     beta: T,
-) -> Result<(T, usize), symtn::expert::DenseError> {
+) -> Result<(T, usize), symtn_dense::DenseError> {
     let lhs_shape = [fixture.lhs.len() - fixture.lhs_base];
     let rhs_shape = [fixture.rhs.len() - fixture.rhs_base];
     let dst_shape = [fixture.output.len() - fixture.dst_base];
@@ -499,8 +499,8 @@ fn bench_adapter<T: OrientedScalar>(
     form: &str,
     min_time: Duration,
     expected_marker: (T, usize),
-    mut operation: impl FnMut() -> Result<(T, usize), symtn::expert::DenseError>,
-) -> Result<(), symtn::expert::DenseError> {
+    mut operation: impl FnMut() -> Result<(T, usize), symtn_dense::DenseError>,
+) -> Result<(), symtn_dense::DenseError> {
     let started = Instant::now();
     let (marker, allocations) = measure_allocations(&mut operation)?;
     let elapsed = started.elapsed();
@@ -540,8 +540,8 @@ fn bench_adapter_shape<T: OrientedScalar>(
     form: &str,
     min_time: Duration,
     expected: &[(T, usize)],
-    mut operation: impl FnMut() -> Result<(usize, T, usize), symtn::expert::DenseError>,
-) -> Result<(), symtn::expert::DenseError> {
+    mut operation: impl FnMut() -> Result<(usize, T, usize), symtn_dense::DenseError>,
+) -> Result<(), symtn_dense::DenseError> {
     for _ in 0..expected.len() {
         let (case, first, len) = operation()?;
         assert_oriented_close(&[first], &[expected[case].0]);
@@ -557,7 +557,7 @@ fn bench_adapter_shape<T: OrientedScalar>(
                 iterations += 1;
             }
         }
-        Ok::<_, symtn::expert::DenseError>(marker.expect("shape cycle is nonempty"))
+        Ok::<_, symtn_dense::DenseError>(marker.expect("shape cycle is nonempty"))
     })?;
     let elapsed = started.elapsed();
     assert_eq!(iterations % expected.len() as u64, 0);

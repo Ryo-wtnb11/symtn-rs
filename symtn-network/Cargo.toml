@@ -37,6 +37,8 @@ lru = "0.12"
 [dev-dependencies]
 # Native test providers implement the provider seal through `testing`.
 symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"] }
+# The CUDA bench warms a fresh engine through the dense adapter.
+symtn-dense = { version = "0.1.1", path = "../symtn-dense", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", optional = true }

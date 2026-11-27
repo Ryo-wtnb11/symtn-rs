@@ -9,7 +9,7 @@ use symtn::typed::Side;
 #[cfg(feature = "cgc-gen")]
 use symtn::typed::{Lq, Qr};
 
-use symtn::expert::DenseBackend;
+use symtn_dense::DenseBackend;
 
 fn structure_cache_info(
     kind: symtn::cache::StructureCacheKind,
@@ -19,10 +19,6 @@ fn structure_cache_info(
         .find(|info| info.kind() == kind)
         .unwrap()
 }
-use symtn::expert::{
-    DefaultDenseExecutor, DenseDotConfig, DenseError, DenseExecutor, DenseGemmBatchJob, DenseRead,
-    DenseScalar, DenseTensor, DenseWrite, MatrixOp,
-};
 use symtn::sector::SectorId;
 use symtn::sector::{
     BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion,
@@ -38,6 +34,10 @@ use symtn::typed::{
     TensorMap, Truncation,
 };
 use symtn::typed::{Complex32, Complex64, GenericTensorError, Runtime, SectorSpectrum};
+use symtn_dense::{
+    DefaultDenseExecutor, DenseDotConfig, DenseError, DenseExecutor, DenseGemmBatchJob, DenseRead,
+    DenseScalar, DenseTensor, DenseWrite, MatrixOp,
+};
 
 /// Orders process-global cache clears against provider-query and cache-count
 /// windows: a test that clears holds the write side for its whole

@@ -9,8 +9,8 @@ use crate::prepared;
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
 use std::hint::black_box;
-use symtn::expert::{DefaultDenseExecutor, DenseExecutor, DenseRead, DenseView};
 use symtn::typed::{EighFullPlan, HermitianTol, Runtime, StackedTensorMap};
+use symtn_dense::{DefaultDenseExecutor, DenseExecutor, DenseRead, DenseView};
 
 use prepared::eigh::hermitian_members;
 use prepared::u1_legs;
