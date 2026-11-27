@@ -115,7 +115,7 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
 
     let dual_leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 0]), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual_sector = dual_leg.sectors().unwrap().remove(0);
     let dual: TensorMap<_, f64> = TensorMap::diagonal(
@@ -162,7 +162,7 @@ fn checked_dual_diagonal_qr_lq_skips_materialization_and_dense_qr() {
         [(su_irrep(&[1, 0]), 3), (su_irrep(&[0, 0]), 2)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let sectors = leg.sectors().unwrap();
     assert!(!sectors.contains(&su_irrep(&[1, 0])));
@@ -842,7 +842,7 @@ fn checked_compact_diagonal_inv_exp_solve_stay_compact() {
 
     // A dual bond: the scaled leg's charge is the dual of the stored sector
     // label, so a mis-keyed scaling would disagree with the LU oracle.
-    let dual = bond.try_dual().unwrap();
+    let dual = bond.dual().unwrap();
     let dual_spectrum = [
         SectorSpectrum {
             sector: su_irrep(&[0, 0]),

@@ -204,7 +204,7 @@ where
             || {
                 let raw_domain = domain
                     .iter()
-                    .map(GradedSpace::try_dual)
+                    .map(GradedSpace::dual)
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(FusionTreeHomSpace::new(
                     FusionProductSpace::new(

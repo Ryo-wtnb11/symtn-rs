@@ -16,7 +16,7 @@ fn u1_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<symtn::sector::U1
         ],
     )
     .unwrap();
-    // Built through `try_dual` because the dual flips the sector labels too.
+    // Built through `dual` because the dual flips the sector labels too.
     let typed_q = GradedSpace::try_new(
         Arc::clone(&rule),
         [
@@ -25,7 +25,7 @@ fn u1_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<symtn::sector::U1
         ],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     counter_oracle(runtime, (&typed_p, &typed_q), first_value)
 }
@@ -59,7 +59,7 @@ fn u1_fz2_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<U1Fz2Rule, f6
         [(label(-1, 1), 1), (label(0, 0), 2), (label(1, 1), 1)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     counter_oracle(runtime, (&typed_p, &typed_q), first_value)
 }
@@ -689,7 +689,7 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
             (label(symtn::sector::FermionParityIrrep::EVEN, 0), 2),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
 
     // A distinct value per element, so multiple blocks are exercised

@@ -227,7 +227,7 @@ macro_rules! multiplicity_free {
         let rt = $rt;
         let lift = $lift;
         let v = su2_leg();
-        let vd = v.try_dual().unwrap();
+        let vd = v.dual().unwrap();
         let host =
             TensorMap::<_, $d>::rand_with_seed($engine, rt, [&v, &vd], [&v, &vd], 3).unwrap();
         let t = lift(&mut *$ops, &host);
@@ -309,7 +309,7 @@ fn checked_generic_axis_errors_are_the_multiplicity_free_facade_errors() {
         ],
     )
     .unwrap();
-    let vd = v.try_dual().unwrap();
+    let vd = v.dual().unwrap();
     fn facade<E: std::fmt::Debug>(error: GenericTensorError<E>) -> Error {
         match error {
             GenericTensorError::Facade(error) => error,

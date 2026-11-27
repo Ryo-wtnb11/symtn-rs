@@ -212,7 +212,7 @@ fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
     let equal_leg =
         GradedSpace::try_new(Arc::clone(&equal_identity), [(su_irrep(&[1, 1]), 2)]).unwrap();
     let dual_leg = GradedSpace::try_new(Arc::clone(&equal_identity), [(su_irrep(&[1, 1]), 2)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let wrong_leg =
         GradedSpace::try_new(Arc::clone(&wrong_identity), [(su_irrep(&[1, 0, 1]), 2)]).unwrap();

@@ -103,7 +103,7 @@ macro_rules! assert_output_axes_cost {
             $sectors.into_iter().map(|s| (s, 3)),
         )
         .unwrap();
-        for w in [v.clone(), v.try_dual().unwrap()] {
+        for w in [v.clone(), v.dual().unwrap()] {
             let a = TensorMap::<_, f64>::rand_with_seed($engine, &runtime, [&v, &v], [&w, &w], 1)
                 .unwrap();
             let b =

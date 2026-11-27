@@ -1648,7 +1648,7 @@ mod tests {
         .unwrap();
         let w =
             GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
-        let v_dual = v.try_dual().unwrap();
+        let v_dual = v.dual().unwrap();
         let x = GradedSpace::try_new(
             Arc::clone(&provider),
             [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
@@ -1661,7 +1661,7 @@ mod tests {
             [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
         )
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
         let x_flag = GradedSpace::try_new(
             Arc::clone(&provider),
@@ -1671,7 +1671,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let x_dual = x.try_dual().unwrap();
+        let x_dual = x.dual().unwrap();
         // Oracle: the dualise-and-compare the preflight replaced.
         assert!(x_degeneracy != x_dual && x_flag != x_dual);
         assert_eq!(x_degeneracy.dim().unwrap(), x_dual.dim().unwrap());

@@ -138,7 +138,7 @@ where
 {
     let runtime = Runtime::new();
     let (v, w) = spaces(n);
-    let vd = v.try_dual().unwrap();
+    let vd = v.dual().unwrap();
     let mixed =
         TensorMap::<_, D>::rand_with_seed(engine, &runtime, [&v, &w, &v], [&v, &w], 11).unwrap();
     let mixed_len = mixed.dense_data().unwrap().len();

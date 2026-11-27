@@ -34,7 +34,7 @@ fn fermionic_compose_pair(
 ) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fermionic_leg_with(&[1, 2]);
-    let leg_dual = leg.try_dual().unwrap();
+    let leg_dual = leg.dual().unwrap();
     let typed_a = TensorMap::from_subblock_fn(
         engine,
         runtime,
@@ -81,7 +81,7 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
     let (typed_a, typed_b) = fermionic_compose_pair(&runtime);
 
     let leg = fermionic_leg_with(&[1, 2]);
-    let leg_dual = leg.try_dual().unwrap();
+    let leg_dual = leg.dual().unwrap();
     let twisted_b = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -258,7 +258,7 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
             (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let dual_endo =
         TensorMap::from_subblock_fn(engine, &runtime, [&wide_leg], [&wide_leg], typed_fill_value)

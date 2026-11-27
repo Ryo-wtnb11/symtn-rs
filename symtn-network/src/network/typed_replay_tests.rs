@@ -52,9 +52,9 @@ where
     let b = make_space(b_dim);
     let d = make_space(d_dim);
     let e = make_space(e_dim);
-    let a_dual = a.try_dual().unwrap();
-    let f_dual = f.try_dual().unwrap();
-    let e_dual = e.try_dual().unwrap();
+    let a_dual = a.dual().unwrap();
+    let f_dual = f.dual().unwrap();
+    let e_dual = e.dual().unwrap();
     let x = TensorMap::from_subblock_fn(engine, runtime, [&a, &f], [&c], |_, ijk| {
         value(
             1.0 + bias + ijk[0] as f64 + 2.0 * ijk[1] as f64 + 3.0 * ijk[2] as f64,
@@ -1444,7 +1444,7 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
         GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(2).unwrap(), 2)]).unwrap();
     let u1_x1 = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(-1).unwrap(), 1)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let u1_y = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(1).unwrap(), 3)]).unwrap();
     let u1_z0 =
@@ -1477,7 +1477,7 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
         )],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let product_y = GradedSpace::try_new(
         Arc::clone(&product_rule),
@@ -1755,7 +1755,7 @@ fn typed_crossed_schedule_reuses_the_actual_first_step_destination() {
     let bond = space(&provider, 8);
     let right = space(&provider, 10);
     let tail = space(&provider, 11);
-    let left_dual = left.try_dual().unwrap();
+    let left_dual = left.dual().unwrap();
     let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&left], [&bond], 1)
         .unwrap();
     let b = TensorMap::rand_with_seed(engine, &runtime, [&bond], [&right], 2).unwrap();
@@ -1892,7 +1892,7 @@ fn typed_crossed_schedule_reuses_the_actual_first_step_destination() {
     let wide_c = TensorMap::rand_with_seed(
         engine,
         &runtime,
-        [&wide_left.try_dual().unwrap()],
+        [&wide_left.dual().unwrap()],
         [&other_tail],
         7,
     )
@@ -1920,7 +1920,7 @@ fn typed_crossed_schedule_reuses_the_actual_first_step_destination() {
     let foreign_c = TensorMap::rand_with_seed(
         engine,
         &other_runtime,
-        [&other_left.try_dual().unwrap()],
+        [&other_left.dual().unwrap()],
         [&other_tail],
         11,
     )
@@ -1988,8 +1988,8 @@ fn typed_replay_restores_buffers_after_injected_failures() {
     let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&left], [&bond], 11)
         .unwrap();
     let b = TensorMap::rand_with_seed(engine, &runtime, [&bond], [&right], 12).unwrap();
-    let c = TensorMap::rand_with_seed(engine, &runtime, [&left.try_dual().unwrap()], [&tail], 13)
-        .unwrap();
+    let c =
+        TensorMap::rand_with_seed(engine, &runtime, [&left.dual().unwrap()], [&tail], 13).unwrap();
     let refs = [&a, &b, &c];
     let mut planned = crossed_plan();
     let mut workspace = NetworkExecutionWorkspace::default();

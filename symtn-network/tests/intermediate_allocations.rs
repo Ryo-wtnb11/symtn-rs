@@ -37,7 +37,7 @@ fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
     let left =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 5)]).unwrap();
     let right = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 11)]).unwrap();
-    let left_dual = left.try_dual().unwrap();
+    let left_dual = left.dual().unwrap();
     let a = TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -497,7 +497,7 @@ fn temporary_order_fixture(engine: &mut dyn Engine, runtime: &Runtime) -> (Vec<U
         .unwrap()
     };
     let (va, vb, vc, vd, vi, vj) = (space(2), space(3), space(4), space(5), space(3), space(2));
-    let (vb_dual, vc_dual) = (vb.try_dual().unwrap(), vc.try_dual().unwrap());
+    let (vb_dual, vc_dual) = (vb.dual().unwrap(), vc.dual().unwrap());
     let legs: [(U1Legs, U1Legs); 6] = [
         (&[&va, &vb], &[&vi]),
         (&[&vi], &[&vc]),
@@ -978,7 +978,7 @@ where
     let left =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), chi + 1)]).unwrap();
     let right = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), chi + 1)]).unwrap();
-    let left_dual = left.try_dual().unwrap();
+    let left_dual = left.dual().unwrap();
     let tensors: [TypedTensorMap<U1FusionRule, D>; 3] = std::array::from_fn(|index| {
         let (codomain, domain) = match index {
             0 => (&left, &bond),
@@ -1033,7 +1033,7 @@ where
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi)]).unwrap();
     let left = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi + 1)]).unwrap();
     let right = GradedSpace::try_new(provider, [(fundamental(), chi + 1)]).unwrap();
-    let left_dual = left.try_dual().unwrap();
+    let left_dual = left.dual().unwrap();
     let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let (codomain, domain) = match index {
             0 => (&left, &bond),
@@ -1092,7 +1092,7 @@ where
     let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let fundamental = provider.category().irrep(&[1]).unwrap();
     let leg = GradedSpace::try_new(provider, [(fundamental, chi + 1)]).unwrap();
-    let leg_dual = leg.try_dual().unwrap();
+    let leg_dual = leg.dual().unwrap();
     let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let codomain = if index == 2 { &leg_dual } else { &leg };
         TypedTensorMap::rand_with_seed(

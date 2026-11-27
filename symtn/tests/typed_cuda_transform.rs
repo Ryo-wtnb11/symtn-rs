@@ -252,7 +252,7 @@ fn u1_leg(charges: &[(i32, usize)], dual: bool) -> GradedSpace<U1FusionRule> {
     )
     .unwrap();
     if dual {
-        space.try_dual().unwrap()
+        space.dual().unwrap()
     } else {
         space
     }

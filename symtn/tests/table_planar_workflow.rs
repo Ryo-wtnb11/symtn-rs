@@ -127,7 +127,7 @@ where
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
     let tau = GradedSpace::try_new(Arc::new(provider), [(leg, 1)]).unwrap();
-    let dual_tau = tau.try_dual().unwrap();
+    let dual_tau = tau.dual().unwrap();
 
     for (rank, expected) in [2, 3, 4].into_iter().zip(counts) {
         let legs = vec![&tau; rank];
@@ -429,7 +429,7 @@ fn semion_unique_fusion_uses_its_associator() {
     assert_eq!(rule.fusion_style(), FusionStyleKind::Unique);
     let runtime = Runtime::new();
     let s = GradedSpace::try_new(Arc::new(rule), [(TableSector::new(2), 1)]).unwrap();
-    let dual_s = s.try_dual().unwrap();
+    let dual_s = s.dual().unwrap();
     let mut ones = |leg: &GradedSpace<TableRule>| -> TensorMap<TableRule, Complex64> {
         TensorMap::from_subblock_fn(engine, &runtime, [leg, leg, leg], [leg], |_, _| {
             Complex64::new(1.0, 0.0)

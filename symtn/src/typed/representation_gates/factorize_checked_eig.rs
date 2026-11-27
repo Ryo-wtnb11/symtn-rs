@@ -150,7 +150,7 @@ fn checked_compact_diagonal_eigh_vals_reads_stored_real_spectrum() {
 
     let dual_leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 0]), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual_sector = dual_leg.sectors().unwrap().remove(0);
     let dual: TensorMap<_, f32> = TensorMap::diagonal(
@@ -615,7 +615,7 @@ fn checked_compact_diagonal_eig_vals_keeps_ties_and_dual_bond() {
 
     let dual_leg = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 0]), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual_sector = dual_leg.sectors().unwrap().remove(0);
     let dual: TensorMap<_, f64> = TensorMap::diagonal(
@@ -884,7 +884,7 @@ fn checked_compact_diagonal_eigh_full_matches_independent_dense_oracle() {
         [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
     )
     .unwrap();
-    let dual_leg = leg.try_dual().unwrap();
+    let dual_leg = leg.dual().unwrap();
     let dual_sectors = dual_leg.sectors().unwrap();
     macro_rules! check {
         ($engine:ident, $dtype:ty, $from:expr, $tol:expr) => {{
@@ -1212,7 +1212,7 @@ fn checked_compact_diagonal_eig_full_matches_independent_dense_oracle() {
         [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
     )
     .unwrap();
-    let dual_leg = leg.try_dual().unwrap();
+    let dual_leg = leg.dual().unwrap();
     let dual_sectors = dual_leg.sectors().unwrap();
     macro_rules! check {
         ($engine:ident, $dtype:ty, $eig:ty, $from:expr, $complex:expr, $tol:expr) => {{

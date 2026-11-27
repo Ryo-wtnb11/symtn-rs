@@ -4,7 +4,7 @@ use super::*;
 // TensorKit's real-input
 // branches (`real(t) = t`, `imag(t) = zerovector(t)` for a real scalartype)
 // are statically unrepresentable here: these methods exist on the `Complex64`
-// impl only, and `to_c64().re()` covers the round trip.
+// impl only, and `to_c64().real()` covers the round trip.
 impl<R> TensorMap<R, num_complex::Complex64> {
     /// The element-wise real part, as an f64 tensor map on the same spaces
     /// (TensorKit `Base.real`: blockwise element-wise, result scalartype
@@ -17,7 +17,7 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     /// # Errors
     ///
     /// The materialization of a lazy adjoint input can fail on the engine.
-    pub fn re(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
+    pub fn real(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
         self.map_parts(cx.engine(), |value| value.re)
     }
 
@@ -30,12 +30,12 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     ///
     /// # Errors
     ///
-    /// As [`Self::re`].
-    pub fn im(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
+    /// As [`Self::real`].
+    pub fn imag(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
         self.map_parts(cx.engine(), |value| value.im)
     }
 
-    /// The shared owned-input route of [`Self::re`] / [`Self::im`].
+    /// The shared owned-input route of [`Self::real`] / [`Self::imag`].
     fn map_parts(
         &self,
         engine: &mut dyn Engine,

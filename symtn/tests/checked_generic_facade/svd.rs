@@ -237,7 +237,7 @@ fn checked_compact_diagonal_svd_preserves_dual_and_changed_roles() {
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let dual_bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -711,7 +711,7 @@ fn sun_checked_generic_compact_factors_and_spectra_on_facade_layouts() {
         [(su_irrep(&[1, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap();
-    let t_dual = t.try_dual().unwrap();
+    let t_dual = t.dual().unwrap();
     let value = |salt: u64| ((salt.wrapping_mul(2_654_435_761) % 1009) as f64) / 1009.0 - 0.5;
     let cases: [(&[&GradedSpace<_>], &[&GradedSpace<_>]); 7] = [
         (&[&leg, &leg], &[&leg]),

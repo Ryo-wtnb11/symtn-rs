@@ -55,7 +55,7 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
         [(0, 1), (1, 2), (2, 1)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
-    (v, w.try_dual().unwrap())
+    (v, w.dual().unwrap())
 }
 
 fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
@@ -69,7 +69,7 @@ fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
         [(1, 1), (2, 2)].map(|(twice, n)| (su2_irrep(twice), n)),
     )
     .unwrap();
-    (v, w.try_dual().unwrap())
+    (v, w.dual().unwrap())
 }
 
 type Fz2U1 = symtn::sector::ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
@@ -114,7 +114,7 @@ fn fz2_u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         ],
     )
     .unwrap();
-    (v, w.try_dual().unwrap())
+    (v, w.dual().unwrap())
 }
 
 /// Space, storage and every stored value of a result, bit for bit.
@@ -408,7 +408,7 @@ fn checked_generic_leg_roles_equal_the_permute_composition() {
     .unwrap();
     let w = GradedSpace::try_new(provider, [(su_irrep(&[1, 0]), 1), (su_irrep(&[1, 1]), 1)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     check_fixture!(
         engine,

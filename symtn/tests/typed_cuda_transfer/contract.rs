@@ -148,7 +148,7 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
             ),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let product_multileg_lhs = TensorMap::from_subblock_fn(
         engine,
@@ -520,7 +520,7 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
         Arc::new(FermionParityFusionRule::new()),
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
         engine,

@@ -80,7 +80,7 @@ macro_rules! check_fixture {
             &format!("{label} independent"),
         );
 
-        let dual = a.try_dual().unwrap();
+        let dual = a.dual().unwrap();
         let (degeneracy, sector) = (leg(1), leg(2));
         for (other, name) in [
             (&dual, "dual"),

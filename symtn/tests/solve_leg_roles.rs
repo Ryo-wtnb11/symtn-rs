@@ -183,7 +183,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
     let v = GradedSpace::try_new(Arc::clone(&su2), [(su2_irrep(1), 2)]).unwrap();
     let w = GradedSpace::try_new(su2, [(su2_irrep(1), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     check!(engine, v, w);
 
@@ -198,7 +198,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
     let v = GradedSpace::try_new(Arc::clone(&fermion), [(sector, 2)]).unwrap();
     let w = GradedSpace::try_new(fermion, [(sector, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     check!(engine, v, w);
 }

@@ -179,7 +179,7 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
             }),
         )
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
         TensorMap::from_subblock_fn(engine, &runtime, [&lw], [&leg], |sectors, indices| {
             10.0 * f64::from(sectors.coupled().is_odd() as u8) + indices[1] as f64

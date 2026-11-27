@@ -210,7 +210,7 @@ fn checked_generic_eig_full_is_complex_and_reconstructs_nonnormal_inputs() {
         .unwrap()
     };
     let nondual_compact = compact_on(engine, &fault_leg);
-    let fault_compact = compact_on(engine, &fault_leg.try_dual().unwrap());
+    let fault_compact = compact_on(engine, &fault_leg.dual().unwrap());
     fault_provider.invalid_style.store(true, Ordering::Relaxed);
     // A nondual bond is its own eigenbasis bond (TensorKit `fuse(V) = V`): `v`
     // and `d` live on the input space, so the provider is never queried and

@@ -428,7 +428,7 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 2), (odd(-1), 1)]).unwrap();
     let wd = GradedSpace::try_new(rule, [(even(0), 2), (odd(1), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let spec = ContractSpec {
         lhs: &[1],

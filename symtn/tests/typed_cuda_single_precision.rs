@@ -1155,7 +1155,7 @@ fn device_fermionic_signs_are_exact_at_every_payload() {
     let provider = Arc::new(FermionParityFusionRule::new());
     let odd =
         || GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)]).unwrap();
-    let odd_dual = || odd().try_dual().unwrap();
+    let odd_dual = || odd().dual().unwrap();
 
     fn run<D: DevicePayload>(
         engine: &mut dyn symtn::typed::Engine,

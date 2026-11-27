@@ -505,7 +505,7 @@ fn su3_adjoint_transforms_with_a_dual_leg_stay_lazy() {
         ],
     )
     .unwrap();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &dual], [&v], |trees, index| {
             value(&format!("{trees:?}"), index)

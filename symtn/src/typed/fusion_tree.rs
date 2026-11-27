@@ -399,7 +399,7 @@ where
                 )
                 .and_then(|space| {
                     if leg.is_dual() {
-                        space.try_dual()
+                        space.dual()
                     } else {
                         Ok(space)
                     }

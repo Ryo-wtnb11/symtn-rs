@@ -10,7 +10,7 @@ fn checked_generic_diagonal_is_compact_canonical_and_provider_owned() {
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2), (Label::Vacuum, 1)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let real = TensorMap::<_, f64>::diagonal(
         engine,
@@ -487,7 +487,7 @@ fn checked_only_provider_roundtrips_through_typed_cuda_without_algebra_dispatch(
     let codomain =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 2)]).unwrap();
     let domain = GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 3)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, indices| {

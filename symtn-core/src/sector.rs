@@ -548,7 +548,7 @@ impl SectorLeg {
         self.try_dual_under(rule, &rule.rule_identity())
     }
 
-    /// [`Self::try_dual`] under `identity`, which must be `rule`'s identity.
+    /// [`Self::dual`] under `identity`, which must be `rule`'s identity.
     pub(crate) fn try_dual_under<R>(
         &self,
         rule: &R,
@@ -570,7 +570,7 @@ impl SectorLeg {
         )
     }
 
-    /// Checked Generic sibling of [`Self::try_dual`] that preserves the
+    /// Checked Generic sibling of [`Self::dual`] that preserves the
     /// provider's concrete error without requiring `CheckedFusionAlgebra`.
     #[doc(hidden)]
     pub fn try_dual_generic<R>(

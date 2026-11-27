@@ -189,7 +189,7 @@ macro_rules! physical_case {
     ($engine:ident, $leg:expr, $what:expr, $dtype:ty, $codomain:expr, $domain:expr, $seed:expr) => {{
         let runtime = host_runtime();
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let what: &str = $what;
         let tensor: TensorMap<_, $dtype> = TensorMap::rand_with_seed(
             $engine,
@@ -407,7 +407,7 @@ macro_rules! fermionic_case {
     ($engine:ident, $dtype:ty, $what:expr, $codomain:expr, $domain:expr, $seed:expr) => {{
         let runtime = host_runtime();
         let leg = fz2_u1_leg!();
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let what: &str = $what;
         let tensor: TensorMap<_, $dtype> = TensorMap::rand_with_seed(
             $engine,
@@ -523,7 +523,7 @@ fn materialize_densifies_a_compact_diagonal() {
     let c = |re: f64, im: f64| Complex64::new(re, im);
     // U(1) sector order is 0, 1, -1. The dual bond carries the dual labels
     // and is listed in the order of the space it dualizes.
-    for (bond, sign) in [(u1_leg(), 1), (u1_leg().try_dual().unwrap(), -1)] {
+    for (bond, sign) in [(u1_leg(), 1), (u1_leg().dual().unwrap(), -1)] {
         let q = |charge: i32| U1Irrep::new(sign * charge).unwrap();
         diagonal_case!(
             engine,
@@ -629,7 +629,7 @@ mod checked_generic {
             // The adjoint irrep 8 (Dynkin [1, 1]) couples 8 ⊗ 8 → 8 with multiplicity 2.
             let a = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 2)]).unwrap();
             let b = GradedSpace::try_new(Arc::clone(&provider), [(su_irrep(&[1, 1]), 3)]).unwrap();
-            let b_dual = b.try_dual().unwrap();
+            let b_dual = b.dual().unwrap();
             let tensor: TensorMap<_, $dtype> = TensorMap::from_subblock_fn(
                 $engine,
                 &runtime,

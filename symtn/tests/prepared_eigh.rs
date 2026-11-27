@@ -794,7 +794,7 @@ fn complex_members_equal_host_eager_and_the_spectral_oracle() {
     // Coupled-sector orders on both sides of 32; a dual non-self-dual U(1)
     // leg and a non-Abelian SU(2) leg.
     let u1 = crate::legs::u1_leg(&[(-1, 4), (0, 31), (1, 33), (2, 48)])
-        .try_dual()
+        .dual()
         .unwrap();
     let su2 = crate::legs::su2_leg(&[(0, 5), (1, 33), (2, 3)]);
     complex_case::<_, Complex64>("dual u1", u1.clone());
@@ -840,7 +840,7 @@ where
 fn complex_members_with_several_trees_per_sector_equal_host_eager() {
     let (su2, _) = su2_legs();
     let (fz2u1, _) = fz2u1_legs();
-    let fz2u1_dual = fz2u1.try_dual().unwrap();
+    let fz2u1_dual = fz2u1.dual().unwrap();
     complex_multi_tree_case::<_, Complex64>("su2", &[&su2, &su2]);
     complex_multi_tree_case::<_, Complex32>("su2", &[&su2, &su2]);
     complex_multi_tree_case::<_, Complex64>("fz2u1", &[&fz2u1, &fz2u1_dual]);

@@ -45,7 +45,7 @@ fn bits(data: &[f64]) -> Vec<u64> {
 macro_rules! source_groups {
     ($engine:ident, $runtime:expr, $leg:expr) => {{
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let mut groups = HashSet::new();
         TensorMap::<_, f64>::from_subblock_fn(
             $engine,
@@ -68,7 +68,7 @@ macro_rules! source_groups {
 macro_rules! tensor {
     ($engine:ident, $runtime:expr, $leg:expr) => {{
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         TensorMap::<_, f64>::rand_with_seed($engine, $runtime, [leg, &dual], [leg, &dual], 17)
             .unwrap()
     }};
@@ -455,7 +455,7 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
     )
     .unwrap();
     let fib_tensor = |engine: &mut dyn Engine, runtime: &Runtime| {
-        let dual = fib.try_dual().unwrap();
+        let dual = fib.dual().unwrap();
         TensorMap::<_, Complex64>::rand_with_seed(engine, runtime, [&fib, &dual], [&fib, &dual], 5)
             .unwrap()
     };

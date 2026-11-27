@@ -463,7 +463,7 @@ fn u1_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
         ],
     )
     .unwrap();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let label = |q: &U1Irrep| f64::from(q.charge());
     let real = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
         engine,
@@ -589,7 +589,7 @@ fn su2_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
     let w = su2_space([2, 1, 1]);
-    let dual = w.try_dual().unwrap();
+    let dual = w.dual().unwrap();
     let label =
         |j: &symtn_core::LieIrrep| usize::try_from(j.dynkin().next().unwrap()).unwrap() as f64;
     let real = TensorMap::<Su2Rule, f64>::from_subblock_fn(

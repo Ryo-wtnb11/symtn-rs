@@ -526,8 +526,8 @@ fn device_qr_compact_matches_the_host_at_every_payload() {
         all_payloads(engine, cuda, &runtime, codomain, domain);
     }
     // Dual legs: the coupled sectors are the duals of the nondual case.
-    let dual_square = square.try_dual().unwrap();
-    let dual_tall = tall.try_dual().unwrap();
+    let dual_square = square.dual().unwrap();
+    let dual_tall = tall.dual().unwrap();
     all_payloads(engine, cuda, &runtime, &dual_tall, &dual_square);
     // SU(2): several quantum dimensions. fZ2 x U(1) x SU(2): fermionic signs
     // and non-Abelian recoupling in one provider.
@@ -627,7 +627,7 @@ fn device_qr_compact_obeys_its_laws_on_rank_deficient_and_dual_multileg_blocks()
         assert_device_qr_laws(engine, cuda, &rank_one, "rank-one qr");
 
         let small = u1_leg([1, 2, 1]);
-        let dual = small.try_dual().unwrap();
+        let dual = small.dual().unwrap();
         let multileg = TensorMap::<U1FusionRule, D>::from_subblock_fn(
             engine,
             runtime,
@@ -1674,7 +1674,7 @@ fn device_factor_plan_publishes_the_host_spaces_at_every_payload() {
     // through two trees each; the domain has {-1, 0, 2}. Only -1 and 0 form
     // regions, both tall and of unequal shape.
     let a = leg(&[(-1, 2), (0, 1), (1, 2)]);
-    let b = leg(&[(0, 1), (1, 2)]).try_dual().unwrap();
+    let b = leg(&[(0, 1), (1, 2)]).dual().unwrap();
     let c = leg(&[(-1, 3), (0, 2), (2, 1)]);
     all_payloads(engine, cuda, &runtime, [&a, &b], &c);
 

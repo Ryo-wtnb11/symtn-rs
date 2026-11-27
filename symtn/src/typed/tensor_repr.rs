@@ -1152,8 +1152,8 @@ where
     ///
     /// let widened = double.convert::<Complex64>(engine)?;
     /// // The real part round-trips exactly; the imaginary part is zero.
-    /// assert_eq!(widened.re(engine)?.dense_data()?, double.dense_data()?);
-    /// assert_eq!(widened.im(engine)?.norm(engine, 2.0)?, 0.0);
+    /// assert_eq!(widened.real(engine)?.dense_data()?, double.dense_data()?);
+    /// assert_eq!(widened.imag(engine)?.norm(engine, 2.0)?, 0.0);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///

@@ -273,7 +273,7 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let triplets = [(0.5, -1.25), (2.0, 0.75)];
     let antitriplet = [(-1.0, 4.0)];
@@ -1896,7 +1896,7 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
         lazy_close_c64,
         two_sided_ops
     );
-    let two_sided_real = two_sided.re(engine).unwrap();
+    let two_sided_real = two_sided.real(engine).unwrap();
     assert_checked_lazy_adjoint_matches_literal!(
         engine,
         two_sided_real,
@@ -1923,7 +1923,7 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
         lazy_close_c64,
         one_sided_ops
     );
-    let one_sided_real = one_sided.re(engine).unwrap();
+    let one_sided_real = one_sided.real(engine).unwrap();
     let real_succeeded = assert_checked_lazy_adjoint_matches_literal!(
         engine,
         one_sided_real,
@@ -2036,7 +2036,7 @@ fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
         ops
     );
     assert_eq!(succeeded, 5);
-    let real = complex.re(engine).unwrap();
+    let real = complex.real(engine).unwrap();
     let succeeded =
         assert_checked_lazy_adjoint_matches_literal!(engine, real, |x: f64| x, lazy_close_f64, ops);
     assert_eq!(succeeded, 5);

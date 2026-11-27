@@ -83,12 +83,12 @@ in_both_modes! {
         assert_eq!(left.compose(engine, &t).unwrap().dense_data().unwrap(), t.dense_data().unwrap());
         assert_eq!(t.compose(engine, &right).unwrap().dense_data().unwrap(), t.dense_data().unwrap());
 
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let f: TensorMap<_, f64> =
             TensorMap::isomorphism(engine, &runtime, [&dual, &leg], [&leg, &dual]).unwrap();
         assert_exact_isometry!(engine, &runtime, &f);
         let (small, big) = (space(1, 2), space(2, 3));
-        for domain in [small.clone(), small.try_dual().unwrap()] {
+        for domain in [small.clone(), small.dual().unwrap()] {
             let w: TensorMap<_, f64> =
                 TensorMap::isometry(engine, &runtime, [&big], [&domain]).unwrap();
             assert_exact_isometry!(engine, &runtime, &w);

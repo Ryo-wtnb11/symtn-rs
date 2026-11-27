@@ -482,7 +482,7 @@ fn signed_cases<D: DevicePayload>(
     runtime: &Runtime,
 ) -> [Case<FermionU1, D>; 4] {
     let v = fermion_u1();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let map = |engine: &mut dyn symtn::typed::Engine,
                codomain: &GradedSpace<FermionU1>,
                domain: &GradedSpace<FermionU1>,

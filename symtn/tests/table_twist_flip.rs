@@ -100,7 +100,7 @@ fn filled(
 /// `t ∈ V ⊗ V' ← V' ⊗ V`: dual and non-dual legs on both sides, and every
 /// coupled sector of the category.
 fn operand(runtime: &Runtime, category: &Category) -> Table {
-    let dual = category.v.try_dual().unwrap();
+    let dual = category.v.dual().unwrap();
     filled(
         runtime,
         "t",

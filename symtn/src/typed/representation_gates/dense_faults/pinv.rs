@@ -116,7 +116,7 @@ fn checked_compact_diagonal_pinv_keeps_a_checked_compact_output() {
 
     let dual_bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual_sector = dual_bond.sectors().unwrap().remove(0);
     let dual: TensorMap<_, f64> = TensorMap::diagonal(

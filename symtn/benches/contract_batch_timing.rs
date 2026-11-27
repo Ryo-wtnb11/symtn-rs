@@ -194,7 +194,7 @@ fn public_signed_direct_release_measurement() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
     let v = fermion_u1();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let lhs =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&dual], fill(201)).unwrap();
     let rhs =

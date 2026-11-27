@@ -23,7 +23,7 @@ fn fz2_leg(dual: bool) -> GradedSpace<FermionParityFusionRule> {
     )
     .unwrap();
     if dual {
-        space.try_dual().unwrap()
+        space.dual().unwrap()
     } else {
         space
     }

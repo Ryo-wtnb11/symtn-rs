@@ -336,7 +336,7 @@ pub fn u1_rhs_identity<D: Payload>(
 ) -> Case<U1FusionRule, D> {
     let v = u1(&[(-1, 2), (0, 1), (1, 2)]);
     let w = u1(&[(0, 2), (1, 1)]);
-    let w_dual = w.try_dual().unwrap();
+    let w_dual = w.dual().unwrap();
     Case {
         name: "U(1) identity rhs transform",
         lhs: tensor(engine, runtime, &[&v, &w], &[&v], 13),
@@ -709,7 +709,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let u = if u_dual { v_dual.clone() } else { v.clone() };
     Case {
         name,
@@ -743,7 +743,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     Case {
         name,
         lhs: tensor(engine, runtime, &[v, v], &[v, &v_dual], salt),
@@ -777,7 +777,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     Case {
         name,
         lhs: tensor(engine, runtime, &[v, v], &[&v_dual, &v_dual], salt),
@@ -818,7 +818,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     [
         Case {
             name: names[0],

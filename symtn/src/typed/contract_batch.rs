@@ -1120,7 +1120,7 @@ mod fermionic_unit_tests {
             ],
         )
         .unwrap();
-        let wd = w.try_dual().unwrap();
+        let wd = w.dual().unwrap();
         let lhs =
             TensorMap::<_, f64>::from_subblock_fn(cpu, &runtime, [&v], [&wd], |_, _| 1.0).unwrap();
         let rhs =
@@ -1268,7 +1268,7 @@ mod fermionic_unit_tests {
             ],
         )
         .unwrap();
-        let fd = f.try_dual().unwrap();
+        let fd = f.dual().unwrap();
         // contract_cases::fermionic_twist_roles "A": the copied A carries the twist.
         let (dynamic, admitted) = cuda_dynamic_admission(
             &runtime,
@@ -1316,7 +1316,7 @@ mod fermionic_unit_tests {
             + CheckedFusionAlgebra
             + SectorCodec,
     {
-        let dual = v.try_dual().unwrap();
+        let dual = v.dual().unwrap();
         let a = TensorMap::<_, f64>::from_subblock_fn(engine, runtime, [v], [&dual], |_, _| 1.0)
             .unwrap();
         let b = TensorMap::<_, f64>::from_subblock_fn(engine, runtime, [&dual], [v], |_, _| 1.0)

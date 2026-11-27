@@ -80,6 +80,6 @@ in_both_modes! {
             &rectangular,
             symtn::typed::Side::Domain,
         )));
-        space_mismatch(operation_err(wide.oplus(&wide.try_dual().unwrap())));
+        space_mismatch(operation_err(wide.oplus(&wide.dual().unwrap())));
     }
 }

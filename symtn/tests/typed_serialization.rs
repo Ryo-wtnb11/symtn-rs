@@ -188,7 +188,7 @@ use fixtures::host_runtime;
 
 fn su2_leg(provider: &Arc<Su2Rule>, dual: bool) -> GradedSpace<Su2Rule> {
     GradedSpace::try_new(Arc::clone(provider), [(su2_irrep(0), 1), (su2_irrep(1), 2)])
-        .and_then(|space| if dual { space.try_dual() } else { Ok(space) })
+        .and_then(|space| if dual { space.dual() } else { Ok(space) })
         .unwrap()
 }
 
@@ -581,7 +581,7 @@ fn non_self_dual_u1_space_roundtrip_does_not_dualize_twice() {
         provider: Arc::clone(&provider),
     };
     let source = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(3).unwrap(), 7)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     assert_eq!(source.sectors().unwrap(), [U1Irrep::new(-3).unwrap()]);
 
@@ -1399,7 +1399,7 @@ macro_rules! single_precision_roundtrip {
                 ],
             )
             .unwrap();
-            let dual = leg.try_dual().unwrap();
+            let dual = leg.dual().unwrap();
             let dense: TensorMap<_, $scalar> = TensorMap::from_subblock_fn(
                 engine,
                 &runtime,
@@ -1515,7 +1515,7 @@ macro_rules! single_precision_roundtrip {
                 [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
             )
             .unwrap();
-            let dual = leg.try_dual().unwrap();
+            let dual = leg.dual().unwrap();
             let dense: TensorMap<_, $scalar> = TensorMap::from_subblock_fn(
                 engine,
                 &runtime,
@@ -1803,7 +1803,7 @@ fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
     };
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(2).unwrap(), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
@@ -1851,7 +1851,7 @@ fn dual_diagonal_full_svd_s_roundtrip_preserves_bond_and_storage() {
     };
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(2).unwrap(), 3)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,

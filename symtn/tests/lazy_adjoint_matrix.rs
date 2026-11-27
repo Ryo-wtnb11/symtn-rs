@@ -350,7 +350,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_u1_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
     let mut real = assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
     let mut complex = assert_exact_adjoint!(engine, Complex64, [&leg, &dual], [&other]);
@@ -419,7 +419,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [
@@ -744,7 +744,7 @@ mod factorizations {
                         TensorMap::<_, $d>::rand_with_seed(engine, runtime, [a], [a, b], $seed + 1)
                             .unwrap();
                     assert_rectangular_ops!(engine, format!("{label} wide"), wide);
-                    let dual = a.try_dual().unwrap();
+                    let dual = a.dual().unwrap();
                     let dual_legs = TensorMap::<_, $d>::rand_with_seed(
                         engine,
                         runtime,
@@ -944,7 +944,7 @@ mod factorizations {
             [(su_irrep(&[0i64, 1]), 3), (su_irrep(&[1, 0]), 1)],
         )
         .unwrap();
-        let dual = three.try_dual().unwrap();
+        let dual = three.dual().unwrap();
         assert!(dual.is_dual() && !three.is_dual());
 
         macro_rules! seams {

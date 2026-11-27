@@ -122,7 +122,7 @@ fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize
         &provider,
         &[(-1, 2 * scale), (0, 3 * scale), (1, 2 * scale)],
     );
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &dual], [&leg], 53).unwrap();
     let on_leg = LegSelection::try_new(

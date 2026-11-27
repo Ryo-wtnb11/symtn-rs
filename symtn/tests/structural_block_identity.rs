@@ -196,7 +196,7 @@ fn u1_negative_charge_isometry_and_isomorphism_match_tensorkit_dense() {
 
         // TensorKit trees of V ⊗ V' at charge 0: (0,0), (1,-1), (-1,1).
         let t: TensorMap<_, D> =
-            TensorMap::isometry(engine, &rt, [&v, &v.try_dual().unwrap()], [&w]).unwrap();
+            TensorMap::isometry(engine, &rt, [&v, &v.dual().unwrap()], [&w]).unwrap();
         assert_dense(
             &format!("{what} isometry V⊗V' ← U1(0=>2)"),
             &t.to_physical_dense(engine).unwrap(),

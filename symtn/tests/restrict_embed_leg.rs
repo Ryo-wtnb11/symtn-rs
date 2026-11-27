@@ -235,9 +235,7 @@ fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
     let provider = Arc::new(U1FusionRule);
     // Degeneracies asymmetric under c -> -c, so a label/dual mix-up cannot
     // survive by coincidence.
-    let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 4)])
-        .try_dual()
-        .unwrap();
+    let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 4)]).dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 3)]);
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&other], 7).unwrap();
@@ -413,7 +411,7 @@ fn restrict_of_a_fermionic_odd_dual_leg_equals_the_isometry_composition() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
     let provider = Arc::new(FermionParityFusionRule::new());
-    let leg = fz2(&provider, &[(false, 2), (true, 3)]).try_dual().unwrap();
+    let leg = fz2(&provider, &[(false, 2), (true, 3)]).dual().unwrap();
     let spectator = fz2(&provider, &[(false, 2), (true, 2)]);
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &spectator], [&spectator], 5).unwrap();
@@ -719,7 +717,7 @@ fn selections_are_validated_against_their_parent_leg_before_anything_is_built() 
     .contains("selected more than once"));
     // A dual leg's own labels are the dualised ones; the non-dual label is
     // simply absent.
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     assert!(
         LegSelection::try_new(&dual, [(U1Irrep::new(1).unwrap(), 0..1)])
             .err()
@@ -822,9 +820,7 @@ fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 4)])
-        .try_dual()
-        .unwrap();
+    let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 4)]).dual().unwrap();
     let selected = [
         (U1Irrep::new(1).unwrap(), 0..1),
         (U1Irrep::new(-1).unwrap(), 2..4),
@@ -1366,7 +1362,7 @@ fn restrict_and_embed_are_exact_block_copies_on_u1_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 4), (1, 5)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 3)]);
     // Ranges at the start, in the middle and at the end of a sector, plus a
     // single-state selection.
@@ -1439,7 +1435,7 @@ fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [
@@ -1557,7 +1553,7 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
 
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 4), (1, 5)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 3)]);
     assert_exact_multi_restrict!(
         engine,
@@ -1633,7 +1629,7 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [(label(false, 0), 2), (label(true, 1), 1)],
@@ -1754,7 +1750,7 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
     let leg = u1_on(&provider, &[(-1, 3), (0, 4), (1, 5)]);
     assert_compact_stays_compact!(engine, f64, leg.clone(), places);
     assert_compact_stays_compact!(engine, f64, leg.clone(), gaps);
-    assert_compact_stays_compact!(engine, Complex64, leg.try_dual().unwrap(), places);
+    assert_compact_stays_compact!(engine, Complex64, leg.dual().unwrap(), places);
 
     let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 3), (1, 4), (2, 3)]);
@@ -1793,7 +1789,7 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
         ],
     )
     .unwrap();
-    assert_compact_stays_compact!(engine, f64, leg.try_dual().unwrap(), places);
+    assert_compact_stays_compact!(engine, f64, leg.dual().unwrap(), places);
     assert_compact_stays_compact!(engine, Complex64, leg.clone(), places);
     assert_compact_stays_compact!(engine, f64, leg, gaps);
 }

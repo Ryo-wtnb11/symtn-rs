@@ -21,7 +21,7 @@ fn checked_compact_diagonal_svd_full_is_its_compact_svd_under_a_provider_bond_mi
         .unwrap()
     };
     let nondual = on(engine, &bond);
-    let dual = on(engine, &bond.try_dual().unwrap());
+    let dual = on(engine, &bond.dual().unwrap());
     provider.extra_vacuum_channel.store(true, Ordering::Relaxed);
 
     // A nondual one-leg bond is its own SVD bond (`fuse(V) = V`, no fusion),
@@ -226,7 +226,7 @@ fn checked_dual_compact_diagonal_svd_compact_propagates_provider_errors() {
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x73));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
         engine,

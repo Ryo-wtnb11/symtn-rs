@@ -106,7 +106,7 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
         [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -116,7 +116,7 @@ fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
         [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (su2_irrep(s), n)),
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -136,7 +136,7 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         [(-1, 2), (0, 1), (1, 2), (2, 1)].map(|(q, n)| (sector(q), n)),
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 

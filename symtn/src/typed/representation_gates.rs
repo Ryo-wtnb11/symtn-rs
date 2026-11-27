@@ -255,7 +255,7 @@ fn u1_lazy_fixture(engine: &mut dyn Engine) -> TensorMap<U1FusionRule, f64> {
         Arc::clone(&provider),
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 1)],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let domain = GradedSpace::try_new(
         provider,

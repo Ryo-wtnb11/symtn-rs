@@ -110,7 +110,7 @@ fn legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
         ],
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -155,7 +155,7 @@ macro_rules! u1_suite {
         let wrong = |e: &mut dyn symtn::typed::Engine, like: &TensorMap<_, f64>| {
             let dual = |legs: Vec<GradedSpace<_>>| {
                 legs.iter()
-                    .map(|leg| leg.try_dual().unwrap())
+                    .map(|leg| leg.dual().unwrap())
                     .collect::<Vec<_>>()
             };
             let (codomain, domain) = (dual(like.codomain()), dual(like.domain()));
@@ -939,7 +939,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
     );
     let v =
         GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 2), (su_irrep(&[1]), 1)]).unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&v], 1).unwrap();
     let permuted = t.permute(engine, &[1], &[2, 0]).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, permuted);
@@ -957,7 +957,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         )
         .unwrap();
         if dual {
-            leg.try_dual().unwrap()
+            leg.dual().unwrap()
         } else {
             leg
         }
@@ -1118,7 +1118,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
     );
     let v =
         GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 2), (su_irrep(&[1]), 1)]).unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&v], 1).unwrap();
     let r = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&w], 2).unwrap();
     let undual = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&w], [&w], 4).unwrap();

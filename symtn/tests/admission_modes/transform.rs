@@ -124,7 +124,7 @@ in_both_modes! {
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), unit), (M::charged(), charged)])
                 .unwrap()
         };
-        let (a, b) = (leg(1, 2), leg(2, 1).try_dual().unwrap());
+        let (a, b) = (leg(1, 2), leg(2, 1).dual().unwrap());
         let fill = |_: &_, ij: &[usize]| ij.iter().sum::<usize>() as f64 + 1.0;
         let lhs: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&a, &b], [&leg(1, 1)], fill).unwrap();
@@ -140,7 +140,7 @@ in_both_modes! {
             engine,
             &runtime,
             [&a, &b],
-            [&leg(1, 1).try_dual().unwrap()],
+            [&leg(1, 1).dual().unwrap()],
             fill,
         )
         .unwrap();

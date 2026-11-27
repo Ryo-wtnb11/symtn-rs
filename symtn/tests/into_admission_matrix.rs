@@ -524,7 +524,7 @@ macro_rules! transform_cells {
 macro_rules! source {
     ($engine:ident, $runtime:expr, $v:expr, $w:expr, $key:expr) => {{
         let key = $key;
-        let w = $w.try_dual().unwrap();
+        let w = $w.dual().unwrap();
         let source: TensorMap<_, f64> =
             TensorMap::from_subblock_fn($engine, $runtime, [&$v, &w], [&$v, &w], |trees, index| {
                 value(&key(trees), index)
@@ -694,7 +694,7 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
     bond_lanes!(
         engine,
         &runtime,
-        v.try_dual().unwrap(),
+        v.dual().unwrap(),
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
         |s: &FermionParityIrrep| format!("{s:?}"),
         debug_key::<FermionParityIrrep>
@@ -947,7 +947,7 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
         [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     bond_lanes!(
         engine,
@@ -1480,7 +1480,7 @@ macro_rules! contract_cells {
 macro_rules! contract_lanes {
     ($engine:ident, $runtime:expr, $v:expr, $w:expr, $key:expr) => {{
         let key = $key;
-        let w = $w.try_dual().unwrap();
+        let w = $w.dual().unwrap();
         let rhs: TensorMap<_, f64> =
             TensorMap::from_subblock_fn($engine, $runtime, [&$v, &w], [&$v], |trees, index| {
                 value(&format!("rhs{}", key(trees)), index)
@@ -1537,7 +1537,7 @@ macro_rules! compact_contract_cells {
     ($engine:ident, $runtime:expr, $v:expr, $w:expr, $b:expr, $sectors:expr, $name:expr, $key:expr, $d:ty,
      $lift:expr) => {{
         let (key, lift) = ($key, $lift);
-        let w = $w.try_dual().unwrap();
+        let w = $w.dual().unwrap();
         let fill = |prefix: &'static str| {
             move |trees: &BlockFusionTrees<_>, index: &[usize]| -> $d {
                 lift(value(&format!("{prefix}{}", key(trees)), index))
@@ -1747,7 +1747,7 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
     );
     // A bond on a dual leg: the fermionic twist on the contracted leg makes
     // every arm decline to the dense route (TensorKit's `copyA`/`copyB`).
-    let dual = w.try_dual().unwrap();
+    let dual = w.dual().unwrap();
     compact_contract_lanes!(
         engine,
         &runtime,
@@ -2437,7 +2437,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
                 ],
             )
             .unwrap()
-            .try_dual()
+            .dual()
             .unwrap();
             (v, w)
         }};

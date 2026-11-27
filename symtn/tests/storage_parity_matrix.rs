@@ -735,7 +735,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fz2_leg();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     // Per written entry: |x|² and the oddness of each leg's uncoupled sector.
     let mut entries: Vec<(f64, [bool; 3])> = Vec::new();
     let a =
@@ -858,7 +858,7 @@ fn twist_cuda_rows_match_host() {
         D: symtn::typed::CudaPayload + Into<Complex64> + std::fmt::Debug,
     {
         let leg = fz2_leg();
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let a =
             TensorMap::<_, D>::from_subblock_fn(engine, runtime, [&leg, &dual], [&leg], |_, ix| {
                 conv(entry(0.7, ix[0] + 2 * ix[1], ix[1], ix[2]))
@@ -909,7 +909,7 @@ macro_rules! materialize_rows {
     ($engine:ident, $runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr) => {{
         let runtime: &Runtime = $runtime;
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let dim = $dim;
         let conv = $conv;
         let mut build = |seed: f64| {
@@ -1074,7 +1074,7 @@ macro_rules! transform_rows {
     ($engine:ident, $runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr, $cuda:expr) => {{
         let runtime: &Runtime = $runtime;
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let dim = $dim;
         let conv = $conv;
         let build = |engine: &mut dyn Engine, seed: f64| {
@@ -1684,12 +1684,12 @@ fn mixed_lazy_axpby_cuda_rows_match_host() {
         }};
     }
     let u1 = u1_leg_2_3_1();
-    let u1_dual = u1.try_dual().unwrap();
+    let u1_dual = u1.dual().unwrap();
     both_dtypes!([&u1, &u1_dual], [&u1]);
     let su2 = su2_leg_2_3_1();
     both_dtypes!([&su2, &su2], [&su2]);
     let fz2 = fz2_leg();
-    let fz2_dual = fz2.try_dual().unwrap();
+    let fz2_dual = fz2.dual().unwrap();
     both_dtypes!([&fz2, &fz2_dual], [&fz2]);
 }
 
@@ -1707,7 +1707,7 @@ macro_rules! contract_rows {
     ($engine:ident, $runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr, $cuda:expr) => {{
         let runtime: &Runtime = $runtime;
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let dim = $dim;
         let conv = $conv;
         let mut build = |seed: f64| {

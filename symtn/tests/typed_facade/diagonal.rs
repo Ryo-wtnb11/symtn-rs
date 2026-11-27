@@ -693,7 +693,7 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let typed =
         TensorMap::from_subblock_fn(engine, &runtime, [&dual], [&leg], typed_fill_value).unwrap();
     let s = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], typed_fill_value)
@@ -1153,7 +1153,7 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
                 (symtn::sector::FermionParityIrrep::ODD, 3),
             ],
         )
-        .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
+        .and_then(|space| if is_dual { space.dual() } else { Ok(space) })
         .unwrap();
         let mut next = 0.0;
         let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
@@ -1466,7 +1466,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
         )
         .unwrap();
         if is_dual {
-            typed_leg = typed_leg.try_dual().unwrap();
+            typed_leg = typed_leg.dual().unwrap();
         }
         let typed_s = compact_bond_trace(&runtime, &typed_leg, real);
         sweep_compact_trace_variants(&format!("u1 dual={is_dual} f64"), &typed_s, widen_real);
@@ -1479,7 +1479,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
             GradedSpace::try_new(Arc::new(su2_rule()), [(su2_irrep(0), 2), (su2_irrep(1), 3)])
                 .unwrap();
         if is_dual {
-            typed_leg = typed_leg.try_dual().unwrap();
+            typed_leg = typed_leg.dual().unwrap();
         }
         let typed_s = compact_bond_trace(&runtime, &typed_leg, real);
         sweep_compact_trace_variants(&format!("su2 dual={is_dual} f64"), &typed_s, widen_real);
@@ -1498,7 +1498,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
             )
             .unwrap();
         if is_dual {
-            typed_leg = typed_leg.try_dual().unwrap();
+            typed_leg = typed_leg.dual().unwrap();
         }
         let typed_s = compact_bond_trace(&runtime, &typed_leg, real);
         sweep_compact_trace_variants(&format!("fz2 dual={is_dual} f64"), &typed_s, widen_real);
@@ -1526,7 +1526,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
         )
         .unwrap();
         if is_dual {
-            typed_leg = typed_leg.try_dual().unwrap();
+            typed_leg = typed_leg.dual().unwrap();
         }
         let typed_s = compact_bond_trace(&runtime, &typed_leg, real);
         sweep_compact_trace_variants(&format!("u1xfz2 dual={is_dual} f64"), &typed_s, widen_real);

@@ -64,7 +64,7 @@ macro_rules! zeros_rows {
         let adjoint = $adjoint;
         let runtime = host_runtime();
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let conv = $conv;
         let mut n = 0;
         let dense = TensorMap::<_, $D>::from_subblock_fn(

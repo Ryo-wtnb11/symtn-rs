@@ -462,7 +462,7 @@ fn checked_generic_inv_isomorphism_preflight_failure_is_typed_and_nonpublishing(
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     // Unequal sides, so the isomorphism is a provider question: equal sides
     // are isomorphic without one.
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&dual], |_, _| 2.0).unwrap();
     let before = source.dense_data().unwrap().to_vec();

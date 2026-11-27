@@ -457,7 +457,7 @@ fn dual_nonabelian_flip_pins_the_pivotal_phase() {
         ($engine:ident, $provider:expr, $label:expr, $axis:expr, $codomain_dual:expr, $domain_dual:expr) => {{
             let provider = Arc::new($provider);
             let plain = GradedSpace::try_new(Arc::clone(&provider), [($label, 1)]).unwrap();
-            let dual = plain.try_dual().unwrap();
+            let dual = plain.dual().unwrap();
             let source: TensorMap<_, f64> =
                 TensorMap::from_subblock_fn($engine, &runtime, [&dual], [&plain], |_, _| 1.0)
                     .unwrap();

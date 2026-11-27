@@ -443,7 +443,7 @@ fn su2_complex_svd_composition_matches_the_oracle_for_every_policy() {
 fn fermionic_svd_composition_matches_the_oracle_for_every_policy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fz2_leg(&[(false, 3), (true, 3)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let mut state = 0x5555_6666u64;
     let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
         engine,

@@ -286,7 +286,7 @@ fn checked_only_compact_diagonal_polar_is_direct_and_refuses_nonfinite_values() 
     );
     let dual_bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual_sector = dual_bond.sectors().unwrap().remove(0);
     let dual: TensorMap<_, f64> = TensorMap::diagonal(

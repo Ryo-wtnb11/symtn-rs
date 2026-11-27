@@ -187,7 +187,7 @@ fn fermionic_values<D: Payload>() {
     // candidate. TensorKit copies an operand to twist it, and the result
     // must match TensorKit's B-role twist, not the untwisted sequence.
     let v = fermion_u1();
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let a = TensorMap::<_, D>::from_subblock_fn(
         engine,
         &runtime,
@@ -279,8 +279,8 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let w_dual = w.try_dual().unwrap();
-    let v_dual = v.try_dual().unwrap();
+    let w_dual = w.dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let tensor = |engine: &mut dyn Engine,
                   codomain: &[&GradedSpace<R>],
                   domain: &[&GradedSpace<R>],
@@ -586,7 +586,7 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let w_dual = w.try_dual().unwrap();
+    let w_dual = w.dual().unwrap();
     Case {
         name: "S3",
         lhs: TensorMap::from_subblock_fn(engine, runtime, [v, &w_dual], [w], fill(84))
@@ -832,7 +832,7 @@ fn fermionic_output_permute_values<D: Payload>() {
     // sorted candidate, under a permuted output. The candidate is declined,
     // and the result must carry TensorKit's B-role twist.
     let v = fermion_u1();
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let a = TensorMap::<_, D>::from_subblock_fn(
         engine,
         &runtime,

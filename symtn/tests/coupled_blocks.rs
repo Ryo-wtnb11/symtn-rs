@@ -517,7 +517,7 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         [(-1, 2), (0, 1), (1, 2), (2, 1)].map(|(q, n)| (sector(q), n)),
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -692,7 +692,7 @@ mod su3 {
             [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
         )
         .unwrap();
-        let dual = chiral.try_dual().unwrap();
+        let dual = chiral.dual().unwrap();
         [octet, chiral, dual]
     }
 

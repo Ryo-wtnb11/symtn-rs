@@ -81,7 +81,7 @@ fn composition_resolves_to_the_unswapped_unit_core() {
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 2), (odd(-1), 1)]).unwrap();
     let wd = GradedSpace::try_new(rule, [(even(0), 2), (odd(1), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let lhs =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&wd], |_, _| 1.0).unwrap();

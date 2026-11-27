@@ -24,7 +24,7 @@ use super::*;
 /// let fused = v.fuse(&w)?;
 /// assert_eq!(fused.degeneracy(&U1Irrep::new(-1).unwrap())?, 2);
 /// assert_eq!(fused.degeneracy(&U1Irrep::new(0).unwrap())?, 1);
-/// assert_eq!(v.try_dual()?.degeneracy(&U1Irrep::new(-1).unwrap())?, 1);
+/// assert_eq!(v.dual()?.degeneracy(&U1Irrep::new(-1).unwrap())?, 1);
 /// # Ok(())
 /// # }
 /// ```
@@ -77,12 +77,12 @@ where
     ///
     /// Input order does not affect the result: sectors are stored in the
     /// provider's [`crate::sector::SectorId`] order, and zero-degeneracy entries
-    /// are omitted. Call [`Self::try_dual`] to construct the dual space.
+    /// are omitted. Call [`Self::dual`] to construct the dual space.
     ///
     /// The space retains `provider`. Clone one [`Arc`] into several
     /// independently constructed spaces to share one allocation (and its
     /// performance cache); spaces derived from an existing space
-    /// ([`Self::try_dual`], [`Self::fuse`], [`Self::unitspace`]) already share
+    /// ([`Self::dual`], [`Self::fuse`], [`Self::unitspace`]) already share
     /// its provider.
     ///
     /// ```
@@ -192,7 +192,7 @@ where
     /// # Errors
     ///
     /// Returns [`Error::InvalidArgument`] when two sectors have the same dual.
-    pub fn try_dual(&self) -> Result<Self, FacadeError<R>> {
+    pub fn dual(&self) -> Result<Self, FacadeError<R>> {
         let sectors = self
             .leg
             .sectors()
@@ -868,7 +868,7 @@ where
         entries: Vec<(SectorId, symtn_tensors::SelectedRuns)>,
     ) -> Result<Self, FacadeError<R>> {
         // The subspace is built on the parent's own dual flag and stored ids:
-        // going through `GradedSpace::try_new` + `try_dual` would dualise the
+        // going through `GradedSpace::try_new` + `dual` would dualise the
         // labels and name a different leg.
         let leg = SectorLeg::try_new(
             entries

@@ -576,7 +576,7 @@ fn checked_compact_diagonal_polar_publishes_on_the_input_space_without_provider_
             let provider = Arc::new(CheckedOnlyToy::new_product_probe(1));
             let mut bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
             if dual {
-                bond = bond.try_dual().unwrap();
+                bond = bond.dual().unwrap();
             }
             let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
                 engine,

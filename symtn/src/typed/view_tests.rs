@@ -287,7 +287,7 @@ const CX: (Complex64, Complex64) = (Complex64::new(0.5, 0.25), Complex64::new(-1
 fn u1_view_matches_owned_lazy_adjoint() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let v = || u1(&[(-1, 2), (0, 1), (1, 3)]);
-    let w = || u1(&[(0, 2), (1, 1)]).try_dual().unwrap();
+    let w = || u1(&[(0, 2), (1, 1)]).dual().unwrap();
     mf_case!(engine, v(), w(), f64, RE.0, RE.1, "U1 f64");
     mf_case!(engine, v(), w(), Complex64, CX.0, CX.1, "U1 c64");
 }
@@ -325,7 +325,7 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
         .unwrap()
     };
     let v = || leg(&[(false, 0, 2), (true, 1, 1), (true, -1, 2), (false, 2, 1)]);
-    let w = || leg(&[(true, 1, 2), (false, 0, 1)]).try_dual().unwrap();
+    let w = || leg(&[(true, 1, 2), (false, 0, 1)]).dual().unwrap();
     mf_case!(engine, v(), w(), f64, RE.0, RE.1, "fZ2xU1 f64");
     mf_case!(engine, v(), w(), Complex64, CX.0, CX.1, "fZ2xU1 c64");
 }
@@ -581,7 +581,7 @@ mod cuda {
     #[ignore = "requires a real CUDA device"]
     fn cuda_view_matches_owned_lazy_adjoint() {
         let v = || u1(&[(-1, 2), (0, 1), (1, 3)]);
-        let w = || u1(&[(0, 2), (1, 1)]).try_dual().unwrap();
+        let w = || u1(&[(0, 2), (1, 1)]).dual().unwrap();
         cuda_case!(v(), w(), f64, RE.0, RE.1, "CUDA U1 f64");
         cuda_case!(v(), w(), Complex64, CX.0, CX.1, "CUDA U1 c64");
         let v = || su2(&[(0, 2), (1, 1), (2, 2)]);
@@ -609,7 +609,7 @@ mod cuda {
             .unwrap()
         };
         let v = || leg(&[(false, 0, 2), (true, 1, 1), (true, -1, 2), (false, 2, 1)]);
-        let w = || leg(&[(true, 1, 2), (false, 0, 1)]).try_dual().unwrap();
+        let w = || leg(&[(true, 1, 2), (false, 0, 1)]).dual().unwrap();
         cuda_case!(v(), w(), f64, RE.0, RE.1, "CUDA fZ2xU1 f64");
         cuda_case!(v(), w(), Complex64, CX.0, CX.1, "CUDA fZ2xU1 c64");
     }

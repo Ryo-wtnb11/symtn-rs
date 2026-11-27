@@ -1463,7 +1463,7 @@ fn fermionic_dual_open_leg_compact_compose_and_contract_agree_across_modes() {
         R: TypedSectorAdmission<Sector: Parity>,
         R::Mode: TypedTensorConstructionDispatch<R, Complex64>,
     {
-        let open = leg.try_dual().unwrap();
+        let open = leg.dual().unwrap();
         bond_fixture_on(&host_runtime(), &leg, &open, parity, |x: f64| {
             Complex64::new(x, 0.25 - x)
         })
@@ -1516,7 +1516,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let dense = d.materialize(engine).unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     ops.iter()
         .map(|&op| {
             let got = transform(d, op).unwrap();
@@ -1823,7 +1823,7 @@ fn su3_dual_leg_checked_compact_swap_and_braid_match_the_dense_route() {
         [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     for complex in [false, true] {
         let conv = |x: f64| Complex64::new(x, if complex { 0.5 * x } else { 0.0 });
@@ -2710,7 +2710,7 @@ fn checked_compact_transform_into_queries_the_provider_like_eager() {
             let provider = tensor.provider();
             // Built on the swapped legs directly: deriving them through the eager
             // op would warm the very caches the cold count reads.
-            let dual = leg.try_dual().unwrap();
+            let dual = leg.dual().unwrap();
             let mut destination = into.then(|| {
                 TensorMap::from_subblock_fn(engine, tensor.runtime(), [&dual], [&dual], |_, _| 0.0)
                     .unwrap()
@@ -2750,7 +2750,7 @@ fn z2_legs_on(legs: Vec<GradedSpace<CheckedZ2>>, salt: u8) -> Vec<GradedSpace<Ch
         .map(|leg| {
             let fresh = z2_leg(checked_fermionic(salt));
             if leg.is_dual() {
-                fresh.try_dual().unwrap()
+                fresh.dual().unwrap()
             } else {
                 fresh
             }
@@ -2863,7 +2863,7 @@ fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() 
     };
     let runtime = host_runtime();
     let (compact, leg) = z2_diagonal(checked_fermionic(0xc0), |x: f64| x);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let mut compact_destination =
         TensorMap::from_subblock_fn(engine, compact.runtime(), [&dual], [&dual], |_, index| {
             index[0] as f64 + 0.25
@@ -2938,7 +2938,7 @@ fn contract_destination(
         legs.iter()
             .map(|l| {
                 if l.is_dual() {
-                    leg.try_dual().unwrap()
+                    leg.dual().unwrap()
                 } else {
                     leg.clone()
                 }
@@ -3453,7 +3453,7 @@ fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
     // error (on a wrong one), cold and warm alike.
     let runtime = host_runtime();
     let leg = z2_leg(checked_fermionic(0x58));
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     // `(0, 2)` joins `W` with `W'`: the untraced legs are those of a valid
     // trace, the pair is not dual.
     let source =

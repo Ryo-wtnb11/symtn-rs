@@ -37,7 +37,7 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
     space: &GradedSpace<R>,
     swapped: bool,
 ) {
-    let dual = space.try_dual().unwrap();
+    let dual = space.dual().unwrap();
     let a =
         TensorMap::<R, D>::from_subblock_fn(engine, runtime, [space], [&dual], fill(201)).unwrap();
     let b =
@@ -302,7 +302,7 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::new();
     for space in [fermion_u1()] {
-        let dual = space.try_dual().unwrap();
+        let dual = space.dual().unwrap();
         let a =
             TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&space], [&dual], fill(201))
                 .unwrap();
@@ -376,7 +376,7 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
         )],
     )
     .unwrap();
-    let dual = odd.try_dual().unwrap();
+    let dual = odd.dual().unwrap();
     let case = Case {
         name: "negative-only signed core",
         lhs: TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&odd], [&dual], |_, _| 1.0)
@@ -455,7 +455,7 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
         ],
     )
     .unwrap();
-    let wd = w.try_dual().unwrap();
+    let wd = w.dual().unwrap();
     let case = Case {
         name: "signed inactive",
         lhs: TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&wd], fill(201))
@@ -1162,7 +1162,7 @@ fn negative_only_signed_core_matches_literal_twist() {
         )],
     )
     .unwrap();
-    let odd_dual = odd.try_dual().unwrap();
+    let odd_dual = odd.dual().unwrap();
     let lhs =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&odd], [&odd_dual], |_, _| 1.0)
             .unwrap();

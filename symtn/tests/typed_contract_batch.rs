@@ -885,7 +885,7 @@ fn check_mixed_signed_members<R, D>(
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let lhs =
         TensorMap::<R, D>::from_subblock_fn(engine, runtime, [v], [&dual], fill(201)).unwrap();
     let rhs =

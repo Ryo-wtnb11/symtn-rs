@@ -448,7 +448,7 @@ fn checked_compact_diagonal_qr_lq_all_modes_use_hand_phase_and_magnitude() {
         3,
     );
 
-    let dual_bond = bond.try_dual().unwrap();
+    let dual_bond = bond.dual().unwrap();
     let dual: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
@@ -595,7 +595,7 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
         ],
     )
     .unwrap();
-    let z2_dual = z2.try_dual().unwrap();
+    let z2_dual = z2.dual().unwrap();
     // Self-dual labels: only the orientation flag distinguishes V' from V.
     assert!(z2_dual.is_dual());
     assert_eq!(z2_dual.degeneracy(&ZNIrrep::new(0, 2).unwrap()).unwrap(), 2);
@@ -609,7 +609,7 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
         [(U1Irrep::new(1).unwrap(), 2), (U1Irrep::new(2).unwrap(), 3)],
     )
     .unwrap();
-    let u1_dual = u1.try_dual().unwrap();
+    let u1_dual = u1.dual().unwrap();
     assert!(u1_dual.is_dual());
     let mut u1_sectors_seen = u1_dual.sectors().unwrap();
     u1_sectors_seen.sort();
@@ -836,7 +836,7 @@ fn checked_dual_diagonal_qr_lq_publish_on_the_input_bond_without_provider_querie
         let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x83));
         let mut bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
         if dual {
-            bond = bond.try_dual().unwrap();
+            bond = bond.dual().unwrap();
         }
         let finite: TensorMap<_, f64> = TensorMap::diagonal(
             engine,

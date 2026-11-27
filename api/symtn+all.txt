@@ -626,9 +626,9 @@ pub fn symtn::typed::GradedSpace<R>::oplus(&self, &Self) -> core::result::Result
 pub fn symtn::typed::GradedSpace<R>::unitspace(&self) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
 impl<R> symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>
 pub fn symtn::typed::GradedSpace<R>::degeneracy(&self, &<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector) -> core::result::Result<usize, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::GradedSpace<R>::dual(&self) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
 pub fn symtn::typed::GradedSpace<R>::sectors(&self) -> core::result::Result<alloc::vec::Vec<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector>, symtn::typed::FacadeError<R>>
 pub fn symtn::typed::GradedSpace<R>::truncspace(&self) -> symtn_matrixalgebra::truncation::TruncationSpace
-pub fn symtn::typed::GradedSpace<R>::try_dual(&self) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
 pub fn symtn::typed::GradedSpace<R>::try_new<Pairs>(alloc::sync::Arc<R>, Pairs) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where Pairs: core::iter::traits::collect::IntoIterator<Item = (<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, usize)>
 impl<R> symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>
 pub fn symtn::typed::GradedSpace<R>::from_bytes_with<C>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[u8], symtn::typed::DecodeLimits, &C) -> core::result::Result<Self, symtn::typed::DecodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, symtn::typed::FacadeError<R>>> where C: symtn::typed::TypedPersistenceCodec<R>
@@ -870,8 +870,8 @@ pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::from_bytes_with<C>(&m
 impl<R> symtn::typed::TensorMap<R, num_complex::Complex64> where R: symtn_sectors::algebra::TypedSectorAdmission
 pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::to_bytes_with<C>(&self, &C) -> core::result::Result<alloc::vec::Vec<u8>, symtn::typed::EncodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, <R as symtn_sectors::algebra::TypedSectorAdmission>::Error>> where C: symtn::typed::TypedPersistenceCodec<R>
 impl<R> symtn::typed::TensorMap<R, num_complex::Complex64>
-pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::im(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, f64>, symtn::typed::Error>
-pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::re(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, f64>, symtn::typed::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::imag(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, f64>, symtn::typed::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::real(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, f64>, symtn::typed::Error>
 impl<'a, R, D, S> core::convert::From<&'a symtn::typed::TensorMap<R, D, S>> for symtn::typed::TensorRef<'a, R, D, S>
 pub fn symtn::typed::TensorRef<'a, R, D, S>::from(&'a symtn::typed::TensorMap<R, D, S>) -> Self
 impl<R, D, S> core::clone::Clone for symtn::typed::TensorMap<R, D, S>

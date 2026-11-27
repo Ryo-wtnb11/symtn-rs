@@ -126,7 +126,7 @@ pub fn su2_leg_2_3_1() -> GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissi
 /// U(1) charges -1, 0, 1 with degeneracies 2, 1, 3, and its dual.
 pub fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     let v = u1_leg(&[(-1, 2), (0, 1), (1, 3)]);
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -136,7 +136,7 @@ pub fn su2_legs() -> (
     GradedSpace<LieGroupFusionRule<MultiplicityFreeAdmissionMode>>,
 ) {
     let v = su2_leg_2_2_1();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 

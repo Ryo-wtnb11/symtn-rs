@@ -669,7 +669,7 @@ in_both_modes! {
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
             .unwrap();
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let mut salt = 0;
         let tall: TensorMap<_, Complex64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&leg, &dual], [&dual], |_, _| {

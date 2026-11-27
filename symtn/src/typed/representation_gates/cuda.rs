@@ -614,7 +614,7 @@ fn typed_cuda_lazy_adjoint_preserves_fermionic_contract_sign() {
     let provider = Arc::new(FermionParityFusionRule::new());
     let odd = |is_dual| {
         GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)])
-            .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
+            .and_then(|space| if is_dual { space.dual() } else { Ok(space) })
             .unwrap()
     };
     let lhs = TensorMap::from_subblock_fn(cpu, &runtime, [&odd(false)], [&odd(true)], |_, _| 2.0)
@@ -844,7 +844,7 @@ fn typed_cuda_into_rejects_another_engines_destination_untouched() {
         ],
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     let host_t = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &w], [&v, &w], 1).unwrap();
     let host_rhs = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &w], [&v], 2).unwrap();
     let (t, rhs) = (
@@ -1064,7 +1064,7 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
-    let dual = fz2.try_dual().unwrap();
+    let dual = fz2.dual().unwrap();
     let real: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &dual], [&fz2, &fz2], fill).unwrap();
     let complex: TensorMap<_, Complex64> =
@@ -1314,7 +1314,7 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
         ],
     )
     .unwrap();
-    let u1_dual = u1.try_dual().unwrap();
+    let u1_dual = u1.dual().unwrap();
     let real: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&u1, &u1_dual], [&u1], fill).unwrap();
     let complex: TensorMap<_, Complex64> =
@@ -1342,7 +1342,7 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
     )
     .unwrap();
-    let fz2_dual = fz2.try_dual().unwrap();
+    let fz2_dual = fz2.dual().unwrap();
     let complex: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &fz2_dual], [&fz2], complex_fill)
             .unwrap();

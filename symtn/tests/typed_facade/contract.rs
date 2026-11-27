@@ -291,10 +291,10 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
     let provider = Arc::new(planar_trivial());
     let lhs_cod = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
     let lhs_dom = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 3)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let rhs_cod = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 4)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let rhs_dom = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
     let lhs: TensorMap<PlanarTrivialRule, f64> =
@@ -574,7 +574,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
             (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let parity_cod = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
@@ -583,7 +583,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
             (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let parity_dom = GradedSpace::try_new(
         Arc::clone(&fz2_rule),

@@ -33,7 +33,7 @@ macro_rules! device_restrict {
     ($cuda:ident, $engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let a = leg(0);
-        let dual = a.try_dual().unwrap();
+        let dual = a.dual().unwrap();
         let other = leg(1);
         let runtime = Runtime::new();
         device_restrict!($cuda, $engine, @dtype $label, &runtime, &a, &dual, &other, f64);

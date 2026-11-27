@@ -604,7 +604,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
                 },
             )
             .unwrap();
-        assert_eq!(actual.codomain(), vec![y.clone(), x0.try_dual().unwrap()]);
+        assert_eq!(actual.codomain(), vec![y.clone(), x0.dual().unwrap()]);
         assert_eq!(actual.domain(), vec![z0.clone(), z1.clone()]);
         assert_same(engine, &actual, &expected);
     }
@@ -614,7 +614,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
     let x0 = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(2).unwrap(), 2)]).unwrap();
     let x1_base =
         GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(-1).unwrap(), 1)]).unwrap();
-    let x1 = x1_base.try_dual().unwrap();
+    let x1 = x1_base.dual().unwrap();
     let y = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(1).unwrap(), 3)]).unwrap();
     let z0 = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(-2).unwrap(), 2)]).unwrap();
     let z1 = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
@@ -643,7 +643,7 @@ fn planning_conjugation_uses_checked_effective_duals_without_reading_storage() {
         )],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let product_y = GradedSpace::try_new(
         Arc::clone(&product_rule),

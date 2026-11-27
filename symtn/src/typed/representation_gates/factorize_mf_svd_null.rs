@@ -10,7 +10,7 @@ fn compact_diagonal_svd_full_preserves_spaces_without_materialization_or_solver(
     let runtime = Runtime::new();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(2).unwrap(), 3)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -305,7 +305,7 @@ fn compact_diagonal_null_is_empty_by_shape_without_dense_work() {
 
     let dual = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
@@ -648,7 +648,7 @@ fn compact_diagonal_svd_vals_uses_only_the_stored_spectrum() {
 
     let dual_bond = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual: TensorMap<_, f64> = TensorMap::diagonal(
         engine,

@@ -110,8 +110,8 @@
 //! [`TensorMap::restrict_leg`] with a [`LegSelection`] of kept degeneracy
 //! positions per sector, contiguous or not), concatenation ([`TensorMap::cat`],
 //! [`TensorMap::absorb`]) and explicit payload conversion
-//! ([`TensorMap::convert`], [`TensorMap::zeros_like`], [`TensorMap::re`],
-//! [`TensorMap::im`]; exact widenings and the two lossy narrowings, never
+//! ([`TensorMap::convert`], [`TensorMap::zeros_like`], [`TensorMap::real`],
+//! [`TensorMap::imag`]; exact widenings and the two lossy narrowings, never
 //! implicit).
 //!
 //! **Device execution** is a storage type, not a runtime switch:

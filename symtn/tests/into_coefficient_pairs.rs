@@ -110,7 +110,7 @@ macro_rules! suite {
     ($engine:ident, $rt:expr, $v:expr, $bond:expr, $d:ty, $label:expr) => {{
         let rt = $rt;
         let v = $v;
-        let w = v.try_dual().unwrap();
+        let w = v.dual().unwrap();
         let bond = $bond;
         type D = $d;
         let rand = |$engine: &mut dyn Engine,
@@ -630,7 +630,7 @@ macro_rules! device_suite {
     ($rt:expr, $v:expr, $bond:expr, $d:ty, $label:expr) => {{
         let rt = $rt;
         let v = $v;
-        let w = v.try_dual().unwrap();
+        let w = v.dual().unwrap();
         let bond = $bond;
         type D = $d;
         let engine = &mut symtn::typed::CpuEngine::serial();

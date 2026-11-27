@@ -1591,11 +1591,7 @@ where
         )
         .unwrap()
     };
-    let (v_dual, w_dual, p_dual) = (
-        v.try_dual().unwrap(),
-        w.try_dual().unwrap(),
-        p.try_dual().unwrap(),
-    );
+    let (v_dual, w_dual, p_dual) = (v.dual().unwrap(), w.dual().unwrap(), p.dual().unwrap());
     Operands {
         a: rand(&[v, w], &[p], 0),
         b: rand(&[p, w], &[v, p], 1),

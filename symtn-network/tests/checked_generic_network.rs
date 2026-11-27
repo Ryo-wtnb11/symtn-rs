@@ -1384,7 +1384,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
                 &runtime,
                 // The third operand's `a` leg pairs with the first one's.
                 [&if seed == 2 {
-                    checked_space(rows).try_dual().unwrap()
+                    checked_space(rows).dual().unwrap()
                 } else {
                     checked_space(rows)
                 }],
@@ -1427,7 +1427,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
                 &runtime,
                 // The third operand's `a` leg pairs with the first one's.
                 [&if seed == 2 {
-                    mf_space(rows).try_dual().unwrap()
+                    mf_space(rows).dual().unwrap()
                 } else {
                     mf_space(rows)
                 }],

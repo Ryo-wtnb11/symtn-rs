@@ -51,7 +51,7 @@ macro_rules! multiplicity_free_matrix {
         let rt = $rt;
         let lift = $lift;
         let (v, w) = su2_legs();
-        let vd = v.try_dual().unwrap();
+        let vd = v.dual().unwrap();
         let t =
             TensorMap::<_, $d>::rand_with_seed($engine, rt, [&v, &vd, &v], [&v, &vd], 5).unwrap();
         let t = lift($ops, &t);
@@ -208,7 +208,7 @@ fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
         [(su_irrep(&[0i64, 0]), 2), (su_irrep(&[2, 1]), 1)],
     )
     .unwrap();
-    let vd = v.try_dual().unwrap();
+    let vd = v.dual().unwrap();
     macro_rules! generic {
         ($d:ty) => {{
             let t = TensorMap::<_, $d>::rand_with_seed(engine, &rt, [&v, &vd, &v], [&v, &vd], 5)

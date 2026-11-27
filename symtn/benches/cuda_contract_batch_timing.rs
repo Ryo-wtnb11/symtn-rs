@@ -294,7 +294,7 @@ fn signed_core_release_measurement() {
     let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0)).unwrap();
     let runtime = Runtime::new();
     let space = fermion_u1();
-    let dual = space.try_dual().unwrap();
+    let dual = space.dual().unwrap();
     let a =
         TensorMap::<_, f64>::from_subblock_fn(&mut *cpu, &runtime, [&space], [&dual], fill(201))
             .unwrap();

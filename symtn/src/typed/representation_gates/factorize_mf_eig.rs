@@ -281,7 +281,7 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
-    let dual = u1.try_dual().unwrap();
+    let dual = u1.dual().unwrap();
     check!(
         engine,
         dual,
@@ -504,7 +504,7 @@ fn compact_diagonal_eigh_full_changed_roles_match_explicit_dense_permute() {
         [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -773,7 +773,7 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     check!(
         engine,
@@ -907,7 +907,7 @@ fn compact_diagonal_eig_full_changed_roles_match_explicit_dense_permute() {
         [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
@@ -1248,7 +1248,7 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
         ],
         1e-5
     );
-    let dual = u1.try_dual().unwrap();
+    let dual = u1.dual().unwrap();
     check!(
         engine,
         dual,
@@ -1534,7 +1534,7 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
         vec![vec![-4.0, 0.0, 1.0], vec![-2.0, 2.0]],
         1e-5
     );
-    let dual = u1.try_dual().unwrap();
+    let dual = u1.dual().unwrap();
     check!(
         engine,
         dual,

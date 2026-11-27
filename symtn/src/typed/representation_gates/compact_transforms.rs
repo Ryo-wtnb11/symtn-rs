@@ -771,8 +771,8 @@ fn compact_arms_never_densify_their_spectrum_operand() {
     let _ = d.repartition(engine, 1).unwrap();
     let _ = d.zeros_like(engine).unwrap();
     let _ = d.convert::<Complex64>(engine).unwrap();
-    let _ = complex_d.re(engine).unwrap();
-    let _ = complex_d.im(engine).unwrap();
+    let _ = complex_d.real(engine).unwrap();
+    let _ = complex_d.imag(engine).unwrap();
     let _ = d.trace_pairs(engine, &[(0, 1)]).unwrap();
     let _ = d.diagview(engine).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);

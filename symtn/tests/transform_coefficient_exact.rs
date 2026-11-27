@@ -181,7 +181,7 @@ fn u1_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
 
     assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
@@ -231,7 +231,7 @@ fn su2_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
 
     assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
@@ -263,7 +263,7 @@ fn u1_times_su2_transforms_scale_componentwise() {
         [(label(0, 0), 2), (label(1, 1), 3), (label(-1, 1), 2)],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [(label(0, 0), 1), (label(1, 1), 2), (label(0, 2), 2)],
@@ -315,7 +315,7 @@ fn fermionic_transforms_scale_componentwise() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [
@@ -362,7 +362,7 @@ fn traces_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
         .trace_pairs(engine, &[(0, 2)]));
@@ -379,7 +379,7 @@ fn traces_scale_componentwise() {
 
     let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
         .trace_pairs(engine, &[(1, 3)]));
@@ -420,7 +420,7 @@ fn traces_scale_componentwise() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     assert_componentwise!(engine, [&leg, &dual], [&leg, &dual], |t| t
         .trace_pairs(engine, &[(1, 3)]));
     assert_componentwise!(engine, [&leg, &dual], [&leg, &dual], |t| t

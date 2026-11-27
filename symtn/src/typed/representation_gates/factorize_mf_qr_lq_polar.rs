@@ -9,7 +9,7 @@ fn compact_diagonal_qr_lq_preserves_compact_factors_without_dense_kernels() {
     let runtime = Runtime::new();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 3)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -117,7 +117,7 @@ fn compact_diagonal_qr_lq_rejects_inconsistent_spectra_and_nonbond_spaces() {
         multileg.logical_space(),
         spectrum
     )));
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let nonendo: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&dual], 1).unwrap();
     assert!(space_mismatch(qr_diagonal(
@@ -362,7 +362,7 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     check!(
         engine,
@@ -788,7 +788,7 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     check!(
         engine,

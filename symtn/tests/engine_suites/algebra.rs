@@ -84,7 +84,7 @@ on_each_engine! {
         let runtime = Runtime::new();
         let provider = Arc::new(FermionParityFusionRule::new());
         let odd = GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)]).unwrap();
-        let odd_dual = odd.try_dual().unwrap();
+        let odd_dual = odd.dual().unwrap();
         let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&odd], [&odd_dual], |_, _| 2.0)
             .unwrap();
         let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&odd_dual], [&odd], |_, _| 3.0)

@@ -267,7 +267,7 @@ fn checked_tr_matches_the_literal_weighted_sum_and_keeps_error_precedence() {
         sectors
     );
 
-    let real = complex.re(engine).unwrap();
+    let real = complex.real(engine).unwrap();
     let mut expected_real = 0.0;
     common::literal_weighted_trace(&snapshot!(engine, real), dim, |value, weight| {
         expected_real += value * weight
@@ -399,8 +399,8 @@ fn checked_inner_and_norm_take_one_weight_per_sector_and_keep_error_precedence()
         lhs.norm(engine, 2.0).unwrap(),
         literal_c64(engine, &lhs, &lhs).re.sqrt()
     ));
-    let real_lhs = lhs.re(engine).unwrap();
-    let real_rhs = rhs.re(engine).unwrap();
+    let real_lhs = lhs.real(engine).unwrap();
+    let real_rhs = rhs.real(engine).unwrap();
     assert!(lazy_close_f64(
         real_lhs.inner(engine, &real_rhs).unwrap(),
         literal_f64(engine, &real_lhs, &real_rhs)

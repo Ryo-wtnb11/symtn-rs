@@ -65,7 +65,7 @@ macro_rules! space_drift {
     ($engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let (a, degeneracy) = (leg(0), leg(1));
-        let dual = a.try_dual().unwrap();
+        let dual = a.dual().unwrap();
         let runtime = host_runtime();
         let base = members!($engine, &runtime, &a, f64, 2);
         for other in [&degeneracy, &dual] {

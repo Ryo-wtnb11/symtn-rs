@@ -199,7 +199,7 @@ fn generic_toy_core_composition_matches_block_products() {
         [(GenericLabel::Vacuum, 2), (GenericLabel::X, 3)],
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     let (a, b) = operands(&runtime, &v, &w, label_value);
     // GenericToy's identity F-symbols with non-unit quantum dimensions are
     // not a consistent category, so equivalent bend/braid sequences differ
@@ -234,7 +234,7 @@ mod racah {
         .unwrap();
         let w = GradedSpace::try_new(rule, [(su_irrep(&[1i64, 1]), 1), (su_irrep(&[0, 1]), 2)])
             .unwrap()
-            .try_dual()
+            .dual()
             .unwrap();
         let (a, b) = operands(&runtime, &v, &w, label_value);
         assert!(block_product_case("SU(3)", &a, &b, true) >= 2);
@@ -314,7 +314,7 @@ mod racah {
             degeneracies.map(|(s, n)| (su2_irrep(s), n)),
         )
         .unwrap();
-        let mf_w = mf_v.try_dual().unwrap();
+        let mf_w = mf_v.dual().unwrap();
         let (a, b) = operands(&runtime, &mf_v, &mf_w, su2_value);
         let mf = a.contract(engine, &b, &spec()).unwrap();
 
@@ -364,7 +364,7 @@ mod racah {
             degeneracies.map(|(s, n)| (su_irrep(&[s as i64]), n)),
         )
         .unwrap();
-        let w = v.try_dual().unwrap();
+        let w = v.dual().unwrap();
         let (a, b) = operands(&runtime, &v, &w, sun_value);
         assert!(block_product_case("SU(2)", &a, &b, true) >= 2);
         let checked = a.contract(engine, &b, &spec()).unwrap();
@@ -500,7 +500,7 @@ pub(crate) mod fermionic {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::new();
         let v = su3_space();
-        let dual = v.try_dual().unwrap();
+        let dual = v.dual().unwrap();
         for uniform in [false, true] {
             let middle = if uniform { [&dual, &dual] } else { [&v, &dual] };
             let a = filled(engine, &runtime, &[&v, &v], &middle, 3, value);
@@ -590,7 +590,7 @@ pub(crate) mod fermionic {
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::new();
-        let dual = v.try_dual().unwrap();
+        let dual = v.dual().unwrap();
         let spaces = [v, &dual];
         // TensorKit copyA/copyB cases followed by mixed-side, reordered contractions.
         #[allow(clippy::type_complexity)]

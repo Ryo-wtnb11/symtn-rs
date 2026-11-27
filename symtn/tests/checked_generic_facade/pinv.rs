@@ -185,7 +185,7 @@ fn sun_checked_generic_polar_and_pinv_accept_facade_layouts_of_rank_three_and_fo
         [(su_irrep(&[1, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap();
-    let t_dual = t.try_dual().unwrap();
+    let t_dual = t.dual().unwrap();
     let cases: [(&[&GradedSpace<_>], &[&GradedSpace<_>], bool); 8] = [
         (&[&leg, &leg], &[&leg], true),
         (&[&leg], &[&leg, &leg], false),
@@ -710,7 +710,7 @@ fn checked_compact_diagonal_pinv_keeps_the_input_space_without_provider_queries(
             let provider = Arc::new(CheckedOnlyToy::new_product_probe(1));
             let mut bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
             if dual {
-                bond = bond.try_dual().unwrap();
+                bond = bond.dual().unwrap();
             }
             let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
                 engine,

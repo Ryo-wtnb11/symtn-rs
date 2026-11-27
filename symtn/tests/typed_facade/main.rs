@@ -514,13 +514,13 @@ fn z3_leg(provider: &Arc<ExternalZ3Rule>, is_dual: bool) -> GradedSpace<External
         Arc::clone(provider),
         [(Z3Charge(0), 2), (Z3Charge(1), 3), (Z3Charge(2), 1)],
     )
-    .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
+    .and_then(|space| if is_dual { space.dual() } else { Ok(space) })
     .expect("Z3 leg is well formed")
 }
 
 fn su2_leg(provider: &Arc<ExternalSu2Rule>, is_dual: bool) -> GradedSpace<ExternalSu2Rule> {
     GradedSpace::try_new(Arc::clone(provider), [(su2_irrep(1), 2)])
-        .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
+        .and_then(|space| if is_dual { space.dual() } else { Ok(space) })
         .expect("SU(2) leg is well formed")
 }
 
@@ -565,7 +565,7 @@ fn z3_other_leg(provider: &Arc<ExternalZ3Rule>, is_dual: bool) -> GradedSpace<Ex
         Arc::clone(provider),
         [(Z3Charge(0), 1), (Z3Charge(1), 2), (Z3Charge(2), 4)],
     )
-    .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
+    .and_then(|space| if is_dual { space.dual() } else { Ok(space) })
     .expect("Z3 leg is well formed")
 }
 
@@ -579,8 +579,8 @@ fn z3_rank_four(
     let engine = &mut symtn_dense::CpuEngine::serial();
     let wide = z3_leg(provider, false);
     let narrow = z3_other_leg(provider, false);
-    let wide_dual = wide.try_dual().unwrap();
-    let narrow_dual = narrow.try_dual().unwrap();
+    let wide_dual = wide.dual().unwrap();
+    let narrow_dual = narrow.dual().unwrap();
     let mut counter = 0.0;
     TensorMap::from_subblock_fn(
         engine,
@@ -1287,7 +1287,7 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
         ],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     (typed_p, typed_q)
 }

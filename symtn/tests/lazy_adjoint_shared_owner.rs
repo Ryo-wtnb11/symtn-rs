@@ -56,7 +56,7 @@ fn u1_leg(
     )
     .unwrap();
     if dual {
-        space.try_dual().unwrap()
+        space.dual().unwrap()
     } else {
         space
     }
@@ -231,7 +231,7 @@ fn u1_rank4_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
     );
     assert_lazy_adjoint_reads_and_transforms_match_literal!(
         engine,
-        complex.re(engine).unwrap(),
+        complex.real(engine).unwrap(),
         |x: f64| x,
         close_f64
     );
@@ -255,7 +255,7 @@ fn su2_rank4_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
     );
     assert_lazy_adjoint_reads_and_transforms_match_literal!(
         engine,
-        complex.re(engine).unwrap(),
+        complex.real(engine).unwrap(),
         |x: f64| x,
         close_f64
     );
@@ -308,7 +308,7 @@ fn su2_tr_matches_the_literal_weighted_diagonal_sum_and_conjugates_lazily() {
         complex_value,
     )
     .unwrap();
-    let real = complex.re(engine).unwrap();
+    let real = complex.real(engine).unwrap();
 
     let mut expected = Complex64::new(0.0, 0.0);
     literal_weighted_trace(&snapshot!(engine, complex), su2_dim, |value, weight| {

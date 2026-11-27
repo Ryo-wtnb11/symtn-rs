@@ -41,14 +41,8 @@ fn u1_operands(engine: &mut dyn Engine, runtime: &Runtime) -> [TensorMap<U1Fusio
     [
         TensorMap::rand_with_seed(engine, runtime, [&v, &v], [&w], 1_371_100).unwrap(),
         TensorMap::rand_with_seed(engine, runtime, [&w], [&v, &v], 1_371_101).unwrap(),
-        TensorMap::rand_with_seed(
-            engine,
-            runtime,
-            [&w.try_dual().unwrap()],
-            [&v, &v],
-            1_371_102,
-        )
-        .unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [&w.dual().unwrap()], [&v, &v], 1_371_102)
+            .unwrap(),
     ]
 }
 

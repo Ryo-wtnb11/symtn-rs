@@ -416,7 +416,7 @@ fn multi_tree_eig_composition_matches_the_hand_selection_for_every_policy() {
     // Fermion parity with a dual leg: leg (x) leg' <- leg (x) leg', so the
     // odd-odd trees and the twist of the dual leg enter the layout.
     let leg = fz2_leg(&[(false, 2), (true, 2)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let source = multi_tree_triangular([&leg, &dual], 0x0e19_0009);
     eig_policy_sweep!(
         engine,

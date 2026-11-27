@@ -97,7 +97,7 @@ fn crossing_free_operations_work_without_braiding() {
     let rule = rep_s3();
     let x = leg(&rule, &[(3, 1)]);
     let mixed = leg(&rule, &[(1, 2), (3, 1)]);
-    let dual_x = x.try_dual().unwrap();
+    let dual_x = x.dual().unwrap();
 
     // transpose and repartition round trips.
     let t = seeded(&runtime, &[&x, &x, &x], &[&x], 7);

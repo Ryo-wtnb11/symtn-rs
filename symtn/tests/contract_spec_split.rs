@@ -159,7 +159,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let a =
         TensorMap::<R, D>::from_subblock_fn(engine, &runtime, [v, &dual], [v], fill(11)).unwrap();
     let b =

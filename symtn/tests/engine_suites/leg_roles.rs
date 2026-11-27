@@ -118,8 +118,8 @@ on_each_engine! {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = Runtime::new();
-        let u1 = || (u1_leg(&[(-1, 1), (0, 2), (1, 2)]), u1_leg(&[(0, 1), (1, 2), (2, 1)]).try_dual().unwrap());
-        let su2 = || (su2_leg(&[(0, 2), (1, 2), (2, 1)]), su2_leg(&[(1, 1), (2, 2)]).try_dual().unwrap());
+        let u1 = || (u1_leg(&[(-1, 1), (0, 2), (1, 2)]), u1_leg(&[(0, 1), (1, 2), (2, 1)]).dual().unwrap());
+        let su2 = || (su2_leg(&[(0, 2), (1, 2), (2, 1)]), su2_leg(&[(1, 1), (2, 2)]).dual().unwrap());
         let rule = Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap(),
@@ -137,7 +137,7 @@ on_each_engine! {
         let fermionic = || {
             (
                 fz2u1(&[(false, 0, 2), (true, 1, 2), (true, -1, 1)]),
-                fz2u1(&[(false, 1, 1), (true, 0, 2)]).try_dual().unwrap(),
+                fz2u1(&[(false, 1, 1), (true, 0, 2)]).dual().unwrap(),
             )
         };
         let (v, w) = u1();

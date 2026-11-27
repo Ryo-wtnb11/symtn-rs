@@ -594,7 +594,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
     assert_eq!(
         lazy.convert::<Complex64>(engine)
             .unwrap()
-            .re(engine)
+            .real(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -604,7 +604,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
         eager
             .convert::<Complex64>(engine)
             .unwrap()
-            .re(engine)
+            .real(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -615,7 +615,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
     assert_eq!(
         lazy.convert::<Complex64>(engine)
             .unwrap()
-            .im(engine)
+            .imag(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -625,7 +625,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
         eager
             .convert::<Complex64>(engine)
             .unwrap()
-            .im(engine)
+            .imag(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -664,7 +664,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
     let lazy_complex = complex.adjoint(engine).unwrap();
     assert_eq!(
         lazy_complex
-            .re(engine)
+            .real(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -672,7 +672,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
             .unwrap()
             .to_vec(),
         eager_complex
-            .re(engine)
+            .real(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -682,7 +682,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
     );
     assert_eq!(
         lazy_complex
-            .im(engine)
+            .imag(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -690,7 +690,7 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
             .unwrap()
             .to_vec(),
         eager_complex
-            .im(engine)
+            .imag(engine)
             .unwrap()
             .materialize(engine)
             .unwrap()
@@ -1143,7 +1143,7 @@ fn adjoint_trace_pairs_stays_parent_native() {
             (U1Irrep::new(0).unwrap(), 1),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let u1 = TensorMap::from_subblock_fn(
         engine,
@@ -1160,7 +1160,7 @@ fn adjoint_trace_pairs_stays_parent_native() {
     )
     .unwrap();
     let su2_open = GradedSpace::try_new(su2_provider, [(su2_irrep(0), 1), (su2_irrep(1), 1)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let su2 = TensorMap::from_subblock_fn(
         engine,
@@ -1668,7 +1668,7 @@ fn fermionic_lazy_contract_keeps_the_supertrace_distinct_from_compose() {
         provider,
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, indices| {
         let sector = trees.codomain_uncoupled[0];

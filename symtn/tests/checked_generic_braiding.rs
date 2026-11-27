@@ -847,7 +847,7 @@ fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
         1.0,
     ));
     let x_dual = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&x_dual], [&x_dual], |_, _| 3.0).unwrap();
@@ -1147,7 +1147,7 @@ fn assert_compose_any_braiding<D>(
     let a = filled(0, &[&v, &w], &[&v]);
     let b = filled(3, &[&v], &[&v, &w]);
     // Dual legs in both middles: A': V ⊗ W* ← V* and B': V* ← V ⊗ W*.
-    let (v_dual, w_dual) = (v.try_dual().unwrap(), w.try_dual().unwrap());
+    let (v_dual, w_dual) = (v.dual().unwrap(), w.dual().unwrap());
     let a_dual = filled(5, &[&v, &w_dual], &[&v_dual]);
     let b_dual = filled(7, &[&v_dual], &[&v, &w_dual]);
     // Empty middle (outer product through the unit): V ← () and () ← W.
@@ -1248,7 +1248,7 @@ where
         let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, -1.0));
         let label = if rotated { Label::Unit } else { Label::X };
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let mut matrix = |offset: f64| -> TensorMap<_, D> {
             TensorMap::from_subblock_fn(engine, &runtime, [&dual], [&dual], |_, index| {
                 value(offset + (2 * index[0] + index[1]) as f64)
@@ -1617,7 +1617,7 @@ fn checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublishe
             },
         )
         .unwrap();
-        let dual = v.try_dual().unwrap();
+        let dual = v.dual().unwrap();
         let mut filled = |codomain: &[&GradedSpace<_>], domain: &[&GradedSpace<_>], seed: f64| {
             TensorMap::from_subblock_fn(
                 engine,

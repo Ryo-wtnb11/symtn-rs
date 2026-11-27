@@ -258,7 +258,7 @@ fn fixtures<R, D>(
         + symtn::typed::TypedTensorModeDispatch<R, FacadeError = symtn::typed::Error>,
     D: Bits + symtn::typed::CudaPayload,
 {
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let square: TensorMap<R, D> =
         TensorMap::rand_with_seed(engine, runtime, [leg, &dual], [&dual, leg], 1545).unwrap();
     check(engine, cuda, &square, &format!("{what} 2<-2"));
@@ -334,7 +334,7 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
         Complex64::new(f64::INFINITY, f64::INFINITY),
         Complex64::new(-3.5, 0.25),
     ];
-    let dual = u1.try_dual().unwrap();
+    let dual = u1.dual().unwrap();
     let mut next = 0;
     let special: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1, &dual], [&dual, &u1], |_, _| {

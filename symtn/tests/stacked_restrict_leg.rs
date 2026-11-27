@@ -22,7 +22,7 @@ macro_rules! restrict_members {
     ($engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let a = leg(0);
-        let dual = a.try_dual().unwrap();
+        let dual = a.dual().unwrap();
         let runtime = host_runtime();
         restrict_members!($engine, @dtype $label, &runtime, &a, &dual, f64);
         restrict_members!($engine, @dtype $label, &runtime, &a, &dual, Complex64);
@@ -89,7 +89,7 @@ macro_rules! multi_axis_members {
     ($engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let a = leg(0);
-        let dual = a.try_dual().unwrap();
+        let dual = a.dual().unwrap();
         let runtime = host_runtime();
         multi_axis_members!($engine, @dtype $label, &runtime, &a, &dual, f64);
         multi_axis_members!($engine, @dtype $label, &runtime, &a, &dual, Complex64);
@@ -143,7 +143,7 @@ macro_rules! malformed {
     ($engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let a = leg(0);
-        let dual = a.try_dual().unwrap();
+        let dual = a.dual().unwrap();
         let other = leg(1);
         let runtime = host_runtime();
         let members = mixed_members!($engine, &runtime, &a, &dual, f64, 2);
