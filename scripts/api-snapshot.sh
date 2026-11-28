@@ -98,13 +98,19 @@ UNEXPORTED_ALLOWED="
 python3 - "$out_dir" "$UNEXPORTED_ALLOWED" <<'PY' || exit 1
 import re, sys, pathlib
 d = pathlib.Path(sys.argv[1]); allowed = set(sys.argv[2].split())
-# The first capitalised segment of an internal-crate path is the type it names;
-# an item under a sealing module (`sealed`, `seal`, `*_sealed`) is unnameable
-# on purpose.
-PATH = re.compile(r"\bsymtn_[a-z_]+((?:::[a-z_0-9]+)*)::([A-Z][A-Za-z0-9_]*)")
+# The first capitalised segment of an internal-crate path is the type it names.
+# Sealing items are unnameable on purpose, but sealing alone does not stop
+# calls, so each one is audited and listed by full path: a marker trait with no
+# methods, an unconstructible token, or a trait whose every method takes one.
+SEALED = {
+    "symtn_dense::cuda_adapter::cuda_scalar_sealed::Sealed",  # no methods
+    "symtn_sectors::product_rule::sealed::Token",  # unnameable, so unconstructible
+    "symtn_matrixalgebra::factorize::scalar::sealed::DenseIo",  # token-gated
+}
+PATH = re.compile(r"\bsymtn_[a-z_]+(?:::[a-z_0-9]+)*::([A-Z][A-Za-z0-9_]*)")
 ATTRS = re.compile(r"^(?:#\[[^\]]*\] )*")
 def names(line):
-    return {m.group(2) for m in PATH.finditer(line) if "seal" not in m.group(1)}
+    return {m.group(1) for m in PATH.finditer(line) if m.group(0) not in SEALED}
 def unexported(facade, deps):
     exported = {l.rsplit("::", 1)[1] for l in facade if l.startswith("pub use ")}
     deps = [ATTRS.sub("", l) for l in deps]
@@ -124,7 +130,7 @@ def unexported(facade, deps):
     return seen - exported
 
 # Self-test: a tuple field of a re-exported type, a type reached only through
-# a re-export, and a sealed item.
+# a re-export, and a sealing trait that has not been audited.
 assert unexported(
     ["pub use symtn::expert::Storage"],
     ["pub struct symtn_ops::cuda::Storage<D>(pub symtn_dense::buf::Buffer, _)"],
@@ -133,7 +139,7 @@ assert unexported(
     ["pub use symtn::sector::Rule"],
     ["pub fn symtn_sectors::Rule::by_uuid(&str) -> core::result::Result<Self, symtn_sectors::RuleError>",
      "pub trait symtn_sectors::Rule: symtn_sectors::seal::Sealed"],
-) == {"RuleError"}
+) == {"RuleError", "Sealed"}
 
 status = 0
 for suffix in ("", "+all"):

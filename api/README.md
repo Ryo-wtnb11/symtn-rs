@@ -54,7 +54,7 @@ that changes the public API without updating `api/` fails the `lint` job.
 
 Both modes also check that every type named by a public `symtn` signature, or
 by the declaration or a public member of a type `symtn` re-exports, is itself
-exported by `symtn` (items under a sealing module are exempt), so no caller needs an internal crate to name a returned value or
+exported by `symtn` (the sealing items audited in the script are exempt), so no caller needs an internal crate to name a returned value or
 match an error. Names that already violate this are listed in the script;
 the list may only shrink.
 
