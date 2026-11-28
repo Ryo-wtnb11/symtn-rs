@@ -78,45 +78,69 @@ for combo in "${COMBOS[@]}"; do
         cargo public-api "${args[@]}" >"$file"
 done
 
-# A type named by a public symtn signature, or by a public member of a type
-# symtn re-exports, must itself be exported by symtn; otherwise a caller has to
-# depend on an internal crate to name it. Ratchet: the names below already
-# violate this. Remove a name once it is exported or no longer named.
+# A type named by a public symtn signature, or by the declaration or a public
+# member of a type symtn re-exports, must itself be exported by symtn;
+# otherwise a caller has to depend on an internal crate to name it. Ratchet:
+# the names below were already unnameable at d72c610c (the check's base) and
+# still are. Remove a name once it is exported or no longer named.
 UNEXPORTED_ALLOWED="
     AdjointBlockMap BlockStructure BoundDynamicFusionMapSpace
-    CheckedGenericFactorPlanError CoefficientAlgebra ContractDestinationInit
-    CudaScalarOperands
-    DenseBlockScalar DenseRecouplingScalar
-    FactorMode FactorSpaceAuthority FusionProductSpace
-    FusionTreeGroupRef FusionTreeHomSpace FusionTreePairRef FusionTreeRef
-    LazyAdjointSpace PhysicalConversionError PlanarContractOrders
+    CheckedGenericFactorPlanError CoefficientAlgebra
+    ContractDestinationInit CudaScalarOperands DenseBlockScalar
+    DenseRecouplingScalar FactorMode FactorOutput FactorSpaceAuthority
+    FusionProductSpace FusionTreeGroupRef FusionTreeHomSpace
+    FusionTreePairRef FusionTreeRef LazyAdjointSpace
+    PhysicalConversionError PlanarContractOrders Provider
     RigidCoefficientAlgebra SectorSpectrum TensorTraceAxisSpec
-    TensorTraceFusionStructure Token TreeTransformOperationView
-    TreeTransformStructure TruncationDecision UnitLegInsertion
+    TensorTraceFusionStructure TreeTransformOperationView
+    TreeTransformStructure TruncationDecision UnitLegInsertion ZeroBytes
 "
 python3 - "$out_dir" "$UNEXPORTED_ALLOWED" <<'PY' || exit 1
 import re, sys, pathlib
 d = pathlib.Path(sys.argv[1]); allowed = set(sys.argv[2].split())
-PATH = re.compile(r"\bsymtn_[a-z_]+(?:::[a-z_0-9]+)*::[A-Z][A-Za-z0-9_]*")
+# The first capitalised segment of an internal-crate path is the type it names;
+# an item under a sealing module (`sealed`, `seal`, `*_sealed`) is unnameable
+# on purpose.
+PATH = re.compile(r"\bsymtn_[a-z_]+((?:::[a-z_0-9]+)*)::([A-Z][A-Za-z0-9_]*)")
+ATTRS = re.compile(r"^(?:#\[[^\]]*\] )*")
+def names(line):
+    return {m.group(2) for m in PATH.finditer(line) if "seal" not in m.group(1)}
+def unexported(facade, deps):
+    exported = {l.rsplit("::", 1)[1] for l in facade if l.startswith("pub use ")}
+    deps = [ATTRS.sub("", l) for l in deps]
+    # Roots: every public symtn signature and every re-exported type.
+    todo = set(exported).union(*(names(l) for l in facade if not l.startswith("pub use ")))
+    seen = set()
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        if name not in exported:
+            continue
+        # The declaration (tuple fields and supertraits included) and every member.
+        item = re.compile(r"^pub (?:[a-z]+ )*symtn_[a-z_]+(?:::[a-z_0-9]+)*::" + name + r"\b")
+        todo |= set().union(*(names(l) for l in deps if item.match(l)))
+    return seen - exported
+
+# Self-test: a tuple field of a re-exported type, a type reached only through
+# a re-export, and a sealed item.
+assert unexported(
+    ["pub use symtn::expert::Storage"],
+    ["pub struct symtn_ops::cuda::Storage<D>(pub symtn_dense::buf::Buffer, _)"],
+) == {"Buffer"}
+assert unexported(
+    ["pub use symtn::sector::Rule"],
+    ["pub fn symtn_sectors::Rule::by_uuid(&str) -> core::result::Result<Self, symtn_sectors::RuleError>",
+     "pub trait symtn_sectors::Rule: symtn_sectors::seal::Sealed"],
+) == {"RuleError"}
+
 status = 0
 for suffix in ("", "+all"):
     facade = (d / f"symtn{suffix}.txt").read_text().splitlines()
-    exported = {l.rsplit("::", 1)[1] for l in facade if l.startswith("pub use ")}
     deps = [l for f in sorted(d.glob(f"symtn-*{suffix}.txt"))
             if suffix or "+" not in f.name for l in f.read_text().splitlines()]
-    todo = {p for l in facade if not l.startswith("pub use ") for p in PATH.findall(l)}
-    seen = set()
-    while todo:
-        path = todo.pop()
-        if path in seen:
-            continue
-        seen.add(path)
-        name = path.rsplit("::", 1)[1]
-        if name not in exported:
-            continue
-        member = re.compile(r"^pub (?:(?:const |unsafe )?fn )?symtn_[a-z_]+(?:::[a-z_0-9]+)*::" + name + r"(?:<[^:]*>)?::")
-        todo |= {p for l in deps if member.match(l) for p in PATH.findall(l)}
-    for name in sorted({p.rsplit("::", 1)[1] for p in seen} - exported - allowed):
+    for name in sorted(unexported(facade, deps) - allowed):
         print(f"api-snapshot: symtn{suffix} names {name} in a public signature but does not export it", file=sys.stderr)
         status = 1
 sys.exit(status)
