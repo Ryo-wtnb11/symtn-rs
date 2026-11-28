@@ -1384,6 +1384,8 @@ mod fermionic_unit_tests {
                     &StackedStorageView::new::<f64>(&lhs, lhs_len, members, lhs_len).unwrap(),
                     &StackedStorageView::new::<f64>(&rhs, rhs_len, members, rhs_len).unwrap(),
                     true,
+                    1.0,
+                    0.0,
                 )
                 .unwrap();
             let expected: Vec<_> = [(1.0, positive), (-1.0, negative)]
@@ -1409,6 +1411,8 @@ mod fermionic_unit_tests {
                         &StackedStorageView::new::<f64>(&lhs, lhs_len, members, lhs_len).unwrap(),
                         &StackedStorageView::new::<f64>(&rhs, rhs_len, members, rhs_len).unwrap(),
                         true,
+                        1.0,
+                        0.0,
                     )
                     .unwrap_err();
                 assert!(matches!(

@@ -1969,108 +1969,240 @@ fn nonsymmetric_braiding_is_rejected_before_cuda_execution() {
         } if !style.is_symmetric())));
 }
 
-/// The device form of the Host `Dest` mode test: each mode per member,
-/// `out = alpha · contract(lhs, rhs) + beta · out`, on the core route, the
-/// CopyC route and composition, against that formula over the eager Host
-/// contraction of each member.
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn prepared_execute_into_applies_every_dest_mode_per_member_on_device() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::new();
-    let v = u1(&[(0, 2), (1, 2)]);
-    let random = |engine: &mut symtn::typed::CpuEngine, seed| {
-        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], seed).unwrap()
-    };
-    let a: Vec<_> = (0..3).map(|i| random(engine, 10 + i)).collect();
-    let b: Vec<_> = (0..3).map(|i| random(engine, 20 + i)).collect();
-    let pack = |cuda: &mut symtn::typed::CudaEngine, members: &[TensorMap<_, f64>]| {
+/// The device form of `assert_dest_modes` (typed_contract_batch.rs): one
+/// `execute_into` per `(alpha, beta)` on device stacks, each element against
+/// `alpha · op + beta · before` per member with `op` the eager Host
+/// contraction (or composition). A `beta = 0` destination starts as NaN, and
+/// `alpha = 0` drops the `op` term exactly, so a NaN operand must not reach
+/// the result.
+#[allow(clippy::too_many_arguments)]
+fn assert_dest_modes_on_device<R: DeviceRule, D: DevicePayload>(
+    engine: &mut symtn::typed::CpuEngine,
+    cuda: &mut symtn::typed::CudaEngine,
+    runtime: &Runtime,
+    what: &str,
+    lhs: &[TensorMap<R, D>],
+    rhs: &[TensorMap<R, D>],
+    spec: Option<&ContractSpec<'_>>,
+    modes: &[(D, D)],
+) {
+    let (zero, one) = (D::entry(0.0, 0.0), D::entry(1.0, 0.0));
+    let nan = D::entry(f64::NAN, f64::NAN);
+    let pack = |cuda: &mut symtn::typed::CudaEngine, members: &[TensorMap<R, D>]| {
         StackedTensorMap::pack(&members.iter().collect::<Vec<_>>())
             .unwrap()
             .to_cuda(cuda)
             .unwrap()
     };
-    let (lhs, rhs) = (pack(cuda, &a), pack(cuda, &b));
-    let modes = [
-        ("overwrite", 1.0, 0.0),
-        ("accumulate", 1.0, 1.0),
-        ("scaled", 2.5, -0.5),
-        ("scaled", 0.0, 0.5),
-    ];
-    type DeviceStack = StackedTensorMap<U1FusionRule, f64, CudaStorage<f64>>;
-    let check =
-        |engine: &mut symtn::typed::CpuEngine,
-         cuda: &mut symtn::typed::CudaEngine,
-         route: &str,
-         eager: &[TensorMap<U1FusionRule, f64>],
-         run: &mut dyn FnMut(&mut symtn::typed::CudaEngine, Dest<'_, DeviceStack, f64>)| {
-            for (mode, alpha, beta) in modes {
-                let before: Vec<_> = (0..3).map(|i| random(engine, 30 + i as u64)).collect();
-                let mut dst = if mode == "overwrite" {
-                    // `beta = 0` never reads the destination.
-                    let poison: Vec<_> = before
-                        .iter()
-                        .map(|t| t.scale(engine, f64::NAN).unwrap())
-                        .collect();
-                    pack(cuda, &poison)
-                } else {
-                    pack(cuda, &before)
-                };
-                let dest = match mode {
-                    "overwrite" => Dest::overwrite(&mut dst),
-                    "accumulate" => Dest::accumulate(&mut dst),
-                    _ => Dest::scaled(&mut dst, alpha, beta),
-                };
-                run(cuda, dest);
-                let dst = dst.to_host(cuda).unwrap();
-                for (i, (eager, before)) in eager.iter().zip(&before).enumerate() {
-                    let actual = dst.member(engine, i).unwrap();
-                    let actual = actual.dense_data().unwrap();
-                    let (eager, before) =
-                        (eager.dense_data().unwrap(), before.dense_data().unwrap());
-                    assert_eq!(actual.len(), eager.len());
-                    for k in 0..actual.len() {
-                        let prior = if beta == 0.0 { 0.0 } else { beta * before[k] };
-                        let want = alpha * eager[k] + prior;
-                        assert!(
-                            (actual[k] - want).abs() <= 1e-12 * (1.0 + want.abs()),
-                            "{route} {mode} member {i} element {k}: {} != {want}",
-                            actual[k]
-                        );
-                    }
-                }
-            }
-        };
-    for (route, output) in [("core", [0, 1, 2, 3]), ("copyC", [1, 0, 2, 3])] {
-        let (codomain, domain) = output.split_at(2);
-        let spec = ContractSpec {
-            lhs: &[2, 3],
-            rhs: &[0, 1],
-            codomain,
-            domain,
-        };
-        let eager: Vec<_> = a
-            .iter()
-            .zip(&b)
-            .map(|(a, b)| a.contract(engine, b, &spec).unwrap())
-            .collect();
-        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
-        let mut workspace = plan.workspace().unwrap();
-        check(engine, cuda, route, &eager, &mut |cuda, dest| {
-            plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace)
-                .unwrap()
-        });
-    }
-    let eager: Vec<_> = a
+    let eager: Vec<_> = lhs
         .iter()
-        .zip(&b)
-        .map(|(a, b)| a.compose(engine, b).unwrap())
+        .zip(rhs)
+        .map(|(a, b)| match spec {
+            Some(spec) => a.contract(engine, b, spec).unwrap(),
+            None => a.compose(engine, b).unwrap(),
+        })
         .collect();
-    let plan = symtn::typed::ComposePlan::new(engine, &lhs, &rhs).unwrap();
-    let mut workspace = plan.workspace().unwrap();
-    check(engine, cuda, "compose", &eager, &mut |cuda, dest| {
-        plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace)
+    let before: Vec<_> = eager
+        .iter()
+        .enumerate()
+        .map(|(i, out)| {
+            let (codomain, domain) = (out.codomain(), out.domain());
+            TensorMap::<R, D>::rand_with_seed(
+                engine,
+                runtime,
+                codomain.iter(),
+                domain.iter(),
+                90 + i as u64,
+            )
             .unwrap()
-    });
+        })
+        .collect();
+    let (lhs, rhs) = (pack(cuda, lhs), pack(cuda, rhs));
+    let contract = spec.map(|spec| ContractPlan::new(engine, &lhs, &rhs, spec).unwrap());
+    let compose = spec
+        .is_none()
+        .then(|| symtn::typed::ComposePlan::new(engine, &lhs, &rhs).unwrap());
+    let mut workspace = match (&contract, &compose) {
+        (Some(plan), _) => plan.workspace().unwrap(),
+        (_, Some(plan)) => plan.workspace().unwrap(),
+        _ => unreachable!(),
+    };
+    for &(alpha, beta) in modes {
+        let mut dst = if beta == zero {
+            let poison: Vec<_> = before
+                .iter()
+                .map(|t| t.scale(engine, nan).unwrap())
+                .collect();
+            pack(cuda, &poison)
+        } else {
+            pack(cuda, &before)
+        };
+        let dest = if (alpha, beta) == (one, zero) {
+            Dest::overwrite(&mut dst)
+        } else if (alpha, beta) == (one, one) {
+            Dest::accumulate(&mut dst)
+        } else {
+            Dest::scaled(&mut dst, alpha, beta)
+        };
+        match (&contract, &compose) {
+            (Some(plan), _) => plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace),
+            (_, Some(plan)) => plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace),
+            _ => unreachable!(),
+        }
+        .unwrap();
+        let dst = dst.to_host(cuda).unwrap();
+        for (i, (op, before)) in eager.iter().zip(&before).enumerate() {
+            let actual = dst.member(engine, i).unwrap();
+            let actual = actual.dense_data().unwrap();
+            let (op, before) = (op.dense_data().unwrap(), before.dense_data().unwrap());
+            assert_eq!(actual.len(), op.len(), "{what}");
+            for k in 0..actual.len() {
+                let term = if alpha == zero { zero } else { alpha * op[k] };
+                let prior = if beta == zero { zero } else { beta * before[k] };
+                let want = term + prior;
+                assert!(
+                    actual[k].distance(want) <= 1e-12 * (1.0 + want.magnitude()),
+                    "{what} ({alpha:?}, {beta:?}) member {i} element {k}: {:?} != {want:?}",
+                    actual[k]
+                );
+            }
+        }
+    }
+}
+
+/// Every `Dest` mode on device stacks over the Host test's geometry: the
+/// U(1) inactive-block routes, SU(2) recoupling with a multi-tree scatter,
+/// composition, real and complex dtypes, and a NaN operand under
+/// `alpha = 0`.
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn prepared_execute_into_applies_every_dest_mode_per_member_on_device() {
+    fn check<R: DeviceRule, D: DevicePayload>(
+        engine: &mut symtn::typed::CpuEngine,
+        cuda: &mut symtn::typed::CudaEngine,
+        runtime: &Runtime,
+        case: &Case<R, D>,
+        compose: bool,
+        modes: &[(D, D)],
+    ) {
+        let nan = D::entry(f64::NAN, f64::NAN);
+        let members =
+            |engine: &mut symtn::typed::CpuEngine, t: &TensorMap<R, D>, salt: f64, count: usize| {
+                (0..count)
+                    .map(|i| {
+                        t.scale(
+                            engine,
+                            D::entry(1.0 + salt + i as f64 / 4.0, i as f64 / 8.0),
+                        )
+                        .unwrap()
+                    })
+                    .collect::<Vec<_>>()
+            };
+        // One member replays on the same member route as several.
+        for count in [1, 3] {
+            let lhs = members(engine, &case.lhs, 0.0, count);
+            let rhs = members(engine, &case.rhs, 0.5, count);
+            let spec = (!compose).then(|| case.spec());
+            assert_dest_modes_on_device(
+                engine,
+                cuda,
+                runtime,
+                case.name,
+                &lhs,
+                &rhs,
+                spec.as_ref(),
+                modes,
+            );
+            let poisoned: Vec<_> = lhs.iter().map(|t| t.scale(engine, nan).unwrap()).collect();
+            let zero_alpha: Vec<_> = modes
+                .iter()
+                .filter(|(alpha, _)| *alpha == D::entry(0.0, 0.0))
+                .copied()
+                .collect();
+            assert_dest_modes_on_device(
+                engine,
+                cuda,
+                runtime,
+                case.name,
+                &poisoned,
+                &rhs,
+                spec.as_ref(),
+                &zero_alpha,
+            );
+        }
+    }
+    fn run<D: DevicePayload>(cuda: &mut symtn::typed::CudaEngine, modes: &[(D, D)]) {
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let runtime = Runtime::new();
+        for case in u1_inactive_cases::<D>(engine, &runtime) {
+            check(engine, cuda, &runtime, &case, false, modes);
+        }
+        let su2 = contract_cases::su2_reordered::<D>(engine, &runtime);
+        check(engine, cuda, &runtime, &su2, false, modes);
+        let v = u1(&[(0, 2), (1, 2)]);
+        let w = u1(&[(0, 1), (1, 3)]);
+        let compose = Case {
+            name: "U(1) composition",
+            lhs: TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&w], fill(301)).unwrap(),
+            rhs: TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v], fill(302)).unwrap(),
+            lhs_axes: vec![2],
+            rhs_axes: vec![0],
+            output_axes: vec![0, 1, 2],
+            dense: false,
+        };
+        check(engine, cuda, &runtime, &compose, true, modes);
+    }
+    let cuda = &mut crate::common::cuda_engine();
+    run::<f64>(
+        cuda,
+        &[
+            (1.0, 0.0),
+            (1.0, 1.0),
+            (-1.5, 2.0),
+            (2.5, -0.5),
+            (0.75, 0.0),
+            (0.0, 0.5),
+            (0.0, 1.0),
+            (0.0, 0.0),
+        ],
+    );
+    let c = Complex64::new;
+    run::<Complex64>(
+        cuda,
+        &[
+            (c(1.0, 0.0), c(0.0, 0.0)),
+            (c(1.0, 0.0), c(1.0, 0.0)),
+            (c(0.5, -1.25), c(-0.75, 0.5)),
+            (c(-1.0, 0.0), c(0.0, 1.0)),
+            (c(0.0, 0.0), c(0.25, 0.5)),
+        ],
+    );
+}
+
+/// The Host-storage empty-product accumulation of `engine_ownership.rs` with
+/// a CUDA engine: no GEMM runs and every destination block is kept, yet the
+/// call refuses the engine before any write.
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn prepared_host_empty_product_accumulate_refuses_a_cuda_engine() {
+    let good = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::new();
+    let (q0, q1) = (u1(&[(0, 2)]), u1(&[(1, 2)]));
+    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(good, &runtime, [&q0], [&q1], 7).unwrap();
+    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(good, &runtime, [&q1], [&q0], 8).unwrap();
+    assert_eq!((a.subblock_count(), b.subblock_count()), (0, 0));
+    let lhs = StackedTensorMap::pack(&[&a, &a]).unwrap();
+    let rhs = StackedTensorMap::pack(&[&b, &b]).unwrap();
+    let plan = symtn::typed::ComposePlan::new(good, &lhs, &rhs).unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    let member = TensorMap::<_, f64>::rand_with_seed(good, &runtime, [&q0], [&q0], 9).unwrap();
+    let mut dst = StackedTensorMap::pack(&[&member, &member]).unwrap();
+    let before = member.dense_data().unwrap().to_vec();
+    assert!(plan
+        .execute_into(cuda, &lhs, &rhs, Dest::accumulate(&mut dst), &mut workspace)
+        .is_err());
+    for i in 0..2 {
+        assert_eq!(dst.member(good, i).unwrap().dense_data().unwrap(), before);
+    }
 }

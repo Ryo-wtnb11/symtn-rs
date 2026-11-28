@@ -462,7 +462,7 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
 
                 let mut out = initial.clone();
                 let mut cold = TreeTransformWorkspace::default();
-                let error = tree_transform_members_overwrite_raw(
+                let error = tree_transform_members_raw(
                     &mut engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut dense,
@@ -474,6 +474,8 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                     &source,
                     2,
                     &[],
+                    num_traits::One::one(),
+                    num_traits::Zero::zero(),
                 )
                 .unwrap_err();
                 assert!(unsupported(error), "{what}, members");
@@ -483,7 +485,7 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                 // One member delegates to the initialized overwrite.
                 let mut out = initial[..dst_len].to_vec();
                 let mut cold = TreeTransformWorkspace::default();
-                let error = tree_transform_members_overwrite_raw(
+                let error = tree_transform_members_raw(
                     &mut engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut dense,
@@ -495,6 +497,8 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                     &source[..src_len],
                     1,
                     &[],
+                    num_traits::One::one(),
+                    num_traits::Zero::zero(),
                 )
                 .unwrap_err();
                 assert!(unsupported(error), "{what}, one member");

@@ -135,7 +135,7 @@ fn unit_single_member_overwrite_zeros_inactive_layouts() {
                 .unwrap();
                 let before = cuda_transfer_stats();
                 regions
-                    .execute_overwrite(&mut ctx, &input, None, &mut output)
+                    .execute(&mut ctx, &input, None, D::ONE, D::ZERO, &mut output)
                     .unwrap();
                 let after = cuda_transfer_stats();
                 assert_eq!(after.copy_calls - before.copy_calls, 1);
@@ -179,7 +179,14 @@ fn underflowed_f32_single_coefficient_remains_a_data_operand() {
     let input = CudaStorage::upload_owned(&ctx, vec![f32::NAN, 2.0]).unwrap();
     let mut output = CudaStorage::upload_owned(&ctx, vec![1.0_f32; 2]).unwrap();
     regions
-        .execute_overwrite(&mut ctx, &input, Some(&coefficients.0), &mut output)
+        .execute(
+            &mut ctx,
+            &input,
+            Some(&coefficients.0),
+            1.0,
+            0.0,
+            &mut output,
+        )
         .unwrap();
     let actual = output.download(&ctx).unwrap();
     assert!(
@@ -2134,7 +2141,7 @@ fn a_single_member_overwrite_refuses_a_foreign_source_before_zeroing_inactive_la
     let mut destination = CudaStorage::upload_owned(&b, before_values.clone()).unwrap();
     let before = cuda_transfer_stats();
     assert!(regions
-        .execute_overwrite(&mut b, &source, None, &mut destination)
+        .execute(&mut b, &source, None, 1.0, 0.0, &mut destination)
         .is_err());
     assert_eq!(cuda_transfer_stats(), before, "nothing reached the device");
     assert_eq!(destination.download(&b).unwrap(), before_values);

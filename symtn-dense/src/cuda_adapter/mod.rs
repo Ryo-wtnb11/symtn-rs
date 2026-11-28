@@ -56,8 +56,7 @@ pub use factorization::{
 };
 pub use finite::cuda_all_finite;
 pub use gemm::{
-    cuda_gemm_region_batched_axpby_into, cuda_gemm_region_batched_into,
-    cuda_gemm_region_batched_scaled_into, cuda_gemm_region_into, cuda_gemm_region_with_ops_into,
+    cuda_gemm_region_batched_into, cuda_gemm_region_into, cuda_gemm_region_with_ops_into,
     cuda_matmul_region_into,
 };
 pub use hermitian::{cuda_hermitian_regions, cuda_hermitian_regions_batched};

@@ -572,3 +572,51 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
     // A dense lazy adjoint moves no payload and needs nothing of the engine.
     assert!(a.adjoint(engine).is_ok());
 }
+
+/// A prepared composition whose operands have no blocks runs no GEMM, and
+/// `Dest::accumulate` keeps every (inactive) destination block, so nothing
+/// opens an execution section; the engine is still admitted, as the eager
+/// composition does, and a broken one is refused before any write.
+#[test]
+fn prepared_empty_product_accumulate_refuses_a_broken_engine() {
+    let runtime = Runtime::new();
+    let good = &mut CpuEngine::serial();
+    let u1 = |charge| {
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(charge).unwrap(), 2)]).unwrap()
+    };
+    let (q0, q1) = (u1(0), u1(1));
+    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(good, &runtime, [&q0], [&q1], 7).unwrap();
+    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(good, &runtime, [&q1], [&q0], 8).unwrap();
+    assert_eq!((a.subblock_count(), b.subblock_count()), (0, 0));
+    let lhs = symtn::typed::StackedTensorMap::pack(&[&a, &a]).unwrap();
+    let rhs = symtn::typed::StackedTensorMap::pack(&[&b, &b]).unwrap();
+    let plan = symtn::typed::ComposePlan::new(good, &lhs, &rhs).unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    let member = TensorMap::<_, f64>::rand_with_seed(good, &runtime, [&q0], [&q0], 9).unwrap();
+    let mut dst = symtn::typed::StackedTensorMap::pack(&[&member, &member]).unwrap();
+    let before = member.dense_data().unwrap().to_vec();
+    assert!(!before.is_empty());
+    for threads in [1, 4] {
+        let mut engine = engine(threads);
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
+        }));
+        assert!(panicked.is_err() && engine.is_broken());
+        assert!(
+            plan.execute_into(
+                &mut engine,
+                &lhs,
+                &rhs,
+                Dest::accumulate(&mut dst),
+                &mut workspace
+            )
+            .is_backend_failure(),
+            "width {threads}"
+        );
+        for i in 0..2 {
+            assert_eq!(dst.member(good, i).unwrap().dense_data().unwrap(), before);
+        }
+    }
+    plan.execute_into(good, &lhs, &rhs, Dest::accumulate(&mut dst), &mut workspace)
+        .unwrap();
+}

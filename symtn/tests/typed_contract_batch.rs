@@ -1385,102 +1385,212 @@ fn reject_braiding<const ANYONIC: bool>(runtime: &Runtime) -> bool {
     matches!(ContractPlan::new(engine, &stack, &stack, &spec), Err(Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::UnsupportedContractionBraiding { operation: symtn::typed::BraidingOp::Contraction, style, } if !style.is_symmetric()))
 }
 
-/// `execute_into` applies each `Dest` mode per member,
-/// `out = alpha · contract(lhs, rhs) + beta · out`, on the direct core route
-/// (identity output order), the CopyC route (a permuted output) and
-/// composition; the expected value is that formula over the eager
-/// contraction of each member.
-#[test]
-fn prepared_execute_into_applies_every_dest_mode_per_member() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::new();
-    let v = u1(&[(0, 2), (1, 2)]);
-    let random = |engine: &mut symtn_dense::CpuEngine, seed| {
-        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], seed).unwrap()
+/// Runs `execute_into` once per `(alpha, beta)` over the member stacks and
+/// checks every element against `alpha · op + beta · before` per member,
+/// with `op` the eager contraction (or composition, without `spec`) of the
+/// member. `(1, 0)` is `Dest::overwrite`, `(1, 1)` `Dest::accumulate`, the
+/// rest `Dest::scaled`; a `beta = 0` destination starts as NaN, which it must
+/// not read, and `alpha = 0` drops the `op` term exactly, so a NaN operand
+/// must not reach the result either.
+#[allow(clippy::too_many_arguments)]
+fn assert_dest_modes<R, D>(
+    engine: &mut symtn_dense::CpuEngine,
+    runtime: &Runtime,
+    what: &str,
+    lhs: &[TensorMap<R, D>],
+    rhs: &[TensorMap<R, D>],
+    spec: Option<&ContractSpec<'_>>,
+    modes: &[(D, D)],
+) where
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + MultiplicityFreeRigidSymbols<Scalar = f64>
+        + CheckedFusionAlgebra
+        + SectorCodec,
+    D: Payload,
+{
+    let (zero, one) = (D::entry(0.0, 0.0), D::entry(1.0, 0.0));
+    let nan = D::entry(f64::NAN, f64::NAN);
+    let pack = |members: &[TensorMap<R, D>]| {
+        StackedTensorMap::pack(&members.iter().collect::<Vec<_>>()).unwrap()
     };
-    let a: Vec<_> = (0..3).map(|i| random(engine, 10 + i)).collect();
-    let b: Vec<_> = (0..3).map(|i| random(engine, 20 + i)).collect();
-    let lhs = StackedTensorMap::pack(&a.iter().collect::<Vec<_>>()).unwrap();
-    let rhs = StackedTensorMap::pack(&b.iter().collect::<Vec<_>>()).unwrap();
-    let modes = [
-        ("overwrite", 1.0, 0.0),
-        ("accumulate", 1.0, 1.0),
-        ("scaled", 2.5, -0.5),
-        ("scaled", 0.0, 0.5),
-    ];
-    type HostStack = StackedTensorMap<symtn::sector::U1FusionRule, f64>;
-    type Run<'a> = dyn FnMut(&mut symtn_dense::CpuEngine, Dest<'_, HostStack, f64>) + 'a;
-    let check = |engine: &mut symtn_dense::CpuEngine,
-                 route: &str,
-                 eager: &[TensorMap<symtn::sector::U1FusionRule, f64>],
-                 run: &mut Run<'_>| {
-        for (mode, alpha, beta) in modes {
-            let before: Vec<_> = (0..3).map(|i| random(engine, 30 + i as u64)).collect();
-            let pack = |members: &[TensorMap<_, f64>]| {
-                StackedTensorMap::pack(&members.iter().collect::<Vec<_>>()).unwrap()
-            };
-            let mut dst = if mode == "overwrite" {
-                // `beta = 0` never reads the destination.
-                let poison: Vec<_> = before
-                    .iter()
-                    .map(|t| t.scale(engine, f64::NAN).unwrap())
-                    .collect();
-                pack(&poison)
-            } else {
-                pack(&before)
-            };
-            let dest = match mode {
-                "overwrite" => Dest::overwrite(&mut dst),
-                "accumulate" => Dest::accumulate(&mut dst),
-                _ => Dest::scaled(&mut dst, alpha, beta),
-            };
-            run(engine, dest);
-            for (i, (eager, before)) in eager.iter().zip(&before).enumerate() {
-                let actual = dst.member(engine, i).unwrap();
-                let actual = actual.dense_data().unwrap();
-                let (eager, before) = (eager.dense_data().unwrap(), before.dense_data().unwrap());
-                assert_eq!(actual.len(), eager.len());
-                for k in 0..actual.len() {
-                    let prior = if beta == 0.0 { 0.0 } else { beta * before[k] };
-                    let want = alpha * eager[k] + prior;
-                    assert!(
-                        (actual[k] - want).abs() <= 1e-12 * (1.0 + want.abs()),
-                        "{route} {mode} member {i} element {k}: {} != {want}",
-                        actual[k]
-                    );
-                }
+    let eager: Vec<_> = lhs
+        .iter()
+        .zip(rhs)
+        .map(|(a, b)| match spec {
+            Some(spec) => a.contract(engine, b, spec).unwrap(),
+            None => a.compose(engine, b).unwrap(),
+        })
+        .collect();
+    let before: Vec<_> = eager
+        .iter()
+        .enumerate()
+        .map(|(i, out)| {
+            let (codomain, domain) = (out.codomain(), out.domain());
+            TensorMap::<R, D>::rand_with_seed(
+                engine,
+                runtime,
+                codomain.iter(),
+                domain.iter(),
+                90 + i as u64,
+            )
+            .unwrap()
+        })
+        .collect();
+    let (lhs, rhs) = (pack(lhs), pack(rhs));
+    let contract = spec.map(|spec| ContractPlan::new(engine, &lhs, &rhs, spec).unwrap());
+    let compose = spec
+        .is_none()
+        .then(|| symtn::typed::ComposePlan::new(engine, &lhs, &rhs).unwrap());
+    let mut workspace = match (&contract, &compose) {
+        (Some(plan), _) => plan.workspace().unwrap(),
+        (_, Some(plan)) => plan.workspace().unwrap(),
+        _ => unreachable!(),
+    };
+    for &(alpha, beta) in modes {
+        let mut dst = if beta == zero {
+            let poison: Vec<_> = before
+                .iter()
+                .map(|t| t.scale(engine, nan).unwrap())
+                .collect();
+            pack(&poison)
+        } else {
+            pack(&before)
+        };
+        let dest = if (alpha, beta) == (one, zero) {
+            Dest::overwrite(&mut dst)
+        } else if (alpha, beta) == (one, one) {
+            Dest::accumulate(&mut dst)
+        } else {
+            Dest::scaled(&mut dst, alpha, beta)
+        };
+        match (&contract, &compose) {
+            (Some(plan), _) => plan.execute_into(engine, &lhs, &rhs, dest, &mut workspace),
+            (_, Some(plan)) => plan.execute_into(engine, &lhs, &rhs, dest, &mut workspace),
+            _ => unreachable!(),
+        }
+        .unwrap();
+        for (i, (op, before)) in eager.iter().zip(&before).enumerate() {
+            let actual = dst.member(engine, i).unwrap();
+            let actual = actual.dense_data().unwrap();
+            let (op, before) = (op.dense_data().unwrap(), before.dense_data().unwrap());
+            assert_eq!(actual.len(), op.len(), "{what}");
+            for k in 0..actual.len() {
+                let term = if alpha == zero { zero } else { alpha * op[k] };
+                let prior = if beta == zero { zero } else { beta * before[k] };
+                let want = term + prior;
+                assert!(
+                    actual[k].distance(want) <= 1e-12 * (1.0 + want.magnitude()),
+                    "{what} ({alpha:?}, {beta:?}) member {i} element {k}: {:?} != {want:?}",
+                    actual[k]
+                );
             }
         }
-    };
-    for (route, output) in [("core", [0, 1, 2, 3]), ("copyC", [1, 0, 2, 3])] {
-        let (codomain, domain) = output.split_at(2);
-        let spec = ContractSpec {
-            lhs: &[2, 3],
-            rhs: &[0, 1],
-            codomain,
-            domain,
-        };
-        let eager: Vec<_> = a
-            .iter()
-            .zip(&b)
-            .map(|(a, b)| a.contract(engine, b, &spec).unwrap())
-            .collect();
-        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
-        let mut workspace = plan.workspace().unwrap();
-        check(engine, route, &eager, &mut |engine, dest| {
-            plan.execute_into(engine, &lhs, &rhs, dest, &mut workspace)
-                .unwrap()
-        });
     }
-    let eager: Vec<_> = a
-        .iter()
-        .zip(&b)
-        .map(|(a, b)| a.compose(engine, b).unwrap())
-        .collect();
-    let plan = symtn::typed::ComposePlan::new(engine, &lhs, &rhs).unwrap();
-    let mut workspace = plan.workspace().unwrap();
-    check(engine, "compose", &eager, &mut |engine, dest| {
-        plan.execute_into(engine, &lhs, &rhs, dest, &mut workspace)
-            .unwrap()
-    });
+}
+
+/// Every `Dest` mode of `ContractPlan::execute_into` and
+/// `ComposePlan::execute_into` per member: the direct core and CopyC routes
+/// and composition, U(1) outputs with inactive blocks (`beta` zero-fills,
+/// scales or keeps them), SU(2) recoupling with a multi-tree scatter, real
+/// and complex dtypes with signed and complex coefficients, and a NaN
+/// operand under `alpha = 0`.
+#[test]
+fn prepared_execute_into_applies_every_dest_mode_per_member() {
+    fn check<R, D>(
+        engine: &mut symtn_dense::CpuEngine,
+        runtime: &Runtime,
+        case: &Case<R, D>,
+        compose: bool,
+        modes: &[(D, D)],
+    ) where
+        R: symtn::sector::TypedSectorAdmission<
+                Sector = <R as symtn::sector::SectorCodec>::Sector,
+                Error = symtn::typed::FusionAlgebraError,
+                Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+            > + MultiplicityFreeRigidSymbols<Scalar = f64>
+            + CheckedFusionAlgebra
+            + SectorCodec,
+        D: Payload,
+    {
+        let nan = D::entry(f64::NAN, f64::NAN);
+        let members =
+            |engine: &mut symtn_dense::CpuEngine, t: &TensorMap<R, D>, salt: f64, count: usize| {
+                (0..count)
+                    .map(|i| {
+                        t.scale(
+                            engine,
+                            D::entry(1.0 + salt + i as f64 / 4.0, i as f64 / 8.0),
+                        )
+                        .unwrap()
+                    })
+                    .collect::<Vec<_>>()
+            };
+        // One member replays on the same member route as several.
+        for count in [1, 3] {
+            let lhs = members(engine, &case.lhs, 0.0, count);
+            let rhs = members(engine, &case.rhs, 0.5, count);
+            let spec = (!compose).then(|| case.spec());
+            assert_dest_modes(engine, runtime, case.name, &lhs, &rhs, spec.as_ref(), modes);
+            // `alpha = 0` never reads the operands.
+            let poisoned: Vec<_> = lhs.iter().map(|t| t.scale(engine, nan).unwrap()).collect();
+            let zero_alpha: Vec<_> = modes
+                .iter()
+                .filter(|(alpha, _)| *alpha == D::entry(0.0, 0.0))
+                .copied()
+                .collect();
+            assert!(!zero_alpha.is_empty());
+            assert_dest_modes(
+                engine,
+                runtime,
+                case.name,
+                &poisoned,
+                &rhs,
+                spec.as_ref(),
+                &zero_alpha,
+            );
+        }
+    }
+    fn run<D: Payload>(modes: &[(D, D)]) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::new();
+        for case in u1_inactive_cases::<D>(engine, &runtime) {
+            check(engine, &runtime, &case, false, modes);
+        }
+        let su2 = su2_reordered::<D>(engine, &runtime);
+        check(engine, &runtime, &su2, false, modes);
+        let v = u1(&[(0, 2), (1, 2)]);
+        let w = u1(&[(0, 1), (1, 3)]);
+        let compose = Case {
+            name: "U(1) composition",
+            lhs: TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&w], fill(301)).unwrap(),
+            rhs: TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v], fill(302)).unwrap(),
+            lhs_axes: vec![2],
+            rhs_axes: vec![0],
+            output_axes: vec![0, 1, 2],
+            dense: false,
+        };
+        check(engine, &runtime, &compose, true, modes);
+    }
+    let real = |alpha: f64, beta: f64| (alpha, beta);
+    run::<f64>(&[
+        real(1.0, 0.0),
+        real(1.0, 1.0),
+        real(-1.5, 2.0),
+        real(2.5, -0.5),
+        real(0.75, 0.0),
+        real(0.0, 0.5),
+        real(0.0, 1.0),
+        real(0.0, 0.0),
+    ]);
+    let c = |re: f64, im: f64| num_complex::Complex64::new(re, im);
+    run::<num_complex::Complex64>(&[
+        (c(1.0, 0.0), c(0.0, 0.0)),
+        (c(1.0, 0.0), c(1.0, 0.0)),
+        (c(0.5, -1.25), c(-0.75, 0.5)),
+        (c(-1.0, 0.0), c(0.0, 1.0)),
+        (c(0.0, 0.0), c(0.25, 0.5)),
+    ]);
 }

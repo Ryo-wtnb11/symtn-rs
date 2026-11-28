@@ -271,7 +271,7 @@ fn a_wide_member_batch_is_one_member_strided_submission() {
                 .collect::<Vec<_>>();
             let mut out = vec![f64::NAN; members * dst.required_len().unwrap()];
             let mut dense = Batches::default();
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 &mut if cheap {
                     flat_engine(4, 1, CpuBatchStrategy::Auto)
                 } else {
@@ -287,6 +287,8 @@ fn a_wide_member_batch_is_one_member_strided_submission() {
                 &source,
                 members,
                 &[],
+                num_traits::One::one(),
+                num_traits::Zero::zero(),
             )
             .unwrap();
             let groups = plan.jobs().len();

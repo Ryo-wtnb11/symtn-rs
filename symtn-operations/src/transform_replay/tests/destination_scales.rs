@@ -175,7 +175,7 @@ where
     E: DenseExecutor,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<f64> + ConjugateValue,
 {
-    tree_transform_members_overwrite_raw(
+    tree_transform_members_raw(
         engine,
         &mut StridedHostKernelAdapter::default(),
         dense,
@@ -187,6 +187,8 @@ where
         source,
         members,
         &SCALES,
+        num_traits::One::one(),
+        num_traits::Zero::zero(),
     )
 }
 
@@ -208,7 +210,7 @@ fn unsorted_destination_scales_are_rejected_before_any_write() {
     let bad = [(8, -1.0), (4, -1.0)];
     for members in [1, 2] {
         let mut out = vec![7.0; 20 * members];
-        let error = tree_transform_members_overwrite_raw(
+        let error = tree_transform_members_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
@@ -220,6 +222,8 @@ fn unsorted_destination_scales_are_rejected_before_any_write() {
             &source[..16 * members],
             members,
             &bad,
+            num_traits::One::one(),
+            num_traits::Zero::zero(),
         )
         .unwrap_err();
         assert!(

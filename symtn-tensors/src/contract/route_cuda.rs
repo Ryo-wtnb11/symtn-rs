@@ -254,6 +254,14 @@ where
     Ok(())
 }
 
+/// The `beta` of `init`: zero for a born-zero destination.
+fn init_beta<D: CudaScalar>(init: ContractDestinationInit<D>) -> D {
+    match init {
+        ContractDestinationInit::Zeroed => D::ZERO,
+        ContractDestinationInit::Axpby(beta) => beta,
+    }
+}
+
 /// Whether a core destination's inactive blocks need `beta * dst`: not when
 /// it is born zero, and not for `beta = 1`.
 fn inactive_blocks_need_beta<D: CudaScalar>(init: ContractDestinationInit<D>) -> bool {
@@ -870,15 +878,19 @@ where
             .chain(core_fill)
             .max()
             .unwrap_or(0)
-            // An `alpha = 0` output move reads the exact-zero coefficient.
-            .max(usize::from(route.output.is_some() && alpha == D::ZERO));
+            // An `alpha = 0` output fills or scales every written region from
+            // the zero template instead of reading the core.
+            .max(match &workspace.stages[Stage::Output as usize] {
+                Some(output) if alpha == D::ZERO && init_beta(init) != D::ONE => {
+                    output.max_write_len()
+                }
+                _ => 0,
+            });
         ctx.reserve_zero_template::<D>(stack_len(zero_len, members)?)
             .map_err(OperationError::Dense)?;
         // The output axpby's unscaled moves read the `1` template.
-        let output_axpby = route.output.is_some()
-            && (alpha != D::ONE
-                || !matches!(init, ContractDestinationInit::Zeroed)
-                    && !matches!(init, ContractDestinationInit::Axpby(beta) if beta == D::ZERO));
+        let output_axpby =
+            route.output.is_some() && (alpha != D::ONE || init_beta(init) != D::ZERO);
         if output_axpby
             || core_fill.is_some()
             || stages.into_iter().any(|stage| !stage.zeros().is_empty())
@@ -903,7 +915,14 @@ where
         else {
             return Err(UNPREPARED);
         };
-        stage.execute_overwrite(ctx, payload, workspace.coefficients[index].as_ref(), buffer)
+        stage.execute(
+            ctx,
+            payload,
+            workspace.coefficients[index].as_ref(),
+            D::ONE,
+            D::ZERO,
+            buffer,
+        )
     }
 
     fn core_io<'a>(
@@ -994,15 +1013,12 @@ where
         else {
             return Err(UNPREPARED);
         };
-        stage.execute_axpby(
+        stage.execute(
             ctx,
             core,
             workspace.coefficients[output].as_ref(),
             alpha,
-            match init {
-                ContractDestinationInit::Zeroed => D::ZERO,
-                ContractDestinationInit::Axpby(beta) => beta,
-            },
+            init_beta(init),
             dst,
         )
     }

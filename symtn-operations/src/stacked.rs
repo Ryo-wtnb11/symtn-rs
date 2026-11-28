@@ -347,50 +347,15 @@ where
         )
     }
 
-    /// Replays exact +1 and -1 classes in at most two batch submissions.
+    /// Replays exact +1 and -1 classes in at most two batch submissions:
+    /// `dst[i] = alpha · lhs[i] · rhs[i] + beta · dst[i]`. The GEMMs carry
+    /// `alpha` and `beta`; with `scale_inactive` each inactive layout becomes
+    /// `beta · dst` in one strided pass over all members (a zero fill for
+    /// `beta = 0`, nothing for `beta = 1`), else the caller proves them zero.
+    /// `beta = 0` never reads `dst`.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn execute_signed_host<A, G, D, SD, SL, SR>(
-        &self,
-        engine: &mut dyn Engine,
-        kernels: &mut A,
-        gemm: &mut G,
-        dst: &mut StackedStorageViewMut<'_, SD>,
-        lhs: &StackedStorageView<'_, SL>,
-        rhs: &StackedStorageView<'_, SR>,
-        zero_inactive: bool,
-    ) -> Result<(), OperationError>
-    where
-        A: HostKernelAdapter<D>,
-        G: Rank2Gemm<D>,
-        D: Copy + Zero + One + RecouplingCoefficientAction<C>,
-        C: std::ops::Neg<Output = C>,
-        SD: HostWritableStorage<D>,
-        SL: HostReadableStorage<D>,
-        SR: HostReadableStorage<D>,
-    {
-        self.execute_host_with_alpha(
-            engine,
-            kernels,
-            gemm,
-            dst,
-            lhs,
-            rhs,
-            Inactive::zeroed(zero_inactive),
-            Some(D::coefficient_as_data(-C::one())),
-            D::one(),
-            D::zero(),
-        )
-    }
-
-    /// [`Self::execute_signed_host`] as `dst[i] = alpha · lhs[i] · rhs[i] +
-    /// beta · dst[i]`: the GEMMs carry `alpha` and `beta`, and with
-    /// `scale_inactive` each inactive layout becomes `beta · dst` in one
-    /// strided pass over all members (nothing for `beta = 1`). `beta = 0`
-    /// overwrites, as [`Self::execute_signed_host`] does.
-    #[doc(hidden)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn execute_signed_host_axpby<A, G, D, SD, SL, SR>(
         &self,
         engine: &mut dyn Engine,
         kernels: &mut A,
@@ -470,11 +435,12 @@ where
             }
         }
         let dst_data = dst.storage.as_mut_slice();
-        // Nothing to zero opens no section: the engine is only admitted, with
-        // the entry's own refusals, and no token is taken.
-        if !matches!(inactive, Inactive::Kept) && self.inactive.is_empty() {
+        // Nothing to fill opens no section, but the engine is still admitted
+        // with the entry's own refusals: a replay with no GEMM job and kept
+        // inactive layouts must refuse a broken or foreign engine too.
+        if matches!(inactive, Inactive::Kept) || self.inactive.is_empty() {
             crate::host_pool::admit(engine)?;
-        } else if !matches!(inactive, Inactive::Kept) {
+        } else {
             let zero = [D::zero()];
             crate::host_pool::with_exec(engine, |mut exec| {
                 for (shape, strides, offset) in &self.inactive {

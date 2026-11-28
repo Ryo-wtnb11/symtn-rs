@@ -30,9 +30,8 @@ use symtn_operations::fusion_replay::FusionBlockContractPlan;
 
 use symtn_operations::stacked::{StackedDirectReplay, StackedStorageView, StackedStorageViewMut};
 use symtn_operations::{
-    admit_tree_transform_members_overwrite_raw, tree_transform_members_axpby_raw,
-    tree_transform_members_overwrite_raw, ContractDestinationInit, DenseTreeTransformOperations,
-    Rank2Gemm, TreeTransformWorkspace,
+    admit_tree_transform_members_overwrite_raw, tree_transform_members_raw,
+    ContractDestinationInit, DenseTreeTransformOperations, Rank2Gemm, TreeTransformWorkspace,
 };
 
 use crate::host_scratch::HostScratchBuffer;
@@ -89,9 +88,10 @@ where
         members: usize,
     ) -> Result<(), OperationError>;
 
-    /// One `B > 1` overwrite stage over member-major stacks.
+    /// One `B > 1` stage over member-major stacks,
+    /// `dst = alpha · transform(src) + beta · dst`.
     #[allow(clippy::too_many_arguments)]
-    fn overwrite_members(
+    fn transform_members(
         &mut self,
         engine: &mut dyn Engine,
         stage: Stage,
@@ -102,21 +102,6 @@ where
         src: &[D],
         members: usize,
         destination_scales: &[(usize, C)],
-    ) -> Result<(), OperationError>;
-
-    /// One `B > 1` stage over member-major stacks that writes the caller's
-    /// destination: `dst = alpha · transform(src) + beta · dst`.
-    #[allow(clippy::too_many_arguments)]
-    fn axpby_members(
-        &mut self,
-        engine: &mut dyn Engine,
-        stage: Stage,
-        structure: &TreeTransformStructure<C>,
-        dst_structure: &Arc<BlockStructure>,
-        src_structure: &Arc<BlockStructure>,
-        dst: &mut [D],
-        src: &[D],
-        members: usize,
         alpha: D,
         beta: D,
     ) -> Result<(), OperationError>;
@@ -232,7 +217,7 @@ where
         Err(EAGER_IS_ONE_MEMBER)
     }
 
-    fn overwrite_members(
+    fn transform_members(
         &mut self,
         _engine: &mut dyn Engine,
         _: Stage,
@@ -243,20 +228,6 @@ where
         _: &[D],
         _: usize,
         _: &[(usize, C)],
-    ) -> Result<(), OperationError> {
-        Err(EAGER_IS_ONE_MEMBER)
-    }
-
-    fn axpby_members(
-        &mut self,
-        _engine: &mut dyn Engine,
-        _: Stage,
-        _: &TreeTransformStructure<C>,
-        _: &Arc<BlockStructure>,
-        _: &Arc<BlockStructure>,
-        _: &mut [D],
-        _: &[D],
-        _: usize,
         _: D,
         _: D,
     ) -> Result<(), OperationError> {
@@ -333,7 +304,7 @@ where
         )
     }
 
-    fn overwrite_members(
+    fn transform_members(
         &mut self,
         engine: &mut dyn Engine,
         stage: Stage,
@@ -344,8 +315,10 @@ where
         src: &[D],
         members: usize,
         destination_scales: &[(usize, C)],
+        alpha: D,
+        beta: D,
     ) -> Result<(), OperationError> {
-        tree_transform_members_overwrite_raw(
+        tree_transform_members_raw(
             engine,
             &mut crate::StridedHostKernelAdapter::default(),
             self.backend.dense_mut(),
@@ -357,33 +330,6 @@ where
             src,
             members,
             destination_scales,
-        )
-    }
-
-    fn axpby_members(
-        &mut self,
-        engine: &mut dyn Engine,
-        stage: Stage,
-        structure: &TreeTransformStructure<C>,
-        dst_structure: &Arc<BlockStructure>,
-        src_structure: &Arc<BlockStructure>,
-        dst: &mut [D],
-        src: &[D],
-        members: usize,
-        alpha: D,
-        beta: D,
-    ) -> Result<(), OperationError> {
-        tree_transform_members_axpby_raw(
-            engine,
-            &mut crate::StridedHostKernelAdapter::default(),
-            self.backend.dense_mut(),
-            &mut self.workspaces[stage as usize],
-            structure,
-            dst_structure,
-            src_structure,
-            dst,
-            src,
-            members,
             alpha,
             beta,
         )
@@ -416,7 +362,7 @@ where
         let right = StackedStorageView::new::<D>(&right, right_len, members, right_len)?;
         let mut dst = WriteSlice(dst);
         let mut dst = StackedStorageViewMut::new::<D>(&mut dst, dst_len, members, dst_len)?;
-        replay.execute_signed_host_axpby(
+        replay.execute_signed_host(
             engine,
             &mut crate::StridedHostKernelAdapter::default(),
             gemm,
@@ -608,7 +554,7 @@ where
     C: Copy,
 {
     if members != 1 {
-        return stage.overwrite_members(
+        return stage.transform_members(
             engine,
             slot,
             structure,
@@ -618,6 +564,8 @@ where
             src,
             members,
             destination_scales,
+            D::one(),
+            D::zero(),
         );
     }
     let (backend, workspace) = stage.ordinary(slot);
@@ -1064,7 +1012,7 @@ where
         let Some(dst_data) = dst_data else {
             return Err(EAGER_IS_ONE_MEMBER);
         };
-        return stage.axpby_members(
+        return stage.transform_members(
             engine,
             Stage::Output,
             transform,
@@ -1073,6 +1021,7 @@ where
             dst_data,
             &core_dst.as_slice()[..core_dst_len],
             members,
+            &[],
             output_alpha,
             init.active_beta(),
         );

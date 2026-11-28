@@ -171,6 +171,7 @@ pub struct CudaSingleMemberRegions {
     moves: Vec<(CudaRegion, CudaRegion, f64, Option<usize>)>,
     zeros: Vec<CudaRegion>,
     max_zero_len: usize,
+    max_write_len: usize,
 }
 
 impl CudaSingleMemberRegions {
@@ -343,10 +344,17 @@ impl CudaSingleMemberRegions {
                 .map_err(OperationError::Dense)?;
             zeros.push(zero);
         }
+        let max_write_len = device
+            .moves
+            .iter()
+            .map(|entry| entry.dims.iter().product::<usize>())
+            .max()
+            .unwrap_or(0);
         Ok(Self {
             moves,
             zeros,
             max_zero_len: device.max_zero_len,
+            max_write_len,
         })
     }
 
@@ -358,6 +366,11 @@ impl CudaSingleMemberRegions {
     }
     pub fn max_zero_len(&self) -> usize {
         self.max_zero_len
+    }
+    /// The largest per-member move destination: the zero template a
+    /// zero-`alpha` call fills or scales every written region with.
+    pub fn max_write_len(&self) -> usize {
+        self.max_write_len
     }
     pub fn has_scaled_moves(&self) -> bool {
         self.moves
@@ -373,62 +386,18 @@ impl CudaSingleMemberRegions {
             .collect()
     }
 
-    /// Overwrites every active layout and zeros every inactive layout.
-    pub fn execute_overwrite<D: CudaScalar + RecouplingCoefficientAction<f64>>(
-        &self,
-        ctx: &mut CudaDenseContext,
-        source: &CudaStorage<D>,
-        coefficients: Option<&CudaDenseStorage>,
-        destination: &mut CudaStorage<D>,
-    ) -> Result<(), OperationError> {
-        // Every operand belongs to this engine before the first write: the
-        // inactive-layout zeros below would otherwise land in the destination
-        // ahead of the refusal of a foreign source or coefficient buffer.
-        const OP: &str = "cuda_single_member_overwrite";
-        ctx.ensure_owns(OP, &[&source.0, &destination.0])
-            .and_then(|()| coefficients.map_or(Ok(()), |c| ctx.ensure_owns(OP, &[c])))
-            .map_err(OperationError::Dense)?;
-        for region in &self.zeros {
-            cuda_region_zero::<D>(ctx, &mut destination.0, region)
-                .map_err(OperationError::Dense)?;
-        }
-        for (src, dst, coefficient, coefficient_offset) in &self.moves {
-            if *coefficient == 1.0 {
-                cuda_copy_strided_into::<D>(ctx, &source.0, src, &mut destination.0, dst)
-                    .map_err(OperationError::Dense)?;
-            } else {
-                let coefficients = coefficients.ok_or(OperationError::InvalidArgument {
-                    message: "CUDA CopyC scaled move has no coefficient buffer",
-                })?;
-                cuda_region_axpby::<D>(
-                    ctx,
-                    &source.0,
-                    src,
-                    false,
-                    D::ONE,
-                    CudaRegionCoefficient::Buffer(
-                        coefficients,
-                        coefficient_offset.ok_or(OperationError::InvalidArgument {
-                            message: "CUDA CopyC scaled move has no coefficient offset",
-                        })?,
-                    ),
-                    CudaRegionBeta::Overwrite,
-                    &mut destination.0,
-                    dst,
-                )
-                .map_err(OperationError::Dense)?;
-            }
-        }
-        Ok(())
-    }
     /// `destination = alpha · transform(source) + beta · destination` per
-    /// member: each move is one region axpby with `alpha` and `beta` in its
-    /// epilogue, and each inactive layout becomes `beta · destination`
-    /// (nothing for `beta = 1`). `alpha = 0` multiplies by the exact-zero
-    /// coefficient, so the source is still read. `(1, 0)` is
-    /// [`Self::execute_overwrite`]. Reserve the context's zero and `1`
-    /// templates first so the call uploads nothing.
-    pub fn execute_axpby<D: CudaScalar + RecouplingCoefficientAction<f64>>(
+    /// member. Each move is one copy for `(1, 0)` with a unit coefficient,
+    /// else one region axpby with `alpha` and `beta` in its epilogue; each
+    /// inactive layout becomes `beta · destination` (a zero fill for
+    /// `beta = 0`, nothing for `beta = 1`). `beta = 0` never reads the
+    /// destination. `alpha = 0` does not read the source either, as
+    /// VectorInterface's `scale(x, 0)`: every written layout becomes
+    /// `beta · destination`, so a non-finite source does not survive. Reserve
+    /// the context's zero template ([`Self::max_zero_len`], and
+    /// [`Self::max_write_len`] for `alpha = 0`) and `1` template first so the
+    /// call uploads nothing.
+    pub fn execute<D: CudaScalar + RecouplingCoefficientAction<f64>>(
         &self,
         ctx: &mut CudaDenseContext,
         source: &CudaStorage<D>,
@@ -437,13 +406,28 @@ impl CudaSingleMemberRegions {
         beta: D,
         destination: &mut CudaStorage<D>,
     ) -> Result<(), OperationError> {
-        if alpha == D::ONE && beta == D::ZERO {
-            return self.execute_overwrite(ctx, source, coefficients, destination);
-        }
-        const OP: &str = "cuda_single_member_axpby";
+        // Every operand belongs to this engine before the first write: the
+        // inactive-layout fills below would otherwise land in the destination
+        // ahead of the refusal of a foreign source or coefficient buffer.
+        const OP: &str = "cuda_single_member_transform";
         ctx.ensure_owns(OP, &[&source.0, &destination.0])
             .and_then(|()| coefficients.map_or(Ok(()), |c| ctx.ensure_owns(OP, &[c])))
             .map_err(OperationError::Dense)?;
+        for region in &self.zeros {
+            if beta == D::ZERO {
+                cuda_region_zero::<D>(ctx, &mut destination.0, region)
+            } else {
+                cuda_region_scale::<D>(ctx, &mut destination.0, region, beta)
+            }
+            .map_err(OperationError::Dense)?;
+        }
+        if alpha == D::ZERO {
+            for (_, dst, _, _) in &self.moves {
+                cuda_region_scale::<D>(ctx, &mut destination.0, dst, beta)
+                    .map_err(OperationError::Dense)?;
+            }
+            return Ok(());
+        }
         let region_beta = if beta == D::ZERO {
             CudaRegionBeta::Overwrite
         } else if beta == D::ONE {
@@ -451,14 +435,13 @@ impl CudaSingleMemberRegions {
         } else {
             CudaRegionBeta::Scale(beta)
         };
-        for region in &self.zeros {
-            cuda_region_scale::<D>(ctx, &mut destination.0, region, beta)
-                .map_err(OperationError::Dense)?;
-        }
         for (src, dst, coefficient, coefficient_offset) in &self.moves {
-            let coefficient = if alpha == D::ZERO {
-                CudaRegionCoefficient::Zero
-            } else if *coefficient == 1.0 {
+            if *coefficient == 1.0 && alpha == D::ONE && beta == D::ZERO {
+                cuda_copy_strided_into::<D>(ctx, &source.0, src, &mut destination.0, dst)
+                    .map_err(OperationError::Dense)?;
+                continue;
+            }
+            let coefficient = if *coefficient == 1.0 {
                 CudaRegionCoefficient::One
             } else {
                 CudaRegionCoefficient::Buffer(
@@ -470,7 +453,6 @@ impl CudaSingleMemberRegions {
                     })?,
                 )
             };
-            let alpha = if alpha == D::ZERO { D::ONE } else { alpha };
             cuda_region_axpby::<D>(
                 ctx,
                 &source.0,

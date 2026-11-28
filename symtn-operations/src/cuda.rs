@@ -14,8 +14,7 @@ use std::marker::PhantomData;
 use symtn_core::{Placement, TensorStorage};
 use symtn_dense::{
     cuda_conj, cuda_gather_elements, cuda_gather_member_elements, cuda_gather_members,
-    cuda_gemm_region_batched_axpby_into, cuda_gemm_region_batched_into,
-    cuda_gemm_region_batched_scaled_into, cuda_gemm_region_with_ops_into, cuda_matmul_region_into,
+    cuda_gemm_region_batched_into, cuda_gemm_region_with_ops_into, cuda_matmul_region_into,
     cuda_widen, CudaDenseContext, CudaDenseStorage, CudaScalar, MatrixOp,
 };
 
@@ -323,6 +322,8 @@ impl<D: CudaScalar>
             contracted,
             cols,
             members,
+            D::ONE,
+            D::ZERO,
         )
         .map_err(OperationError::Dense)
     }
@@ -354,7 +355,7 @@ impl<D: CudaScalar>
             });
         }
         let dst_stride = dst.member_stride();
-        cuda_gemm_region_batched_scaled_into::<D>(
+        cuda_gemm_region_batched_into::<D>(
             self.ctx,
             &mut dst.storage_mut().0,
             dst_offset,
@@ -370,6 +371,7 @@ impl<D: CudaScalar>
             cols,
             members,
             alpha,
+            D::ZERO,
         )
         .map_err(OperationError::Dense)
     }
@@ -401,7 +403,7 @@ impl<D: CudaScalar>
             });
         }
         let dst_stride = dst.member_stride();
-        cuda_gemm_region_batched_axpby_into::<D>(
+        cuda_gemm_region_batched_into::<D>(
             self.ctx,
             &mut dst.storage_mut().0,
             dst_offset,

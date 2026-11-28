@@ -640,25 +640,32 @@ where
     Ok(singles)
 }
 
-/// Overwrite a fixed-stride Host batch with one completed tree transform.
+/// `dst = alpha · transform(src) + beta · dst` over a fixed-stride Host
+/// batch with one completed tree transform.
 /// Each member uses the exact structure passed at compilation; the workspace
 /// owns only execution scratch and can be reused at a different batch size.
-/// One member replays on the ordinary route. A larger batch refuses a
-/// forced batch policy `dense` cannot honor, as the ordinary route does,
-/// and is admitted whole (every member's ranges) before any write; then the
-/// member axis is one more strided dimension of each move around one dense
-/// submission of the member-expanded GEMM jobs, plan job outer and member
-/// inner, stopping at the first failure. `destination_scales` folds `θ_b`
-/// into the moves writing destination block `b` of every member, as in
-/// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`],
-/// each scale resolved once per role for the whole batch.
+/// One member with `beta = 0` replays on the ordinary overwrite route. A
+/// larger batch refuses a forced batch policy `dense` cannot honor, as the
+/// ordinary route does, and is admitted whole (every member's ranges) before
+/// any write; then the member axis is one more strided dimension of each move
+/// around one dense submission of the member-expanded GEMM jobs, plan job
+/// outer and member inner, stopping at the first failure. `alpha` and
+/// `destination_scales` (`θ_b` for the moves writing destination block `b`
+/// of every member, as in
+/// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`])
+/// fold into the Single and scatter scales, each resolved once per role for
+/// the whole batch; a zero scale writes an exact zero without reading the
+/// source. `beta` rides the Single and scatter writes, and each inactive
+/// layout becomes `beta · dst` (a zero fill for `beta = 0`, nothing for
+/// `beta = 1`); `beta = 0` never reads `dst`. The pack and grouped GEMM stay
+/// overwrites of the workspace's packed buffers.
 ///
 /// Both movement phases use the common width model over their executed
 /// member ranges. At width q each range fuses its members into one move per
 /// role, while the whole token is divided into q balanced slot shares.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
-pub fn tree_transform_members_overwrite_raw<A, E, D, C>(
+pub fn tree_transform_members_raw<A, E, D, C>(
     engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
@@ -670,49 +677,6 @@ pub fn tree_transform_members_overwrite_raw<A, E, D, C>(
     src_data: &[D],
     members: usize,
     destination_scales: &[(usize, C)],
-) -> Result<(), OperationError>
-where
-    A: HostKernelAdapter<D> + Clone + Send + Sync,
-    E: DenseExecutor,
-    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
-    C: Copy + Sync,
-{
-    tree_transform_members_raw(
-        engine,
-        kernels,
-        dense,
-        workspace,
-        structure,
-        dst_structure,
-        src_structure,
-        dst_data,
-        src_data,
-        members,
-        destination_scales,
-        D::one(),
-        None,
-    )
-}
-
-/// [`tree_transform_members_overwrite_raw`] as `dst = alpha · transform(src)
-/// + beta · dst` per member, at every `B`: `alpha` folds into the Single and
-/// scatter scales, `beta` rides the Single and scatter writes, and each
-/// inactive layout becomes `beta · dst` (nothing for `beta = 1`). The pack
-/// and grouped GEMM stay overwrites of the workspace's packed buffers.
-/// `beta = 0` overwrites.
-#[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
-pub fn tree_transform_members_axpby_raw<A, E, D, C>(
-    engine: &mut dyn Engine,
-    kernels: &mut A,
-    dense: &mut E,
-    workspace: &mut TreeTransformWorkspace<D>,
-    structure: &TreeTransformStructure<C>,
-    dst_structure: &Arc<BlockStructure>,
-    src_structure: &Arc<BlockStructure>,
-    dst_data: &mut [D],
-    src_data: &[D],
-    members: usize,
     alpha: D,
     beta: D,
 ) -> Result<(), OperationError>
@@ -722,45 +686,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    tree_transform_members_raw(
-        engine,
-        kernels,
-        dense,
-        workspace,
-        structure,
-        dst_structure,
-        src_structure,
-        dst_data,
-        src_data,
-        members,
-        &[],
-        alpha,
-        (!beta.is_zero()).then_some(beta),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn tree_transform_members_raw<A, E, D, C>(
-    engine: &mut dyn Engine,
-    kernels: &mut A,
-    dense: &mut E,
-    workspace: &mut TreeTransformWorkspace<D>,
-    structure: &TreeTransformStructure<C>,
-    dst_structure: &Arc<BlockStructure>,
-    src_structure: &Arc<BlockStructure>,
-    dst_data: &mut [D],
-    src_data: &[D],
-    members: usize,
-    destination_scales: &[(usize, C)],
-    alpha: D,
-    beta: Option<D>,
-) -> Result<(), OperationError>
-where
-    A: HostKernelAdapter<D> + Clone + Send + Sync,
-    E: DenseExecutor,
-    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
-    C: Copy + Sync,
-{
+    let beta = (!beta.is_zero()).then_some(beta);
     if members == 1 && beta.is_none() {
         // The ordinary entry runs its own route, refuses an unhonored forced
         // policy first and admits the single member before writing its
@@ -1236,7 +1162,7 @@ mod tests {
             .map(|(mut engine, mut dense)| {
                 let mut workspace = TreeTransformWorkspace::default();
                 let mut destination = vec![Complex64::new(f64::NAN, f64::NAN); source.len()];
-                tree_transform_members_overwrite_raw(
+                tree_transform_members_raw(
                     &mut engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut dense,
@@ -1248,6 +1174,8 @@ mod tests {
                     source,
                     members,
                     &[],
+                    num_traits::One::one(),
+                    num_traits::Zero::zero(),
                 )
                 .unwrap();
                 destination
@@ -1317,7 +1245,7 @@ mod tests {
                 .collect();
             let mut destination = vec![f64::NAN; source.len()];
             let mut dense = CountingDense::default();
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut dense,
@@ -1329,6 +1257,8 @@ mod tests {
                 &source,
                 members,
                 &[],
+                num_traits::One::one(),
+                num_traits::Zero::zero(),
             )
             .unwrap();
             for member in 0..members {
@@ -1377,7 +1307,7 @@ mod tests {
         let source = [1.0; 7];
         let mut dst = [f64::NAN; 8];
         let mut dense = CountingDense::default();
-        let error = tree_transform_members_overwrite_raw(
+        let error = tree_transform_members_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
             &mut dense,
@@ -1389,6 +1319,8 @@ mod tests {
             &source,
             2,
             &[],
+            num_traits::One::one(),
+            num_traits::Zero::zero(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -1440,7 +1372,7 @@ mod tests {
             .collect();
         let mut destination = vec![f64::NAN; source.len()];
         let mut dense = CountingDense::default();
-        tree_transform_members_overwrite_raw(
+        tree_transform_members_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
             &mut dense,
@@ -1452,6 +1384,8 @@ mod tests {
             &source,
             members,
             &[],
+            num_traits::One::one(),
+            num_traits::Zero::zero(),
         )
         .unwrap();
         for member in 0..members {
@@ -1484,7 +1418,7 @@ mod tests {
         .unwrap();
         let source = [Complex64::new(1.0, 2.0), Complex64::new(-3.0, 4.0)];
         let mut destination = [Complex64::new(f64::NAN, f64::NAN); 2];
-        tree_transform_members_overwrite_raw(
+        tree_transform_members_raw(
             &mut symtn_dense::CpuEngine::serial(),
             &mut StridedHostKernelAdapter::default(),
             &mut CountingDense::default(),
@@ -1496,6 +1430,8 @@ mod tests {
             &source,
             2,
             &[],
+            num_traits::One::one(),
+            num_traits::Zero::zero(),
         )
         .unwrap();
         assert_eq!(
@@ -1543,7 +1479,7 @@ mod tests {
         let mut destination = [f64::NAN; 8];
         let mut dense = CountingDense::default();
         for members in [0, usize::MAX] {
-            assert!(tree_transform_members_overwrite_raw(
+            assert!(tree_transform_members_raw(
                 engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut dense,
@@ -1555,6 +1491,8 @@ mod tests {
                 &[1.0; 8],
                 members,
                 &[],
+                num_traits::One::one(),
+                num_traits::Zero::zero()
             )
             .is_err());
         }
