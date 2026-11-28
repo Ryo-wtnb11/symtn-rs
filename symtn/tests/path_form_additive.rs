@@ -115,7 +115,15 @@ fn unified_methods_resolve_in_path_form() {
         out.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
     );
-    ContractPlan::execute_into(&plan, engine, &stack, &stack, &mut dst, &mut workspace).unwrap();
+    ContractPlan::execute_into(
+        &plan,
+        engine,
+        &stack,
+        &stack,
+        Dest::overwrite(&mut dst),
+        &mut workspace,
+    )
+    .unwrap();
     assert_eq!(
         dst.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
@@ -128,7 +136,15 @@ fn unified_methods_resolve_in_path_form() {
         out.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
     );
-    ComposePlan::execute_into(&plan, engine, &stack, &stack, &mut dst, &mut workspace).unwrap();
+    ComposePlan::execute_into(
+        &plan,
+        engine,
+        &stack,
+        &stack,
+        Dest::overwrite(&mut dst),
+        &mut workspace,
+    )
+    .unwrap();
     assert_eq!(
         dst.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()

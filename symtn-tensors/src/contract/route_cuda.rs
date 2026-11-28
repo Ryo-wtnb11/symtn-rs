@@ -654,25 +654,11 @@ impl<D: CudaScalar> CudaContractMembersWorkspace<CudaStorage<D>> {
 }
 
 /// The per-call member contract every route's member replay admits, checked
-/// without a device: overwrite only (`alpha = 1`, a born-zero destination or
-/// `Axpby(0)`), at least one member.
-fn admit_member_call<D: CudaScalar>(
-    alpha: D,
-    init: ContractDestinationInit<D>,
-    members: usize,
-) -> Result<(), OperationError> {
+/// without a device: at least one member.
+fn admit_member_call(members: usize) -> Result<(), OperationError> {
     if members == 0 {
         return Err(OperationError::InvalidArgument {
             message: "a CUDA member contraction needs at least one member",
-        });
-    }
-    let overwrite = match init {
-        ContractDestinationInit::Zeroed => true,
-        ContractDestinationInit::Axpby(beta) => beta == D::ZERO,
-    };
-    if alpha != D::ONE || !overwrite {
-        return Err(OperationError::Internal {
-            message: "CUDA member contraction only overwrites its destination with alpha = 1",
         });
     }
     Ok(())
@@ -839,7 +825,7 @@ where
         init: ContractDestinationInit<D>,
         core_init: ContractDestinationInit<D>,
     ) -> Result<(), OperationError> {
-        admit_member_call(alpha, init, members)?;
+        admit_member_call(members)?;
         // A copied source reads the caller's payload layout; a borrowed one is
         // the core layout.
         let lhs_payload = route
@@ -883,10 +869,20 @@ where
             .map(CudaSingleMemberRegions::max_zero_len)
             .chain(core_fill)
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            // An `alpha = 0` output move reads the exact-zero coefficient.
+            .max(usize::from(route.output.is_some() && alpha == D::ZERO));
         ctx.reserve_zero_template::<D>(stack_len(zero_len, members)?)
             .map_err(OperationError::Dense)?;
-        if core_fill.is_some() || stages.into_iter().any(|stage| !stage.zeros().is_empty()) {
+        // The output axpby's unscaled moves read the `1` template.
+        let output_axpby = route.output.is_some()
+            && (alpha != D::ONE
+                || !matches!(init, ContractDestinationInit::Zeroed)
+                    && !matches!(init, ContractDestinationInit::Axpby(beta) if beta == D::ZERO));
+        if output_axpby
+            || core_fill.is_some()
+            || stages.into_iter().any(|stage| !stage.zeros().is_empty())
+        {
             ctx.reserve_ones_template::<D>(1)
                 .map_err(OperationError::Dense)?;
         }
@@ -983,8 +979,8 @@ where
         _: &Arc<BlockStructure>,
         _: &Arc<BlockStructure>,
         dst: &mut CudaStorage<D>,
-        _: D,
-        _: ContractDestinationInit<D>,
+        alpha: D,
+        init: ContractDestinationInit<D>,
     ) -> Result<(), OperationError> {
         let workspace = &mut *self.workspace;
         #[cfg(any(test, feature = "testing"))]
@@ -998,16 +994,26 @@ where
         else {
             return Err(UNPREPARED);
         };
-        stage.execute_overwrite(ctx, core, workspace.coefficients[output].as_ref(), dst)
+        stage.execute_axpby(
+            ctx,
+            core,
+            workspace.coefficients[output].as_ref(),
+            alpha,
+            match init {
+                ContractDestinationInit::Zeroed => D::ZERO,
+                ContractDestinationInit::Axpby(beta) => beta,
+            },
+            dst,
+        )
     }
 }
 
 /// Overwrites each of `members` member-major destination members with its
-/// contraction, through the stage sequence of every eager call. `init` is
+/// contraction, `dst = alpha · contract(lhs, rhs) + init(dst)`, through the
+/// stage sequence of every eager call. `init` is
 /// [`ContractDestinationInit::Zeroed`] for a stack whose core inactive
 /// blocks are already zero (they get no fill, and the call reserves no
-/// template for one) or `Axpby(0)`; anything else, and `alpha`
-/// other than one, is not a member contract. The caller admits the route
+/// template for one). The caller admits the route
 /// once, for every `B`, with [`StorageContractResolution::admit_cuda_members`].
 ///
 /// Every structural and region check finishes before the first device
@@ -1024,6 +1030,7 @@ pub fn execute_storage_contract_members_cuda<D>(
     (rhs_structure, rhs): (&Arc<BlockStructure>, &CudaStorage<D>),
     workspace: &mut CudaContractMembersWorkspace<CudaStorage<D>>,
     members: usize,
+    alpha: D,
     init: ContractDestinationInit<D>,
 ) -> Result<(), OperationError>
 where
@@ -1041,7 +1048,7 @@ where
         lhs,
         rhs,
         members,
-        D::ONE,
+        alpha,
         init,
     );
     // Back on every outcome: a failed call keeps what it already uploaded.
@@ -1053,33 +1060,13 @@ where
 mod tests {
     use super::*;
 
-    /// The member contract is checked without a device, before any
-    /// workspace or context is touched.
+    /// The member count is checked without a device, before any workspace
+    /// or context is touched.
     #[test]
-    fn member_admission_rejects_non_overwrite_calls_without_a_device() {
-        let unsupported = |result: Result<(), OperationError>| {
-            matches!(result, Err(OperationError::Internal { .. }))
-        };
-        assert!(admit_member_call(1.0, ContractDestinationInit::Zeroed, 1).is_ok());
-        assert!(admit_member_call(1.0, ContractDestinationInit::Axpby(0.0), 17).is_ok());
-        assert!(admit_member_call(1.0, ContractDestinationInit::Axpby(-0.0), 2).is_ok());
-        assert!(unsupported(admit_member_call(
-            2.5,
-            ContractDestinationInit::Zeroed,
-            1
-        )));
-        assert!(unsupported(admit_member_call(
-            1.0,
-            ContractDestinationInit::Axpby(1.0),
-            1
-        )));
-        assert!(unsupported(admit_member_call(
-            1.0,
-            ContractDestinationInit::Axpby(2.0),
-            1
-        )));
+    fn member_admission_rejects_an_empty_stack_without_a_device() {
+        assert!(admit_member_call(1).is_ok());
         assert!(matches!(
-            admit_member_call(1.0, ContractDestinationInit::Zeroed, 0),
+            admit_member_call(0),
             Err(OperationError::InvalidArgument { .. })
         ));
     }

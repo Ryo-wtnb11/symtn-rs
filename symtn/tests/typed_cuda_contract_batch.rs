@@ -5,6 +5,7 @@
 
 use crate::braiding_probe;
 use crate::common;
+use symtn::typed::Dest;
 
 use crate::contract_cases;
 use crate::numerics;
@@ -217,11 +218,11 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
             .to_cuda(cuda)
             .unwrap();
         let (_, first_into) = observe(|| {
-            plan.execute_into(cuda, &lhs, &rhs, &mut reserve, &mut other)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut reserve), &mut other)
                 .unwrap()
         });
         let (_, into) = observe(|| {
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut other)
                 .unwrap()
         });
         assert_eq!(into.cuda.h2d_calls, 0);
@@ -241,13 +242,25 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
             let before = payload_snapshot(engine, cuda, &dst);
             let short_rhs = rhs.select(cuda, &[0]).unwrap();
             assert!(plan
-                .execute_into(cuda, &lhs, &short_rhs, &mut dst, &mut other)
+                .execute_into(
+                    cuda,
+                    &lhs,
+                    &short_rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut other
+                )
                 .is_err());
             assert_eq!(payload_snapshot(engine, cuda, &dst), before);
             let mut wrong_dst = dst.select(cuda, &[0]).unwrap();
             let wrong_before = payload_snapshot(engine, cuda, &wrong_dst);
             assert!(plan
-                .execute_into(cuda, &lhs, &rhs, &mut wrong_dst, &mut other)
+                .execute_into(
+                    cuda,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut wrong_dst),
+                    &mut other
+                )
                 .is_err());
             assert_eq!(payload_snapshot(engine, cuda, &wrong_dst), wrong_before);
             assert_eq!(payload_snapshot(engine, cuda, &dst), before);
@@ -496,7 +509,7 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
                 .unwrap()
                 .to_cuda(cuda)
                 .unwrap();
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut workspace)
                 .unwrap();
             let result = dst.to_host(cuda).unwrap();
             for i in 0..count {
@@ -605,7 +618,7 @@ fn check_changed_input_reuse<R: DeviceRule, D: DevicePayload>(
             .unwrap()
             .to_cuda(cuda)
             .unwrap();
-        plan.execute_into(cuda, &lhs, &rhs, &mut dst, workspace)
+        plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), workspace)
             .unwrap();
         let written = dst.to_host(cuda).unwrap();
         for (i, (member, expected)) in changed.iter().zip(&expected).enumerate() {
@@ -787,7 +800,7 @@ fn check<R: DeviceRule, D: DevicePayload>(
             .to_cuda(cuda)
             .unwrap();
         let before = cuda_transfer_stats();
-        plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut second)
+        plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut second)
             .unwrap();
         let after = cuda_transfer_stats();
         assert_eq!(after.h2d_calls - before.h2d_calls, 0);
@@ -808,7 +821,13 @@ fn check<R: DeviceRule, D: DevicePayload>(
         assert_ne!(wrong_dst.len(), count);
         let before = payload_snapshot(engine, cuda, &wrong_dst);
         assert!(matches!(
-            plan.execute_into(cuda, &lhs, &rhs, &mut wrong_dst, &mut second),
+            plan.execute_into(
+                cuda,
+                &lhs,
+                &rhs,
+                Dest::overwrite(&mut wrong_dst),
+                &mut second
+            ),
             Err(Error::InvalidArgument(_))
         ));
         assert_eq!(payload_snapshot(engine, cuda, &wrong_dst), before);
@@ -971,8 +990,14 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
         assert_eq!(after.h2d_calls - before.h2d_calls, 0);
         assert_eq!(after.d2h_calls - before.d2h_calls, 0);
         let before = cuda_transfer_stats();
-        plan.execute_into(cuda, &left, &right, &mut dst, &mut workspace)
-            .unwrap();
+        plan.execute_into(
+            cuda,
+            &left,
+            &right,
+            Dest::overwrite(&mut dst),
+            &mut workspace,
+        )
+        .unwrap();
         let after = cuda_transfer_stats();
         assert_eq!(
             after.gemm_calls - before.gemm_calls,
@@ -1048,7 +1073,7 @@ fn a_workspace_moved_to_another_engine_rebuilds_its_device_state() {
             .to_cuda(cuda)
             .unwrap();
         let before = cuda_transfer_stats();
-        plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut workspace)
+        plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut workspace)
             .unwrap();
         let uploads = cuda_transfer_stats().h2d_calls - before.h2d_calls;
         let written = dst.to_host(cuda).unwrap();
@@ -1102,7 +1127,13 @@ fn invalid_bindings_preserve_poisoned_destination() {
     let before = payload_snapshot(engine, cuda, &dst);
     let short = lhs.select(cuda, &[0]).unwrap();
     assert!(plan
-        .execute_into(cuda, &short, &rhs, &mut dst, &mut workspace)
+        .execute_into(
+            cuda,
+            &short,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut workspace
+        )
         .is_err());
     let other_case = candidate_core_probes::<_, f64>(engine, &other_runtime, &u1_non_self_dual())
         .into_iter()
@@ -1114,7 +1145,13 @@ fn invalid_bindings_preserve_poisoned_destination() {
         .to_cuda(cuda)
         .unwrap();
     assert!(plan
-        .execute_into(cuda, &wrong_runtime, &rhs, &mut dst, &mut workspace)
+        .execute_into(
+            cuda,
+            &wrong_runtime,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut workspace
+        )
         .is_err());
     let other_space = u1(&[(0, 2)]);
     let wrong_tensor = TensorMap::<_, f64>::zeros(
@@ -1129,10 +1166,16 @@ fn invalid_bindings_preserve_poisoned_destination() {
         .to_cuda(cuda)
         .unwrap();
     assert!(plan
-        .execute_into(cuda, &wrong_signature, &rhs, &mut dst, &mut workspace)
+        .execute_into(
+            cuda,
+            &wrong_signature,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut workspace
+        )
         .is_err());
     assert!(plan
-        .execute_into(cuda, &lhs, &rhs, &mut dst, &mut foreign)
+        .execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut foreign)
         .is_err());
     assert_eq!(payload_snapshot(engine, cuda, &dst), before);
     drop(plan);
@@ -1349,7 +1392,7 @@ fn copy_c_nonzero_single_public_admission() {
                     .to_cuda(cuda)
                     .unwrap();
                 let (_, into) = observe(|| {
-                    plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+                    plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut other)
                         .unwrap()
                 });
                 assert_eq!(into.cuda.copy_calls, cold.cuda.copy_calls);
@@ -1359,7 +1402,7 @@ fn copy_c_nonzero_single_public_admission() {
                 );
                 assert_eq!(into.cuda.d2h_calls, 0);
                 let (_, warm_into) = observe(|| {
-                    plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+                    plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut other)
                         .unwrap()
                 });
                 assert_eq!(warm_into.cuda.copy_calls, cold.cuda.copy_calls);
@@ -1404,7 +1447,13 @@ fn copy_c_nonzero_single_public_admission() {
                     let before = payload_snapshot(engine, cuda, &invalid);
                     let short_rhs = rhs.select(cuda, &[0]).unwrap();
                     let (rejected, metrics) = observe(|| {
-                        plan.execute_into(cuda, &lhs, &short_rhs, &mut invalid, &mut other)
+                        plan.execute_into(
+                            cuda,
+                            &lhs,
+                            &short_rhs,
+                            Dest::overwrite(&mut invalid),
+                            &mut other,
+                        )
                     });
                     assert!(rejected.is_err());
                     assert_eq!(metrics.cuda.gemm_calls, 0);
@@ -1570,10 +1619,10 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
             .unwrap()
             .to_cuda(cuda)
             .unwrap();
-        plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+        plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut other)
             .unwrap();
         let (_, warm_into) = observe(|| {
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut other)
                 .unwrap();
         });
         assert_eq!(
@@ -1608,8 +1657,15 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
                 .unwrap();
             let before = payload_snapshot(engine, cuda, &invalid);
             let short_rhs = rhs.select(cuda, &[0]).unwrap();
-            let (rejected, metrics) =
-                observe(|| plan.execute_into(cuda, &lhs, &short_rhs, &mut invalid, &mut other));
+            let (rejected, metrics) = observe(|| {
+                plan.execute_into(
+                    cuda,
+                    &lhs,
+                    &short_rhs,
+                    Dest::overwrite(&mut invalid),
+                    &mut other,
+                )
+            });
             assert!(rejected.is_err());
             assert_eq!(submissions(&metrics), (0, 0));
             assert_eq!(payload_snapshot(engine, cuda, &invalid), before);
@@ -1715,7 +1771,7 @@ fn check_high_water<R: DeviceRule, D: DevicePayload>(
                 .to_cuda(cuda)
                 .unwrap();
             let (_, written_metrics) = observe(|| {
-                plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut into)
+                plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut into)
                     .unwrap();
             });
             let written = dst.to_host(cuda).unwrap();
@@ -1911,4 +1967,110 @@ fn nonsymmetric_braiding_is_rejected_before_cuda_execution() {
             operation: symtn::typed::BraidingOp::Contraction,
             style,
         } if !style.is_symmetric())));
+}
+
+/// The device form of the Host `Dest` mode test: each mode per member,
+/// `out = alpha · contract(lhs, rhs) + beta · out`, on the core route, the
+/// CopyC route and composition, against that formula over the eager Host
+/// contraction of each member.
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn prepared_execute_into_applies_every_dest_mode_per_member_on_device() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::new();
+    let v = u1(&[(0, 2), (1, 2)]);
+    let random = |engine: &mut symtn::typed::CpuEngine, seed| {
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], seed).unwrap()
+    };
+    let a: Vec<_> = (0..3).map(|i| random(engine, 10 + i)).collect();
+    let b: Vec<_> = (0..3).map(|i| random(engine, 20 + i)).collect();
+    let pack = |cuda: &mut symtn::typed::CudaEngine, members: &[TensorMap<_, f64>]| {
+        StackedTensorMap::pack(&members.iter().collect::<Vec<_>>())
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap()
+    };
+    let (lhs, rhs) = (pack(cuda, &a), pack(cuda, &b));
+    let modes = [
+        ("overwrite", 1.0, 0.0),
+        ("accumulate", 1.0, 1.0),
+        ("scaled", 2.5, -0.5),
+        ("scaled", 0.0, 0.5),
+    ];
+    type DeviceStack = StackedTensorMap<U1FusionRule, f64, CudaStorage<f64>>;
+    let check =
+        |engine: &mut symtn::typed::CpuEngine,
+         cuda: &mut symtn::typed::CudaEngine,
+         route: &str,
+         eager: &[TensorMap<U1FusionRule, f64>],
+         run: &mut dyn FnMut(&mut symtn::typed::CudaEngine, Dest<'_, DeviceStack, f64>)| {
+            for (mode, alpha, beta) in modes {
+                let before: Vec<_> = (0..3).map(|i| random(engine, 30 + i as u64)).collect();
+                let mut dst = if mode == "overwrite" {
+                    // `beta = 0` never reads the destination.
+                    let poison: Vec<_> = before
+                        .iter()
+                        .map(|t| t.scale(engine, f64::NAN).unwrap())
+                        .collect();
+                    pack(cuda, &poison)
+                } else {
+                    pack(cuda, &before)
+                };
+                let dest = match mode {
+                    "overwrite" => Dest::overwrite(&mut dst),
+                    "accumulate" => Dest::accumulate(&mut dst),
+                    _ => Dest::scaled(&mut dst, alpha, beta),
+                };
+                run(cuda, dest);
+                let dst = dst.to_host(cuda).unwrap();
+                for (i, (eager, before)) in eager.iter().zip(&before).enumerate() {
+                    let actual = dst.member(engine, i).unwrap();
+                    let actual = actual.dense_data().unwrap();
+                    let (eager, before) =
+                        (eager.dense_data().unwrap(), before.dense_data().unwrap());
+                    assert_eq!(actual.len(), eager.len());
+                    for k in 0..actual.len() {
+                        let prior = if beta == 0.0 { 0.0 } else { beta * before[k] };
+                        let want = alpha * eager[k] + prior;
+                        assert!(
+                            (actual[k] - want).abs() <= 1e-12 * (1.0 + want.abs()),
+                            "{route} {mode} member {i} element {k}: {} != {want}",
+                            actual[k]
+                        );
+                    }
+                }
+            }
+        };
+    for (route, output) in [("core", [0, 1, 2, 3]), ("copyC", [1, 0, 2, 3])] {
+        let (codomain, domain) = output.split_at(2);
+        let spec = ContractSpec {
+            lhs: &[2, 3],
+            rhs: &[0, 1],
+            codomain,
+            domain,
+        };
+        let eager: Vec<_> = a
+            .iter()
+            .zip(&b)
+            .map(|(a, b)| a.contract(engine, b, &spec).unwrap())
+            .collect();
+        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
+        let mut workspace = plan.workspace().unwrap();
+        check(engine, cuda, route, &eager, &mut |cuda, dest| {
+            plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace)
+                .unwrap()
+        });
+    }
+    let eager: Vec<_> = a
+        .iter()
+        .zip(&b)
+        .map(|(a, b)| a.compose(engine, b).unwrap())
+        .collect();
+    let plan = symtn::typed::ComposePlan::new(engine, &lhs, &rhs).unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    check(engine, cuda, "compose", &eager, &mut |cuda, dest| {
+        plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace)
+            .unwrap()
+    });
 }

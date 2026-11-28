@@ -16,6 +16,7 @@ use crate::common;
 use crate::common::ErrorKind as _;
 use crate::numerics;
 use crate::prepared;
+use symtn::typed::Dest;
 
 use crate::braiding_probe;
 
@@ -136,7 +137,13 @@ fn foreign_workspace_is_rejected_before_destination_write() {
     let foreign = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut workspace = foreign.workspace().unwrap();
     assert!(plan
-        .execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
+        .execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut workspace
+        )
         .is_invalid_argument("another plan"));
     assert!(dst
         .member(engine, 0)
@@ -212,7 +219,7 @@ where
                 StackedTensorMap::pack(&filled::<R, D>(&runtime, &[&v, &v], &[&v], count, fill))
                     .unwrap();
             assert!(*dst.signature() == *plan.output_signature());
-            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut ws)
+            plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut dst), &mut ws)
                 .unwrap();
             for (index, oracle) in oracles.iter().enumerate() {
                 let member = dst.member(engine, index).unwrap();
@@ -285,7 +292,7 @@ fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
             f64::NAN,
         ))
         .unwrap();
-        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut ws)
+        plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut dst), &mut ws)
             .unwrap();
         for (index, (x, y)) in a.iter().zip(&b).enumerate() {
             let (oracle, _) = compose_oracle(x, y, &x.compose(engine, y).unwrap());
@@ -346,13 +353,13 @@ fn mismatched_stacks_are_typed_errors_before_any_work() {
     let mut wrong_dst =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v], &[&v], 3, 3)).unwrap();
     assert!(matches!(
-        plan.execute_into(engine, &lhs, &rhs, &mut wrong_dst, &mut ws),
+        plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut wrong_dst), &mut ws),
         Err(Error::BatchSignatureMismatch { member: None, .. })
     ));
     let mut short_dst =
         StackedTensorMap::pack(&filled::<_, f64>(&runtime, &[&v, &v], &[&v], 2, 1.0)).unwrap();
     assert!(matches!(plan
-        .execute_into(engine, &lhs, &rhs, &mut short_dst, &mut ws), Err(Error::InvalidArgument(m)) if m.contains("destination member count differs")));
+        .execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut short_dst), &mut ws), Err(Error::InvalidArgument(m)) if m.contains("destination member count differs")));
     assert_eq!(
         short_dst.member(engine, 0).unwrap().dense_data().unwrap()[0],
         1.0,
@@ -512,8 +519,14 @@ fn non_symmetric_composition<const ANYONIC: bool>() {
             f64::NAN,
         ))
         .unwrap();
-        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-            .unwrap();
+        plan.execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut workspace,
+        )
+        .unwrap();
         assert_members_compose(&format!("{label} execute_into"), &dst, &a, &b);
         let spec = ContractSpec {
             lhs: &[2],

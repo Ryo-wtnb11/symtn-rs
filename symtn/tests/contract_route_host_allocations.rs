@@ -117,13 +117,25 @@ fn row(codomain: &[usize], reach: i32) -> Row {
         let mut dst = workspace.take_output().unwrap();
         let mut workspace = plan.workspace().unwrap();
         let cold = calls(|| {
-            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-                .unwrap()
+            plan.execute_into(
+                engine,
+                &lhs,
+                &rhs,
+                Dest::overwrite(&mut dst),
+                &mut workspace,
+            )
+            .unwrap()
         });
         builds = plan_builds();
         let warm = calls(|| {
-            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-                .unwrap()
+            plan.execute_into(
+                engine,
+                &lhs,
+                &rhs,
+                Dest::overwrite(&mut dst),
+                &mut workspace,
+            )
+            .unwrap()
         });
         warm_plan_builds += plan_builds() - builds;
         // Dropped while the plan, which shares its replay with the

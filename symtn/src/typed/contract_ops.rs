@@ -1229,7 +1229,8 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
     ) -> Result<Self, Error>;
 
     /// Replays `plan` on every member of the checked operands (each its
-    /// stored block structure and payload) into `dst`.
+    /// stored block structure and payload) into `dst`:
+    /// `dst = alpha · contract(lhs, rhs) + init(dst)` per member.
     #[allow(clippy::too_many_arguments)]
     fn contract_members(
         _: ExecToken,
@@ -1240,6 +1241,7 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
+        alpha: D,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error>;
 
@@ -1286,6 +1288,7 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
+        alpha: D,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error> {
         workspace
@@ -1300,6 +1303,7 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
                 (rhs.0, rhs.1),
                 &mut workspace.members,
                 members,
+                alpha,
                 init,
             )?;
         Ok(())

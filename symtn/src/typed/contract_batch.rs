@@ -3,8 +3,8 @@
 use super::*;
 #[cfg(test)]
 use crate::su2::{su2_irrep, su2_rule};
-use crate::typed::ExecContext;
 use crate::typed::PreparedExec;
+use crate::typed::{Dest, ExecContext};
 use symtn_dense::Engine;
 use symtn_tensors::{HostContractMembersWorkspace, OutputAxisOrder, StorageContractResolution};
 
@@ -409,26 +409,34 @@ where
             (lhs.space.space().structure(), &lhs.storage),
             (rhs.space.space().structure(), &rhs.storage),
             members,
+            D::one(),
             symtn_tensors::ContractDestinationInit::Zeroed,
         );
         drop(lease);
         workspace.output.settle(output, result)
     }
 
-    /// Overwrites a checked caller destination. Validation and capability
-    /// errors leave it unchanged; after a backend error its payload may be
-    /// partially overwritten while its metadata stays valid. Any error
-    /// follows the batched module's failure rule.
+    /// Writes every member's contraction into a checked caller destination,
+    /// `out = alpha · contract(lhs, rhs) + beta · out` per member ([`Dest`]).
+    /// `alpha` and `beta` ride the same GEMM and output-transform epilogues
+    /// as [`Self::execute`], so no mode adds a pass; each block no GEMM
+    /// writes becomes `beta · out` (a zero fill for `beta = 0`, nothing for
+    /// `beta = 1`). `beta = 0` never reads `out`.
     ///
-    /// On CUDA each inactive region is zeroed across all members; the first
-    /// such call at a new high-water member count grows the workspace's zero
-    /// template, and later calls transfer nothing.
+    /// Validation and capability errors leave the destination unchanged;
+    /// after a backend error its payload may be partially overwritten while
+    /// its metadata stays valid. Any error follows the batched module's
+    /// failure rule.
+    ///
+    /// On CUDA the first call at a new high-water member count that fills an
+    /// inactive region grows the workspace's zero template, and later calls
+    /// transfer nothing.
     pub fn execute_into(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
-        dst: &mut StackedTensorMap<R, D, S>,
+        dst: Dest<'_, StackedTensorMap<R, D, S>, D>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
         let engine = cx.engine();
@@ -440,9 +448,10 @@ where
         engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
-        dst: &mut StackedTensorMap<R, D, S>,
+        dst: Dest<'_, StackedTensorMap<R, D, S>, D>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
+        let (dst, alpha, beta) = dst.into_parts();
         self.check_workspace(workspace)?;
         // First, so no later error of this call keeps another engine's state.
         let mut lease = match S::lease_members(EXEC, engine, workspace) {
@@ -461,7 +470,8 @@ where
                 (lhs.space.space().structure(), &lhs.storage),
                 (rhs.space.space().structure(), &rhs.storage),
                 members,
-                symtn_tensors::ContractDestinationInit::Axpby(D::from_real(0.0)),
+                alpha,
+                symtn_tensors::ContractDestinationInit::Axpby(beta),
             )
         });
         result.map_err(|error| workspace.output.hide(error))
@@ -502,7 +512,7 @@ where
 /// ```
 /// use std::sync::Arc;
 /// use symtn::sector::{U1FusionRule, U1Irrep};
-/// use symtn::typed::{ComposePlan, Error, GradedSpace, Runtime, StackedTensorMap, TensorMap};
+/// use symtn::typed::{ComposePlan, Dest, Error, GradedSpace, Runtime, StackedTensorMap, TensorMap};
 ///
 /// # fn main() -> Result<(), Error> {
 /// let engine = &mut symtn::typed::CpuEngine::serial();
@@ -523,7 +533,7 @@ where
 /// let plan = ComposePlan::new(engine, &lhs, &rhs)?;
 /// let mut workspace = plan.workspace()?;
 /// let _output = plan.execute(engine, &lhs, &rhs, &mut workspace)?;
-/// plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut workspace)?;
+/// plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut destination), &mut workspace)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -593,12 +603,12 @@ where
         self.0.execute_impl(cx.engine(), lhs, rhs, workspace)
     }
 
-    /// Composes every member pair into the caller's `dst`, overwriting it;
+    /// Composes every member pair into the caller's `dst`,
+    /// `out = alpha · compose(lhs, rhs) + beta · out` per member;
     /// [`ContractPlan::execute_into`]. `dst` must carry
-    /// [`Self::output_signature`] and the operands' member count. Its prior
-    /// contents never reach the result: the blocks no GEMM writes are
-    /// zero-filled on every call (on CUDA, one zero fill per inactive block
-    /// per call over all members).
+    /// [`Self::output_signature`] and the operands' member count. The blocks
+    /// no GEMM writes become `beta · out` on every call (a zero fill for
+    /// `beta = 0`; on CUDA one fill per inactive block over all members).
     ///
     /// # Errors
     ///
@@ -609,7 +619,7 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
-        dst: &mut StackedTensorMap<R, D, S>,
+        dst: Dest<'_, StackedTensorMap<R, D, S>, D>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
         self.0

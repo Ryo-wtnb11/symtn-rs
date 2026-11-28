@@ -14,9 +14,9 @@ use std::marker::PhantomData;
 use symtn_core::{Placement, TensorStorage};
 use symtn_dense::{
     cuda_conj, cuda_gather_elements, cuda_gather_member_elements, cuda_gather_members,
-    cuda_gemm_region_batched_into, cuda_gemm_region_batched_scaled_into,
-    cuda_gemm_region_with_ops_into, cuda_matmul_region_into, cuda_widen, CudaDenseContext,
-    CudaDenseStorage, CudaScalar, MatrixOp,
+    cuda_gemm_region_batched_axpby_into, cuda_gemm_region_batched_into,
+    cuda_gemm_region_batched_scaled_into, cuda_gemm_region_with_ops_into, cuda_matmul_region_into,
+    cuda_widen, CudaDenseContext, CudaDenseStorage, CudaScalar, MatrixOp,
 };
 
 use crate::fusion_replay::StorageGemm;
@@ -370,6 +370,54 @@ impl<D: CudaScalar>
             cols,
             members,
             alpha,
+        )
+        .map_err(OperationError::Dense)
+    }
+    fn matmul_range_axpby_with_ops_into(
+        &mut self,
+        dst: &mut StackedStorageViewMut<'_, CudaStorage<D>>,
+        dst_offset: usize,
+        lhs: &StackedStorageView<'_, CudaStorage<D>>,
+        lhs_offset: usize,
+        rhs: &StackedStorageView<'_, CudaStorage<D>>,
+        rhs_offset: usize,
+        rows: usize,
+        contracted: usize,
+        cols: usize,
+        lhs_op: MatrixOp,
+        rhs_op: MatrixOp,
+        alpha: D,
+        beta: D,
+    ) -> Result<(), OperationError> {
+        if lhs_op != MatrixOp::Identity || rhs_op != MatrixOp::Identity {
+            return Err(OperationError::Internal {
+                message: "stacked CUDA GEMM requires identity operand orientations",
+            });
+        }
+        let members = dst.members();
+        if lhs.members() != members || rhs.members() != members {
+            return Err(OperationError::InvalidArgument {
+                message: "stacked GEMM operands have different member counts",
+            });
+        }
+        let dst_stride = dst.member_stride();
+        cuda_gemm_region_batched_axpby_into::<D>(
+            self.ctx,
+            &mut dst.storage_mut().0,
+            dst_offset,
+            dst_stride,
+            &lhs.storage().0,
+            lhs_offset,
+            lhs.member_stride(),
+            &rhs.storage().0,
+            rhs_offset,
+            rhs.member_stride(),
+            rows,
+            contracted,
+            cols,
+            members,
+            alpha,
+            beta,
         )
         .map_err(OperationError::Dense)
     }

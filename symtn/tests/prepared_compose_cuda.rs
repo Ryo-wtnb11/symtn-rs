@@ -9,6 +9,7 @@
 use crate::common;
 use crate::numerics;
 use crate::prepared;
+use symtn::typed::Dest;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
@@ -129,7 +130,7 @@ fn device_gate<R, D>(
                     .unwrap()
             };
             let mut dst = poisoned(cuda);
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut ws)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut ws)
                 .unwrap();
             check(
                 engine,
@@ -140,7 +141,7 @@ fn device_gate<R, D>(
 
             let mut dst = poisoned(cuda);
             let before = cuda_transfer_stats();
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut ws)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut ws)
                 .unwrap();
             let warm = delta(cuda_transfer_stats(), before);
             assert_eq!(
@@ -271,7 +272,7 @@ fn record_counters<R, D>(
         .to_cuda(cuda)
         .unwrap();
         let (_, mut written) = counted(|| {
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut into)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut into)
                 .unwrap();
         });
         written[6] = into.retained_bytes() as u64;

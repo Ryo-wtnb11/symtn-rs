@@ -270,6 +270,7 @@ fn move_members<A, D>(
     members: usize,
     conjugate: bool,
     scale: D,
+    beta: Option<D>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D>,
@@ -284,20 +285,40 @@ where
     src_strides.clear();
     src_strides.extend_from_slice(local_src_strides);
     src_strides.push(src_member_stride);
-    kernels.copy_scale_strided_baked(
-        exec,
-        dst,
-        src,
-        shape,
-        dst_strides,
-        src_strides,
-        dst_offset,
-        src_offset,
-        conjugate,
-        scale,
-        None,
-        None,
-    )
+    match beta {
+        // Only the scatter accumulates, and it never conjugates.
+        Some(beta) if !conjugate => kernels.axpby_strided_baked(
+            exec,
+            dst,
+            src,
+            shape,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            scale,
+            beta,
+            None,
+            None,
+        ),
+        Some(_) => Err(OperationError::Internal {
+            message: "a conjugating member move cannot accumulate",
+        }),
+        None => kernels.copy_scale_strided_baked(
+            exec,
+            dst,
+            src,
+            shape,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            conjugate,
+            scale,
+            None,
+            None,
+        ),
+    }
 }
 
 /// One worker's member-axis move scratch, kept by the workspace: the moved
@@ -336,6 +357,8 @@ struct MemberMoves<'a, D, C> {
     /// The scale of each Single, in block order, then of each scatter
     /// column, in plan order.
     alpha: &'a [D],
+    /// `None` overwrites `dst`; `Some(beta)` adds `beta · dst`.
+    beta: Option<D>,
     singles: usize,
     src_stride: isize,
     dst_stride: isize,
@@ -374,6 +397,25 @@ where
         } = scratch;
         for &index in self.inactive {
             let (dims, strides) = layouts.inactive_role(index)?;
+            if let Some(beta) = self.beta {
+                if beta != D::one() {
+                    shape.clear();
+                    shape.extend_from_slice(dims);
+                    shape.push(members);
+                    dst_strides.clear();
+                    dst_strides.extend_from_slice(strides);
+                    dst_strides.push(self.dst_stride);
+                    kernels.scale_strided(
+                        exec.reborrow(),
+                        dst,
+                        shape,
+                        dst_strides,
+                        layouts.entry(index).offset,
+                        beta,
+                    )?;
+                }
+                continue;
+            }
             let zero = [D::zero()];
             zero_strides.clear();
             zero_strides.resize(dims.len(), 0);
@@ -395,6 +437,7 @@ where
                 members,
                 false,
                 D::one(),
+                None,
             )?;
         }
         let mut single = 0;
@@ -434,7 +477,7 @@ where
                     self.alpha[single],
                     self.parts.single_coefficients[coefficient],
                 ),
-                None,
+                self.beta,
                 None,
                 None,
             )?;
@@ -471,6 +514,7 @@ where
                     members,
                     self.parts.storage_conjugate,
                     D::one(),
+                    None,
                 )?;
             }
         }
@@ -527,6 +571,7 @@ where
                     members,
                     false,
                     self.alpha[column_index],
+                    self.beta,
                 )?;
                 column_index += 1;
             }
@@ -632,7 +677,91 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    if members == 1 {
+    tree_transform_members_raw(
+        engine,
+        kernels,
+        dense,
+        workspace,
+        structure,
+        dst_structure,
+        src_structure,
+        dst_data,
+        src_data,
+        members,
+        destination_scales,
+        D::one(),
+        None,
+    )
+}
+
+/// [`tree_transform_members_overwrite_raw`] as `dst = alpha · transform(src)
+/// + beta · dst` per member, at every `B`: `alpha` folds into the Single and
+/// scatter scales, `beta` rides the Single and scatter writes, and each
+/// inactive layout becomes `beta · dst` (nothing for `beta = 1`). The pack
+/// and grouped GEMM stay overwrites of the workspace's packed buffers.
+/// `beta = 0` overwrites.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn tree_transform_members_axpby_raw<A, E, D, C>(
+    engine: &mut dyn Engine,
+    kernels: &mut A,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    structure: &TreeTransformStructure<C>,
+    dst_structure: &Arc<BlockStructure>,
+    src_structure: &Arc<BlockStructure>,
+    dst_data: &mut [D],
+    src_data: &[D],
+    members: usize,
+    alpha: D,
+    beta: D,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<D> + Clone + Send + Sync,
+    E: DenseExecutor,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    tree_transform_members_raw(
+        engine,
+        kernels,
+        dense,
+        workspace,
+        structure,
+        dst_structure,
+        src_structure,
+        dst_data,
+        src_data,
+        members,
+        &[],
+        alpha,
+        (!beta.is_zero()).then_some(beta),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tree_transform_members_raw<A, E, D, C>(
+    engine: &mut dyn Engine,
+    kernels: &mut A,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    structure: &TreeTransformStructure<C>,
+    dst_structure: &Arc<BlockStructure>,
+    src_structure: &Arc<BlockStructure>,
+    dst_data: &mut [D],
+    src_data: &[D],
+    members: usize,
+    destination_scales: &[(usize, C)],
+    alpha: D,
+    beta: Option<D>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<D> + Clone + Send + Sync,
+    E: DenseExecutor,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    if members == 1 && beta.is_none() {
         // The ordinary entry runs its own route, refuses an unhonored forced
         // policy first and admits the single member before writing its
         // destination.
@@ -646,12 +775,12 @@ where
             src_structure,
             dst_data,
             src_data,
-            D::one(),
+            alpha,
             destination_scales,
         );
     }
     refuse_unhonored_policy(engine, dense)?;
-    let alpha = DestinationAlpha::new(D::one(), destination_scales)?;
+    let alpha = DestinationAlpha::new(alpha, destination_scales)?;
     let task = structure.task_view()?;
     admit::<D, C>(
         task,
@@ -698,6 +827,7 @@ where
         inactive: task.inactive_destination_layouts(),
         src: src_data,
         alpha: &[],
+        beta,
         singles,
         src_stride: strides[0],
         dst_stride: strides[1],

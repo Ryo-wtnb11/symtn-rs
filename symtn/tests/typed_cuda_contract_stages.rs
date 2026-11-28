@@ -393,7 +393,7 @@ fn members<R: DeviceRule, D: DevicePayload>(
                 .to_cuda(cuda)
                 .unwrap();
             let (_, written_counters) = delta(|| {
-                plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut into)
+                plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut into)
                     .unwrap();
             });
             let written = dst.to_host(cuda).unwrap();

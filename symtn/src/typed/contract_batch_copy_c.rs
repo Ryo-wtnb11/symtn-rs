@@ -142,7 +142,7 @@ mod tests {
                 .collect();
             let mut dst = pack(cuda, &poisoned);
             let before = symtn_dense::cuda_transfer_stats();
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut workspace)
                 .unwrap();
             let after = symtn_dense::cuda_transfer_stats();
             assert_eq!(

@@ -249,6 +249,48 @@ pub fn cuda_gemm_region_batched_scaled_into<D: CudaScalar>(
     members: usize,
     alpha: D,
 ) -> Result<(), DenseError> {
+    cuda_gemm_region_batched_axpby_into::<D>(
+        ctx,
+        dst,
+        dst_offset,
+        dst_member_stride,
+        lhs,
+        lhs_offset,
+        lhs_member_stride,
+        rhs,
+        rhs_offset,
+        rhs_member_stride,
+        m,
+        k,
+        n,
+        members,
+        alpha,
+        D::ZERO,
+    )
+}
+
+/// Batched region GEMM `dst = alpha · lhs · rhs + beta · dst` per member,
+/// with `beta` in the same `dot_general` epilogue (`beta = 0` overwrites).
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn cuda_gemm_region_batched_axpby_into<D: CudaScalar>(
+    ctx: &mut CudaDenseContext,
+    dst: &mut CudaDenseStorage,
+    dst_offset: usize,
+    dst_member_stride: usize,
+    lhs: &CudaDenseStorage,
+    lhs_offset: usize,
+    lhs_member_stride: usize,
+    rhs: &CudaDenseStorage,
+    rhs_offset: usize,
+    rhs_member_stride: usize,
+    m: usize,
+    k: usize,
+    n: usize,
+    members: usize,
+    alpha: D,
+    beta: D,
+) -> Result<(), DenseError> {
     const OP: &str = "cuda_gemm_batched";
     ensure_cuda_device(
         ctx.device,
@@ -308,7 +350,7 @@ pub fn cuda_gemm_region_batched_scaled_into<D: CudaScalar>(
         lhs_conj: false,
         rhs_conj: false,
         alpha: alpha.contraction_scalar(),
-        beta: D::ZERO.contraction_scalar(),
+        beta: beta.contraction_scalar(),
     };
     record(|stats| stats.gemm_calls += 1);
     ctx.backend

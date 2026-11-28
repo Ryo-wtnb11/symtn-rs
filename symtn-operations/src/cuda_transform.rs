@@ -421,6 +421,72 @@ impl CudaSingleMemberRegions {
         }
         Ok(())
     }
+    /// `destination = alpha · transform(source) + beta · destination` per
+    /// member: each move is one region axpby with `alpha` and `beta` in its
+    /// epilogue, and each inactive layout becomes `beta · destination`
+    /// (nothing for `beta = 1`). `alpha = 0` multiplies by the exact-zero
+    /// coefficient, so the source is still read. `(1, 0)` is
+    /// [`Self::execute_overwrite`]. Reserve the context's zero and `1`
+    /// templates first so the call uploads nothing.
+    pub fn execute_axpby<D: CudaScalar + RecouplingCoefficientAction<f64>>(
+        &self,
+        ctx: &mut CudaDenseContext,
+        source: &CudaStorage<D>,
+        coefficients: Option<&CudaDenseStorage>,
+        alpha: D,
+        beta: D,
+        destination: &mut CudaStorage<D>,
+    ) -> Result<(), OperationError> {
+        if alpha == D::ONE && beta == D::ZERO {
+            return self.execute_overwrite(ctx, source, coefficients, destination);
+        }
+        const OP: &str = "cuda_single_member_axpby";
+        ctx.ensure_owns(OP, &[&source.0, &destination.0])
+            .and_then(|()| coefficients.map_or(Ok(()), |c| ctx.ensure_owns(OP, &[c])))
+            .map_err(OperationError::Dense)?;
+        let region_beta = if beta == D::ZERO {
+            CudaRegionBeta::Overwrite
+        } else if beta == D::ONE {
+            CudaRegionBeta::Accumulate
+        } else {
+            CudaRegionBeta::Scale(beta)
+        };
+        for region in &self.zeros {
+            cuda_region_scale::<D>(ctx, &mut destination.0, region, beta)
+                .map_err(OperationError::Dense)?;
+        }
+        for (src, dst, coefficient, coefficient_offset) in &self.moves {
+            let coefficient = if alpha == D::ZERO {
+                CudaRegionCoefficient::Zero
+            } else if *coefficient == 1.0 {
+                CudaRegionCoefficient::One
+            } else {
+                CudaRegionCoefficient::Buffer(
+                    coefficients.ok_or(OperationError::InvalidArgument {
+                        message: "CUDA CopyC scaled move has no coefficient buffer",
+                    })?,
+                    coefficient_offset.ok_or(OperationError::InvalidArgument {
+                        message: "CUDA CopyC scaled move has no coefficient offset",
+                    })?,
+                )
+            };
+            let alpha = if alpha == D::ZERO { D::ONE } else { alpha };
+            cuda_region_axpby::<D>(
+                ctx,
+                &source.0,
+                src,
+                false,
+                alpha,
+                coefficient,
+                region_beta,
+                &mut destination.0,
+                dst,
+            )
+            .map_err(OperationError::Dense)?;
+        }
+        Ok(())
+    }
+
     pub fn retained_bytes(&self) -> usize {
         let inline = self
             .moves

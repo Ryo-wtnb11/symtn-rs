@@ -2,6 +2,7 @@ use crate::common::ErrorKind as _;
 use crate::report;
 use crate::su2::{su2_irrep, su2_rule};
 use report::Report;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use crate::braiding_probe;
@@ -102,8 +103,14 @@ where
             .map(|case| poisoned_destination(engine, case))
             .collect();
         let mut destination = StackedTensorMap::pack(&poison).unwrap();
-        plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut workspace)
-            .unwrap();
+        plan.execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut destination),
+            &mut workspace,
+        )
+        .unwrap();
         for (i, member_case) in members.iter().enumerate() {
             let member = destination.member(engine, i).unwrap();
             let reference = blas_contract_oracle(engine, member_case);
@@ -290,14 +297,26 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
         matches!(ContractPlan::new(engine, &wrong_count, &rhs, &case.spec()), Err(Error::InvalidArgument(m)) if m.contains("operand stacks have different member counts"))
     );
     assert!(plan
-        .execute_into(engine, &wrong_count, &rhs, &mut destination, &mut workspace)
+        .execute_into(
+            engine,
+            &wrong_count,
+            &rhs,
+            Dest::overwrite(&mut destination),
+            &mut workspace
+        )
         .err()
         .unwrap()
         .report()
         .contains("operand stacks have different member counts"));
     assert_eq!(bits(engine, &destination), before);
     assert!(plan
-        .execute_into(engine, &lhs, &rhs, &mut destination, &mut foreign)
+        .execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut destination),
+            &mut foreign
+        )
         .err()
         .unwrap()
         .report()
@@ -307,7 +326,13 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
     let mut wrong_destination = wrong_destination;
     let wrong_before = bits(engine, &wrong_destination);
     assert!(plan
-        .execute_into(engine, &lhs, &rhs, &mut wrong_destination, &mut workspace)
+        .execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut wrong_destination),
+            &mut workspace
+        )
         .err()
         .unwrap()
         .report()
@@ -317,7 +342,13 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
     let wrong_member = TensorMap::<_, f64>::zeros(engine, runtime, [&v], [&v]).unwrap();
     let wrong = StackedTensorMap::pack(&[wrong_member.clone(), wrong_member]).unwrap();
     assert!(matches!(
-        plan.execute_into(engine, &wrong, &rhs, &mut destination, &mut workspace),
+        plan.execute_into(
+            engine,
+            &wrong,
+            &rhs,
+            Dest::overwrite(&mut destination),
+            &mut workspace
+        ),
         Err(symtn::typed::Error::BatchSignatureMismatch { member: None, .. })
     ));
     assert_eq!(bits(engine, &destination), before);
@@ -326,8 +357,14 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
     assert!(workspace.retained_bytes() > 0);
     assert!(workspace.take_output().is_some());
     assert!(workspace.take_output().is_none());
-    plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut second)
-        .unwrap();
+    plan.execute_into(
+        engine,
+        &lhs,
+        &rhs,
+        Dest::overwrite(&mut destination),
+        &mut second,
+    )
+    .unwrap();
     let singleton = rhs.select(engine, &[0]).unwrap();
     let singleton_lhs = lhs.select(engine, &[0]).unwrap();
     plan.execute(engine, &singleton_lhs, &singleton, &mut workspace)
@@ -652,8 +689,14 @@ fn check_twisted_members<R, D>(
             .collect();
         let refs: Vec<_> = poisoned.iter().collect();
         let mut dst = StackedTensorMap::pack(&refs).unwrap();
-        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut independent)
-            .unwrap();
+        plan.execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut independent,
+        )
+        .unwrap();
         for (i, member) in members.iter().enumerate() {
             compare(
                 dst.member(engine, i).unwrap().dense_data().unwrap(),
@@ -674,7 +717,13 @@ fn check_twisted_members<R, D>(
                 .collect();
             let short_rhs = StackedTensorMap::pack(&[&members[0].rhs]).unwrap();
             assert!(plan
-                .execute_into(engine, &lhs, &short_rhs, &mut dst, &mut independent)
+                .execute_into(
+                    engine,
+                    &lhs,
+                    &short_rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut independent
+                )
                 .is_invalid_argument("different member counts"));
             for (i, data) in before.iter().enumerate() {
                 assert_eq!(dst.member(engine, i).unwrap().dense_data().unwrap(), data);
@@ -801,7 +850,13 @@ fn check_fermionic_unit_batch<R, D>(
                 .collect();
             let short_rhs = StackedTensorMap::pack(&[&members[0].rhs]).unwrap();
             assert!(plan
-                .execute_into(engine, &lhs, &short_rhs, &mut destination, &mut workspace)
+                .execute_into(
+                    engine,
+                    &lhs,
+                    &short_rhs,
+                    Dest::overwrite(&mut destination),
+                    &mut workspace
+                )
                 .is_invalid_argument("different member counts"));
             for (i, expected) in before.iter().enumerate() {
                 assert_eq!(
@@ -1012,8 +1067,14 @@ fn check_mixed_signed_members<R, D>(
             .collect();
         let refs: Vec<_> = poisoned.iter().collect();
         let mut dst = StackedTensorMap::pack(&refs).unwrap();
-        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut other_workspace)
-            .unwrap();
+        plan.execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut other_workspace,
+        )
+        .unwrap();
         for (i, expected) in eager.iter().enumerate() {
             numerics::assert_nonzero_slices_close(
                 base.name,
@@ -1034,7 +1095,13 @@ fn check_mixed_signed_members<R, D>(
                 })
                 .collect();
             assert!(plan
-                .execute_into(engine, &lhs, &short_rhs, &mut dst, &mut other_workspace)
+                .execute_into(
+                    engine,
+                    &lhs,
+                    &short_rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut other_workspace
+                )
                 .is_invalid_argument("different member counts"));
             for (i, before) in snapshot.iter().enumerate() {
                 assert_eq!(dst.member(engine, i).unwrap().dense_data().unwrap(), before);
@@ -1255,8 +1322,14 @@ where
                 .map(|case| poisoned_destination(engine, case))
                 .collect();
             let mut dst = StackedTensorMap::pack(&poison).unwrap();
-            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-                .unwrap();
+            plan.execute_into(
+                engine,
+                &lhs,
+                &rhs,
+                Dest::overwrite(&mut dst),
+                &mut workspace,
+            )
+            .unwrap();
             for (i, oracle) in oracles.iter().enumerate() {
                 numerics::assert_nonzero_slices_close(
                     &format!("{what} execute_into member {i}"),
@@ -1310,4 +1383,104 @@ fn reject_braiding<const ANYONIC: bool>(runtime: &Runtime) -> bool {
         domain: &[1],
     };
     matches!(ContractPlan::new(engine, &stack, &stack, &spec), Err(Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::UnsupportedContractionBraiding { operation: symtn::typed::BraidingOp::Contraction, style, } if !style.is_symmetric()))
+}
+
+/// `execute_into` applies each `Dest` mode per member,
+/// `out = alpha · contract(lhs, rhs) + beta · out`, on the direct core route
+/// (identity output order), the CopyC route (a permuted output) and
+/// composition; the expected value is that formula over the eager
+/// contraction of each member.
+#[test]
+fn prepared_execute_into_applies_every_dest_mode_per_member() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::new();
+    let v = u1(&[(0, 2), (1, 2)]);
+    let random = |engine: &mut symtn_dense::CpuEngine, seed| {
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], seed).unwrap()
+    };
+    let a: Vec<_> = (0..3).map(|i| random(engine, 10 + i)).collect();
+    let b: Vec<_> = (0..3).map(|i| random(engine, 20 + i)).collect();
+    let lhs = StackedTensorMap::pack(&a.iter().collect::<Vec<_>>()).unwrap();
+    let rhs = StackedTensorMap::pack(&b.iter().collect::<Vec<_>>()).unwrap();
+    let modes = [
+        ("overwrite", 1.0, 0.0),
+        ("accumulate", 1.0, 1.0),
+        ("scaled", 2.5, -0.5),
+        ("scaled", 0.0, 0.5),
+    ];
+    type HostStack = StackedTensorMap<symtn::sector::U1FusionRule, f64>;
+    type Run<'a> = dyn FnMut(&mut symtn_dense::CpuEngine, Dest<'_, HostStack, f64>) + 'a;
+    let check = |engine: &mut symtn_dense::CpuEngine,
+                 route: &str,
+                 eager: &[TensorMap<symtn::sector::U1FusionRule, f64>],
+                 run: &mut Run<'_>| {
+        for (mode, alpha, beta) in modes {
+            let before: Vec<_> = (0..3).map(|i| random(engine, 30 + i as u64)).collect();
+            let pack = |members: &[TensorMap<_, f64>]| {
+                StackedTensorMap::pack(&members.iter().collect::<Vec<_>>()).unwrap()
+            };
+            let mut dst = if mode == "overwrite" {
+                // `beta = 0` never reads the destination.
+                let poison: Vec<_> = before
+                    .iter()
+                    .map(|t| t.scale(engine, f64::NAN).unwrap())
+                    .collect();
+                pack(&poison)
+            } else {
+                pack(&before)
+            };
+            let dest = match mode {
+                "overwrite" => Dest::overwrite(&mut dst),
+                "accumulate" => Dest::accumulate(&mut dst),
+                _ => Dest::scaled(&mut dst, alpha, beta),
+            };
+            run(engine, dest);
+            for (i, (eager, before)) in eager.iter().zip(&before).enumerate() {
+                let actual = dst.member(engine, i).unwrap();
+                let actual = actual.dense_data().unwrap();
+                let (eager, before) = (eager.dense_data().unwrap(), before.dense_data().unwrap());
+                assert_eq!(actual.len(), eager.len());
+                for k in 0..actual.len() {
+                    let prior = if beta == 0.0 { 0.0 } else { beta * before[k] };
+                    let want = alpha * eager[k] + prior;
+                    assert!(
+                        (actual[k] - want).abs() <= 1e-12 * (1.0 + want.abs()),
+                        "{route} {mode} member {i} element {k}: {} != {want}",
+                        actual[k]
+                    );
+                }
+            }
+        }
+    };
+    for (route, output) in [("core", [0, 1, 2, 3]), ("copyC", [1, 0, 2, 3])] {
+        let (codomain, domain) = output.split_at(2);
+        let spec = ContractSpec {
+            lhs: &[2, 3],
+            rhs: &[0, 1],
+            codomain,
+            domain,
+        };
+        let eager: Vec<_> = a
+            .iter()
+            .zip(&b)
+            .map(|(a, b)| a.contract(engine, b, &spec).unwrap())
+            .collect();
+        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
+        let mut workspace = plan.workspace().unwrap();
+        check(engine, route, &eager, &mut |engine, dest| {
+            plan.execute_into(engine, &lhs, &rhs, dest, &mut workspace)
+                .unwrap()
+        });
+    }
+    let eager: Vec<_> = a
+        .iter()
+        .zip(&b)
+        .map(|(a, b)| a.compose(engine, b).unwrap())
+        .collect();
+    let plan = symtn::typed::ComposePlan::new(engine, &lhs, &rhs).unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    check(engine, "compose", &eager, &mut |engine, dest| {
+        plan.execute_into(engine, &lhs, &rhs, dest, &mut workspace)
+            .unwrap()
+    });
 }

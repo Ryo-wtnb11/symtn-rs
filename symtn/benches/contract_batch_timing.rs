@@ -241,8 +241,14 @@ fn public_signed_direct_release_measurement() {
         let mut into = Vec::new();
         for _ in 0..31 {
             let (_, elapsed, calls, bytes) = measure(|| {
-                plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-                    .unwrap();
+                plan.execute_into(
+                    engine,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut workspace,
+                )
+                .unwrap();
                 black_box(&dst);
             });
             into.push((elapsed, calls, bytes));
@@ -305,8 +311,14 @@ fn public_dynamic_source_twist_release_measurement() {
         let mut into = Vec::new();
         for _ in 0..31 {
             let (_, elapsed, calls, bytes) = measure(|| {
-                plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut workspace)
-                    .unwrap();
+                plan.execute_into(
+                    engine,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut destination),
+                    &mut workspace,
+                )
+                .unwrap();
                 black_box(&destination);
             });
             into.push((elapsed, calls, bytes));
