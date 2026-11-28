@@ -444,6 +444,8 @@ use fusion_tree::{diagonal_factor_on, full_svd_spectrum_matches_bonds};
 pub use fusion_tree::{
     BlockFusionTrees, CoupledBlock, CoupledBlockPayload, FusionTreeLabels, SectorSpectrum,
 };
+mod dest;
+pub use dest::Dest;
 mod tensor_repr;
 use tensor_repr::{
     borrowed_view_unsupported, owned_repr, TypedAdjointView, TypedTensorBody, TypedTensorRepr,

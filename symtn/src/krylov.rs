@@ -29,8 +29,8 @@
 //! | `krylov::Vector` | symtn | TensorKit |
 //! |---|---|---|
 //! | `similar` | [`TensorMap::zeros_like`] | `zerovector` |
-//! | `copy_from(x)` | `x.axpby_into(engine, self, 1, 0)` | `scale!(ty, tx, 1)` |
-//! | `axpby(a, x, b)` | `x.axpby_into(engine, self, a, b)` | `add!(ty, tx, α, β)` |
+//! | `copy_from(x)` | `x.axpby_into(engine, Dest::overwrite(self))` | `scale!(ty, tx, 1)` |
+//! | `axpby(a, x, b)` | `x.axpby_into(engine, Dest::scaled(self, a, b))` | `add!(ty, tx, α, β)` |
 //! | `inner(y)` | [`TensorMap::inner`] | `inner` |
 //! | `norm` | [`TensorMap::norm`]`(2.0)` | `norm` |
 //!
@@ -59,7 +59,7 @@
 //!
 //! use symtn::krylov::{self, Lanczos, Which, Workspace};
 //! use symtn::sector::{U1FusionRule, U1Irrep};
-//! use symtn::typed::{ExecContext, GradedSpace, Runtime, TensorMap};
+//! use symtn::typed::{Dest, ExecContext, GradedSpace, Runtime, TensorMap};
 //!
 //! let engine: &mut dyn ExecContext = &mut symtn::typed::CpuEngine::serial();
 //! let rt = Runtime::new();
@@ -72,7 +72,7 @@
 //! let mut op = |engine: &mut (dyn ExecContext + 'static),
 //!               x: &TensorMap<U1FusionRule, f64>,
 //!               y: &mut TensorMap<U1FusionRule, f64>| {
-//!     h.compose(engine, x)?.axpby_into(engine, y, 1.0, 0.0)
+//!     h.compose(engine, x)?.axpby_into(engine, Dest::overwrite(y))
 //! };
 //! let mut ws = Workspace::with_capacity(engine, &x0, 5)?;
 //! let alg = Lanczos::new(5, 100, 1e-12);
@@ -88,7 +88,7 @@ use num_complex::{Complex32, Complex64};
 use crate::sector::TypedSectorAdmission;
 // `Error` is not imported: it would shadow the re-exported `krylov::Error`.
 use crate::typed::{
-    ElementwiseExec, ExecContext, FacadeError, FactorScalar, ReduceExec, TensorMap,
+    Dest, ElementwiseExec, ExecContext, FacadeError, FactorScalar, ReduceExec, TensorMap,
     TypedAdjointSpace, TypedSpaceModeDispatch, TypedTensorModeDispatch,
 };
 
@@ -122,7 +122,7 @@ macro_rules! host_vector {
                 engine: &mut Self::Context,
                 x: &Self,
             ) -> Result<(), Self::Error> {
-                x.axpby_into(engine, self, <$d>::from_real(1.0), <$d>::from_real(0.0))
+                x.axpby_into(engine, Dest::overwrite(self))
             }
 
             fn inner(&self, engine: &mut Self::Context, y: &Self) -> Result<$d, Self::Error> {
@@ -140,7 +140,7 @@ macro_rules! host_vector {
                 x: &Self,
                 b: $d,
             ) -> Result<(), Self::Error> {
-                x.axpby_into(engine, self, a, b)
+                x.axpby_into(engine, Dest::scaled(self, a, b))
             }
         }
     };

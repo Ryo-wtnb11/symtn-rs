@@ -17,6 +17,7 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use num_complex::{Complex32, Complex64};
 use symtn::krylov::{self, Lanczos, Vector, Which, Workspace};
@@ -261,10 +262,11 @@ fn krylov_reports_operation_errors_as_vector_errors() {
     let b = filled!(engine, &rt, [&v, &w], [&v], f64, 5);
     let x0 = filled!(engine, &rt, [&v], [&v], f64, 6);
     let mut ws = Workspace::with_capacity(engine, &b, 5).unwrap();
-    let mut op =
-        |engine: &mut (dyn ExecContext + 'static),
-         x: &TensorMap<U1FusionRule, f64>,
-         y: &mut TensorMap<U1FusionRule, f64>| x.axpby_into(engine, y, 2.0, 0.0);
+    let mut op = |engine: &mut (dyn ExecContext + 'static),
+                  x: &TensorMap<U1FusionRule, f64>,
+                  y: &mut TensorMap<U1FusionRule, f64>| {
+        x.axpby_into(engine, Dest::scaled(y, 2.0, 0.0))
+    };
     let result = krylov::linsolve(
         engine,
         &mut op,
@@ -371,7 +373,12 @@ macro_rules! eigsolve_case {
         let engine: &mut dyn ExecContext = $engine;
         let (h, x0, want): (_, _, Vec<f64>) = (&$h, &$x0, $want);
         let mut op = |engine: &mut (dyn ExecContext + 'static), x: &_, y: &mut _| {
-            h.contract_into(engine, x, &APPLY, y, Sample::real(1.0), Sample::real(0.0))
+            h.contract_into(
+                engine,
+                x,
+                &APPLY,
+                Dest::scaled(y, Sample::real(1.0), Sample::real(0.0)),
+            )
         };
         let (alg, tol): (Lanczos, f64) = ($alg, $tol);
         let mut ws = Workspace::with_capacity(engine, x0, 10).unwrap();
@@ -527,7 +534,12 @@ macro_rules! exponentiate_case {
         let (h, x, lambda): (_, _, Vec<f64>) = (&$h, &$x, $lambda);
         let t = $t;
         let mut op = |engine: &mut (dyn ExecContext + 'static), x: &_, y: &mut _| {
-            h.contract_into(engine, x, &APPLY, y, Sample::real(1.0), Sample::real(0.0))
+            h.contract_into(
+                engine,
+                x,
+                &APPLY,
+                Dest::scaled(y, Sample::real(1.0), Sample::real(0.0)),
+            )
         };
         let alg = Lanczos::new(10, 100, 1e-13);
         let mut ws = Workspace::with_capacity(engine, x, 10).unwrap();
@@ -696,12 +708,7 @@ fn fibonacci_vectors_carry_the_golden_ratio_weight() {
     let mut op = |engine: &mut (dyn ExecContext + 'static),
                   x: &TensorMap<TableRule, Complex64>,
                   y: &mut TensorMap<TableRule, Complex64>| {
-        h.compose(engine, x)?.axpby_into(
-            engine,
-            y,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
-        )
+        h.compose(engine, x)?.axpby_into(engine, Dest::overwrite(y))
     };
     let mut ws = Workspace::with_capacity(engine, &x, 6).unwrap();
     let alg = Lanczos::new(6, 100, 1e-12);
@@ -742,7 +749,7 @@ fn warm_eigsolve_allocates_only_its_results() {
     let mut op = |engine: &mut (dyn ExecContext + 'static),
                   x: &TensorMap<U1FusionRule, f64>,
                   y: &mut TensorMap<U1FusionRule, f64>| {
-        h.contract_into(engine, x, &APPLY, y, 1.0, 0.0)
+        h.contract_into(engine, x, &APPLY, Dest::overwrite(y))
     };
     // Warm the contraction plan and the dense backend.
     krylov::eigsolve(
@@ -819,7 +826,7 @@ fn eigsolve_runs_on_the_callers_engine() {
         let mut op = |engine: &mut (dyn ExecContext + 'static),
                       x: &TensorMap<U1FusionRule, f64>,
                       y: &mut TensorMap<U1FusionRule, f64>| {
-            h.contract_into(engine, x, &APPLY, y, 1.0, 0.0)
+            h.contract_into(engine, x, &APPLY, Dest::overwrite(y))
         };
         let mut ws = Workspace::with_capacity(engine, &x0, 10).map_err(krylov::Error::Vector)?;
         krylov::eigsolve(

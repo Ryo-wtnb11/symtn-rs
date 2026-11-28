@@ -127,9 +127,7 @@ where
             engine,
             rhs,
             spec,
-            destination,
-            D::from_real(1.0),
-            D::from_real(0.0),
+            symtn::typed::Dest::overwrite(destination),
         )?;
         Ok(StepOutput::Overwritten)
     } else {

@@ -18,6 +18,7 @@
 #![cfg(feature = "cuda")]
 
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{U1FusionRule, U1Irrep};
@@ -86,7 +87,7 @@ fn a_cpu_engine_is_refused_on_device_tensors_before_any_transfer() {
     let stats = cuda_transfer_stats();
     assert!(lhs.contract(engine, &rhs, &SPEC).is_err());
     assert!(lhs
-        .contract_into(engine, &rhs, &SPEC, &mut destination, 1.0, 0.0)
+        .contract_into(engine, &rhs, &SPEC, Dest::overwrite(&mut destination))
         .is_err());
     assert!(lhs.norm(engine, 2.0).is_err());
     assert!(lhs.to_host(engine).is_err());
@@ -120,9 +121,11 @@ fn a_tensor_of_another_engine_on_the_same_device_is_refused_before_any_transfer(
     assert!(lhs.norm(second, 2.0).is_err());
     assert!(lhs.inner(second, &rhs).is_err());
     assert!(lhs
-        .contract_into(second, &rhs, &SPEC, &mut destination, 1.0, 0.0)
+        .contract_into(second, &rhs, &SPEC, Dest::overwrite(&mut destination))
         .is_err());
-    assert!(lhs.axpby_into(second, &mut destination, 1.0, 1.0).is_err());
+    assert!(lhs
+        .axpby_into(second, Dest::accumulate(&mut destination))
+        .is_err());
     assert!(lhs.to_host(second).is_err());
     assert_eq!(
         cuda_transfer_stats(),
@@ -146,7 +149,7 @@ fn a_cuda_engine_is_refused_on_host_contractions() {
     let before = destination.dense_data().unwrap().to_vec();
     assert!(lhs.contract(cuda, &rhs, &SPEC).is_err());
     assert!(lhs
-        .contract_into(cuda, &rhs, &SPEC, &mut destination, 1.0, 0.0)
+        .contract_into(cuda, &rhs, &SPEC, Dest::overwrite(&mut destination))
         .is_err());
     assert_eq!(destination.dense_data().unwrap(), before.as_slice());
 }
@@ -167,7 +170,9 @@ fn a_cuda_engine_is_refused_on_host_permutations_and_value_operations() {
     assert!(host.twist(cuda, &[], Direction::Forward).is_err());
     assert!(host.scale(cuda, 2.0).is_err());
     assert!(host.norm(cuda, 2.0).is_err());
-    assert!(host.axpby_into(cuda, &mut destination, 1.0, 1.0).is_err());
+    assert!(host
+        .axpby_into(cuda, Dest::accumulate(&mut destination))
+        .is_err());
     assert_eq!(destination.dense_data().unwrap(), before.as_slice());
 }
 

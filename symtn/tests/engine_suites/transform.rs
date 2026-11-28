@@ -10,6 +10,7 @@ use crate::numerics::{self, Numeric};
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{FermionParityFusionRule, FermionParityIrrep};
+use symtn::typed::Dest;
 use symtn::typed::{GradedSpace, Runtime};
 
 /// Terms per physical entry: a rank-4 SU(2) tensor with spins up to 1 sums
@@ -358,7 +359,7 @@ on_each_engine! {
         let model = host.permute(engine, &[1], &[0]).unwrap();
         let mut destination = B::upload(device, &model);
         drop(model);
-        source.permute_into(device, &[1], &[0], &mut destination, 2.0, 0.0).unwrap();
+        source.permute_into(device, &[1], &[0], Dest::scaled(&mut destination, 2.0, 0.0)).unwrap();
         assert!(B::download(device, &destination).dense_data().unwrap().is_empty());
     }
 }

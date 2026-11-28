@@ -11,6 +11,7 @@ use std::{
 use su2::{su2_irrep, su2_rule, Su2Rule};
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 use symtn_core as sector_types;
 
@@ -2386,20 +2387,16 @@ macro_rules! run_provider {
                                 $engine,
                                 &[1],
                                 &[2, 0],
-                                &mut destination,
-                                1.0,
-                                0.0,
+                                Dest::overwrite(&mut destination),
                             ),
                             "transpose" => source.transpose_into(
                                 $engine,
                                 &[2],
                                 &[1, 0],
-                                &mut destination,
-                                1.0,
-                                0.0,
+                                Dest::overwrite(&mut destination),
                             ),
                             "repartition" => {
-                                source.repartition_into($engine, &mut destination, 1.0, 0.0)
+                                source.repartition_into($engine, Dest::overwrite(&mut destination))
                             }
                             _ => unreachable!("fixed tree-operation table"),
                         },
@@ -2641,7 +2638,14 @@ macro_rules! run_provider {
                         "first_after_setup",
                         "warm_after_setup",
                         $min_time,
-                        || lhs.contract_into($engine, &rhs, &spec, &mut destination, 1.0, 0.0),
+                        || {
+                            lhs.contract_into(
+                                $engine,
+                                &rhs,
+                                &spec,
+                                Dest::overwrite(&mut destination),
+                            )
+                        },
                     )?;
                     assert_same_tensor!($engine, destination, expected, lhs);
                 }

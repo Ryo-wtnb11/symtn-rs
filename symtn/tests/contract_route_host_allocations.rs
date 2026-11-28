@@ -19,6 +19,7 @@
 //! workspace of symtn can own.
 
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use symtn::cache::StructureCacheKind;
 use symtn::sector::{U1FusionRule, U1Irrep};
@@ -96,11 +97,11 @@ fn row(codomain: &[usize], reach: i32) -> Row {
         domain: &[2],
     };
     let mut out = a.contract(engine, &b, &spec).unwrap();
-    a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
+    a.contract_into(engine, &b, &spec, Dest::overwrite(&mut out))
         .unwrap();
     let mut builds = plan_builds();
     let eager_warm = calls(|| {
-        a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
+        a.contract_into(engine, &b, &spec, Dest::overwrite(&mut out))
             .unwrap()
     });
     let mut warm_plan_builds = plan_builds() - builds;
@@ -219,26 +220,12 @@ fn eager_complex_copy_c_scratch_is_allocator_zeroed() {
     };
     let mut out = a.contract(engine, &b, &spec).unwrap();
     let out_bytes = std::mem::size_of_val(out.dense_data().unwrap());
-    a.contract_into(
-        engine,
-        &b,
-        &spec,
-        &mut out,
-        Complex64::new(1.0, 0.0),
-        Complex64::new(0.0, 0.0),
-    )
-    .unwrap();
+    a.contract_into(engine, &b, &spec, Dest::overwrite(&mut out))
+        .unwrap();
     let into = |engine: &mut symtn_dense::CpuEngine, out: &mut TensorMap<_, Complex64>| {
         counting_alloc::measure_matching(out_bytes..=out_bytes, || {
-            a.contract_into(
-                engine,
-                &b,
-                &spec,
-                out,
-                Complex64::new(1.0, 0.0),
-                Complex64::new(0.0, 0.0),
-            )
-            .unwrap()
+            a.contract_into(engine, &b, &spec, Dest::overwrite(out))
+                .unwrap()
         })
         .1
     };

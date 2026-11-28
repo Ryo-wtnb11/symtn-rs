@@ -3,6 +3,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
+use symtn::typed::Dest;
 
 use symtn::sector::{ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
@@ -55,13 +56,13 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     let mut destination = source.permute(engine, &[1], &[2, 0]).unwrap();
 
     source
-        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut destination))
         .unwrap();
     let destination_data = destination.dense_data().unwrap().as_ptr();
 
     let cost = measure(|| {
         source
-            .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
+            .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut destination))
             .unwrap();
     });
     black_box(destination.dense_data().unwrap());
@@ -93,13 +94,13 @@ fn cached_u1_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     let mut destination = source.permute(engine, &[1], &[2, 0]).unwrap();
 
     source
-        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut destination))
         .unwrap();
     let destination_data = destination.dense_data().unwrap().as_ptr();
 
     let cost = measure(|| {
         source
-            .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
+            .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut destination))
             .unwrap();
     });
     black_box(destination.dense_data().unwrap());
@@ -141,7 +142,7 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
         let mut destination = source.permute(engine, &[1, 3], &[0, 2]).unwrap();
         let calls = warm_calls(|| {
             source
-                .permute_into(engine, &[1, 3], &[0, 2], &mut destination, 1.0, 0.0)
+                .permute_into(engine, &[1, 3], &[0, 2], Dest::overwrite(&mut destination))
                 .unwrap()
         });
         black_box(destination.dense_data().unwrap());
@@ -183,7 +184,7 @@ fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() 
         let mut destination = source.permute(engine, &[1, 3], &[0, 2]).unwrap();
         let calls = warm_calls(|| {
             source
-                .permute_into(engine, &[1, 3], &[0, 2], &mut destination, 1.0, 0.0)
+                .permute_into(engine, &[1, 3], &[0, 2], Dest::overwrite(&mut destination))
                 .unwrap()
         });
         black_box(destination.dense_data().unwrap());
@@ -256,12 +257,12 @@ fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
 
     let mut full = source.transpose(engine, &[2], &[1, 0]).unwrap();
     source
-        .transpose_into(engine, &[2], &[1, 0], &mut full, 1.0, 0.0)
+        .transpose_into(engine, &[2], &[1, 0], Dest::overwrite(&mut full))
         .unwrap();
     assert_eq!(
         measure(|| {
             source
-                .transpose_into(engine, &[2], &[1, 0], &mut full, 1.0, 0.0)
+                .transpose_into(engine, &[2], &[1, 0], Dest::overwrite(&mut full))
                 .unwrap()
         }),
         (0, 0)
@@ -269,12 +270,12 @@ fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
 
     let mut explicit = source.transpose(engine, &[1, 2], &[0]).unwrap();
     source
-        .transpose_into(engine, &[1, 2], &[0], &mut explicit, 1.0, 0.0)
+        .transpose_into(engine, &[1, 2], &[0], Dest::overwrite(&mut explicit))
         .unwrap();
     assert_eq!(
         measure(|| {
             source
-                .transpose_into(engine, &[1, 2], &[0], &mut explicit, 1.0, 0.0)
+                .transpose_into(engine, &[1, 2], &[0], Dest::overwrite(&mut explicit))
                 .unwrap()
         }),
         (0, 0)
@@ -282,12 +283,12 @@ fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
 
     let mut repartitioned = source.repartition(engine, 1).unwrap();
     source
-        .repartition_into(engine, &mut repartitioned, 1.0, 0.0)
+        .repartition_into(engine, Dest::overwrite(&mut repartitioned))
         .unwrap();
     assert_eq!(
         measure(|| {
             source
-                .repartition_into(engine, &mut repartitioned, 1.0, 0.0)
+                .repartition_into(engine, Dest::overwrite(&mut repartitioned))
                 .unwrap()
         }),
         (0, 0)

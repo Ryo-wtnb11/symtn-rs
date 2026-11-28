@@ -12,6 +12,7 @@
 
 use crate::contract_cases;
 use crate::numerics;
+use symtn::typed::Dest;
 
 use std::sync::Arc;
 
@@ -96,9 +97,7 @@ where
                 engine,
                 rhs,
                 &spec,
-                &mut destination,
-                D::entry(1.0, 0.0),
-                D::entry(0.0, 0.0),
+                Dest::scaled(&mut destination, D::entry(1.0, 0.0), D::entry(0.0, 0.0)),
             )
             .unwrap();
             assert_eq!(destination.codomain(), expected.codomain(), "{label}");
@@ -126,10 +125,7 @@ where
                 engine,
                 rhs,
                 &moved,
-                &mut mismatched,
-                D::entry(1.0, 0.0),
-                D::entry(0.0, 0.0)
-            ),
+                Dest::scaled(&mut mismatched, D::entry(1.0, 0.0), D::entry(0.0, 0.0))),
             Err(symtn::typed::Error::Operation(operation))
                 if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
         ),

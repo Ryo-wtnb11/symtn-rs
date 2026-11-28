@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Error, OperationError};
@@ -23,12 +24,12 @@ fn tensor(runtime: &Runtime, n: usize, value: f64) -> TensorMap<U1FusionRule, f6
 }
 
 #[test]
-fn scale_assign_mutates_unique_dense_payload() {
+fn scale_in_place_mutates_unique_dense_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::new();
     let mut value = tensor(&runtime, 3, 2.0);
-    value.scale_assign(engine, 3.0).unwrap();
+    value.scale_in_place(engine, 3.0).unwrap();
     assert_eq!(
         value.dense_data().unwrap(),
         &[6.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 6.0]
@@ -42,14 +43,15 @@ fn axpby_into_updates_a_unique_destination_and_refuses_a_shared_one() {
     let runtime = Runtime::new();
     let x = tensor(&runtime, 2, 3.0);
     let mut destination = tensor(&runtime, 2, 2.0);
-    x.axpby_into(engine, &mut destination, -1.0, 2.0).unwrap();
+    x.axpby_into(engine, Dest::scaled(&mut destination, -1.0, 2.0))
+        .unwrap();
     assert_eq!(destination.dense_data().unwrap(), &[1.0, 0.0, 0.0, 1.0]);
 
     // A clone shares the payload: writing it would change the clone too, and
     // replacing it would allocate behind the caller's back.
     let clone = destination.clone();
     assert_eq!(
-        x.axpby_into(engine, &mut destination, 1.0, 1.0),
+        x.axpby_into(engine, Dest::accumulate(&mut destination)),
         Err(Error::DestinationShared)
     );
     assert_eq!(destination.dense_data().unwrap(), &[1.0, 0.0, 0.0, 1.0]);
@@ -64,7 +66,7 @@ fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
     let mut destination = tensor(&runtime, 2, 2.0);
     let x = tensor(&runtime, 3, 3.0);
     let error = x
-        .axpby_into(engine, &mut destination, 1.0, 1.0)
+        .axpby_into(engine, Dest::accumulate(&mut destination))
         .unwrap_err();
     assert!(
         matches!(
@@ -85,10 +87,12 @@ fn unique_dense_destinations_are_allocation_free() {
     let runtime = Runtime::new();
     let mut destination = tensor(&runtime, 64, 2.0);
     let x = tensor(&runtime, 64, 3.0);
-    let ((), allocs) =
-        counting_alloc::measure(|| x.axpby_into(engine, &mut destination, -1.0, 2.0).unwrap());
+    let ((), allocs) = counting_alloc::measure(|| {
+        x.axpby_into(engine, Dest::scaled(&mut destination, -1.0, 2.0))
+            .unwrap()
+    });
     assert_eq!(allocs.calls, 0);
     let mut scaled = tensor(&runtime, 64, 2.0);
-    let ((), allocs) = counting_alloc::measure(|| scaled.scale_assign(engine, 3.0).unwrap());
+    let ((), allocs) = counting_alloc::measure(|| scaled.scale_in_place(engine, 3.0).unwrap());
     assert_eq!(allocs.calls, 0);
 }

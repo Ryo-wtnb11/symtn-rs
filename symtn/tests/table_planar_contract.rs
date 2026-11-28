@@ -21,6 +21,7 @@
 
 use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
@@ -275,7 +276,7 @@ fn into_is_alpha_planar_plus_beta(case: &Case) {
     let (a, b) = (case.filled("a1", 2, 2), case.filled("b1", 2, 2));
     let d1 = case.filled("d1", 2, 2);
     let mut got = case.filled("d1", 2, 2);
-    a.planar_contract_into(engine, &b, &G1, &mut got, alpha, beta)
+    a.planar_contract_into(engine, &b, &G1, Dest::scaled(&mut got, alpha, beta))
         .unwrap();
     let want = a
         .planar_contract(engine, &b, &G1)
@@ -288,7 +289,7 @@ fn into_is_alpha_planar_plus_beta(case: &Case) {
     let c3 = h.planar_contract(engine, &theta, &G3).unwrap();
     let d3 = case.filled_like("d3", &c3);
     let mut got = case.filled_like("d3", &c3);
-    h.planar_contract_into(engine, &theta, &G3, &mut got, alpha, beta)
+    h.planar_contract_into(engine, &theta, &G3, Dest::scaled(&mut got, alpha, beta))
         .unwrap();
     assert_entries_close(
         "into g3",
@@ -344,14 +345,7 @@ fn non_planar_specs_are_rejected(case: &Case) {
         let mut destination = case.filled("dst", 2, 2);
         let before = destination.dense_data().unwrap().to_vec();
         let into = a
-            .planar_contract_into(
-                engine,
-                &b,
-                &spec,
-                &mut destination,
-                Complex64::ONE,
-                Complex64::ONE,
-            )
+            .planar_contract_into(engine, &b, &spec, Dest::accumulate(&mut destination))
             .unwrap_err();
         assert_eq!(into, error, "{name}: the destination form reports the same");
         let after = destination.dense_data().unwrap();
@@ -428,10 +422,10 @@ macro_rules! bosonic_planar_is_contract {
             let ordinary = lhs.contract($engine, rhs, &spec).unwrap();
             assert_eq!(planar.dense_data().unwrap(), ordinary.dense_data().unwrap());
             let mut into = lhs.contract($engine, rhs, &spec).unwrap();
-            lhs.planar_contract_into($engine, rhs, &spec, &mut into, 0.5, -1.25)
+            lhs.planar_contract_into($engine, rhs, &spec, Dest::scaled(&mut into, 0.5, -1.25))
                 .unwrap();
             let mut want = lhs.contract($engine, rhs, &spec).unwrap();
-            lhs.contract_into($engine, rhs, &spec, &mut want, 0.5, -1.25)
+            lhs.contract_into($engine, rhs, &spec, Dest::scaled(&mut want, 0.5, -1.25))
                 .unwrap();
             assert_eq!(into.dense_data().unwrap(), want.dense_data().unwrap());
         }
@@ -731,8 +725,13 @@ fn fermionic_planar_contract_into_is_alpha_steps_plus_beta() {
         |t, i| parity_entry("fdst", t, i),
     )
     .unwrap();
-    x.planar_contract_into(engine, &y, &cyclic, &mut destination, alpha, beta)
-        .unwrap();
+    x.planar_contract_into(
+        engine,
+        &y,
+        &cyclic,
+        Dest::scaled(&mut destination, alpha, beta),
+    )
+    .unwrap();
     let got = destination.dense_data().unwrap();
     let start = initial.dense_data().unwrap();
     let expect = |op: &[Complex64]| -> Vec<Complex64> {

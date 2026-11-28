@@ -8,10 +8,11 @@
 //! alone, independent of every operation under test; each fixture also runs
 //! one valid call on a fresh destination, so a rejection is caused by the one
 //! malformed input and not by a broken fixture. Host tensors additionally
-//! keep their payload pointer. `scale_assign` gets the same destination rule.
+//! keep their payload pointer. `scale_in_place` gets the same destination rule.
 //! The device variants run with `--features cuda -- --ignored`.
 
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use num_complex::Complex64;
 use symtn::sector::ZNIrrep;
@@ -187,33 +188,50 @@ macro_rules! u1_suite {
         let mut fixture_destination = fresh($ops, &permuted);
 
         // The fixtures are valid: the unmodified call succeeds.
-        t.permute_into($ops, &[2, 0], &[1, 3], &mut fixture_destination, 1.0, 0.5)
-            .unwrap();
+        t.permute_into(
+            $ops,
+            &[2, 0],
+            &[1, 3],
+            Dest::scaled(&mut fixture_destination, 1.0, 0.5),
+        )
+        .unwrap();
         let mut fixture_destination = fresh($ops, &braided);
         t.braid_into(
             $ops,
             &[1, 0],
             &[3, 2],
             &[0, 1, 2, 3],
-            &mut fixture_destination,
-            1.0,
-            0.5,
+            Dest::scaled(&mut fixture_destination, 1.0, 0.5),
         )
         .unwrap();
         let mut fixture_destination = fresh($ops, &transposed);
-        t.transpose_into($ops, &[1, 3], &[0, 2], &mut fixture_destination, 1.0, 0.5)
-            .unwrap();
+        t.transpose_into(
+            $ops,
+            &[1, 3],
+            &[0, 2],
+            Dest::scaled(&mut fixture_destination, 1.0, 0.5),
+        )
+        .unwrap();
         let mut fixture_destination = fresh($ops, &repartitioned);
-        t.repartition_into($ops, &mut fixture_destination, 1.0, 0.5)
+        t.repartition_into($ops, Dest::scaled(&mut fixture_destination, 1.0, 0.5))
             .unwrap();
         let mut fixture_destination = fresh($ops, &traced);
-        t.trace_pairs_into($ops, &[(0, 2)], &mut fixture_destination, 1.0, 0.5)
-            .unwrap();
+        t.trace_pairs_into(
+            $ops,
+            &[(0, 2)],
+            Dest::scaled(&mut fixture_destination, 1.0, 0.5),
+        )
+        .unwrap();
         let mut fixture_destination = fresh($ops, &contracted);
-        t.contract_into($ops, &rhs, &spec, &mut fixture_destination, 1.0, 0.5)
-            .unwrap();
+        t.contract_into(
+            $ops,
+            &rhs,
+            &spec,
+            Dest::scaled(&mut fixture_destination, 1.0, 0.5),
+        )
+        .unwrap();
         let mut fixture_destination = fresh($ops, &host_t);
-        t.axpby_into($ops, &mut fixture_destination, 1.0, 0.5)
+        t.axpby_into($ops, Dest::scaled(&mut fixture_destination, 1.0, 0.5))
             .unwrap();
 
         // A second handle on the destination's storage for the duration of
@@ -237,28 +255,28 @@ macro_rules! u1_suite {
             format!("{op} runtime"),
             foreign($ops, &permuted),
             Error::RuntimeMismatch,
-            |d: &mut _| t.permute_into($ops, &[2, 0], &[1, 3], d, 1.0, 0.5)
+            |d: &mut _| t.permute_into($ops, &[2, 0], &[1, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} space"),
             wrong($ops, &permuted),
             SpaceMismatch,
-            |d: &mut _| t.permute_into($ops, &[2, 0], &[1, 3], d, 1.0, 0.5)
+            |d: &mut _| t.permute_into($ops, &[2, 0], &[1, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} leg out of range"),
             fresh($ops, &permuted),
             _,
-            |d: &mut _| t.permute_into($ops, &[4, 0], &[1, 3], d, 1.0, 0.5)
+            |d: &mut _| t.permute_into($ops, &[4, 0], &[1, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} leg repeated"),
             fresh($ops, &permuted),
             _,
-            |d: &mut _| t.permute_into($ops, &[0, 0], &[1, 3], d, 1.0, 0.5)
+            |d: &mut _| t.permute_into($ops, &[0, 0], &[1, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
@@ -267,7 +285,7 @@ macro_rules! u1_suite {
             format!("{op} lazy source, wrong space"),
             wrong($ops, &permuted),
             SpaceMismatch,
-            |d: &mut _| lazy.permute_into($ops, &[2, 0], &[1, 3], d, 1.0, 0.5)
+            |d: &mut _| lazy.permute_into($ops, &[2, 0], &[1, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
@@ -276,7 +294,7 @@ macro_rules! u1_suite {
             Error::DestinationShared,
             |d: &mut _| {
                 let source = d.clone();
-                source.permute_into($ops, &[0, 1], &[2, 3], d, 1.0, 0.5)
+                source.permute_into($ops, &[0, 1], &[2, 3], Dest::scaled(d, 1.0, 0.5))
             }
         );
         rejects!(
@@ -284,7 +302,7 @@ macro_rules! u1_suite {
             format!("{op} shared"),
             fresh($ops, &permuted),
             Error::DestinationShared,
-            shared!(|d: &mut _| t.permute_into($ops, &[2, 0], &[1, 3], d, 1.0, 0.5))
+            shared!(|d: &mut _| t.permute_into($ops, &[2, 0], &[1, 3], Dest::scaled(d, 1.0, 0.5)))
         );
 
         // braid_into
@@ -295,42 +313,54 @@ macro_rules! u1_suite {
             format!("{op} runtime"),
             foreign($ops, &braided),
             Error::RuntimeMismatch,
-            |d: &mut _| t.braid_into($ops, &[1, 0], &[3, 2], &levels, d, 1.0, 0.5)
+            |d: &mut _| t.braid_into($ops, &[1, 0], &[3, 2], &levels, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} space"),
             wrong($ops, &braided),
             SpaceMismatch,
-            |d: &mut _| t.braid_into($ops, &[1, 0], &[3, 2], &levels, d, 1.0, 0.5)
+            |d: &mut _| t.braid_into($ops, &[1, 0], &[3, 2], &levels, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} levels"),
             fresh($ops, &braided),
             Error::InvalidArgument(_),
-            |d: &mut _| t.braid_into($ops, &[1, 0], &[3, 2], &levels[..3], d, 1.0, 0.5)
+            |d: &mut _| t.braid_into(
+                $ops,
+                &[1, 0],
+                &[3, 2],
+                &levels[..3],
+                Dest::scaled(d, 1.0, 0.5)
+            )
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} leg out of range"),
             fresh($ops, &braided),
             _,
-            |d: &mut _| t.braid_into($ops, &[1, 7], &[3, 2], &levels, d, 1.0, 0.5)
+            |d: &mut _| t.braid_into($ops, &[1, 7], &[3, 2], &levels, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} lazy source, wrong space"),
             wrong($ops, &braided),
             SpaceMismatch,
-            |d: &mut _| lazy.braid_into($ops, &[1, 0], &[3, 2], &levels, d, 1.0, 0.5)
+            |d: &mut _| lazy.braid_into($ops, &[1, 0], &[3, 2], &levels, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} shared"),
             fresh($ops, &braided),
             Error::DestinationShared,
-            shared!(|d: &mut _| t.braid_into($ops, &[1, 0], &[3, 2], &levels, d, 1.0, 0.5))
+            shared!(|d: &mut _| t.braid_into(
+                $ops,
+                &[1, 0],
+                &[3, 2],
+                &levels,
+                Dest::scaled(d, 1.0, 0.5)
+            ))
         );
 
         // transpose_into
@@ -340,35 +370,40 @@ macro_rules! u1_suite {
             format!("{op} runtime"),
             foreign($ops, &transposed),
             Error::RuntimeMismatch,
-            |d: &mut _| t.transpose_into($ops, &[1, 3], &[0, 2], d, 1.0, 0.5)
+            |d: &mut _| t.transpose_into($ops, &[1, 3], &[0, 2], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} space"),
             wrong($ops, &transposed),
             SpaceMismatch,
-            |d: &mut _| t.transpose_into($ops, &[1, 3], &[0, 2], d, 1.0, 0.5)
+            |d: &mut _| t.transpose_into($ops, &[1, 3], &[0, 2], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} non-planar"),
             fresh($ops, &transposed),
             _,
-            |d: &mut _| t.transpose_into($ops, &[0, 2], &[1, 3], d, 1.0, 0.5)
+            |d: &mut _| t.transpose_into($ops, &[0, 2], &[1, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} leg out of range"),
             fresh($ops, &transposed),
             _,
-            |d: &mut _| t.transpose_into($ops, &[1, 8], &[0, 2], d, 1.0, 0.5)
+            |d: &mut _| t.transpose_into($ops, &[1, 8], &[0, 2], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} shared"),
             fresh($ops, &transposed),
             Error::DestinationShared,
-            shared!(|d: &mut _| t.transpose_into($ops, &[1, 3], &[0, 2], d, 1.0, 0.5))
+            shared!(|d: &mut _| t.transpose_into(
+                $ops,
+                &[1, 3],
+                &[0, 2],
+                Dest::scaled(d, 1.0, 0.5)
+            ))
         );
 
         // repartition_into
@@ -378,35 +413,35 @@ macro_rules! u1_suite {
             format!("{op} runtime"),
             foreign($ops, &repartitioned),
             Error::RuntimeMismatch,
-            |d: &mut _| t.repartition_into($ops, d, 1.0, 0.5)
+            |d: &mut _| t.repartition_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} space"),
             wrong($ops, &repartitioned),
             SpaceMismatch,
-            |d: &mut _| t.repartition_into($ops, d, 1.0, 0.5)
+            |d: &mut _| t.repartition_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} rank"),
             fresh($ops, &traced),
             Error::InvalidArgument(_),
-            |d: &mut _| t.repartition_into($ops, d, 1.0, 0.5)
+            |d: &mut _| t.repartition_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} lazy source, wrong space"),
             wrong($ops, &repartitioned),
             SpaceMismatch,
-            |d: &mut _| lazy.repartition_into($ops, d, 1.0, 0.5)
+            |d: &mut _| lazy.repartition_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} shared"),
             fresh($ops, &repartitioned),
             Error::DestinationShared,
-            shared!(|d: &mut _| t.repartition_into($ops, d, 1.0, 0.5))
+            shared!(|d: &mut _| t.repartition_into($ops, Dest::scaled(d, 1.0, 0.5)))
         );
 
         // trace_pairs_into
@@ -416,28 +451,28 @@ macro_rules! u1_suite {
             format!("{op} runtime"),
             foreign($ops, &traced),
             Error::RuntimeMismatch,
-            |d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], d, 1.0, 0.5)
+            |d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} space"),
             wrong($ops, &traced),
             SpaceMismatch,
-            |d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], d, 1.0, 0.5)
+            |d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} leg out of range"),
             fresh($ops, &traced),
             _,
-            |d: &mut _| t.trace_pairs_into($ops, &[(0, 9)], d, 1.0, 0.5)
+            |d: &mut _| t.trace_pairs_into($ops, &[(0, 9)], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} leg repeated"),
             fresh($ops, &traced),
             _,
-            |d: &mut _| t.trace_pairs_into($ops, &[(0, 0)], d, 1.0, 0.5)
+            |d: &mut _| t.trace_pairs_into($ops, &[(0, 0)], Dest::scaled(d, 1.0, 0.5))
         );
         // On the legs the pair would leave, so the duality check itself (in
         // the trace compile, after every destination check) rejects it.
@@ -448,7 +483,7 @@ macro_rules! u1_suite {
             format!("{op} legs not dual"),
             fresh($ops, &undual_traced),
             _,
-            |d: &mut _| t.trace_pairs_into($ops, &[(0, 3)], d, 1.0, 0.5)
+            |d: &mut _| t.trace_pairs_into($ops, &[(0, 3)], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
@@ -457,7 +492,7 @@ macro_rules! u1_suite {
             Error::DestinationShared,
             |d: &mut _| {
                 let source = d.clone();
-                source.trace_pairs_into($ops, &[], d, 1.0, 0.5)
+                source.trace_pairs_into($ops, &[], Dest::scaled(d, 1.0, 0.5))
             }
         );
         rejects!(
@@ -465,7 +500,7 @@ macro_rules! u1_suite {
             format!("{op} shared"),
             fresh($ops, &traced),
             Error::DestinationShared,
-            shared!(|d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], d, 1.0, 0.5))
+            shared!(|d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], Dest::scaled(d, 1.0, 0.5)))
         );
         // One destination check order and wording on every placement: a
         // destination both on the wrong space and shared is a space error.
@@ -474,7 +509,7 @@ macro_rules! u1_suite {
             format!("{op} wrong space before shared"),
             wrong($ops, &traced),
             SpaceMismatch,
-            shared!(|d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], d, 1.0, 0.5))
+            shared!(|d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], Dest::scaled(d, 1.0, 0.5)))
         );
 
         // contract_into
@@ -484,28 +519,28 @@ macro_rules! u1_suite {
             format!("{op} runtime"),
             foreign($ops, &contracted),
             Error::RuntimeMismatch,
-            |d: &mut _| t.contract_into($ops, &rhs, &spec, d, 1.0, 0.5)
+            |d: &mut _| t.contract_into($ops, &rhs, &spec, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} space"),
             wrong($ops, &contracted),
             SpaceMismatch,
-            |d: &mut _| t.contract_into($ops, &rhs, &spec, d, 1.0, 0.5)
+            |d: &mut _| t.contract_into($ops, &rhs, &spec, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} leg out of range"),
             fresh($ops, &contracted),
             _,
-            |d: &mut _| t.contract_into($ops, &rhs, &bad_spec, d, 1.0, 0.5)
+            |d: &mut _| t.contract_into($ops, &rhs, &bad_spec, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} legs not dual"),
             fresh($ops, &contracted),
             _,
-            |d: &mut _| t.contract_into($ops, &rhs, &undual_spec, d, 1.0, 0.5)
+            |d: &mut _| t.contract_into($ops, &rhs, &undual_spec, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
@@ -514,7 +549,7 @@ macro_rules! u1_suite {
             Error::DestinationShared,
             |d: &mut _| {
                 let lhs = d.clone();
-                lhs.contract_into($engine, &rhs, &spec, d, 1.0, 0.5)
+                lhs.contract_into($engine, &rhs, &spec, Dest::scaled(d, 1.0, 0.5))
             }
         );
         rejects!(
@@ -522,7 +557,7 @@ macro_rules! u1_suite {
             format!("{op} shared"),
             fresh($ops, &contracted),
             Error::DestinationShared,
-            shared!(|d: &mut _| t.contract_into($ops, &rhs, &spec, d, 1.0, 0.5))
+            shared!(|d: &mut _| t.contract_into($ops, &rhs, &spec, Dest::scaled(d, 1.0, 0.5)))
         );
 
         // axpby_into
@@ -532,14 +567,14 @@ macro_rules! u1_suite {
             format!("{op} runtime"),
             foreign($ops, &host_t),
             Error::RuntimeMismatch,
-            |d: &mut _| t.axpby_into($ops, d, 1.0, 0.5)
+            |d: &mut _| t.axpby_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             format!("{op} space"),
             wrong($ops, &host_t),
             SpaceMismatch,
-            |d: &mut _| t.axpby_into($ops, d, 1.0, 0.5)
+            |d: &mut _| t.axpby_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
@@ -548,7 +583,7 @@ macro_rules! u1_suite {
             Error::DestinationShared,
             |d: &mut _| {
                 let source = d.clone();
-                source.axpby_into($ops, d, 1.0, 0.5)
+                source.axpby_into($ops, Dest::scaled(d, 1.0, 0.5))
             }
         );
         rejects!(
@@ -556,7 +591,7 @@ macro_rules! u1_suite {
             format!("{op} shared"),
             fresh($ops, &host_t),
             Error::DestinationShared,
-            shared!(|d: &mut _| t.axpby_into($ops, d, 1.0, 0.5))
+            shared!(|d: &mut _| t.axpby_into($ops, Dest::scaled(d, 1.0, 0.5)))
         );
     }};
 }
@@ -630,42 +665,48 @@ macro_rules! rule_suite {
             "permute_into rule",
             rank4($ops, &b),
             Error::RuleMismatch,
-            |d: &mut _| t.permute_into($ops, &[0, 1], &[2, 3], d, 1.0, 0.5)
+            |d: &mut _| t.permute_into($ops, &[0, 1], &[2, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             "braid_into rule",
             rank4($ops, &b),
             Error::RuleMismatch,
-            |d: &mut _| t.braid_into($ops, &[0, 1], &[2, 3], &[0, 1, 2, 3], d, 1.0, 0.5)
+            |d: &mut _| t.braid_into(
+                $ops,
+                &[0, 1],
+                &[2, 3],
+                &[0, 1, 2, 3],
+                Dest::scaled(d, 1.0, 0.5)
+            )
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             "transpose_into rule",
             rank4($ops, &b),
             Error::RuleMismatch,
-            |d: &mut _| t.transpose_into($ops, &[0, 1], &[2, 3], d, 1.0, 0.5)
+            |d: &mut _| t.transpose_into($ops, &[0, 1], &[2, 3], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             "repartition_into rule",
             rank4($ops, &b),
             Error::RuleMismatch,
-            |d: &mut _| t.repartition_into($ops, d, 1.0, 0.5)
+            |d: &mut _| t.repartition_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             "trace_pairs_into rule",
             rank2($ops, &b),
             Error::RuleMismatch,
-            |d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], d, 1.0, 0.5)
+            |d: &mut _| t.trace_pairs_into($ops, &[(0, 2)], Dest::scaled(d, 1.0, 0.5))
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
             "contract_into rule",
             rank4($ops, &b),
             Error::RuleMismatch,
-            |d: &mut _| t.contract_into($ops, &t, &spec, d, 1.0, 0.5)
+            |d: &mut _| t.contract_into($ops, &t, &spec, Dest::scaled(d, 1.0, 0.5))
         );
         // `axpby_into` compares the operand spaces, which carry the rule.
         rejects!(
@@ -673,15 +714,24 @@ macro_rules! rule_suite {
             "axpby_into rule",
             rank4($ops, &b),
             SpaceMismatch,
-            |d: &mut _| t.axpby_into($ops, d, 1.0, 0.5)
+            |d: &mut _| t.axpby_into($ops, Dest::scaled(d, 1.0, 0.5))
         );
         let mut fixture_destination = rank4($ops, &a);
         // The fixture is otherwise valid.
-        t.contract_into($ops, &t, &spec, &mut fixture_destination, 1.0, 0.5)
-            .unwrap();
+        t.contract_into(
+            $ops,
+            &t,
+            &spec,
+            Dest::scaled(&mut fixture_destination, 1.0, 0.5),
+        )
+        .unwrap();
         let mut fixture_destination = rank2($ops, &a);
-        t.trace_pairs_into($ops, &[(0, 2)], &mut fixture_destination, 1.0, 0.5)
-            .unwrap();
+        t.trace_pairs_into(
+            $ops,
+            &[(0, 2)],
+            Dest::scaled(&mut fixture_destination, 1.0, 0.5),
+        )
+        .unwrap();
     }};
 }
 
@@ -750,7 +800,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::CompactDiagonal
         },
-        |d: &mut _| t.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
+        |d: &mut _| t.permute_into(engine, &[0], &[1], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         diag_snap,
@@ -759,7 +809,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::CompactDiagonal
         },
-        |d: &mut _| t.braid_into(engine, &[0], &[1], &[0, 1], d, 1.0, 0.5)
+        |d: &mut _| t.braid_into(engine, &[0], &[1], &[0, 1], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         diag_snap,
@@ -768,7 +818,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::CompactDiagonal
         },
-        |d: &mut _| t.transpose_into(engine, &[0], &[1], d, 1.0, 0.5)
+        |d: &mut _| t.transpose_into(engine, &[0], &[1], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         diag_snap,
@@ -777,7 +827,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::CompactDiagonal
         },
-        |d: &mut _| t.repartition_into(engine, d, 1.0, 0.5)
+        |d: &mut _| t.repartition_into(engine, Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         diag_snap,
@@ -786,7 +836,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::CompactDiagonal
         },
-        |d: &mut _| t.trace_pairs_into(engine, &[], d, 1.0, 0.5)
+        |d: &mut _| t.trace_pairs_into(engine, &[], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         diag_snap,
@@ -795,7 +845,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::CompactDiagonal
         },
-        |d: &mut _| t.axpby_into(engine, d, 1.0, 0.5)
+        |d: &mut _| t.axpby_into(engine, Dest::scaled(d, 1.0, 0.5))
     );
     let unit = ContractSpec {
         lhs: &[1],
@@ -810,7 +860,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::CompactDiagonal
         },
-        |d: &mut _| t.contract_into(engine, &t, &unit, d, 1.0, 0.5)
+        |d: &mut _| t.contract_into(engine, &t, &unit, Dest::scaled(d, 1.0, 0.5))
     );
 
     // A lazy-adjoint destination: its parent's bytes are the destination's.
@@ -823,7 +873,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| t.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
+        |d: &mut _| t.permute_into(engine, &[0], &[1], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         lazy_snap,
@@ -832,7 +882,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| t.repartition_into(engine, d, 1.0, 0.5)
+        |d: &mut _| t.repartition_into(engine, Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         lazy_snap,
@@ -841,7 +891,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| t.trace_pairs_into(engine, &[], d, 1.0, 0.5)
+        |d: &mut _| t.trace_pairs_into(engine, &[], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         lazy_snap,
@@ -850,7 +900,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| t.axpby_into(engine, d, 1.0, 0.5)
+        |d: &mut _| t.axpby_into(engine, Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         lazy_snap,
@@ -859,7 +909,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| t.contract_into(engine, &t, &unit, d, 1.0, 0.5)
+        |d: &mut _| t.contract_into(engine, &t, &unit, Dest::scaled(d, 1.0, 0.5))
     );
 
     // A compact source traced over its only pair is read from the compiled
@@ -867,7 +917,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
     // checks run. Its spectrum holds a NaN, so the value is eager's NaN.
     let s = compact();
     let mut scalar = t.trace_pairs(engine, &[(0, 1)]).unwrap();
-    s.trace_pairs_into(engine, &[(0, 1)], &mut scalar, 1.0, 0.5)
+    s.trace_pairs_into(engine, &[(0, 1)], Dest::scaled(&mut scalar, 1.0, 0.5))
         .unwrap();
     assert!(s
         .trace_pairs(engine, &[(0, 1)])
@@ -887,7 +937,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::DestinationShared,
         |d: &mut TensorMap<_, f64>| {
             let clone = d.clone();
-            let result = s.trace_pairs_into(engine, &[(0, 1)], d, 1.0, 0.5);
+            let result = s.trace_pairs_into(engine, &[(0, 1)], Dest::scaled(d, 1.0, 0.5));
             drop(clone);
             result
         }
@@ -902,7 +952,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         Error::DestinationShared,
         |d: &mut TensorMap<_, f64>| {
             let source = d.adjoint(engine).unwrap();
-            source.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
+            source.permute_into(engine, &[0], &[1], Dest::scaled(d, 1.0, 0.5))
         }
     );
     // A compact source is admitted, so its destination checks run:
@@ -914,7 +964,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         "permute_into compact source, wrong space",
         sentinel!(&rt, dual),
         SpaceMismatch,
-        |d: &mut _| s.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
+        |d: &mut _| s.permute_into(engine, &[0], &[1], Dest::scaled(d, 1.0, 0.5))
     );
 }
 
@@ -986,11 +1036,16 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
     };
     let into = |engine: &mut dyn symtn::typed::Engine,
                 d: &mut TensorMap<LieGroupFusionRule, f64>| {
-        t.permute_into(engine, &[1], &[2, 0], d, 1.0, 0.5)
+        t.permute_into(engine, &[1], &[2, 0], Dest::scaled(d, 1.0, 0.5))
     };
 
-    t.permute_into(engine, &[1], &[2, 0], &mut fresh(&rt), 1.0, 0.5)
-        .unwrap();
+    t.permute_into(
+        engine,
+        &[1],
+        &[2, 0],
+        Dest::scaled(&mut fresh(&rt), 1.0, 0.5),
+    )
+    .unwrap();
     rejects!(
         host_snap,
         "checked permute_into runtime",
@@ -1059,7 +1114,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let source = d.clone();
-            source.permute_into(engine, &[0, 1], &[2], d, 1.0, 0.5)
+            source.permute_into(engine, &[0, 1], &[2], Dest::scaled(d, 1.0, 0.5))
         }
     );
     rejects!(
@@ -1146,10 +1201,10 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
     let wrong = sentinel!(&rt, t);
     let into = |engine: &mut dyn symtn::typed::Engine,
                 d: &mut TensorMap<LieGroupFusionRule, f64>| {
-        t.contract_into(engine, &r, &spec, d, 1.0, 0.5)
+        t.contract_into(engine, &r, &spec, Dest::scaled(d, 1.0, 0.5))
     };
 
-    t.contract_into(engine, &r, &spec, &mut fresh(&rt), 1.0, 0.5)
+    t.contract_into(engine, &r, &spec, Dest::scaled(&mut fresh(&rt), 1.0, 0.5))
         .unwrap();
     rejects!(
         host_snap,
@@ -1187,7 +1242,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lhs = d.clone();
-            lhs.contract_into(engine, &r, &spec, d, 1.0, 0.5)
+            lhs.contract_into(engine, &r, &spec, Dest::scaled(d, 1.0, 0.5))
         }
     );
     rejects!(
@@ -1197,7 +1252,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lazy = d.adjoint(engine).unwrap();
-            t.contract_into(engine, &lazy, &spec, d, 1.0, 0.5)
+            t.contract_into(engine, &lazy, &spec, Dest::scaled(d, 1.0, 0.5))
         }
     );
     rejects!(
@@ -1205,8 +1260,12 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
         "checked contract_into legs not dual",
         fresh(&rt),
         _,
-        |d: &mut TensorMap<LieGroupFusionRule, f64>| t
-            .contract_into(engine, &undual, &spec, d, 1.0, 0.5)
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| t.contract_into(
+            engine,
+            &undual,
+            &spec,
+            Dest::scaled(d, 1.0, 0.5)
+        )
     );
     rejects!(
         host_snap,
@@ -1291,7 +1350,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
     );
     let into = |engine: &mut dyn symtn::typed::Engine,
                 d: &mut TensorMap<LieGroupFusionRule, f64>| {
-        t.trace_pairs_into(engine, &[(0, 2)], d, 1.0, 0.5)
+        t.trace_pairs_into(engine, &[(0, 2)], Dest::scaled(d, 1.0, 0.5))
     };
     let shared = |engine: &mut dyn symtn::typed::Engine,
                   d: &mut TensorMap<LieGroupFusionRule, f64>| {
@@ -1305,7 +1364,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
             if matches!(**operation, symtn::typed::OperationError::SpaceMismatch { .. }))
     };
 
-    t.trace_pairs_into(engine, &[(0, 2)], &mut fresh(&rt), 1.0, 0.5)
+    t.trace_pairs_into(engine, &[(0, 2)], Dest::scaled(&mut fresh(&rt), 1.0, 0.5))
         .unwrap();
     rejects!(
         host_snap,
@@ -1329,9 +1388,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         |d: &mut TensorMap<LieGroupFusionRule, f64>| t.trace_pairs_into(
             engine,
             &[(0, 9)],
-            d,
-            1.0,
-            0.5
+            Dest::scaled(d, 1.0, 0.5)
         )
     );
     rejects!(
@@ -1356,7 +1413,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         GenericTensorError::Facade(Error::DestinationShared),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
             let lazy = d.adjoint(engine).unwrap();
-            lazy.trace_pairs_into(engine, &[(0, 1)], d, 1.0, 0.5)
+            lazy.trace_pairs_into(engine, &[(0, 1)], Dest::scaled(d, 1.0, 0.5))
         }
     );
     rejects!(
@@ -1365,7 +1422,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         fresh(&rt),
         GenericTensorError::Plan(_),
         |d: &mut TensorMap<LieGroupFusionRule, f64>| {
-            let into = undual.trace_pairs_into(engine, &[(0, 2)], d, 1.0, 0.5);
+            let into = undual.trace_pairs_into(engine, &[(0, 2)], Dest::scaled(d, 1.0, 0.5));
             // Eager's own staging error, in the same wrapper.
             let eager = undual.trace_pairs(engine, &[(0, 2)]).unwrap_err();
             assert_eq!(format!("{into:?}"), format!("{:?}", Err::<(), _>(eager)));
@@ -1377,7 +1434,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
         "checked trace_pairs_into space before legs not dual",
         wrong.clone(),
         error if space(error),
-        |d: &mut TensorMap<LieGroupFusionRule, f64>| undual.trace_pairs_into(engine, &[(0, 2)], d, 1.0, 0.5)
+        |d: &mut TensorMap<LieGroupFusionRule, f64>| undual.trace_pairs_into(engine, &[(0, 2)], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         host_snap,
@@ -1402,10 +1459,10 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
     );
 }
 
-/// `scale_assign` takes the destination rule: in place on the receiver's own
+/// `scale_in_place` takes the destination rule: in place on the receiver's own
 /// storage, `DestinationShared` (receiver untouched) when it is shared.
 #[test]
-fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
+fn scale_in_place_is_in_place_or_refuses_a_shared_receiver() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::new();
     let (v, w) = legs();
@@ -1416,7 +1473,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
         TensorMap::<_, Complex64>::rand_with_seed(engine, &rt, [&v], [&v, &w], 1).unwrap();
     let mut dense = original.materialize(engine).unwrap();
     let pointer = dense.dense_data().unwrap().as_ptr();
-    dense.scale_assign(engine, factor).unwrap();
+    dense.scale_in_place(engine, factor).unwrap();
     assert_eq!(dense.dense_data().unwrap().as_ptr(), pointer);
     let expected: Vec<_> = original
         .dense_data()
@@ -1430,7 +1487,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
     let clone = dense.clone();
     let before = dense.dense_data().unwrap().to_vec();
     assert_eq!(
-        dense.scale_assign(engine, factor),
+        dense.scale_in_place(engine, factor),
         Err(Error::DestinationShared)
     );
     assert_eq!(dense.dense_data().unwrap(), before.as_slice());
@@ -1448,7 +1505,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
         dense.dense_data().unwrap().as_ptr()
     );
     assert_eq!(
-        unit.scale_assign(engine, factor),
+        unit.scale_in_place(engine, factor),
         Err(Error::DestinationShared)
     );
     assert_eq!(unit.dense_data().unwrap(), before.as_slice());
@@ -1472,7 +1529,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
             })
     };
     let mut compact = TensorMap::<_, Complex64>::diagonal(engine, &rt, &v, spectra()).unwrap();
-    compact.scale_assign(engine, factor).unwrap();
+    compact.scale_in_place(engine, factor).unwrap();
     let got = compact.diagview(engine).unwrap();
     assert_eq!(got.len(), sectors.len());
     for (&sector, values) in sectors.iter().zip(&values) {
@@ -1485,7 +1542,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
     }
     let clone = compact.clone();
     assert_eq!(
-        compact.scale_assign(engine, factor),
+        compact.scale_in_place(engine, factor),
         Err(Error::DestinationShared)
     );
     assert_eq!(compact.diagview(engine).unwrap(), got);
@@ -1498,7 +1555,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
     // The parent handle still shares the storage.
     let before = parent.dense_data().unwrap().to_vec();
     assert_eq!(
-        lazy.scale_assign(engine, factor),
+        lazy.scale_in_place(engine, factor),
         Err(Error::DestinationShared)
     );
     assert_eq!(parent.dense_data().unwrap(), before.as_slice());
@@ -1506,7 +1563,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
     // A cloned lazy view shares the adjoint header.
     let view = lazy.clone();
     assert_eq!(
-        lazy.scale_assign(engine, factor),
+        lazy.scale_in_place(engine, factor),
         Err(Error::DestinationShared)
     );
     assert_eq!(
@@ -1514,7 +1571,7 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
         logical.dense_data().unwrap()
     );
     drop(view);
-    lazy.scale_assign(engine, factor).unwrap();
+    lazy.scale_in_place(engine, factor).unwrap();
     assert!(lazy.dense_data().is_err(), "a lazy adjoint stays lazy");
     let got = lazy.materialize(engine).unwrap();
     let want: Vec<_> = logical
@@ -1573,7 +1630,7 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         Error::DestinationShared,
         |d: &mut _| {
             let clone = d.clone();
-            let result = lazy.axpby_into(cuda, d, 1.0, 0.5);
+            let result = lazy.axpby_into(cuda, Dest::scaled(d, 1.0, 0.5));
             drop(clone);
             result
         }
@@ -1600,7 +1657,7 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| device_square.permute_into(cuda, &[0], &[1], d, 1.0, 0.5)
+        |d: &mut _| device_square.permute_into(cuda, &[0], &[1], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         |dst: &_| lazy_snap(cuda, dst),
@@ -1609,7 +1666,7 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| device_square.trace_pairs_into(cuda, &[], d, 1.0, 0.5)
+        |d: &mut _| device_square.trace_pairs_into(cuda, &[], Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         |dst: &_| lazy_snap(cuda, dst),
@@ -1618,7 +1675,7 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| device_square.axpby_into(cuda, d, 1.0, 0.5)
+        |d: &mut _| device_square.axpby_into(cuda, Dest::scaled(d, 1.0, 0.5))
     );
     rejects!(
         |dst: &_| lazy_snap(cuda, dst),
@@ -1627,7 +1684,12 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         Error::UnsupportedDestination {
             representation: PayloadRepresentation::LazyAdjoint
         },
-        |d: &mut _| device_square.contract_into(cuda, &device_square, &unit, d, 1.0, 0.5)
+        |d: &mut _| device_square.contract_into(
+            cuda,
+            &device_square,
+            &unit,
+            Dest::scaled(d, 1.0, 0.5)
+        )
     );
 }
 

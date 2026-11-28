@@ -13,6 +13,7 @@ use crate::contract_cases::{
 };
 use crate::numerics;
 use num_complex::{Complex32, Complex64};
+use symtn::typed::Dest;
 use symtn::typed::Runtime;
 
 /// `$case` contracted on `$backend`, downloaded.
@@ -41,9 +42,11 @@ macro_rules! overwritten {
             $device,
             &rhs,
             &case.spec(),
-            &mut destination,
-            <$d>::entry(1.0, 0.0),
-            <$d>::entry(0.0, 0.0),
+            Dest::scaled(
+                &mut destination,
+                <$d>::entry(1.0, 0.0),
+                <$d>::entry(0.0, 0.0),
+            ),
         )
         .unwrap();
         <$backend>::download($device, &destination)

@@ -487,10 +487,9 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.contract_into_impl(engine, other, spec, destination, alpha, beta)
     }
@@ -763,10 +762,9 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.planar_contract_into_impl(engine, other, spec, destination, alpha, beta)
     }
@@ -807,7 +805,7 @@ where
         // Placement and planarity precede borrowed-adjoint resolution.
         let orders = self.planar_orders(other, spec)?;
         if self.is_bosonic() {
-            return self.contract_into(&mut *engine, other, spec, destination, alpha, beta);
+            return self.contract_into_impl(engine, other, spec, destination, alpha, beta);
         }
         let other = other.operand()?;
         let other = &*other;

@@ -19,6 +19,7 @@
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
@@ -323,21 +324,23 @@ fn ising_lazy_adjoint_into_transforms_equal_the_materialized_update() {
             engine,
             format!("braid_into levels {levels:?}"),
             &|engine, x| x.braid(engine, &[2, 0], &[3, 1], &levels),
-            &|engine, x, d, a, b| x.braid_into(engine, &[2, 0], &[3, 1], &levels, d, a, b),
+            &|engine, x, d, a, b| {
+                x.braid_into(engine, &[2, 0], &[3, 1], &levels, Dest::scaled(d, a, b))
+            },
         );
     }
     check(
         engine,
         "transpose_into".to_string(),
         &|engine, x| x.transpose(engine, &[3, 2], &[0, 1]),
-        &|engine, x, d, a, b| x.transpose_into(engine, &[3, 2], &[0, 1], d, a, b),
+        &|engine, x, d, a, b| x.transpose_into(engine, &[3, 2], &[0, 1], Dest::scaled(d, a, b)),
     );
     for split in [0, 2, 3] {
         check(
             engine,
             format!("repartition_into {split}"),
             &|engine, x| x.repartition(engine, split),
-            &|engine, x, d, a, b| x.repartition_into(engine, d, a, b),
+            &|engine, x, d, a, b| x.repartition_into(engine, Dest::scaled(d, a, b)),
         );
     }
 }

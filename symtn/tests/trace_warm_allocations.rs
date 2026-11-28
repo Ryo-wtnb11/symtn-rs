@@ -2,6 +2,7 @@
 
 use std::hint::black_box;
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use symtn::sector::{
     FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
@@ -57,14 +58,18 @@ macro_rules! warm_trace_calls {
         for _ in 0..3 {
             black_box(source.trace_pairs($engine, pairs).unwrap());
             source
-                .trace_pairs_into($engine, pairs, &mut destination, 1.0, 0.5)
+                .trace_pairs_into($engine, pairs, Dest::scaled(&mut destination, 1.0, 0.5))
                 .unwrap();
         }
         let (output, owned) =
             counting_alloc::measure(|| black_box(source.trace_pairs($engine, pairs)));
         output.unwrap();
         let (result, into) = counting_alloc::measure(|| {
-            source.trace_pairs_into($engine, pairs, black_box(&mut destination), 1.0, 0.5)
+            source.trace_pairs_into(
+                $engine,
+                pairs,
+                Dest::scaled(black_box(&mut destination), 1.0, 0.5),
+            )
         });
         result.unwrap();
         (source.subblock_count(), owned.calls, into.calls)

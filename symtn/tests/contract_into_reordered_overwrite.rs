@@ -4,6 +4,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
+use symtn::typed::Dest;
 
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -205,9 +206,7 @@ fn assert_reordered_overwrite<R, D>(
             codomain: &[1],
             domain: &[0],
         },
-        &mut destination,
-        D::from_real(1.0),
-        D::from_real(0.0),
+        Dest::scaled(&mut destination, D::from_real(1.0), D::from_real(0.0)),
     )
     .unwrap();
     assert_oracle(&destination);

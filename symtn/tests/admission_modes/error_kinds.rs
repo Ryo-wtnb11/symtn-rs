@@ -3,6 +3,7 @@
 //! failure `Dense(NumericalFailure)`, never a backend error.
 
 use super::*;
+use symtn::typed::Dest;
 use symtn::typed::HermitianTol;
 
 in_both_modes! {
@@ -52,16 +53,14 @@ in_both_modes! {
         space_mismatch(operation_err(rectangular.tr(engine)));
         space_mismatch(operation_err(skew.axpby(engine, 1.0, &rectangular, 1.0)));
         space_mismatch(operation_err(skew.inner(engine, &rectangular)));
-        space_mismatch(operation_err(rectangular.axpby_into(engine, &mut other, 1.0, 1.0)));
+        space_mismatch(operation_err(rectangular.axpby_into(engine, Dest::accumulate(&mut other))));
         // The identity permutation: the toy cannot recouple a bend, and the
         // destination check is the same for every permutation.
         space_mismatch(operation_err(skew.permute_into(
             engine,
             &[0],
             &[1],
-            &mut wrong_destination,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut wrong_destination),
         )));
         space_mismatch(operation_err(TensorMap::<_, f64>::isomorphism(
             engine,

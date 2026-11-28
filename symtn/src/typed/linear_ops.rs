@@ -250,29 +250,28 @@ where
     /// use std::sync::Arc;
     ///
     /// use symtn::sector::{U1FusionRule, U1Irrep};
-    /// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
+    /// use symtn::typed::{Dest, Error, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let x: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
     /// let mut y = x.zeros_like(engine)?;
-    /// x.axpby_into(engine, &mut y, 2.0, 0.0)?;
+    /// x.axpby_into(engine, Dest::scaled(&mut y, 2.0, 0.0))?;
     /// assert_eq!(y.dense_data()?, x.scale(engine, 2.0)?.dense_data()?);
     ///
     /// // A clone shares the payload, so it is not a valid destination.
     /// let shared = y.clone();
-    /// assert_eq!(x.axpby_into(engine, &mut y, 1.0, 1.0), Err(Error::DestinationShared));
+    /// assert_eq!(x.axpby_into(engine, Dest::accumulate(&mut y)), Err(Error::DestinationShared));
     /// drop(shared);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn axpby_into(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.axpby_into_impl(engine, destination, alpha, beta)
     }
@@ -663,24 +662,24 @@ where
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let mut t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
     /// let expected = t.scale(engine, 2.0)?;
-    /// t.scale_assign(engine, 2.0)?;
+    /// t.scale_in_place(engine, 2.0)?;
     /// assert_eq!(t.dense_data()?, expected.dense_data()?);
     ///
     /// let shared = t.clone();
-    /// assert_eq!(t.scale_assign(engine, 2.0), Err(Error::DestinationShared));
+    /// assert_eq!(t.scale_in_place(engine, 2.0), Err(Error::DestinationShared));
     /// drop(shared);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn scale_assign(
+    pub fn scale_in_place(
         &mut self,
         cx: &mut (impl ExecContext + ?Sized),
         factor: D,
     ) -> Result<(), FacadeError<R>> {
         let engine = cx.engine();
-        self.scale_assign_impl(engine, factor)
+        self.scale_in_place_impl(engine, factor)
     }
 
-    fn scale_assign_impl(
+    fn scale_in_place_impl(
         &mut self,
         engine: &mut dyn Engine,
         factor: D,

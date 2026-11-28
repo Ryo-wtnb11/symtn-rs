@@ -45,7 +45,7 @@ entry, and charged-byte fields are printed.
 
 The destination rows call the stable public `permute_into`,
 `transpose_into`, `repartition_into`, and `contract_into` APIs with
-`beta = 0` (they were the `*_overwrite_into` forms before #1550). Exact-layout admission is attached to the
+`Dest::overwrite` (they were the `*_overwrite_into` forms before #1550). Exact-layout admission is attached to the
 Runtime tree-transform entry, but it has no public activity counter, so the
 `exact_layout_admission` column is literal `NA`. The 38-column CSV schema omits
 the old erased-only destination preparation/comparison fields. Caller-thread

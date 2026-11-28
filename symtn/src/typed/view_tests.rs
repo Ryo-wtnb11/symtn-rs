@@ -7,6 +7,7 @@
 //! existing body without the view; results are compared bit for bit because
 //! both run the same code on the same parent payload.
 
+use super::Dest;
 #[cfg(test)]
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
@@ -113,12 +114,12 @@ macro_rules! shared_suite {
 
         let mut view = a.materialize($engine).unwrap();
         let mut owned = a.materialize($engine).unwrap();
-        let (result, entries) = adjoint_entries(|| lazy.axpby_into($engine, &mut view, $beta, $alpha));
+        let (result, entries) = adjoint_entries(|| lazy.axpby_into($engine, Dest::scaled(&mut view, $beta, $alpha)));
         assert_eq!(entries, 0, "{what}: axpby_into");
         result.unwrap();
         lazy.materialize($engine)
             .unwrap()
-            .axpby_into($engine, &mut owned, $beta, $alpha)
+            .axpby_into($engine, Dest::scaled(&mut owned, $beta, $alpha))
             .unwrap();
         assert_same_tensor!($engine, view, owned, format!("{what}: axpby_into"));
 
@@ -212,9 +213,7 @@ macro_rules! mf_suite {
                     codomain: &[0, 1],
                     domain: &[2, 3],
                 },
-                &mut destination,
-                $alpha,
-                $alpha * 0.0,
+                Dest::scaled(&mut destination, $alpha, $alpha * 0.0),
             )
         });
         assert_eq!(entries, 0, "{what}: contract_into");
@@ -228,9 +227,7 @@ macro_rules! mf_suite {
                 codomain: &[0, 1],
                 domain: &[2, 3],
             },
-            &mut expected,
-            $alpha,
-            $alpha * 0.0,
+            Dest::scaled(&mut expected, $alpha, $alpha * 0.0),
         )
         .unwrap();
         assert_same_tensor!(
@@ -363,11 +360,11 @@ fn checked_generic_su3_view_matches_owned_lazy_adjoint() {
             let mut destination = owned.scale($engine, $alpha * 0.0).unwrap();
             let mut expected = owned.scale($engine, $alpha * 0.0).unwrap();
             let (result, entries) = adjoint_entries(|| {
-                a.contract_into($engine, b.adjoint_view(), &spec, &mut destination, $alpha, $alpha * 0.0)
+                a.contract_into($engine, b.adjoint_view(), &spec, Dest::scaled(&mut destination, $alpha, $alpha * 0.0))
             });
             assert_eq!(entries, 0, "{}: contract_into", $what);
             result.unwrap();
-            a.contract_into($engine, &lazy, &spec, &mut expected, $alpha, $alpha * 0.0).unwrap();
+            a.contract_into($engine, &lazy, &spec, Dest::scaled(&mut expected, $alpha, $alpha * 0.0)).unwrap();
             assert_same_tensor!($engine, destination, expected, format!("{}: contract_into", $what));
             let (view, owned) = direct!("compose", b.compose($engine, b.adjoint_view()), b.compose($engine, &lazy));
             assert_same_tensor!($engine, view, owned, format!("{}: compose", $what));
@@ -498,9 +495,7 @@ mod cuda {
                         codomain: &[0, 1],
                         domain: &[2, 3],
                     },
-                    &mut destination,
-                    one,
-                    one * 0.0,
+                    Dest::scaled(&mut destination, one, one * 0.0),
                 )
             });
             assert_eq!(entries, 0, "{what}: contract_into");
@@ -514,9 +509,7 @@ mod cuda {
                     codomain: &[0, 1],
                     domain: &[2, 3],
                 },
-                &mut expected,
-                one,
-                one * 0.0,
+                Dest::scaled(&mut expected, one, one * 0.0),
             )
             .unwrap();
             assert_same_tensor!(

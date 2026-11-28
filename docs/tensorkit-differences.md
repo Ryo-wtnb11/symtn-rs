@@ -28,6 +28,10 @@ this page records intentional differences.
   The application chooses dense providers and thread counts. Destination
   methods and operation-specific plan/workspace pairs expose reuse costs;
   eager methods remain primary.
+- **Destination grammar.** `_into` methods take one `Dest` value
+  (`overwrite`, `accumulate`, `scaled(out, α, β)`), tenferro's call grammar,
+  in place of TensorKit's trailing `(tdst, …, α, β)`; `scale!` is
+  `scale_in_place`.
 - **Nested products.** Provider order and association remain in the Rust type
   and nested `ProductSector` label. TensorKit flattens product association.
 - **Narrow index macro.** `contract!` wraps `Network::contract`; traces,

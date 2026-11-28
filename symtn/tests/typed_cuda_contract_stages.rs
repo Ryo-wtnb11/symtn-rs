@@ -21,6 +21,7 @@
 #![cfg(feature = "cuda")]
 
 use crate::common;
+use symtn::typed::Dest;
 
 use crate::contract_cases;
 
@@ -166,12 +167,22 @@ fn eager<R: DeviceRule, D: DevicePayload>(
             // rejects as a shared destination.
             let mut expected = start.scale(engine, D::entry(1.0, 0.0)).unwrap();
             case.lhs
-                .contract_into(engine, &case.rhs, &spec, &mut expected, alpha, beta)
+                .contract_into(
+                    engine,
+                    &case.rhs,
+                    &spec,
+                    Dest::scaled(&mut expected, alpha, beta),
+                )
                 .unwrap();
             let mut destination = start.to_cuda(cuda).unwrap();
             let (_, counters) = delta(|| {
-                lhs.contract_into(cuda, &rhs, &spec, &mut destination, alpha, beta)
-                    .unwrap()
+                lhs.contract_into(
+                    cuda,
+                    &rhs,
+                    &spec,
+                    Dest::scaled(&mut destination, alpha, beta),
+                )
+                .unwrap()
             });
             assert_bit_equal(
                 &what,

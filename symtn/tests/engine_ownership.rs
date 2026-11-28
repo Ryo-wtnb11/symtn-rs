@@ -10,6 +10,7 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::{Arc, Barrier};
+use symtn::typed::Dest;
 
 use symtn::sector::{ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::{
@@ -414,15 +415,15 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
         let mut destination = t.scale(&mut CpuEngine::serial(), 1.0).unwrap();
         let before = destination.dense_data().unwrap().to_vec();
         refused(
-            t.axpby_into(&mut engine, &mut destination, 1.0, 1.0)
+            t.axpby_into(&mut engine, Dest::accumulate(&mut destination))
                 .map_err(|e| err(&e)),
             "axpby_into",
         );
         refused(
             destination
-                .scale_assign(&mut engine, 2.0)
+                .scale_in_place(&mut engine, 2.0)
                 .map_err(|e| err(&e)),
-            "scale_assign",
+            "scale_in_place",
         );
         assert_eq!(destination.dense_data().unwrap(), before.as_slice());
         let s = t
@@ -548,7 +549,7 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
         "compact contract"
     );
     assert!(s
-        .permute_into(engine, &[0], &[1], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[0], &[1], Dest::overwrite(&mut destination))
         .is_backend_failure());
     assert_eq!(destination.dense_data().unwrap(), before.as_slice());
     // Compact `contract_into` (diagonal·diagonal, diagonal·dense,
@@ -559,7 +560,7 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
     for (lhs, rhs, what) in [(&s, &s, "D·D"), (&s, &a, "D·t"), (&a, &s, "t·D")] {
         for alpha in [1.0, 0.0] {
             assert!(
-                lhs.contract_into(engine, rhs, &spec, &mut target, alpha, 0.0)
+                lhs.contract_into(engine, rhs, &spec, Dest::scaled(&mut target, alpha, 0.0))
                     .is_backend_failure(),
                 "compact contract_into {what}, alpha {alpha}"
             );

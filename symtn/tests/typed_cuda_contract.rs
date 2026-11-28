@@ -15,6 +15,7 @@
 #![cfg(feature = "cuda")]
 
 use crate::common;
+use symtn::typed::Dest;
 
 use crate::contract_cases;
 use crate::numerics;
@@ -234,8 +235,13 @@ fn copy_c_probes_move_only_c_and_match_the_host_at_every_dtype() {
             );
             let mut destination = poisoned_destination(engine, &case).to_cuda(cuda).unwrap();
             let (alpha, beta) = (D::entry(0.75, 0.25), D::entry(0.0, 0.0));
-            lhs.contract_into(cuda, &rhs, &case.spec(), &mut destination, alpha, beta)
-                .unwrap();
+            lhs.contract_into(
+                cuda,
+                &rhs,
+                &case.spec(),
+                Dest::scaled(&mut destination, alpha, beta),
+            )
+            .unwrap();
             numerics::assert_nonzero_slices_close(
                 &name,
                 destination.to_host(cuda).unwrap().dense_data().unwrap(),
@@ -420,9 +426,7 @@ fn check_splits<R: DeviceRule, D: DevicePayload>(
                 cuda,
                 &rhs,
                 &spec,
-                &mut destination,
-                D::entry(1.0, 0.0),
-                D::entry(0.0, 0.0),
+                Dest::scaled(&mut destination, D::entry(1.0, 0.0), D::entry(0.0, 0.0)),
             )
             .unwrap();
             numerics::assert_nonzero_slices_close(
@@ -524,11 +528,16 @@ fn overwrite_rejections_match_the_host_in_order_and_leave_the_destination_untouc
         let mut destination = host_destination.to_cuda(cuda).unwrap();
         let mut host_destination = host_destination;
         let expected = host_lhs
-            .contract_into(engine, host_rhs, &spec, &mut host_destination, 1.0, 0.0)
+            .contract_into(
+                engine,
+                host_rhs,
+                &spec,
+                Dest::overwrite(&mut host_destination),
+            )
             .unwrap_err()
             .report();
         let (actual, counters) = delta(|| {
-            lhs.contract_into(cuda, &rhs, &spec, &mut destination, 1.0, 0.0)
+            lhs.contract_into(cuda, &rhs, &spec, Dest::overwrite(&mut destination))
                 .unwrap_err()
                 .report()
         });
@@ -551,14 +560,14 @@ fn overwrite_rejections_match_the_host_in_order_and_leave_the_destination_untouc
     let (errors, counters) = delta(|| {
         let spec = case.spec();
         let mut errors = vec![
-            lhs.contract_into(cuda, &stranger, &spec, &mut destination, 1.0, 0.0)
+            lhs.contract_into(cuda, &stranger, &spec, Dest::overwrite(&mut destination))
                 .unwrap_err(),
-            lhs.contract_into(cuda, &rhs, &spec, &mut destination, 1.0, 0.0)
+            lhs.contract_into(cuda, &rhs, &spec, Dest::overwrite(&mut destination))
                 .unwrap_err(),
         ];
         let mut lhs_alias = lhs.clone();
         errors.push(
-            lhs.contract_into(cuda, &rhs, &spec, &mut lhs_alias, 1.0, 0.0)
+            lhs.contract_into(cuda, &rhs, &spec, Dest::overwrite(&mut lhs_alias))
                 .unwrap_err(),
         );
         errors

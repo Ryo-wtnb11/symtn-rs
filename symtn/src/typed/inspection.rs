@@ -40,7 +40,7 @@ where
     /// let adjoint = t.adjoint(engine)?;
     /// let mut owned = adjoint.materialize(engine)?;
     /// assert_eq!(owned.dense_data()?, adjoint.materialize(engine)?.dense_data()?);
-    /// owned.scale_assign(engine, 2.0)?;
+    /// owned.scale_in_place(engine, 2.0)?;
     /// assert_ne!(owned.dense_data()?, adjoint.materialize(engine)?.dense_data()?);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```

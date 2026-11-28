@@ -17,6 +17,7 @@ use crate::numerics::nan_folded_bits;
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use num_complex::Complex64;
 use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
+use symtn::typed::Dest;
 use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap, TensorScalar};
 
 const X: [(f64, f64); 5] = [
@@ -113,7 +114,8 @@ macro_rules! check_dense {
                 &want,
             );
             let mut assigned = x.materialize($engine).unwrap();
-            y.axpby_into($engine, &mut assigned, b, a).unwrap();
+            y.axpby_into($engine, Dest::scaled(&mut assigned, b, a))
+                .unwrap();
             assert_same(
                 &format!("{what} axpby_into"),
                 assigned.dense_data().unwrap(),
@@ -153,7 +155,8 @@ macro_rules! check_dense {
                 bits(&base)
             );
             let mut assigned = x.materialize($engine).unwrap();
-            y.axpby_into($engine, &mut assigned, b, a).unwrap();
+            y.axpby_into($engine, Dest::scaled(&mut assigned, b, a))
+                .unwrap();
             assert_eq!(bits(assigned.dense_data().unwrap()), bits(&base));
         }
         let a = real::<$d>(2.0);
@@ -177,9 +180,9 @@ macro_rules! check_dense {
                 &want,
             );
             let mut assigned = x.materialize($engine).unwrap();
-            assigned.scale_assign($engine, f).unwrap();
+            assigned.scale_in_place($engine, f).unwrap();
             assert_same(
-                &format!("{what} scale_assign"),
+                &format!("{what} scale_in_place"),
                 assigned.dense_data().unwrap(),
                 &want,
             );
@@ -251,9 +254,7 @@ fn unit_destination_factor_keeps_the_sign_of_its_zero_imaginary_part() {
             source
                 .axpby_into(
                     engine,
-                    &mut destination,
-                    <$c>::new(1.0, 0.0),
-                    <$c>::new(1.0, -0.0),
+                    Dest::scaled(&mut destination, <$c>::new(1.0, 0.0), <$c>::new(1.0, -0.0)),
                 )
                 .unwrap();
             let data = destination.dense_data().unwrap();
@@ -278,7 +279,7 @@ fn zero_scale_overwrites_nonfinite_entries_with_signed_zero() {
         let expected = (0.0_f64 * factor).to_bits();
         let scaled = x.scale(engine, factor).unwrap();
         let mut assigned = x.materialize(engine).unwrap();
-        assigned.scale_assign(engine, factor).unwrap();
+        assigned.scale_in_place(engine, factor).unwrap();
         for result in [&scaled, &assigned] {
             assert!(result
                 .dense_data()

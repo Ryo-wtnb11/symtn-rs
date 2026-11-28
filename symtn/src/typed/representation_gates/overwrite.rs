@@ -112,9 +112,7 @@ fn assert_contract_overwrite_matches<R, D>(
             engine,
             rhs,
             &spec,
-            &mut destination,
-            alpha,
-            D::from_real(0.0),
+            Dest::scaled(&mut destination, alpha, D::from_real(0.0)),
         )
         .unwrap_or_else(|error| panic!("{label} ordered overwrite failed: {error:?}"));
     } else {
@@ -122,9 +120,7 @@ fn assert_contract_overwrite_matches<R, D>(
             engine,
             rhs,
             &spec,
-            &mut destination,
-            alpha,
-            D::from_real(0.0),
+            Dest::scaled(&mut destination, alpha, D::from_real(0.0)),
         )
         .unwrap_or_else(|error| panic!("{label} overwrite failed: {error:?}"));
     }
@@ -217,7 +213,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     poison_destination(&mut wrong_layout);
     let before = f64_bits(engine, &wrong_layout);
     assert!(source
-        .permute_into(engine, &[1], &[2, 0], &mut wrong_layout, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut wrong_layout))
         .fails_in_operation(|e| matches!(e, OperationError::SpaceMismatch { .. })));
     assert_unchanged(engine, &wrong_layout, &before);
 
@@ -230,9 +226,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
                 engine,
                 codomain_axes,
                 domain_axes,
-                &mut destination,
-                1.0,
-                0.0
+                Dest::overwrite(&mut destination)
             )
             .fails_in_operation(|e| matches!(e, OperationError::InvalidPermutation { .. })));
         assert_unchanged(engine, &destination, &before);
@@ -246,7 +240,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     poison_destination(&mut nonplanar);
     let before = f64_bits(engine, &nonplanar);
     assert!(source
-        .transpose_into(engine, &[0, 2], &[1], &mut nonplanar, 1.0, 0.0)
+        .transpose_into(engine, &[0, 2], &[1], Dest::overwrite(&mut nonplanar))
         .fails_in_operation(|e| matches!(e, OperationError::InvalidPermutation { .. })));
     assert_unchanged(engine, &nonplanar, &before);
 
@@ -257,7 +251,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &foreign);
     assert_eq!(
         source
-            .permute_into(engine, &[1], &[2, 0], &mut foreign, 1.0, 0.0)
+            .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut foreign))
             .unwrap_err(),
         Error::RuntimeMismatch
     );
@@ -268,7 +262,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &shared_body);
     let shared_body_handle = shared_body.clone();
     assert!(source
-        .permute_into(engine, &[1], &[2, 0], &mut shared_body, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut shared_body))
         .is_destination_shared());
     assert_unchanged(engine, &shared_body, &before);
     drop(shared_body_handle);
@@ -280,7 +274,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         .insert_unit(engine, 0, Side::Domain, Duality::Plain)
         .unwrap();
     assert!(source
-        .permute_into(engine, &[1], &[2, 0], &mut shared_payload, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut shared_payload))
         .is_destination_shared());
     assert_unchanged(engine, &shared_payload, &before);
     drop(payload_handle);
@@ -292,7 +286,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         .unwrap();
     let before = f64_bits(engine, &alias);
     assert!(source
-        .permute_into(engine, &[0, 1], &[2], &mut alias, 1.0, 0.0)
+        .permute_into(engine, &[0, 1], &[2], Dest::overwrite(&mut alias))
         .is_destination_shared());
     assert_unchanged(engine, &alias, &before);
 
@@ -311,14 +305,19 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         f64_bits(engine, &bad_len)
     };
     assert!(source
-        .permute_into(engine, &[1], &[2, 0], &mut bad_len, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut bad_len))
         .is_internal("does not match required length"));
     assert_unchanged(engine, &bad_len, &before);
 
     let mut lazy_destination = expected.adjoint(engine).unwrap();
     let before = f64_bits(engine, &lazy_destination);
     assert!(source
-        .permute_into(engine, &[1], &[2, 0], &mut lazy_destination, 1.0, 0.0)
+        .permute_into(
+            engine,
+            &[1],
+            &[2, 0],
+            Dest::overwrite(&mut lazy_destination)
+        )
         .is_unsupported_destination(PayloadRepresentation::LazyAdjoint));
     assert_eq!(f64_bits(engine, &lazy_destination), before);
 
@@ -327,7 +326,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     poison_destination(&mut destination);
     let before = f64_bits(engine, &destination);
     assert!(lazy_source
-        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut destination))
         .fails_in_operation(|e| matches!(e, OperationError::SpaceMismatch { .. })));
     assert_unchanged(engine, &destination, &before);
 
@@ -344,7 +343,12 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         .unwrap()
         .to_vec();
     assert!(square
-        .permute_into(engine, &[0], &[1], &mut compact_destination, 1.0, 0.0)
+        .permute_into(
+            engine,
+            &[0],
+            &[1],
+            Dest::overwrite(&mut compact_destination)
+        )
         .is_unsupported_destination(PayloadRepresentation::CompactDiagonal));
     assert_eq!(
         compact_destination
@@ -375,7 +379,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let before = f64_bits(engine, &z3_destination);
     assert_eq!(
         z2_source
-            .permute_into(engine, &[0], &[1], &mut z3_destination, 1.0, 0.0)
+            .permute_into(engine, &[0], &[1], Dest::overwrite(&mut z3_destination))
             .unwrap_err(),
         Error::RuleMismatch
     );
@@ -405,7 +409,7 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
     .unwrap();
     let moved = one_sided.repartition(engine, 0).unwrap();
     assert_overwrite_matches(engine, &one_sided, moved, 2.0, |engine, destination| {
-        one_sided.repartition_into(engine, destination, 2.0, 0.0)
+        one_sided.repartition_into(engine, Dest::scaled(destination, 2.0, 0.0))
     });
 
     let square = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 4.0).unwrap();
@@ -416,7 +420,9 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
         &scalar,
         scalar_destination,
         -0.5,
-        |engine, destination| scalar.transpose_into(engine, &[], &[], destination, -0.5, 0.0),
+        |engine, destination| {
+            scalar.transpose_into(engine, &[], &[], Dest::scaled(destination, -0.5, 0.0))
+        },
     );
 
     let high_rank = TensorMap::from_subblock_fn(
@@ -435,9 +441,7 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
             engine,
             &[0, 1, 2, 3, 4, 5, 6, 7, 17],
             &[8, 9, 10, 11, 12, 13, 14, 15],
-            &mut high_rank_destination,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut high_rank_destination),
         )
         .fails_in_operation(|e| matches!(e, OperationError::InvalidPermutation { .. })));
     assert_eq!(f64_bits(engine, &high_rank_destination), before);
@@ -452,12 +456,12 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
     crate::cache::clear();
     let mut first = expected.zeros_like(engine).unwrap();
     source
-        .permute_into(engine, &[1], &[2, 0], &mut first, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut first))
         .unwrap();
     let cold = crate::test_cache::completed();
     let mut second = expected.zeros_like(engine).unwrap();
     source
-        .permute_into(engine, &[1], &[2, 0], &mut second, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut second))
         .unwrap();
     let warm = crate::test_cache::completed();
     assert_eq!(warm.entries(), cold.entries());
@@ -488,7 +492,7 @@ fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
     let expected = source.permute(engine, &[1], &[2, 0]).unwrap();
     let mut warm = expected.zeros_like(engine).unwrap();
     source
-        .permute_into(engine, &[1], &[2, 0], &mut warm, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut warm))
         .unwrap();
 
     std::thread::scope(|scope| {
@@ -498,7 +502,7 @@ fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
                     let engine = &mut symtn_dense::CpuEngine::serial();
                     let mut destination = expected.zeros_like(engine).unwrap();
                     source
-                        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
+                        .permute_into(engine, &[1], &[2, 0], Dest::overwrite(&mut destination))
                         .unwrap();
                     destination
                 })
@@ -684,9 +688,7 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
             engine,
             &lazy_rhs,
             &RANK_TWO_COMPOSE,
-            &mut destination,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut destination),
         )
         .unwrap();
     assert_eq!(
@@ -715,8 +717,13 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
         .unwrap();
     let mut destination = expected.zeros_like(engine).unwrap();
     poison_destination(&mut destination);
-    u.contract_into(engine, &s, &RANK_TWO_COMPOSE, &mut destination, 1.0, 0.0)
-        .unwrap();
+    u.contract_into(
+        engine,
+        &s,
+        &RANK_TWO_COMPOSE,
+        Dest::overwrite(&mut destination),
+    )
+    .unwrap();
     assert_eq!(
         destination.dense_data().unwrap(),
         expected.dense_data().unwrap()
@@ -774,9 +781,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
                 lhs: &[9],
                 ..RANK_TWO_COMPOSE
             },
-            &mut foreign,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut foreign),
         )
         .unwrap_err(),
         Error::RuntimeMismatch
@@ -799,9 +804,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
                 lhs: &[9],
                 ..RANK_TWO_COMPOSE
             },
-            &mut rejected,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut rejected),
         )
         .unwrap_err(),
         Error::RuntimeMismatch
@@ -827,7 +830,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
         let mut rejected = destination(engine);
         let before = f64_destination_state(engine, &rejected);
         assert!(lhs
-            .contract_into(engine, &rhs, &spec, &mut rejected, 1.0, 0.0)
+            .contract_into(engine, &rhs, &spec, Dest::overwrite(&mut rejected))
             .fails_in_operation(|e| {
                 matches!(
                     e,
@@ -848,7 +851,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let mut rejected = destination(engine);
     let before = f64_destination_state(engine, &rejected);
     assert!(lhs
-        .contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &bad_rhs,
+            &RANK_TWO_COMPOSE,
+            Dest::overwrite(&mut rejected)
+        )
         .fails_in_operation(|e| matches!(e, OperationError::Core(_))));
     assert_eq!(f64_destination_state(engine, &rejected), before);
 
@@ -860,7 +868,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     poison_destination(&mut wrong_layout);
     let before = f64_destination_state(engine, &wrong_layout);
     assert!(lhs
-        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut wrong_layout, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &rhs,
+            &RANK_TWO_COMPOSE,
+            Dest::overwrite(&mut wrong_layout)
+        )
         .fails_in_operation(|e| matches!(e, OperationError::SpaceMismatch { .. })));
     assert_eq!(f64_destination_state(engine, &wrong_layout), before);
 
@@ -875,8 +888,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             _ => unreachable!(),
         }
         let before = f64_destination_state(engine, &rejected);
-        let rejection =
-            bad_lhs.contract_into(engine, &bad_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0);
+        let rejection = bad_lhs.contract_into(
+            engine,
+            &bad_rhs,
+            &RANK_TWO_COMPOSE,
+            Dest::overwrite(&mut rejected),
+        );
         if malformed == "destination" {
             assert!(rejection.is_internal("does not match required length"));
         } else {
@@ -893,7 +910,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
         .unwrap();
     let before = f64_destination_state(engine, &lhs_alias);
     assert!(lhs
-        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut lhs_alias, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &rhs,
+            &RANK_TWO_COMPOSE,
+            Dest::overwrite(&mut lhs_alias)
+        )
         .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &lhs_alias), before);
 
@@ -904,7 +926,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
         .unwrap();
     let before = f64_destination_state(engine, &rhs_alias);
     assert!(lhs
-        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut rhs_alias, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &rhs,
+            &RANK_TWO_COMPOSE,
+            Dest::overwrite(&mut rhs_alias)
+        )
         .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &rhs_alias), before);
 
@@ -912,7 +939,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let shared_body_handle = shared_body.clone();
     let before = f64_destination_state(engine, &shared_body);
     assert!(lhs
-        .contract_into(engine, &rhs, &RANK_TWO_COMPOSE, &mut shared_body, 1.0, 0.0)
+        .contract_into(
+            engine,
+            &rhs,
+            &RANK_TWO_COMPOSE,
+            Dest::overwrite(&mut shared_body)
+        )
         .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &shared_body), before);
     drop(shared_body_handle);
@@ -927,9 +959,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             engine,
             &rhs,
             &RANK_TWO_COMPOSE,
-            &mut shared_payload,
-            1.0,
-            0.0
+            Dest::overwrite(&mut shared_payload)
         )
         .is_destination_shared());
     assert_eq!(f64_destination_state(engine, &shared_payload), before);
@@ -945,9 +975,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             engine,
             &rhs,
             &RANK_TWO_COMPOSE,
-            &mut lazy_destination,
-            1.0,
-            0.0
+            Dest::overwrite(&mut lazy_destination)
         )
         .is_unsupported_destination(PayloadRepresentation::LazyAdjoint));
     let TypedTensorRepr::Adjoint(after) = &lazy_destination.repr else {
@@ -963,9 +991,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
             engine,
             &rhs,
             &RANK_TWO_COMPOSE,
-            &mut compact_destination,
-            1.0,
-            0.0
+            Dest::overwrite(&mut compact_destination)
         )
         .is_unsupported_destination(PayloadRepresentation::CompactDiagonal));
     assert!(Arc::ptr_eq(&owned(&compact_destination).data, &payload));
@@ -1007,7 +1033,12 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let before = f64_destination_state(engine, &rejected);
     assert_eq!(
         z2_lhs
-            .contract_into(engine, &z3_rhs, &RANK_TWO_COMPOSE, &mut rejected, 1.0, 0.0)
+            .contract_into(
+                engine,
+                &z3_rhs,
+                &RANK_TWO_COMPOSE,
+                Dest::overwrite(&mut rejected)
+            )
             .unwrap_err(),
         Error::RuleMismatch
     );
@@ -1037,9 +1068,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
                 engine,
                 &z2_rhs,
                 &RANK_TWO_COMPOSE,
-                &mut z3_destination,
-                1.0,
-                0.0
+                Dest::overwrite(&mut z3_destination)
             )
             .unwrap_err(),
         Error::RuleMismatch
@@ -1123,9 +1152,7 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
                 codomain: &axes[..3],
                 domain: &axes[3..],
             },
-            &mut first,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut first),
         )
         .unwrap();
     let cold = crate::test_cache::completed();
@@ -1141,9 +1168,7 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
                 codomain: &axes[..3],
                 domain: &axes[3..],
             },
-            &mut second,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut second),
         )
         .unwrap();
     let warm = crate::test_cache::completed();

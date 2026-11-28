@@ -12,6 +12,7 @@
 
 use crate::common::ErrorKind as _;
 use crate::single_precision_oracle;
+use symtn::typed::Dest;
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -956,7 +957,7 @@ fn converted_lazy_adjoints_are_owned() {
     let expected = source.permute(engine, &[2], &[0, 1]).unwrap();
     let mut destination = expected.zeros_like(engine).unwrap();
     source
-        .permute_into(engine, &[2], &[0, 1], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[2], &[0, 1], Dest::overwrite(&mut destination))
         .unwrap();
     assert_eq!(
         f64_bits(destination.dense_data().unwrap()),

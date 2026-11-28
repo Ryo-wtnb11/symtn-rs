@@ -43,6 +43,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use symtn::sector::{
@@ -1306,7 +1307,7 @@ fn checked_contraction_refuses_a_cold_borrowed_adjoint_before_resolving_it() {
         (
             "contract_into",
             Contraction,
-            d.contract_into(engine, view(), &one_leg, ordinary_dst, 1.0, 0.0),
+            d.contract_into(engine, view(), &one_leg, Dest::overwrite(ordinary_dst)),
         ),
     ];
     assert_eq!(provider.queries.load(Ordering::Relaxed), queries);
@@ -2510,7 +2511,7 @@ fn checked_transform_into_reports_the_same_error_cold_and_warm() {
             format!(
                 "{:?}",
                 source
-                    .permute_into(engine, &[0], &[1, 2], &mut wrong, 1.0, 0.0)
+                    .permute_into(engine, &[0], &[1, 2], Dest::overwrite(&mut wrong))
                     .unwrap_err()
             )
         };
@@ -2568,11 +2569,23 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     match op {
-        "identity" => tensor.permute_into(engine, &[0], &[1], destination, alpha, beta),
-        "permute" => tensor.permute_into(engine, &[1], &[0], destination, alpha, beta),
-        "transpose" => tensor.transpose_into(engine, &[1], &[0], destination, alpha, beta),
-        "braid" => tensor.braid_into(engine, &[1], &[0], &[0, 1], destination, alpha, beta),
-        _ => tensor.repartition_into(engine, destination, alpha, beta),
+        "identity" => {
+            tensor.permute_into(engine, &[0], &[1], Dest::scaled(destination, alpha, beta))
+        }
+        "permute" => {
+            tensor.permute_into(engine, &[1], &[0], Dest::scaled(destination, alpha, beta))
+        }
+        "transpose" => {
+            tensor.transpose_into(engine, &[1], &[0], Dest::scaled(destination, alpha, beta))
+        }
+        "braid" => tensor.braid_into(
+            engine,
+            &[1],
+            &[0],
+            &[0, 1],
+            Dest::scaled(destination, alpha, beta),
+        ),
+        _ => tensor.repartition_into(engine, Dest::scaled(destination, alpha, beta)),
     }
 }
 
@@ -2803,7 +2816,7 @@ fn checked_lazy_transform_into_queries_no_more_than_eager() {
             .map(|_| {
                 provider.queries.store(0, Ordering::Relaxed);
                 if into {
-                    lazy.permute_into(engine, &[1, 0], &[2], &mut destination, 1.0, 0.0)
+                    lazy.permute_into(engine, &[1, 0], &[2], Dest::overwrite(&mut destination))
                         .unwrap();
                 } else {
                     drop(black_box(lazy.permute(engine, &[1, 0], &[2]).unwrap()));
@@ -2907,10 +2920,10 @@ fn checked_compact_and_lazy_transform_into_failure_is_typed_and_nonpublishing() 
         "compact braid",
         compact.provider(),
         compact_destination,
-        |d| compact.braid_into(engine, &[1], &[0], &[0, 1], d, 1.0, 0.5)
+        |d| compact.braid_into(engine, &[1], &[0], &[0, 1], Dest::scaled(d, 1.0, 0.5))
     );
     fails_then_publishes!("lazy permute", lazy.provider(), lazy_destination, |d| lazy
-        .permute_into(engine, &[1, 0], &[2], d, 1.0, 0.5));
+        .permute_into(engine, &[1, 0], &[2], Dest::scaled(d, 1.0, 0.5)));
 }
 
 // ---- contraction `_into` ----
@@ -2974,7 +2987,7 @@ fn checked_contract_into_queries_the_provider_like_eager() {
             .map(|_| {
                 provider.queries.store(0, Ordering::Relaxed);
                 if into {
-                    lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5)
+                    lhs.contract_into(engine, rhs, &spec, Dest::scaled(&mut destination, 1.0, 0.5))
                         .unwrap_or_else(|error| panic!("{what}: {error}"));
                 } else {
                     drop(black_box(lhs.contract(engine, rhs, &spec).unwrap()));
@@ -3088,7 +3101,8 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
         let (before, original) = (published(), bits(&destination));
 
         provider.fail_queries.store(true, Ordering::Relaxed);
-        let result = lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5);
+        let result =
+            lhs.contract_into(engine, rhs, &spec, Dest::scaled(&mut destination, 1.0, 0.5));
         provider.fail_queries.store(false, Ordering::Relaxed);
         assert!(
             matches!(
@@ -3103,7 +3117,8 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(published(), before, "{what}: the failure published");
 
         let shared = destination.clone();
-        let result = lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5);
+        let result =
+            lhs.contract_into(engine, rhs, &spec, Dest::scaled(&mut destination, 1.0, 0.5));
         assert!(
             matches!(
                 result,
@@ -3115,7 +3130,7 @@ fn checked_contract_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(bits(&destination), original, "{what}: shared");
         assert_eq!(published(), before, "{what}: the shared call published");
 
-        lhs.contract_into(engine, rhs, &spec, &mut destination, 1.0, 0.5)
+        lhs.contract_into(engine, rhs, &spec, Dest::scaled(&mut destination, 1.0, 0.5))
             .unwrap();
         assert_ne!(published(), before, "{what}: the success published nothing");
     }
@@ -3147,7 +3162,7 @@ fn checked_contract_into_reports_the_same_error_cold_and_warm() {
     for pass in ["cold", "warm"] {
         for destination in [&mut right, &mut wrong] {
             let error = lhs
-                .contract_into(engine, rhs, &spec, destination, 1.0, 0.5)
+                .contract_into(engine, rhs, &spec, Dest::scaled(destination, 1.0, 0.5))
                 .unwrap_err();
             assert_eq!(error.to_string(), eager, "{pass}");
         }
@@ -3196,9 +3211,7 @@ where
                 engine,
                 rhs,
                 &spec,
-                &mut destination,
-                alpha,
-                D::from_real(beta),
+                Dest::scaled(&mut destination, alpha, D::from_real(beta)),
             )
             .unwrap();
             let alpha = Complex64::from(alpha);
@@ -3328,7 +3341,11 @@ fn checked_trace_pairs_into_queries_the_provider_like_eager() {
                     provider.queries.store(0, Ordering::Relaxed);
                     if into {
                         source
-                            .trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5)
+                            .trace_pairs_into(
+                                engine,
+                                pairs,
+                                Dest::scaled(&mut destination, 1.0, 0.5),
+                            )
                             .unwrap();
                     } else {
                         drop(black_box(source.trace_pairs(engine, pairs).unwrap()));
@@ -3409,7 +3426,8 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
         let (before, original) = (published(), bits(&destination));
 
         provider.fail_queries.store(true, Ordering::Relaxed);
-        let result = source.trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5);
+        let result =
+            source.trace_pairs_into(engine, pairs, Dest::scaled(&mut destination, 1.0, 0.5));
         provider.fail_queries.store(false, Ordering::Relaxed);
         assert!(
             matches!(
@@ -3424,7 +3442,8 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(published(), before, "{kind}: the failure published");
 
         let shared = destination.clone();
-        let result = source.trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5);
+        let result =
+            source.trace_pairs_into(engine, pairs, Dest::scaled(&mut destination, 1.0, 0.5));
         assert!(
             matches!(
                 result,
@@ -3437,7 +3456,7 @@ fn checked_trace_pairs_into_failure_is_typed_and_nonpublishing() {
         assert_eq!(published(), before, "{kind}: the shared call published");
 
         source
-            .trace_pairs_into(engine, pairs, &mut destination, 1.0, 0.5)
+            .trace_pairs_into(engine, pairs, Dest::scaled(&mut destination, 1.0, 0.5))
             .unwrap();
         assert_ne!(published(), before, "{kind}: the success published nothing");
     }
@@ -3470,11 +3489,11 @@ fn checked_trace_pairs_into_reports_the_same_error_cold_and_warm() {
     for pass in ["cold", "warm"] {
         let right_error = report(
             &source
-                .trace_pairs_into(engine, &[(0, 2)], &mut right, 1.0, 0.5)
+                .trace_pairs_into(engine, &[(0, 2)], Dest::scaled(&mut right, 1.0, 0.5))
                 .unwrap_err(),
         );
         let wrong_error = source
-            .trace_pairs_into(engine, &[(0, 2)], &mut wrong, 1.0, 0.5)
+            .trace_pairs_into(engine, &[(0, 2)], Dest::scaled(&mut wrong, 1.0, 0.5))
             .unwrap_err();
         assert!(
             matches!(

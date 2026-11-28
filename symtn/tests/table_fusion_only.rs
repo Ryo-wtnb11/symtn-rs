@@ -7,6 +7,7 @@
 //! for `NoBraiding` in `artin_braid` and `permute`.
 
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
@@ -233,9 +234,7 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
             &[1, 0],
             &[2],
             &[0, 1, 2],
-            &mut destination,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
+            Dest::overwrite(&mut destination),
         )
         .unwrap_err();
     assert!(is_no_braiding_sector_braid(&error), "{error:?}");
@@ -317,9 +316,7 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
             &[1, 0],
             &[2],
             &[0, 1, 2],
-            &mut destination,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
+            Dest::overwrite(&mut destination),
         )
         .unwrap_err();
     assert!(is_no_braiding_sector_braid(&error), "{error:?}");

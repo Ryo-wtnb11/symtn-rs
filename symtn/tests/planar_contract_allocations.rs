@@ -12,6 +12,7 @@
 //! the output.
 
 use crate::counting_alloc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use std::sync::Arc;
@@ -106,30 +107,16 @@ fn planar_contract_owns_only_its_output() {
         };
         for _ in 0..2 {
             drop(a.planar_contract(engine, rhs, &spec).unwrap());
-            a.planar_contract_into(
-                engine,
-                rhs,
-                &spec,
-                &mut out,
-                Complex64::ONE,
-                Complex64::ZERO,
-            )
-            .unwrap();
+            a.planar_contract_into(engine, rhs, &spec, Dest::overwrite(&mut out))
+                .unwrap();
             drop(hand(engine, &lhs_core, &rhs_core));
         }
         let core = payloads(payload, || {
             drop(lhs_core.compose(engine, &rhs_core).unwrap())
         });
         let warm_into = payloads(payload, || {
-            a.planar_contract_into(
-                engine,
-                rhs,
-                &spec,
-                &mut out,
-                Complex64::ONE,
-                Complex64::ZERO,
-            )
-            .unwrap()
+            a.planar_contract_into(engine, rhs, &spec, Dest::overwrite(&mut out))
+                .unwrap()
         });
         let warm = payloads(payload, || {
             drop(a.planar_contract(engine, rhs, &spec).unwrap())

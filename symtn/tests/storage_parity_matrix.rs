@@ -43,6 +43,7 @@
 
 use crate::report;
 use report::Report;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use std::sync::Arc;
@@ -223,7 +224,7 @@ macro_rules! storage_rows {
         let a_zeros_like = &a.zeros_like($engine).unwrap();
         check($engine, "zeros_like", a_zeros_like, &zeros);
         let (mut destination, _) = build($engine, -0.4);
-        a.axpby_into($engine, &mut destination, alpha, beta).unwrap();
+        a.axpby_into($engine, Dest::scaled(&mut destination, alpha, beta)).unwrap();
         check($engine, "axpby_into", &destination, &ab);
 
         // Lazy adjoints: `alpha A^H + beta B^H = (conj(alpha) A + conj(beta) B)^H`.
@@ -243,7 +244,7 @@ macro_rules! storage_rows {
         check_lazy($engine, "lazy zeros_like", &zero_lazy, &zeros);
         assert!(matches!(zero_lazy.dense_data(), Err(Error::Unsupported { .. })));
         let mut destination = lazy_b.materialize($engine).unwrap();
-        lazy_a.axpby_into($engine, &mut destination, alpha, beta).unwrap();
+        lazy_a.axpby_into($engine, Dest::scaled(&mut destination, alpha, beta)).unwrap();
         check_lazy($engine, "lazy axpby_into", &destination, &lazy_ab);
 
         // Compact: scale and compact + compact stay compact.
@@ -262,7 +263,7 @@ macro_rules! storage_rows {
         ));
         let mut foreign = wider.clone();
         assert!(matches!(
-            a.axpby_into($engine, &mut foreign, alpha, beta),
+            a.axpby_into($engine, Dest::scaled(&mut foreign, alpha, beta)),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
 
@@ -521,10 +522,11 @@ fn cuda_rows_match_host() {
         same(engine, cuda, "zeros_like", device_result, host_result);
         let mut destination = b_dev.materialize(cuda).unwrap();
         a_dev
-            .axpby_into(cuda, &mut destination, alpha, beta)
+            .axpby_into(cuda, Dest::scaled(&mut destination, alpha, beta))
             .unwrap();
         let mut expected = b.materialize(engine).unwrap();
-        a.axpby_into(engine, &mut expected, alpha, beta).unwrap();
+        a.axpby_into(engine, Dest::scaled(&mut expected, alpha, beta))
+            .unwrap();
         same(engine, cuda, "axpby_into", destination, expected);
         let device_result = lazy_dev.scale(cuda, alpha).unwrap();
         let host_result = lazy_a.scale(engine, alpha).unwrap();
@@ -547,11 +549,11 @@ fn cuda_rows_match_host() {
         same(engine, cuda, "owned + lazy", device_result, host_result);
         let mut destination = owned_b_host.to_cuda(cuda).unwrap();
         lazy_dev
-            .axpby_into(cuda, &mut destination, alpha, beta)
+            .axpby_into(cuda, Dest::scaled(&mut destination, alpha, beta))
             .unwrap();
         let mut expected = owned_b_host.materialize(engine).unwrap();
         lazy_a
-            .axpby_into(engine, &mut expected, alpha, beta)
+            .axpby_into(engine, Dest::scaled(&mut expected, alpha, beta))
             .unwrap();
         same(
             engine,
@@ -564,7 +566,7 @@ fn cuda_rows_match_host() {
         let shared = destination.clone();
         assert_eq!(
             lazy_dev
-                .axpby_into(cuda, &mut destination, alpha, beta)
+                .axpby_into(cuda, Dest::scaled(&mut destination, alpha, beta))
                 .unwrap_err(),
             Error::DestinationShared
         );
@@ -1149,13 +1151,13 @@ macro_rules! transform_rows {
 
         // `_into`: dst = alpha T a + beta T b, from an owned and from a lazy source.
         let into = |engine: &mut dyn Engine, source: &TensorMap<_, $D>, name: &str, destination: &mut TensorMap<_, $D>| match name {
-            "permute" => source.permute_into(engine, PERMUTE.0, PERMUTE.1, destination, alpha, beta),
-            "braid" => source.braid_into(engine, PERMUTE.0, PERMUTE.1, &[0, 1, 2], destination, alpha, beta),
+            "permute" => source.permute_into(engine, PERMUTE.0, PERMUTE.1, Dest::scaled(destination, alpha, beta)),
+            "braid" => source.braid_into(engine, PERMUTE.0, PERMUTE.1, &[0, 1, 2], Dest::scaled(destination, alpha, beta)),
             "transpose" => {
                 let (codomain, domain) = rotation(source.codomain_rank(), source.rank(), 1);
-                source.transpose_into(engine, &codomain, &domain, destination, alpha, beta)
+                source.transpose_into(engine, &codomain, &domain, Dest::scaled(destination, alpha, beta))
             }
-            _ => source.repartition_into(engine, destination, alpha, beta),
+            _ => source.repartition_into(engine, Dest::scaled(destination, alpha, beta)),
         };
         for (name, forward, _) in motions {
             let mut destination = forward($engine, &b);
@@ -1193,7 +1195,7 @@ macro_rules! transform_rows {
         assert!(close(swapped.norm($engine, 2.0).unwrap(), norm));
         let mut destination = swapped.materialize($engine).unwrap();
         compact
-            .permute_into($engine, &[1], &[0], &mut destination, conv(Complex64::new(1.0, 0.0)), conv(Complex64::new(1.0, 0.0)))
+            .permute_into($engine, &[1], &[0], Dest::scaled(&mut destination, conv(Complex64::new(1.0, 0.0)), conv(Complex64::new(1.0, 0.0))))
             .unwrap();
         assert!(close(destination.norm($engine, 2.0).unwrap(), 2.0 * norm));
 
@@ -1209,16 +1211,16 @@ macro_rules! transform_rows {
                 if message == "braid levels must list one level per source axis (expected 3, got 1)"
         ));
         let mut alias = a.clone();
-        assert!(matches!(a.permute_into($engine, PERMUTE.0, PERMUTE.1, &mut alias, alpha, beta), Err(Error::DestinationShared)));
+        assert!(matches!(a.permute_into($engine, PERMUTE.0, PERMUTE.1, Dest::scaled(&mut alias, alpha, beta)), Err(Error::DestinationShared)));
         let mut mismatched = b.clone().materialize($engine).unwrap();
         assert!(matches!(
-            a.permute_into($engine, PERMUTE.0, PERMUTE.1, &mut mismatched, alpha, beta),
+            a.permute_into($engine, PERMUTE.0, PERMUTE.1, Dest::scaled(&mut mismatched, alpha, beta)),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
         let mut shared = b.permute($engine, PERMUTE.0, PERMUTE.1).unwrap();
         let _keep = shared.clone();
         assert!(matches!(
-            a.permute_into($engine, PERMUTE.0, PERMUTE.1, &mut shared, alpha, beta),
+            a.permute_into($engine, PERMUTE.0, PERMUTE.1, Dest::scaled(&mut shared, alpha, beta)),
             Err(Error::DestinationShared)
         ));
 
@@ -1396,9 +1398,7 @@ fn transform_cuda_rows_match_host() {
                 engine,
                 PERMUTE.0,
                 PERMUTE.1,
-                &mut host_destination,
-                alpha,
-                beta,
+                Dest::scaled(&mut host_destination, alpha, beta),
             )
             .unwrap();
             device
@@ -1406,9 +1406,7 @@ fn transform_cuda_rows_match_host() {
                     cuda,
                     PERMUTE.0,
                     PERMUTE.1,
-                    &mut device_destination,
-                    alpha,
-                    beta,
+                    Dest::scaled(&mut device_destination, alpha, beta),
                 )
                 .unwrap();
             agree(
@@ -1428,7 +1426,12 @@ fn transform_cuda_rows_match_host() {
         ));
         let mut alias = a_dev.clone();
         assert!(matches!(
-            a_dev.permute_into(cuda, PERMUTE.0, PERMUTE.1, &mut alias, alpha, beta),
+            a_dev.permute_into(
+                cuda,
+                PERMUTE.0,
+                PERMUTE.1,
+                Dest::scaled(&mut alias, alpha, beta)
+            ),
             Err(Error::DestinationShared)
         ));
         let mut lazy_destination = b_dev
@@ -1441,9 +1444,7 @@ fn transform_cuda_rows_match_host() {
                 cuda,
                 PERMUTE.0,
                 PERMUTE.1,
-                &mut lazy_destination,
-                alpha,
-                beta
+                Dest::scaled(&mut lazy_destination, alpha, beta)
             ),
             Err(Error::UnsupportedDestination {
                 representation: PayloadRepresentation::LazyAdjoint
@@ -1451,7 +1452,7 @@ fn transform_cuda_rows_match_host() {
         ));
         let mut mismatched = b_dev.clone();
         assert!(matches!(
-            a_dev.permute_into(cuda, PERMUTE.0, PERMUTE.1, &mut mismatched, alpha, beta),
+            a_dev.permute_into(cuda, PERMUTE.0, PERMUTE.1, Dest::scaled(&mut mismatched, alpha, beta)),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
     }
@@ -1607,9 +1608,12 @@ fn mixed_lazy_axpby_cuda_rows_match_host() {
             let zero_beta = Into::<Complex64>::into(beta) == Complex64::new(0.0, 0.0);
             let start = if zero_beta { &poisoned } else { &owned };
             let mut device = start.to_cuda(cuda).unwrap();
-            lazy_dev.axpby_into(cuda, &mut device, alpha, beta).unwrap();
+            lazy_dev
+                .axpby_into(cuda, Dest::scaled(&mut device, alpha, beta))
+                .unwrap();
             let mut host = start.materialize(engine).unwrap();
-            lazy.axpby_into(engine, &mut host, alpha, beta).unwrap();
+            lazy.axpby_into(engine, Dest::scaled(&mut host, alpha, beta))
+                .unwrap();
             same(
                 engine,
                 cuda,
@@ -1752,7 +1756,7 @@ macro_rules! contract_rows {
             assert!(agree($engine, &flat, &permuted), "{name}: flat = contract then permute");
 
             let mut destination = x.compose($engine, &a).unwrap();
-            x.contract_into($engine, &twisted_b, &CANONICAL, &mut destination, alpha, beta)
+            x.contract_into($engine, &twisted_b, &CANONICAL, Dest::scaled(&mut destination, alpha, beta))
                 .unwrap();
             let expected = alpha_c * ab + beta_c * aa;
             assert!(close_c(destination.tr($engine).unwrap().into(), expected), "{name}: contract_into");
@@ -1781,7 +1785,7 @@ macro_rules! contract_rows {
         let b_dense_compose = b.compose($engine, &dense).unwrap();
         assert!(agree($engine, &b_compose, &b_dense_compose), "compact compose");
         let mut destination = b.contract($engine, &dense, &SCALE).unwrap();
-        b.contract_into($engine, &compact, &SCALE, &mut destination, alpha, beta)
+        b.contract_into($engine, &compact, &SCALE, Dest::scaled(&mut destination, alpha, beta))
             .unwrap();
         let expected = scaled.scale($engine, conv(alpha_c + beta_c)).unwrap();
         assert!(agree($engine, &destination, &expected), "compact contract_into");
@@ -1796,24 +1800,24 @@ macro_rules! contract_rows {
         ));
         let mut alias = b.clone();
         assert!(matches!(
-            x.contract_into($engine, &b, &CANONICAL, &mut alias, alpha, beta),
+            x.contract_into($engine, &b, &CANONICAL, Dest::scaled(&mut alias, alpha, beta)),
             Err(Error::DestinationShared)
         ));
         let mut lazy = x.compose($engine, &a).unwrap().adjoint($engine).unwrap();
         assert!(matches!(
-            x.contract_into($engine, &b, &CANONICAL, &mut lazy, alpha, beta),
+            x.contract_into($engine, &b, &CANONICAL, Dest::scaled(&mut lazy, alpha, beta)),
             Err(Error::UnsupportedDestination { representation: PayloadRepresentation::LazyAdjoint })
         ));
         let mut mismatched = a.scale($engine, one).unwrap();
         assert!(matches!(
-            x.contract_into($engine, &b, &CANONICAL, &mut mismatched, alpha, beta),
+            x.contract_into($engine, &b, &CANONICAL, Dest::scaled(&mut mismatched, alpha, beta)),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
         assert!(agree($engine, &mismatched, &a), "a rejected destination is untouched");
         let mut shared = x.compose($engine, &a).unwrap();
         let keep = shared.clone();
         assert!(matches!(
-            x.contract_into($engine, &b, &CANONICAL, &mut shared, alpha, beta),
+            x.contract_into($engine, &b, &CANONICAL, Dest::scaled(&mut shared, alpha, beta)),
             Err(Error::DestinationShared)
         ));
         let x_compose = x.compose($engine, &a).unwrap();
@@ -1986,16 +1990,19 @@ fn contract_cuda_rows_match_host() {
             }
             let mut host_destination = host.compose(engine, a).unwrap();
             let mut device_destination = device.compose(cuda, &a_dev).unwrap();
-            host.contract_into(engine, &tb, &CANONICAL, &mut host_destination, alpha, beta)
-                .unwrap();
+            host.contract_into(
+                engine,
+                &tb,
+                &CANONICAL,
+                Dest::scaled(&mut host_destination, alpha, beta),
+            )
+            .unwrap();
             device
                 .contract_into(
                     cuda,
                     &tb_dev,
                     &CANONICAL,
-                    &mut device_destination,
-                    alpha,
-                    beta,
+                    Dest::scaled(&mut device_destination, alpha, beta),
                 )
                 .unwrap();
             agree(
@@ -2010,19 +2017,29 @@ fn contract_cuda_rows_match_host() {
         let x = a_dev.adjoint(cuda).unwrap().materialize(cuda).unwrap();
         let mut alias = b_dev.clone();
         assert!(matches!(
-            x.contract_into(cuda, &b_dev, &CANONICAL, &mut alias, alpha, beta),
+            x.contract_into(
+                cuda,
+                &b_dev,
+                &CANONICAL,
+                Dest::scaled(&mut alias, alpha, beta)
+            ),
             Err(Error::DestinationShared)
         ));
         let mut lazy = x.compose(cuda, &a_dev).unwrap().adjoint(cuda).unwrap();
         assert!(matches!(
-            x.contract_into(cuda, &b_dev, &CANONICAL, &mut lazy, alpha, beta),
+            x.contract_into(
+                cuda,
+                &b_dev,
+                &CANONICAL,
+                Dest::scaled(&mut lazy, alpha, beta)
+            ),
             Err(Error::UnsupportedDestination {
                 representation: PayloadRepresentation::LazyAdjoint
             })
         ));
         let mut mismatched = a_dev.clone().to_host(cuda).unwrap().to_cuda(cuda).unwrap();
         assert!(matches!(
-            x.contract_into(cuda, &b_dev, &CANONICAL, &mut mismatched, alpha, beta),
+            x.contract_into(cuda, &b_dev, &CANONICAL, Dest::scaled(&mut mismatched, alpha, beta)),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
     }
@@ -2152,7 +2169,7 @@ macro_rules! trace_rows {
             let full = x.trace_pairs($engine, &[(0, 2), (1, 3)]).unwrap();
             assert!(close_c(full.scalar($engine).unwrap().into(), expected_full), "{name}: full trace");
             let mut destination = b.trace_pairs($engine, &[(0, 2)]).unwrap();
-            x.trace_pairs_into($engine, &[(0, 2)], &mut destination, alpha, beta)
+            x.trace_pairs_into($engine, &[(0, 2)], Dest::scaled(&mut destination, alpha, beta))
                 .unwrap();
             let expected = alpha_c * expected_partial + beta_c * b_partial;
             assert!(close_c(tr($engine, &destination), expected), "{name}: trace_pairs_into");
@@ -2180,7 +2197,7 @@ macro_rules! trace_rows {
         assert!(close_c(compact_value, value), "compact trace_pairs");
         let mut destination = dense.trace_pairs($engine, &[(0, 1)]).unwrap();
         compact
-            .trace_pairs_into($engine, &[(0, 1)], &mut destination, alpha, beta)
+            .trace_pairs_into($engine, &[(0, 1)], Dest::scaled(&mut destination, alpha, beta))
             .unwrap();
         let scalar: Complex64 = destination.scalar($engine).unwrap().into();
         assert!(close_c(scalar, (alpha_c + beta_c) * value), "compact trace_pairs_into");
@@ -2193,25 +2210,25 @@ macro_rules! trace_rows {
         // Doubly invalid: the source's own storage, of the wrong space.
         let mut alias = a.clone();
         assert!(matches!(
-            a.trace_pairs_into($engine, &[(0, 2)], &mut alias, alpha, beta),
+            a.trace_pairs_into($engine, &[(0, 2)], Dest::scaled(&mut alias, alpha, beta)),
             Err(Error::DestinationShared)
         ));
         // Doubly invalid: a lazy adjoint, of the wrong space.
         let mut lazy = b.adjoint($engine).unwrap();
         assert!(matches!(
-            a.trace_pairs_into($engine, &[(0, 2)], &mut lazy, alpha, beta),
+            a.trace_pairs_into($engine, &[(0, 2)], Dest::scaled(&mut lazy, alpha, beta)),
             Err(Error::UnsupportedDestination { representation: PayloadRepresentation::LazyAdjoint })
         ));
         let mut mismatched = b.scale($engine, one).unwrap();
         assert!(matches!(
-            a.trace_pairs_into($engine, &[(0, 2)], &mut mismatched, alpha, beta),
+            a.trace_pairs_into($engine, &[(0, 2)], Dest::scaled(&mut mismatched, alpha, beta)),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
         assert!(agree($engine, &mismatched, &b), "a rejected destination is untouched");
         let mut shared = b.trace_pairs($engine, &[(0, 2)]).unwrap();
         let keep = shared.clone();
         assert!(matches!(
-            a.trace_pairs_into($engine, &[(0, 2)], &mut shared, alpha, beta),
+            a.trace_pairs_into($engine, &[(0, 2)], Dest::scaled(&mut shared, alpha, beta)),
             Err(Error::DestinationShared)
         ));
         let b_trace_pairs = b.trace_pairs($engine, &[(0, 2)]).unwrap();
@@ -2363,10 +2380,18 @@ fn trace_cuda_rows_match_host() {
             }
             let mut host_destination = b.trace_pairs(engine, &[(0, 2)]).unwrap();
             let mut device_destination = b_dev.trace_pairs(cuda, &[(0, 2)]).unwrap();
-            host.trace_pairs_into(engine, &[(0, 2)], &mut host_destination, alpha, beta)
-                .unwrap();
+            host.trace_pairs_into(
+                engine,
+                &[(0, 2)],
+                Dest::scaled(&mut host_destination, alpha, beta),
+            )
+            .unwrap();
             device
-                .trace_pairs_into(cuda, &[(0, 2)], &mut device_destination, alpha, beta)
+                .trace_pairs_into(
+                    cuda,
+                    &[(0, 2)],
+                    Dest::scaled(&mut device_destination, alpha, beta),
+                )
                 .unwrap();
             agree(
                 engine,
@@ -2379,19 +2404,19 @@ fn trace_cuda_rows_match_host() {
         // Admission, as on Host with the storage noun.
         let mut alias = a_dev.clone();
         assert!(matches!(
-            a_dev.trace_pairs_into(cuda, &[(0, 2)], &mut alias, alpha, beta),
+            a_dev.trace_pairs_into(cuda, &[(0, 2)], Dest::scaled(&mut alias, alpha, beta)),
             Err(Error::DestinationShared)
         ));
         let mut lazy = b_dev.adjoint(cuda).unwrap();
         assert!(matches!(
-            a_dev.trace_pairs_into(cuda, &[(0, 2)], &mut lazy, alpha, beta),
+            a_dev.trace_pairs_into(cuda, &[(0, 2)], Dest::scaled(&mut lazy, alpha, beta)),
             Err(Error::UnsupportedDestination {
                 representation: PayloadRepresentation::LazyAdjoint
             })
         ));
         let mut mismatched = b_dev.clone().to_host(cuda).unwrap().to_cuda(cuda).unwrap();
         assert!(matches!(
-            a_dev.trace_pairs_into(cuda, &[(0, 2)], &mut mismatched, alpha, beta),
+            a_dev.trace_pairs_into(cuda, &[(0, 2)], Dest::scaled(&mut mismatched, alpha, beta)),
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
         agree(

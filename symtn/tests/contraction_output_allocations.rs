@@ -11,6 +11,7 @@ use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::hint::black_box;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
+use symtn::typed::Dest;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{U1FusionRule, U1Irrep};
@@ -197,7 +198,7 @@ fn moved_output_allocations(r: &[(i32, usize)]) -> (usize, (u64, u64)) {
         domain: &[1],
     };
     let mut destination = lhs.contract(engine, &rhs, &spec).unwrap();
-    lhs.contract_into(engine, &rhs, &spec, &mut destination, 1.0, 0.0)
+    lhs.contract_into(engine, &rhs, &spec, Dest::overwrite(&mut destination))
         .unwrap();
     let payload_len = destination.dense_data().unwrap().len();
     let payload_bytes = std::mem::size_of_val(destination.dense_data().unwrap());
@@ -205,7 +206,7 @@ fn moved_output_allocations(r: &[(i32, usize)]) -> (usize, (u64, u64)) {
         black_box(lhs.contract(engine, &rhs, &spec).unwrap());
     });
     let into = measure(payload_bytes, || {
-        lhs.contract_into(engine, &rhs, &spec, &mut destination, 1.0, 0.0)
+        lhs.contract_into(engine, &rhs, &spec, Dest::overwrite(&mut destination))
             .unwrap();
     });
     (
