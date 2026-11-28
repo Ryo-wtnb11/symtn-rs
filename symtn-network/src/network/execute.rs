@@ -560,6 +560,7 @@ impl PlannedNetwork {
         S: NetworkOperandStorage<R, D>,
     {
         let engine = cx.engine();
+        workspace.drop_foreign_device_state(engine);
         workspace.last_slice_stats = None;
         if self.sliced.is_some() {
             let (result, stats) =
@@ -588,7 +589,6 @@ impl PlannedNetwork {
         D: TensorScalar,
         S: NetworkOperandStorage<R, D>,
     {
-        workspace.drop_foreign_device_state(engine);
         if tensors.len() != self.schedule.input_ranks.len() {
             return Err(invalid(format!(
                 "plan has {} operands but {} tensors were given",

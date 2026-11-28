@@ -2392,6 +2392,45 @@ fn a_network_workspace_follows_the_engine_of_each_call() {
         .iter()
         .all(|buffers| buffers.output.is_none()));
     assert!(workspace.slots.iter().all(Option::is_none));
+
+    // A sliced plan refused on another engine drops the old engine's
+    // intermediates as well.
+    planned
+        .execute(first, &[&on_a[0], &on_a[1], &on_a[2]], &mut workspace)
+        .unwrap();
+    let ir = NetworkIR::from_labels(
+        vec![
+            labels(&["a", "b"]),
+            labels(&["b", "c"]),
+            labels(&["c", "d"]),
+        ],
+        labels(&["a", "d"]),
+    )
+    .unwrap();
+    let cost =
+        DenseCostModel::from_network(&ir, &vec![DenseTensorInfo::new(vec![5, 5]); 3]).unwrap();
+    let slice = crate::greedy_slice(
+        &ir,
+        planned.plan(),
+        &cost,
+        5,
+        crate::SliceLabels::IncludeOutput,
+    );
+    let sliced = network
+        .plan(
+            &[&host[0], &host[1], &host[2]],
+            &SlicedPlan::new(planned.plan().clone(), slice),
+        )
+        .unwrap();
+    assert!(matches!(
+        sliced.execute(second, &[&on_b[0], &on_b[1], &on_b[2]], &mut workspace),
+        Err(Error::UnsupportedOnDevice(_))
+    ));
+    assert!(workspace
+        .intermediates
+        .iter()
+        .all(|buffers| buffers.output.is_none()));
+    assert!(workspace.slots.iter().all(Option::is_none));
 }
 
 /// A provider failure after a completed slice is the typed provider error,
