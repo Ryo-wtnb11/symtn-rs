@@ -9,7 +9,18 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Ryo-wtnb11/symtn-rs"
 
 [workspace.dependencies]
-strided-kernel = { version = "0.14.0", features = ["parallel"] }
+strided-kernel = { version = "0.15.0", features = ["parallel"] }
+
+# Why: tenferro-rs main (0.13.0) and threadteam main are ahead of their
+# crates.io releases. One git revision each keeps one tenferro build and one
+# threadteam crate (so one `Exec` type) for every crate in the graph.
+[patch.crates-io]
+tenferro-cpu = { git = "https://github.com/tensor4all/tenferro-rs", rev = "57a6f31f308adcf4fad78cb705fbc0083be31b13" }
+tenferro-gpu = { git = "https://github.com/tensor4all/tenferro-rs", rev = "57a6f31f308adcf4fad78cb705fbc0083be31b13" }
+tenferro-linalg = { git = "https://github.com/tensor4all/tenferro-rs", rev = "57a6f31f308adcf4fad78cb705fbc0083be31b13" }
+tenferro-runtime = { git = "https://github.com/tensor4all/tenferro-rs", rev = "57a6f31f308adcf4fad78cb705fbc0083be31b13" }
+tenferro-tensor = { git = "https://github.com/tensor4all/tenferro-rs", rev = "57a6f31f308adcf4fad78cb705fbc0083be31b13" }
+threadteam = { git = "https://github.com/tensor4all/threadteam-rs", rev = "1e6a9ce8c963510ad18111b7d3c2b7cec94e8002" }
 
 [profile.dev]
 debug = "line-tables-only"
