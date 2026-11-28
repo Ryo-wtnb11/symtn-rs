@@ -127,12 +127,6 @@ pub enum ContractError {
     UnsupportedReduction {
         label: String,
     },
-    UnsupportedPlannerProjection {
-        label: String,
-    },
-    UnknownPlannerSliceLabel {
-        label: String,
-    },
     PlannerSliceKindMismatch {
         label: String,
         expected: SliceKind,
@@ -223,13 +217,6 @@ impl Display for ContractError {
                 "einsum: contracted label `{label}` occurs on a single operand \
                  (single-operand reduction) — not supported"
             ),
-            ContractError::UnsupportedPlannerProjection { label } => write!(
-                f,
-                "planner projected sliced index `{label}`; only complete index slicing is supported"
-            ),
-            ContractError::UnknownPlannerSliceLabel { label } => {
-                write!(f, "planner returned unknown sliced index `{label}`")
-            }
             ContractError::PlannerSliceKindMismatch {
                 label,
                 expected,

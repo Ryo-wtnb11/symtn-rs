@@ -28,10 +28,11 @@
 //!
 //! ## Path search and slicing
 //!
-//! - **cotengra external path search**: the optional `cotengra-python`
-//!   feature calls the installed Python `cotengra` package for path search
-//!   while keeping execution in Rust. The optional `opt-path` feature wraps
-//!   the `opt-einsum-path` crate for optimal / dp / branch-and-bound searches.
+//! - **Order search**: [`GreedyDenseOptimizer`] (the deterministic default)
+//!   and [`LabelOrderDenseOptimizer`]; the optional `omeco` feature adds
+//!   `OmecoOptimizer` (exact search and TreeSA). An order found elsewhere,
+//!   e.g. by cotengra in the application, enters through
+//!   [`ContractionPlan::from_active_pair_path`].
 //! - **Sliced execution**: the slicing *decision* types ([`SlicePlan`],
 //!   [`greedy_slice`]) choose the sliced labels; [`Network::plan`] given a
 //!   [`SlicedPlan`] lowers them, and [`PlannedNetwork::execute`] runs the
@@ -54,15 +55,13 @@ mod braiding_probe;
 mod injected_generic;
 
 mod cost;
-#[cfg(feature = "cotengra-python")]
-mod cotengra_python;
 mod error;
 mod ir;
 mod labels;
 mod network;
+#[cfg(feature = "omeco")]
+mod omeco_optimizer;
 mod optimizer;
-#[cfg(feature = "opt-path")]
-mod pathopt;
 mod plan;
 mod plancache;
 #[cfg(test)]
@@ -72,31 +71,29 @@ mod stepflow;
 mod tree;
 
 pub use cost::{DenseCostModel, DenseTensorInfo};
-#[cfg(feature = "cotengra-python")]
-pub use cotengra_python::CotengraPythonOptimizer;
 pub use error::{ContractError, Result};
 pub use ir::{HyperEdge, NetworkIR, TensorNode};
 pub use labels::{LabelOccurrence, TemporaryLabel, TensorAxis, TensorId};
 pub use network::{
     Network, NetworkExecutionWorkspace, NetworkOperand, PlannedNetwork, SymmetricSliceStats,
 };
+/// omeco's TreeSA configuration, for [`crate::OmecoOptimizer::TreeSa`]: `TreeSA`
+/// and the types of its fields, so callers need no direct omeco dependency.
+#[cfg(feature = "omeco")]
+pub mod omeco {
+    pub use ::omeco::{expr_tree::DecompositionType, Initializer, ScoreFunction, TreeSA};
+}
+#[cfg(feature = "omeco")]
+pub use omeco_optimizer::OmecoOptimizer;
 pub use optimizer::{
     ContractionStep, DenseContractionOptimizer, DensePlanCostReport, GreedyDenseOptimizer,
     LabelOrderDenseOptimizer,
-};
-#[cfg(feature = "opt-path")]
-pub use pathopt::{
-    BranchLevel, DpObjective, OptEinsumPathOptimizer, PathMemoryLimit, PathStrategy,
 };
 pub use plan::{ActivePair, ContractionPlan};
 pub use plancache::{
     clear_plan_cache, configure_plan_cache, load_plan_cache, plan_cache_config, plan_cache_stats,
     save_plan_cache, Optimizer, PlanCacheConfig, PlanCacheStats, ReplanPolicy,
     DEFAULT_PLAN_CACHE_CAPACITY, DEFAULT_REPLAN_DRIFT_FACTOR, DEFAULT_WORKSPACE_BUDGET_BYTES,
-};
-#[cfg(feature = "cotengra-python")]
-pub use plancache::{
-    CotengraMinimize, CotengraPythonConfig, CotengraPythonMethod, CotengraSlicingConfig,
 };
 pub use slice::{
     greedy_slice, slice_plan_for, DegeneracyRange, SectorSlice, SliceKind, SliceLabels, SlicePlan,

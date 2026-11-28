@@ -34,7 +34,7 @@ forms, both re-exported from `symtn::sector`.
 multiplicity-free tensor pipeline, CUDA included, with a physical carrier
 basis for dense conversion (TensorKit's descending-`m` SU(2) order per
 rank-one factor).
-Contraction-order planners and their configuration (`opt-path`, `cotengra-python`) belong to `symtn-network`.
+Contraction-order planners (`GreedyDenseOptimizer`, the `omeco` feature) belong to `symtn-network`.
 
 The `krylov` feature makes Host `TensorMap` a vector of the
 [krylov](https://docs.rs/krylov) crate (re-exported as `symtn::krylov`), so

@@ -17,18 +17,14 @@ default = ["cpu-faer"]
 cpu-faer = ["symtn/cpu-faer"]
 cgc-gen = ["symtn/cgc-gen"]
 cuda = ["symtn/cuda"]
-# Wraps the `opt-einsum-path` crate (Apache-2.0) as a
-# `DenseContractionOptimizer` backend (optimal / dp / branch / random-greedy).
-opt-path = ["dep:opt-einsum-path"]
-# Calls the installed Python `cotengra` package as an external path planner.
-cotengra-python = ["dep:command-group", "dep:libc", "dep:serde_json"]
+# `OmecoOptimizer`: omeco's exact search and TreeSA as a
+# `DenseContractionOptimizer` backend.
+omeco = ["dep:omeco"]
 
 [dependencies]
-command-group = { version = "5.0.1", optional = true }
 symtn = { package = "symtn", version = "0.1.1", path = "../symtn", default-features = false }
-opt-einsum-path = { version = "0.2", optional = true }
+omeco = { version = "0.2.6", optional = true }
 symtn-macros = { version = "0.1.1", path = "../symtn-macros" }
-serde_json = { version = "1", optional = true }
 # O(1) LRU (HashMap + intrusive linked list), the Rust analog of the
 # `LRUCache.jl` that TensorKit uses for its global caches. Replaces the
 # linear-scan `VecDeque` LRU whose touch was O(capacity) per plan-cache hit.
@@ -37,9 +33,6 @@ lru = "0.12"
 [dev-dependencies]
 # Native test providers implement the provider seal through `testing`.
 symtn-core = { version = "0.1.1", path = "../symtn-core", features = ["testing"] }
-
-[target.'cfg(unix)'.dependencies]
-libc = { version = "0.2", optional = true }
 
 [[bench]]
 name = "cuda_operation_matrix"

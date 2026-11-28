@@ -10,8 +10,8 @@ optimizer traits, and slicing types let expert users inspect or reuse structural
 symtn executes the resulting plan locally.
 
 The default host backend is `cpu-faer`; enable at least one host backend.
-`opt-path` enables opt-einsum-path search and `cotengra-python` calls Python
-cotengra for path search. `cuda` still requires a host backend, while
+`omeco` adds omeco's exact and TreeSA order search
+([contraction order](../docs/contraction_order.md)). `cuda` still requires a host backend, while
 `cgc-gen` forwards fusion-symbols' `lie-generated`, which `LieGroupFusionRule`
 needs beyond A1/B1/C1/D2 factors; see `Cargo.toml` for the
 other flags.

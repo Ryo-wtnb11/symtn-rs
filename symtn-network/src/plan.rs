@@ -100,7 +100,7 @@ pub struct ActivePair {
 /// pair positions only to select a tree edge; symtn additionally assigns
 /// fermionic and orientation semantics to lhs/rhs. The public explicit path
 /// constructor intentionally does not call this helper.
-#[cfg(any(feature = "opt-path", feature = "cotengra-python"))]
+#[cfg(feature = "omeco")]
 pub(crate) fn orient_unordered_active_pairs(
     path: &[ActivePair],
     tensor_count: usize,
@@ -192,6 +192,36 @@ impl ContractionPlan {
 
     /// The plan of an active-pair path (positions in the shrinking list of
     /// live tensors, results appended), as cotengra and opt_einsum report it.
+    ///
+    /// This is how an order searched outside symtn enters: run cotengra (or
+    /// any planner) in the application and pass its path here. Each pair is
+    /// taken as written, `(lhs, rhs)`; lhs/rhs order sets the fermionic and
+    /// orientation semantics of the step.
+    ///
+    /// ```python
+    /// import cotengra as ctg
+    ///
+    /// inputs = [("a", "b"), ("b", "c"), ("c", "d")]
+    /// size_dict = {"a": 2, "b": 64, "c": 64, "d": 2}
+    /// path = ctg.array_contract_path(inputs, ("a", "d"), size_dict=size_dict, optimize="auto-hq")
+    /// print(path)  # a pair path such as ((0, 1), (0, 1))
+    /// ```
+    ///
+    /// ```
+    /// use symtn_network::{ActivePair, ContractionPlan, DenseCostModel, DenseTensorInfo, NetworkIR};
+    ///
+    /// let ir = NetworkIR::from_labels(
+    ///     vec![vec!["a".into(), "b".into()], vec!["b".into(), "c".into()], vec!["c".into(), "d".into()]],
+    ///     vec!["a".into(), "d".into()],
+    /// )?;
+    /// let infos = [vec![2, 64], vec![64, 64], vec![64, 2]].map(DenseTensorInfo::new);
+    /// let cost = DenseCostModel::from_network(&ir, &infos)?;
+    /// let path = [ActivePair::new(0, 1), ActivePair::new(0, 1)]; // from the planner
+    /// let plan = ContractionPlan::from_active_pair_path(&ir, &path, &cost)?;
+    /// assert_eq!(plan.active_pair_path()?, path);
+    /// // `network.plan(&tensors, &plan)` then validates it against the operands.
+    /// # Ok::<(), symtn_network::ContractError>(())
+    /// ```
     pub fn from_active_pair_path(
         ir: &NetworkIR,
         path: &[ActivePair],
