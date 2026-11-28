@@ -13,8 +13,7 @@
 //!
 //! ```
 //! use std::sync::Arc;
-//! use fusion_symbols::table::TableCategory;
-//! use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+//! use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
 //! use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,8 +39,8 @@ pub use symtn_core::{
 /// Built-in fusion rules, their sector labels, and product constructors.
 pub use symtn_core::{
     CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep, ProductAdmission,
-    ProductFusionRule, ProductFusionRuleError, ProductSector, SectorId, U1FusionRule, U1Irrep,
-    ZNFusionRule, ZNIrrep,
+    ProductFusionRule, ProductFusionRuleError, ProductSector, SectorId, TableCategory, TableError,
+    TableObject, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 /// The fusion rule of a `fusion_symbols` category: the extension point for a
 /// category defined outside symtn, with its codec and admission vocabulary.

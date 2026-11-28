@@ -630,8 +630,7 @@ where
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use fusion_symbols::table::TableCategory;
-    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();

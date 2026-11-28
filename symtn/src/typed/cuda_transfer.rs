@@ -41,8 +41,7 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     ///
     /// ```compile_fail
     /// use num_complex::Complex64;
-    /// use fusion_symbols::table::TableCategory;
-    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::{Error, TensorMap};
     ///
@@ -58,8 +57,7 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     ///
     /// ```compile_fail
     /// use num_complex::Complex64;
-    /// use fusion_symbols::table::TableCategory;
-    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::{Direction, Error, TensorMap};
     ///

@@ -5,7 +5,7 @@
 use std::sync::OnceLock;
 
 use crate::sector_types::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
-pub use fusion_symbols::table::{TableCategory, TableObject};
+pub use crate::sector_types::{TableCategory, TableObject};
 
 pub type TableCategoryRule =
     CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;

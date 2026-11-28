@@ -41,8 +41,9 @@ pub use symtn_sectors::{
     MultiplicityFreeRigidSymbols, PhysicalBasisError, PhysicalFusionBasis, ProductAdmission,
     ProductFusionRule, ProductFusionRuleError, ProductSector, ProductSectorCodec,
     ProductSectorCodecError, ProductSectorComponent, RuleIdentity, SectorCodec, SectorId,
-    SectorOrderKey, SectorVec, SymbolShapeError, TensorKitProductCodec, TypedSectorAdmission,
-    U1FusionRule, U1Irrep, UncertifiedUnitAdmission, ZNFusionRule, ZNIrrep,
+    SectorOrderKey, SectorVec, SymbolShapeError, TableCategory, TableError, TableObject,
+    TensorKitProductCodec, TypedSectorAdmission, U1FusionRule, U1Irrep, UncertifiedUnitAdmission,
+    ZNFusionRule, ZNIrrep,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use symtn_sectors::{GenericFusionSymbols, GenericRigidSymbols};

@@ -58,6 +58,7 @@ pub use fusion_symbols::{
     fermion::FermionParityIrrep,
     finite::ZNIrrep,
     lie::{CU1Irrep, GroupId, LieIrrep, U1Irrep},
+    table::{TableCategory, TableError, TableObject},
 };
 
 mod lie;

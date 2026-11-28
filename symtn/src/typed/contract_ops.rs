@@ -56,8 +56,7 @@ where
     /// [`GenericTensorError::TensorProduct`].
     ///
     /// ```compile_fail
-    /// use fusion_symbols::table::TableCategory;
-    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::TensorMap;
     /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, f64>) {
@@ -646,8 +645,7 @@ where
     /// use std::sync::Arc;
     ///
     /// use num_complex::Complex64;
-    /// use fusion_symbols::table::TableCategory;
-    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
@@ -998,8 +996,7 @@ where
     /// [`Self::contract`].
     ///
     /// ```compile_fail
-    /// use fusion_symbols::table::TableCategory;
-    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::TensorMap;
     /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, f64>) {

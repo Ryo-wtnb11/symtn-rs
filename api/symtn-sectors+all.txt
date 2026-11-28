@@ -3,6 +3,9 @@ pub use symtn_sectors::CU1Irrep
 pub use symtn_sectors::FermionParityIrrep
 pub use symtn_sectors::GroupId
 pub use symtn_sectors::LieIrrep
+pub use symtn_sectors::TableCategory
+pub use symtn_sectors::TableError
+pub use symtn_sectors::TableObject
 pub use symtn_sectors::U1Irrep
 pub use symtn_sectors::ZNIrrep
 pub mod symtn_sectors::testing

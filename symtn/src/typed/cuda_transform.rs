@@ -26,8 +26,7 @@ use super::*;
 /// ```
 ///
 /// ```compile_fail
-/// use fusion_symbols::table::TableCategory;
-/// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+/// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
 /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///

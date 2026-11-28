@@ -91,8 +91,7 @@ where
     ///
     /// ```compile_fail
     /// use std::sync::Arc;
-    /// use fusion_symbols::table::TableCategory;
-    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     /// let runtime = Runtime::new();
