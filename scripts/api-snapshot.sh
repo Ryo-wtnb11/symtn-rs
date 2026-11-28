@@ -85,7 +85,8 @@ done
 UNEXPORTED_ALLOWED="
     AdjointBlockMap BlockStructure BoundDynamicFusionMapSpace
     CheckedGenericFactorPlanError CoefficientAlgebra ContractDestinationInit
-    CudaDenseContext DenseBlockScalar DenseRecouplingScalar
+    CudaScalarOperands
+    DenseBlockScalar DenseRecouplingScalar
     FactorMode FactorSpaceAuthority FusionProductSpace
     FusionTreeGroupRef FusionTreeHomSpace FusionTreePairRef FusionTreeRef
     LazyAdjointSpace PhysicalConversionError PlanarContractOrders

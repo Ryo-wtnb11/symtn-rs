@@ -9,6 +9,8 @@ pub mod symtn::expert
 pub use symtn::expert::BlockLayout
 pub use symtn::expert::BlockRef
 pub use symtn::expert::BlockView
+pub use symtn::expert::CudaDenseContext
+pub use symtn::expert::CudaDenseStorage
 pub use symtn::expert::CudaTransferStats
 pub use symtn::expert::DenseBackend
 pub use symtn::expert::DenseDType

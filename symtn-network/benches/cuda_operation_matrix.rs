@@ -558,7 +558,7 @@ mod device {
         let open_and_warm = || {
             let start = Instant::now();
             let mut engine = cuda_engine(config);
-            symtn_dense::CudaDenseContext::new(&mut engine)
+            symtn::expert::CudaDenseContext::new(&mut engine)
                 .and_then(|mut context| context.warm_up())
                 .expect("CUDA engine warm-up for the construction measurement");
             start.elapsed().as_nanos()
@@ -624,7 +624,7 @@ mod device {
         let runtime = Runtime::new();
         let mut cpu = CpuEngine::serial();
         let mut cuda = cuda_engine(config);
-        symtn_dense::CudaDenseContext::new(&mut cuda)
+        symtn::expert::CudaDenseContext::new(&mut cuda)
             .and_then(|mut context| context.warm_up())
             .expect("CUDA engine warm-up");
         let host: Vec<TensorMap<R, D>> = (0..count)

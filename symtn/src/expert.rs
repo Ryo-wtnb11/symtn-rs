@@ -18,6 +18,10 @@ pub use symtn_core::{
 /// Per-thread CUDA boundary counters.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{cuda_transfer_stats, reset_cuda_transfer_stats, CudaTransferStats};
+/// The device context `CudaStorage` uploads and downloads through, and the
+/// device buffer inside a `CudaStorage`.
+#[cfg(feature = "cuda")]
+pub use symtn_dense::{CudaDenseContext, CudaDenseStorage};
 /// The dense-kernel failure carried by `OperationError::Dense`, and the
 /// dtype and backend its variants name.
 pub use symtn_dense::{DenseBackend, DenseDType, DenseError};
