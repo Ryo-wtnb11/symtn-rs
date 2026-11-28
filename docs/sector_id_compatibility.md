@@ -53,7 +53,7 @@ order:
 | Z_N, fermion parity | Ascending label |
 | SU(2) | Ascending twice-spin |
 | CU(1) | Charge magnitude, with `0+` before `0-` |
-| TableRule | AnyonWiki object order; Ising is `1, ψ, σ`, unlike TensorKit |
+| `CategoryRule<TableCategory, _>` | AnyonWiki object order; Ising is `1, ψ, σ`, unlike TensorKit |
 | Products | Total enumeration degree, then lexicographic over flattened factors |
 | `LieGroupFusionRule` | TensorKit `ProductSector` order over the `GroupId` factors: sum of factor positions, then lexicographic. A simple factor's position is its graded-lexicographic Dynkin rank (SUNRepresentations' SU(N) order; the Dynkin label for SU(2)), D2 contributes two SU(2) positions and a torus charge its U(1) position above. A single simple factor's key is its ID; IDs remain the codec rank |
 

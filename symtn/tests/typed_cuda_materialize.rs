@@ -13,6 +13,7 @@
 #![cfg(feature = "cuda")]
 
 use crate::su2::{su2_irrep, su2_rule};
+use symtn::typed::Dest;
 
 use std::sync::Arc;
 
@@ -217,9 +218,7 @@ fn check<R, D>(
             cuda,
             &codomain,
             &domain,
-            &mut destination,
-            D::two(),
-            D::from_real(0.0),
+            Dest::scaled(&mut destination, D::two(), D::from_real(0.0)),
         )
         .unwrap();
     assert_eq!(
@@ -233,9 +232,7 @@ fn check<R, D>(
             cuda,
             &codomain,
             &domain,
-            &mut alias,
-            D::two(),
-            D::from_real(0.0)
+            Dest::scaled(&mut alias, D::two(), D::from_real(0.0))
         ),
         Err(symtn::typed::Error::DestinationShared)
     ));

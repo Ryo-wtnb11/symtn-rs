@@ -75,11 +75,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
-use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, TableRule, TableSector, U1FusionRule, U1Irrep,
-};
+use crate::tables::*;
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
     BlockFusionTrees, Complex64, ContractSpec, GradedSpace, SectorSpectrum, TensorMap,
 };
@@ -260,7 +260,7 @@ macro_rules! contract_cell {
             $key,
             $d,
             $name,
-            |d, a, b| $lhs.$into($engine, $rhs_arg, &spec, d, a, b),
+            |d, a, b| $lhs.$into($engine, $rhs_arg, &spec, Dest::scaled(d, a, b)),
             || assert_eq!(
                 ($lhs.dense_data().is_err(), $rhs.dense_data().is_err()),
                 cold,
@@ -366,7 +366,7 @@ macro_rules! bond_cells {
             $d,
             "bond identity permute",
             |t| t.permute($engine, &[0], &[1]),
-            |d, a, b| $source.permute_into($engine, &[0], &[1], d, a, b)
+            |d, a, b| $source.permute_into($engine, &[0], &[1], Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -377,7 +377,7 @@ macro_rules! bond_cells {
             $d,
             "bond swap permute",
             |t| t.permute($engine, &[1], &[0]),
-            |d, a, b| $source.permute_into($engine, &[1], &[0], d, a, b)
+            |d, a, b| $source.permute_into($engine, &[1], &[0], Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -388,7 +388,7 @@ macro_rules! bond_cells {
             $d,
             "bond swap transpose",
             |t| t.transpose($engine, &[1], &[0]),
-            |d, a, b| $source.transpose_into($engine, &[1], &[0], d, a, b)
+            |d, a, b| $source.transpose_into($engine, &[1], &[0], Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -399,7 +399,7 @@ macro_rules! bond_cells {
             $d,
             "bond braid",
             |t| t.braid($engine, &[1], &[0], &[0, 1]),
-            |d, a, b| $source.braid_into($engine, &[1], &[0], &[0, 1], d, a, b)
+            |d, a, b| $source.braid_into($engine, &[1], &[0], &[0, 1], Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -410,7 +410,7 @@ macro_rules! bond_cells {
             $d,
             "bond repartition (0, 2)",
             |t| t.repartition($engine, 0),
-            |d, a, b| $source.repartition_into($engine, d, a, b)
+            |d, a, b| $source.repartition_into($engine, Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -421,7 +421,7 @@ macro_rules! bond_cells {
             $d,
             "bond repartition (2, 0)",
             |t| t.repartition($engine, 2),
-            |d, a, b| $source.repartition_into($engine, d, a, b)
+            |d, a, b| $source.repartition_into($engine, Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -432,7 +432,7 @@ macro_rules! bond_cells {
             $d,
             "bond axpby",
             |t| t.materialize($engine),
-            |d, a, b| $source.axpby_into($engine, d, a, b)
+            |d, a, b| $source.axpby_into($engine, Dest::scaled(d, a, b))
         );
         rows
     }};
@@ -469,7 +469,7 @@ macro_rules! transform_cells {
             $d,
             "permute",
             |t| t.permute($engine, &[2, 0], &[1, 3]),
-            |d, a, b| $source.permute_into($engine, &[2, 0], &[1, 3], d, a, b)
+            |d, a, b| $source.permute_into($engine, &[2, 0], &[1, 3], Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -480,7 +480,13 @@ macro_rules! transform_cells {
             $d,
             "braid",
             |t| t.braid($engine, &[1, 0], &[3, 2], &[0, 1, 2, 3]),
-            |d, a, b| $source.braid_into($engine, &[1, 0], &[3, 2], &[0, 1, 2, 3], d, a, b)
+            |d, a, b| $source.braid_into(
+                $engine,
+                &[1, 0],
+                &[3, 2],
+                &[0, 1, 2, 3],
+                Dest::scaled(d, a, b)
+            )
         );
         cell!(
             $engine,
@@ -491,7 +497,7 @@ macro_rules! transform_cells {
             $d,
             "transpose",
             |t| t.transpose($engine, &[1, 3], &[0, 2]),
-            |d, a, b| $source.transpose_into($engine, &[1, 3], &[0, 2], d, a, b)
+            |d, a, b| $source.transpose_into($engine, &[1, 3], &[0, 2], Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -502,7 +508,7 @@ macro_rules! transform_cells {
             $d,
             "repartition",
             |t| t.repartition($engine, 1),
-            |d, a, b| $source.repartition_into($engine, d, a, b)
+            |d, a, b| $source.repartition_into($engine, Dest::scaled(d, a, b))
         );
         cell!(
             $engine,
@@ -513,7 +519,7 @@ macro_rules! transform_cells {
             $d,
             "axpby",
             |t| t.materialize($engine),
-            |d, a, b| $source.axpby_into($engine, d, a, b)
+            |d, a, b| $source.axpby_into($engine, Dest::scaled(d, a, b))
         );
         rows
     }};
@@ -716,11 +722,11 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 3)],
     )
     .unwrap();
-    let key = debug_key::<TableSector>;
+    let key = debug_key::<TableObject>;
     let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -744,7 +750,13 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "braid",
         |t| t.braid(engine, &[1, 0], &[3, 2], &[0, 1, 2, 3]),
-        |d, a, b| source.braid_into(engine, &[1, 0], &[3, 2], &[0, 1, 2, 3], d, a, b)
+        |d, a, b| source.braid_into(
+            engine,
+            &[1, 0],
+            &[3, 2],
+            &[0, 1, 2, 3],
+            Dest::scaled(d, a, b)
+        )
     );
     cell!(
         engine,
@@ -755,7 +767,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "transpose",
         |t| t.transpose(engine, &[1, 3], &[0, 2]),
-        |d, a, b| source.transpose_into(engine, &[1, 3], &[0, 2], d, a, b)
+        |d, a, b| source.transpose_into(engine, &[1, 3], &[0, 2], Dest::scaled(d, a, b))
     );
     cell!(
         engine,
@@ -766,7 +778,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "repartition",
         |t| t.repartition(engine, 1),
-        |d, a, b| source.repartition_into(engine, d, a, b)
+        |d, a, b| source.repartition_into(engine, Dest::scaled(d, a, b))
     );
     cell!(
         engine,
@@ -777,7 +789,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "axpby",
         |t| t.materialize(engine),
-        |d, a, b| source.axpby_into(engine, d, a, b)
+        |d, a, b| source.axpby_into(engine, Dest::scaled(d, a, b))
     );
     assert_eq!(rows.len(), 4 * BETAS.len());
 
@@ -786,8 +798,8 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         engine,
         &runtime,
         leg,
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
-        |s: &TableSector| format!("{s:?}"),
+        [(fib_object(1), 2), (fib_object(2), 3)],
+        |s: &TableObject| format!("{s:?}"),
         Complex64,
         |x: f64| Complex64::new(x, 0.5 - x)
     );
@@ -801,7 +813,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "bond swap transpose",
         |t| t.transpose(engine, &[1], &[0]),
-        |d, a, b| bond.transpose_into(engine, &[1], &[0], d, a, b)
+        |d, a, b| bond.transpose_into(engine, &[1], &[0], Dest::scaled(d, a, b))
     );
     cell!(
         engine,
@@ -812,7 +824,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "bond braid",
         |t| t.braid(engine, &[1], &[0], &[0, 1]),
-        |d, a, b| bond.braid_into(engine, &[1], &[0], &[0, 1], d, a, b)
+        |d, a, b| bond.braid_into(engine, &[1], &[0], &[0, 1], Dest::scaled(d, a, b))
     );
     cell!(
         engine,
@@ -823,7 +835,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "bond repartition (2, 0)",
         |t| t.repartition(engine, 2),
-        |d, a, b| bond.repartition_into(engine, d, a, b)
+        |d, a, b| bond.repartition_into(engine, Dest::scaled(d, a, b))
     );
     cell!(
         engine,
@@ -834,7 +846,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         Complex64,
         "bond axpby",
         |t| t.materialize(engine),
-        |d, a, b| bond.axpby_into(engine, d, a, b)
+        |d, a, b| bond.axpby_into(engine, Dest::scaled(d, a, b))
     );
     assert_eq!(rows.len(), 4 * BETAS.len());
 
@@ -849,9 +861,7 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
             engine,
             &[1, 0],
             &[3, 2],
-            &mut destination,
-            Complex64::alpha(),
-            Complex64::lift(0.5),
+            Dest::scaled(&mut destination, Complex64::alpha(), Complex64::lift(0.5)),
         )
         .unwrap_err();
     assert_eq!(
@@ -978,14 +988,24 @@ fn checked_generic_warm_transform_into_allocates_no_result_payload() {
     for _ in 0..2 {
         drop(source.permute(engine, &[2, 0], &[1, 3]).unwrap());
         source
-            .permute_into(engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
+            .permute_into(
+                engine,
+                &[2, 0],
+                &[1, 3],
+                Dest::scaled(&mut destination, 1.0, 0.5),
+            )
             .unwrap();
     }
     let (_, eager) =
         counting_alloc::measure(|| drop(source.permute(engine, &[2, 0], &[1, 3]).unwrap()));
     let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
         source
-            .permute_into(engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
+            .permute_into(
+                engine,
+                &[2, 0],
+                &[1, 3],
+                Dest::scaled(&mut destination, 1.0, 0.5),
+            )
             .unwrap()
     });
     assert_eq!(into.matched_calls, 0, "{into:?}");
@@ -1009,12 +1029,22 @@ macro_rules! lazy_into_allocations {
             .unwrap();
         let payload_bytes = std::mem::size_of_val(parent.dense_data().unwrap());
         for _ in 0..2 {
-            lazy.permute_into($engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
-                .unwrap();
+            lazy.permute_into(
+                $engine,
+                &[2, 0],
+                &[1, 3],
+                Dest::scaled(&mut destination, 1.0, 0.5),
+            )
+            .unwrap();
         }
         let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
-            lazy.permute_into($engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
-                .unwrap()
+            lazy.permute_into(
+                $engine,
+                &[2, 0],
+                &[1, 3],
+                Dest::scaled(&mut destination, 1.0, 0.5),
+            )
+            .unwrap()
         });
         assert_eq!(into.matched_calls, 0, "{into:?}, payload {payload_bytes}");
         assert!(lazy.dense_data().is_err(), "the lazy source materialized");
@@ -1074,7 +1104,7 @@ macro_rules! trace_cells {
                 $d,
                 name,
                 |t| t.trace_pairs($engine, pairs),
-                |d, a, b| $source.trace_pairs_into($engine, pairs, d, a, b)
+                |d, a, b| $source.trace_pairs_into($engine, pairs, Dest::scaled(d, a, b))
             );
         }
         rows
@@ -1120,7 +1150,7 @@ macro_rules! trace_lanes {
                 f64,
                 "compact full trace",
                 |t| t.trace_pairs($engine, &[(0, 1)]),
-                |d, a, b| bond.trace_pairs_into($engine, &[(0, 1)], d, a, b)
+                |d, a, b| bond.trace_pairs_into($engine, &[(0, 1)], Dest::scaled(d, a, b))
             );
             rows
         };
@@ -1138,7 +1168,7 @@ macro_rules! trace_lanes {
                 Complex64,
                 "compact full trace",
                 |t| t.trace_pairs($engine, &[(0, 1)]),
-                |d, a, b| bond.trace_pairs_into($engine, &[(0, 1)], d, a, b)
+                |d, a, b| bond.trace_pairs_into($engine, &[(0, 1)], Dest::scaled(d, a, b))
             );
             rows
         };
@@ -1290,11 +1320,11 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
             let mut destination = lazy.trace_pairs($engine, &[(0, 2)]).unwrap();
             let payload_bytes = std::mem::size_of_val(parent.dense_data().unwrap());
             for _ in 0..2 {
-                lazy.trace_pairs_into($engine, &[(0, 2)], &mut destination, 1.0, 0.5)
+                lazy.trace_pairs_into($engine, &[(0, 2)], Dest::scaled(&mut destination, 1.0, 0.5))
                     .unwrap();
             }
             let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
-                lazy.trace_pairs_into($engine, &[(0, 2)], &mut destination, 1.0, 0.5)
+                lazy.trace_pairs_into($engine, &[(0, 2)], Dest::scaled(&mut destination, 1.0, 0.5))
                     .unwrap()
             });
             assert_eq!(into.matched_calls, 0, "{into:?}, payload {payload_bytes}");
@@ -1321,11 +1351,11 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
     let mut destination = bond.trace_pairs(engine, &[(0, 1)]).unwrap();
     let p_bytes = k * k * std::mem::size_of::<f64>();
     for _ in 0..2 {
-        bond.trace_pairs_into(engine, &[(0, 1)], &mut destination, 1.0, 0.5)
+        bond.trace_pairs_into(engine, &[(0, 1)], Dest::scaled(&mut destination, 1.0, 0.5))
             .unwrap();
     }
     let (_, into) = counting_alloc::measure_matching(p_bytes..=usize::MAX, || {
-        bond.trace_pairs_into(engine, &[(0, 1)], &mut destination, 1.0, 0.5)
+        bond.trace_pairs_into(engine, &[(0, 1)], Dest::scaled(&mut destination, 1.0, 0.5))
             .unwrap()
     });
     assert_eq!(into.matched_calls, 0, "{into:?}, P {p_bytes}");
@@ -1340,7 +1370,7 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
     let (_, control) = counting_alloc::measure_matching(p_bytes..=usize::MAX, || {
         drop(bond.materialize(engine).unwrap());
         dense_twin
-            .trace_pairs_into(engine, &[(0, 1)], &mut destination, 1.0, 0.5)
+            .trace_pairs_into(engine, &[(0, 1)], Dest::scaled(&mut destination, 1.0, 0.5))
             .unwrap()
     });
     assert!(control.matched_calls >= 1, "{control:?}");
@@ -1367,14 +1397,14 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
         for _ in 0..2 {
             drop(source.trace_pairs(engine, &[(0, 2)]).unwrap());
             source
-                .trace_pairs_into(engine, &[(0, 2)], &mut destination, 1.0, 0.5)
+                .trace_pairs_into(engine, &[(0, 2)], Dest::scaled(&mut destination, 1.0, 0.5))
                 .unwrap();
         }
         let (_, eager) =
             counting_alloc::measure(|| drop(source.trace_pairs(engine, &[(0, 2)]).unwrap()));
         let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
             source
-                .trace_pairs_into(engine, &[(0, 2)], &mut destination, 1.0, 0.5)
+                .trace_pairs_into(engine, &[(0, 2)], Dest::scaled(&mut destination, 1.0, 0.5))
                 .unwrap()
         });
         assert_eq!(into.matched_calls, 0, "{into:?}");
@@ -1396,8 +1426,8 @@ const CONTRACT_ORDERS: [(&str, &[usize], &[usize]); 3] = [
 ];
 
 /// Every `contract_into` of `$lhs` (`[v, w'] ← [v, w']`) with the
-/// `[v, w'] ← [v]` operand: owned `$rhs`, and `$rhs_parent`'s lazy adjoint
-/// and adjoint view; `$lazy_lhs` (`[v, w'] ← [v, w']`) against the owned one.
+/// `[v, w'] ← [v]` operand: owned `$rhs`, and `$rhs_parent`'s lazy adjoint;
+/// `$lazy_lhs` (`[v, w'] ← [v, w']`) against the owned one.
 macro_rules! contract_cells {
     ($engine:ident, $runtime:expr, $lhs:expr, $lazy_lhs:expr, $rhs:expr, $rhs_parent:expr, $key:expr,
      $d:ty) => {{
@@ -1446,18 +1476,6 @@ macro_rules! contract_cells {
                 $d,
                 format!("contract O·L {order}")
             );
-            contract_cell!(
-                $engine,
-                rows,
-                $runtime,
-                $lhs,
-                lazy_rhs,
-                $rhs_parent.adjoint_view(),
-                spec,
-                $key,
-                $d,
-                format!("contract O·V {order}")
-            );
             // The composition order is planar: `planar_contract_into` on the
             // same operands (the fermionic rule takes its twist-free route).
             if order == "core" {
@@ -1467,9 +1485,6 @@ macro_rules! contract_cells {
                 contract_cell!(planar_contract, planar_contract_into;
                     $engine, rows, $runtime, $lazy_lhs, $rhs, &$rhs, spec, $key, $d,
                     "planar L·O".to_string());
-                contract_cell!(planar_contract, planar_contract_into;
-                    $engine, rows, $runtime, $lhs, lazy_rhs, $rhs_parent.adjoint_view(), spec,
-                    $key, $d, "planar O·V".to_string());
             }
         }
         rows
@@ -2015,12 +2030,22 @@ macro_rules! compact_contract_allocations {
                 .materialize($engine)
                 .unwrap();
             for _ in 0..2 {
-                lhs.contract_into($engine, rhs, &spec, &mut destination, 1.0, 0.5)
-                    .unwrap();
+                lhs.contract_into(
+                    $engine,
+                    rhs,
+                    &spec,
+                    Dest::scaled(&mut destination, 1.0, 0.5),
+                )
+                .unwrap();
             }
             let (_, large) = counting_alloc::measure_matching(p_bytes..=usize::MAX, || {
-                lhs.contract_into($engine, rhs, &spec, &mut destination, 1.0, 0.5)
-                    .unwrap()
+                lhs.contract_into(
+                    $engine,
+                    rhs,
+                    &spec,
+                    Dest::scaled(&mut destination, 1.0, 0.5),
+                )
+                .unwrap()
             });
             if declines {
                 assert!(large.matched_calls > 0, "{name}: the control densifies D");
@@ -2032,8 +2057,13 @@ macro_rules! compact_contract_allocations {
             assert!((large.bytes as usize) < p_bytes, "{name}: {large:?}");
             if direct {
                 let (_, result) = counting_alloc::measure_matching(n_c_bytes..=usize::MAX, || {
-                    lhs.contract_into($engine, rhs, &spec, &mut destination, 1.0, 0.5)
-                        .unwrap()
+                    lhs.contract_into(
+                        $engine,
+                        rhs,
+                        &spec,
+                        Dest::scaled(&mut destination, 1.0, 0.5),
+                    )
+                    .unwrap()
                 });
                 assert_eq!(result.matched_calls, 0, "{name}: {result:?}");
             }
@@ -2736,11 +2766,11 @@ fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
     // with eager's error, before touching the destination.
     let runtime = host_runtime();
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 3)],
     )
     .unwrap();
-    let key = debug_key::<TableSector>;
+    let key = debug_key::<TableObject>;
     let a: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, index| {
             complex_value(&key(trees), index)
@@ -2764,9 +2794,7 @@ fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
             engine,
             &a,
             &spec,
-            &mut destination,
-            Complex64::alpha(),
-            Complex64::lift(0.5),
+            Dest::scaled(&mut destination, Complex64::alpha(), Complex64::lift(0.5)),
         )
         .unwrap_err();
     assert_eq!(format!("{into}"), format!("{eager}"));
@@ -2803,7 +2831,12 @@ fn into_keeps_a_destination_on_its_own_equal_provider_instance() {
     let mut destination = twin.permute(engine, &[2, 0], &[1, 3]).unwrap();
     let provider = destination.provider() as *const _;
     source
-        .permute_into(engine, &[2, 0], &[1, 3], &mut destination, 1.5, 0.0)
+        .permute_into(
+            engine,
+            &[2, 0],
+            &[1, 3],
+            Dest::scaled(&mut destination, 1.5, 0.0),
+        )
         .unwrap();
     assert!(std::ptr::eq(destination.provider(), provider));
     check(
@@ -2815,7 +2848,12 @@ fn into_keeps_a_destination_on_its_own_equal_provider_instance() {
     let mut destination = twin.contract(engine, &twin, &spec).unwrap();
     let provider = destination.provider() as *const _;
     source
-        .contract_into(engine, &source, &spec, &mut destination, 1.5, 0.0)
+        .contract_into(
+            engine,
+            &source,
+            &spec,
+            Dest::scaled(&mut destination, 1.5, 0.0),
+        )
         .unwrap();
     assert!(std::ptr::eq(destination.provider(), provider));
     check(

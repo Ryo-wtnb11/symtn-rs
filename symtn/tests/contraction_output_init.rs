@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
+use symtn::typed::Dest;
 
 use num_complex::Complex64;
 
@@ -142,9 +143,7 @@ fn u1_case<D: Bits>(seed: u64) {
             codomain: &[0],
             domain: &[1],
         },
-        &mut expected,
-        D::from_real(1.0),
-        D::from_real(0.0),
+        Dest::scaled(&mut expected, D::from_real(1.0), D::from_real(0.0)),
     )
     .unwrap();
     assert_eq!(output.dense_data().unwrap().len(), 4 + 9 + 4);
@@ -180,9 +179,7 @@ fn u1_case<D: Bits>(seed: u64) {
             codomain: &[0],
             domain: &[1],
         },
-        &mut expected,
-        D::from_real(1.0),
-        D::from_real(0.0),
+        Dest::scaled(&mut expected, D::from_real(1.0), D::from_real(0.0)),
     )
     .unwrap();
     assert_eq!(check_owned!(output, expected, lazy, rhs, 2), 2);
@@ -236,9 +233,7 @@ fn su2_case<D: Bits>(seed: u64) {
             codomain: &[0, 1],
             domain: &[2, 3],
         },
-        &mut expected,
-        D::from_real(1.0),
-        D::from_real(0.0),
+        Dest::scaled(&mut expected, D::from_real(1.0), D::from_real(0.0)),
     )
     .unwrap();
     assert!(check_owned!(output, expected, lhs, rhs, 3) >= 1);
@@ -260,9 +255,7 @@ fn su2_case<D: Bits>(seed: u64) {
             codomain: &[0, 1],
             domain: &[2, 3],
         },
-        &mut expected,
-        D::from_real(1.0),
-        D::from_real(0.0),
+        Dest::scaled(&mut expected, D::from_real(1.0), D::from_real(0.0)),
     )
     .unwrap();
     assert!(check_owned!(output, expected, lazy, rhs, 3) >= 1);

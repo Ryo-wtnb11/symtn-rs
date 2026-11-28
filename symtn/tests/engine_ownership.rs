@@ -10,6 +10,7 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::{Arc, Barrier};
+use symtn::typed::Dest;
 
 use symtn::sector::{ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::{
@@ -109,11 +110,12 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 1
     for entry in eigh.d.diagview(engine).unwrap() {
         eigh_out.extend_from_slice(&entry.values);
     }
+    let eigh_v_adjoint = eigh.v.adjoint(engine).unwrap();
     let reconstructed = eigh
         .v
         .compose(engine, &eigh.d)
         .unwrap()
-        .compose(engine, eigh.v.adjoint_view())
+        .compose(engine, &eigh_v_adjoint)
         .unwrap();
     eigh_out.extend_from_slice(reconstructed.dense_data().unwrap());
     let mut eigh_vals_out = Vec::new();
@@ -179,8 +181,9 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 1
         .unwrap()
         .to_vec();
     let null = t.left_null(engine, &[0, 1], &[2]).unwrap();
+    let null_adjoint = null.adjoint(engine).unwrap();
     let null_out = null
-        .compose(engine, null.adjoint_view())
+        .compose(engine, &null_adjoint)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -414,15 +417,15 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
         let mut destination = t.scale(&mut CpuEngine::serial(), 1.0).unwrap();
         let before = destination.dense_data().unwrap().to_vec();
         refused(
-            t.axpby_into(&mut engine, &mut destination, 1.0, 1.0)
+            t.axpby_into(&mut engine, Dest::accumulate(&mut destination))
                 .map_err(|e| err(&e)),
             "axpby_into",
         );
         refused(
             destination
-                .scale_assign(&mut engine, 2.0)
+                .scale_in_place(&mut engine, 2.0)
                 .map_err(|e| err(&e)),
-            "scale_assign",
+            "scale_in_place",
         );
         assert_eq!(destination.dense_data().unwrap(), before.as_slice());
         let s = t
@@ -548,7 +551,7 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
         "compact contract"
     );
     assert!(s
-        .permute_into(engine, &[0], &[1], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[0], &[1], Dest::overwrite(&mut destination))
         .is_backend_failure());
     assert_eq!(destination.dense_data().unwrap(), before.as_slice());
     // Compact `contract_into` (diagonal·diagonal, diagonal·dense,
@@ -559,7 +562,7 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
     for (lhs, rhs, what) in [(&s, &s, "D·D"), (&s, &a, "D·t"), (&a, &s, "t·D")] {
         for alpha in [1.0, 0.0] {
             assert!(
-                lhs.contract_into(engine, rhs, &spec, &mut target, alpha, 0.0)
+                lhs.contract_into(engine, rhs, &spec, Dest::scaled(&mut target, alpha, 0.0))
                     .is_backend_failure(),
                 "compact contract_into {what}, alpha {alpha}"
             );
@@ -568,4 +571,52 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
     }
     // A dense lazy adjoint moves no payload and needs nothing of the engine.
     assert!(a.adjoint(engine).is_ok());
+}
+
+/// A prepared composition whose operands have no blocks runs no GEMM, and
+/// `Dest::accumulate` keeps every (inactive) destination block, so nothing
+/// opens an execution section; the engine is still admitted, as the eager
+/// composition does, and a broken one is refused before any write.
+#[test]
+fn prepared_empty_product_accumulate_refuses_a_broken_engine() {
+    let runtime = Runtime::new();
+    let good = &mut CpuEngine::serial();
+    let u1 = |charge| {
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(charge).unwrap(), 2)]).unwrap()
+    };
+    let (q0, q1) = (u1(0), u1(1));
+    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(good, &runtime, [&q0], [&q1], 7).unwrap();
+    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(good, &runtime, [&q1], [&q0], 8).unwrap();
+    assert_eq!((a.subblock_count(), b.subblock_count()), (0, 0));
+    let lhs = symtn::typed::StackedTensorMap::pack(&[&a, &a]).unwrap();
+    let rhs = symtn::typed::StackedTensorMap::pack(&[&b, &b]).unwrap();
+    let plan = symtn::typed::ComposePlan::new(good, &lhs, &rhs).unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    let member = TensorMap::<_, f64>::rand_with_seed(good, &runtime, [&q0], [&q0], 9).unwrap();
+    let mut dst = symtn::typed::StackedTensorMap::pack(&[&member, &member]).unwrap();
+    let before = member.dense_data().unwrap().to_vec();
+    assert!(!before.is_empty());
+    for threads in [1, 4] {
+        let mut engine = engine(threads);
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
+        }));
+        assert!(panicked.is_err() && engine.is_broken());
+        assert!(
+            plan.execute_into(
+                &mut engine,
+                &lhs,
+                &rhs,
+                Dest::accumulate(&mut dst),
+                &mut workspace
+            )
+            .is_backend_failure(),
+            "width {threads}"
+        );
+        for i in 0..2 {
+            assert_eq!(dst.member(good, i).unwrap().dense_data().unwrap(), before);
+        }
+    }
+    plan.execute_into(good, &lhs, &rhs, Dest::accumulate(&mut dst), &mut workspace)
+        .unwrap();
 }

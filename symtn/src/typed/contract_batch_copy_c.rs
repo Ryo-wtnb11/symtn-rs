@@ -15,8 +15,7 @@ mod tests {
         DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite, MatrixOp,
     };
     use symtn_operations::{
-        tree_transform_members_overwrite_raw, Rank2Gemm, StridedHostKernelAdapter,
-        TreeTransformWorkspace,
+        tree_transform_members_raw, Rank2Gemm, StridedHostKernelAdapter, TreeTransformWorkspace,
     };
 
     #[derive(Default)]
@@ -142,7 +141,7 @@ mod tests {
                 .collect();
             let mut dst = pack(cuda, &poisoned);
             let before = symtn_dense::cuda_transfer_stats();
-            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(cuda, &lhs, &rhs, Dest::overwrite(&mut dst), &mut workspace)
                 .unwrap();
             let after = symtn_dense::cuda_transfer_stats();
             assert_eq!(
@@ -375,7 +374,7 @@ mod tests {
             let mut output = vec![f64::NAN; plan.member_len * members];
             let transform_counts = Arc::new(SpyCounts::default());
             let mut transform = SpyExecutor::counting(&transform_counts);
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut transform,
@@ -387,6 +386,8 @@ mod tests {
                 &vec![1.0; copy.temporary_len() * members],
                 members,
                 &[],
+                1.0,
+                0.0,
             )
             .unwrap();
             if members == 1 {

@@ -20,6 +20,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 #[cfg(test)]
 use symtn_core as sector_types;
+#[cfg(test)]
+#[path = "../../tests/support/tables.rs"]
+mod tables;
 
 #[cfg(test)]
 use num_complex::Complex64;
@@ -38,7 +41,7 @@ pub use symtn_sectors::{
     MultiplicityFreeRigidSymbols, PhysicalBasisError, PhysicalFusionBasis, ProductAdmission,
     ProductFusionRule, ProductFusionRuleError, ProductSector, ProductSectorCodec,
     ProductSectorCodecError, ProductSectorComponent, RuleIdentity, SectorCodec, SectorId,
-    SectorOrderKey, SectorVec, SymbolShapeError, TableRule, TableRuleError, TableSector,
+    SectorOrderKey, SectorVec, SymbolShapeError, TableCategory, TableError, TableObject,
     TensorKitProductCodec, TypedSectorAdmission, U1FusionRule, U1Irrep, UncertifiedUnitAdmission,
     ZNFusionRule, ZNIrrep,
 };

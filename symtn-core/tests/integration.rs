@@ -9,4 +9,6 @@ mod sector_vocabulary_compat;
 #[path = "../../tests/support/su2.rs"]
 mod su2;
 use symtn_core as sector_types;
+#[path = "../../tests/support/tables.rs"]
+mod tables;
 mod unique_scratch_reuse;

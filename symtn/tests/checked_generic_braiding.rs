@@ -1,6 +1,7 @@
 use crate::report;
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::LieIrrep;
+use symtn::typed::Dest;
 
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -1307,9 +1308,7 @@ where
                     engine,
                     &rhs,
                     &spec,
-                    ordinary_dst,
-                    D::from_real(1.0),
-                    D::from_real(0.0),
+                    Dest::scaled(ordinary_dst, D::from_real(1.0), D::from_real(0.0)),
                 )
                 .map(|()| ordinary_dst.dense_data().unwrap().to_vec()),
             ),
@@ -1328,9 +1327,7 @@ where
                     engine,
                     &rhs,
                     &spec,
-                    planar_dst,
-                    D::from_real(1.0),
-                    D::from_real(0.0),
+                    Dest::scaled(planar_dst, D::from_real(1.0), D::from_real(0.0)),
                 )
                 .map(|()| planar_dst.dense_data().unwrap().to_vec()),
             ),
@@ -1669,9 +1666,11 @@ fn checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublishe
             engine,
             &b,
             &spec,
-            &mut destination,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.5, 0.0),
+            Dest::scaled(
+                &mut destination,
+                Complex64::new(1.0, 0.0),
+                Complex64::new(0.5, 0.0),
+            ),
         );
         assert!(
             matches!(

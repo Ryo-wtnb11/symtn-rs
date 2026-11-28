@@ -236,10 +236,10 @@ where
 
 #[test]
 fn a_space_binds_to_an_equal_rule_after_its_producer_drops() {
+    use crate::tables::*;
     use fusion_symbols::table::TableCategory;
     use symtn_core::{
         CategoryRule, EnumeratedCodec, GroupId, LieGroupFusionRule, MultiplicityFreeAdmissionMode,
-        TableRule,
     };
     type Mf = MultiplicityFreeAdmissionMode;
     let table = |category: TableCategory| {
@@ -258,7 +258,7 @@ fn a_space_binds_to_an_equal_rule_after_its_producer_drops() {
         || ZNFusionRule::new(3).unwrap(),
         ZNFusionRule::new(4).unwrap(),
     );
-    binds_after_its_producer_drops(TableRule::fibonacci, TableRule::ising());
+    binds_after_its_producer_drops(table_fibonacci, table_ising());
 }
 
 #[test]

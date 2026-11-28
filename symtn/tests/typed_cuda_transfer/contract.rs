@@ -1,6 +1,7 @@
 use super::*;
 use crate::su2::{su2_irrep, su2_rule};
 use symtn::sector::ZNIrrep;
+use symtn::typed::Dest;
 
 fn assert_direct_contract_and_compose<R>(
     engine: &mut dyn symtn::typed::Engine,
@@ -687,9 +688,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
             codomain: &[0],
             domain: &[1],
         },
-        &mut destination,
-        1.0,
-        0.0,
+        Dest::overwrite(&mut destination),
     )
     .unwrap();
     let written = destination
@@ -752,9 +751,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
                 codomain: &[0],
                 domain: &[1]
             },
-            &mut lhs_alias,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut lhs_alias),
         )
         .is_err(),
         "an lhs alias must be rejected"
@@ -776,9 +773,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
                 codomain: &[0],
                 domain: &[1]
             },
-            &mut adjoint_alias,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut adjoint_alias),
         )
         .is_err());
     assert_eq!(
@@ -824,9 +819,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
                 codomain: &[0],
                 domain: &[1]
             },
-            &mut wrong_space,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut wrong_space),
         )
         .is_err(),
         "a destination whose block layout differs must be rejected"
@@ -849,9 +842,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
                 codomain: &[0],
                 domain: &[1],
             },
-            &mut destination,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut destination),
         ),
         &destination,
         cuda,
@@ -868,9 +859,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
             codomain: &[0],
             domain: &[1],
         },
-        &mut destination,
-        2.0,
-        0.5,
+        Dest::scaled(&mut destination, 2.0, 0.5),
     )
     .unwrap();
     let accumulated: Vec<f64> = expected_data
@@ -932,9 +921,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
                 codomain: &[0],
                 domain: &[1],
             },
-            &mut empty_destination,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut empty_destination),
         )
         .unwrap();
     assert_eq!(
@@ -999,9 +986,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
                 codomain: &[0],
                 domain: &[1],
             },
-            &mut zero_destination,
-            1.0,
-            0.0,
+            Dest::overwrite(&mut zero_destination),
         )
         .unwrap();
     assert_eq!(

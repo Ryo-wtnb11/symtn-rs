@@ -67,7 +67,8 @@ macro_rules! lease_rows {
         let a = rand(v, v, 1);
         let y = rand(v, v, 2);
         let vw = rand(v, w, 3);
-        let h = a.axpby($engine, one, a.adjoint_view(), one).unwrap();
+        let a_adjoint = a.adjoint($engine).unwrap();
+        let h = a.axpby($engine, one, &a_adjoint, one).unwrap();
         let nan = a
             .axpby(
                 $engine,
@@ -187,10 +188,6 @@ macro_rules! lease_rows {
         row(
             "error solve codomain".into(),
             leases(|| a.solve($engine, &[0], &[1], &wv, &[0], &[1])),
-        );
-        row(
-            "error solve borrowed rhs".into(),
-            leases(|| a.solve($engine, &[0], &[1], y.adjoint_view(), &[0], &[1])),
         );
         row(
             "error svd_vals nonfinite".into(),

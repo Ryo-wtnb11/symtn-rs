@@ -7,6 +7,7 @@
 
 use crate::common::ErrorKind as _;
 use crate::prepared;
+use symtn::typed::Dest;
 
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
@@ -121,7 +122,13 @@ fn compose_failures_leave_no_output_and_the_next_call_recovers() {
 
     let mut short = short_destination(&runtime, [0, 1]);
     assert!(plan
-        .execute_into(engine, &lhs, &rhs, &mut short, &mut workspace)
+        .execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut short),
+            &mut workspace
+        )
         .is_invalid_argument("member count"));
     assert!(
         workspace.take_output().is_none(),
@@ -161,7 +168,13 @@ fn contract_case(spec: &ContractSpec<'_>, label: &str) {
     let order = [spec.codomain[0], spec.codomain[1]];
     let mut short = short_destination(&runtime, order);
     assert!(plan
-        .execute_into(engine, &lhs, &rhs, &mut short, &mut workspace)
+        .execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut short),
+            &mut workspace
+        )
         .is_invalid_argument("member count"));
     assert!(
         workspace.take_output().is_none(),
@@ -241,7 +254,13 @@ mod cuda {
         }
         let mut short = short_destination(&runtime, [0, 1]).to_cuda(cuda).unwrap();
         assert!(plan
-            .execute_into(cuda, &lhs, &rhs, &mut short, &mut workspace)
+            .execute_into(
+                cuda,
+                &lhs,
+                &rhs,
+                Dest::overwrite(&mut short),
+                &mut workspace
+            )
             .is_err());
         assert!(workspace.take_output().is_none(), "compose execute_into");
 
@@ -264,7 +283,13 @@ mod cuda {
             }
             let mut short = short_destination(&runtime, codomain).to_cuda(cuda).unwrap();
             assert!(plan
-                .execute_into(cuda, &lhs, &rhs, &mut short, &mut workspace)
+                .execute_into(
+                    cuda,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut short),
+                    &mut workspace
+                )
                 .is_err());
             assert!(workspace.take_output().is_none(), "{label} execute_into");
             plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();

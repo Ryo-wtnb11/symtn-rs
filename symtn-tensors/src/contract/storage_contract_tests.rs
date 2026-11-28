@@ -845,7 +845,7 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
     .concat();
     assert_eq!(source.len(), 2 * source_len);
     let mut batched = vec![f64::NAN; 2 * destination_len];
-    symtn_operations::tree_transform_members_overwrite_raw(
+    symtn_operations::tree_transform_members_raw(
         engine,
         &mut symtn_operations::StridedHostKernelAdapter::default(),
         &mut symtn_dense::DefaultDenseExecutor::new(),
@@ -857,6 +857,8 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
         &source,
         2,
         &[],
+        num_traits::One::one(),
+        num_traits::Zero::zero(),
     )
     .unwrap();
     for member in 0..2 {

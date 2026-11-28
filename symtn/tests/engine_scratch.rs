@@ -10,9 +10,11 @@
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use symtn::typed::Dest;
 
+use crate::tables::*;
 use num_complex::Complex64;
-use symtn::sector::{TableRule, TableSector, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, CpuEngine, GradedSpace, Runtime, TensorMap};
 use tenferro_runtime::ExecutionEngine;
 
@@ -129,7 +131,7 @@ fn cold_plain_contract_into_allocates_route_scratch() {
     for_each_case!(|name, a, b, spec, op, out, one, zero| {
         let mut dst = a.contract(&mut CpuEngine::serial(), &b, &spec).unwrap();
         let mut into = |engine: &mut CpuEngine| {
-            a.contract_into(engine, &b, &spec, &mut dst, one, zero)
+            a.contract_into(engine, &b, &spec, Dest::scaled(&mut dst, one, zero))
                 .unwrap()
         };
         // What: a fresh engine keeps nothing, so the transformed operand (and,
@@ -152,7 +154,7 @@ fn warm_plain_contract_allocates_no_operand_or_core_scratch() {
         let mut owned = |engine: &mut CpuEngine| drop(a.contract(engine, &b, &spec).unwrap());
         // What: cold, an owned call allocates more than its one output.
         assert!(sized_allocs(&sizes, None, &mut owned) >= 2, "{name}: cold");
-        a.contract_into(engine, &b, &spec, &mut dst, one, zero)
+        a.contract_into(engine, &b, &spec, Dest::scaled(&mut dst, one, zero))
             .unwrap();
         // What: warm, an owned call allocates its output alone, and a
         // destination call nothing of these sizes.
@@ -162,7 +164,7 @@ fn warm_plain_contract_allocates_no_operand_or_core_scratch() {
             "{name}: owned"
         );
         let into = |engine: &mut CpuEngine| {
-            a.contract_into(engine, &b, &spec, &mut dst, one, zero)
+            a.contract_into(engine, &b, &spec, Dest::scaled(&mut dst, one, zero))
                 .unwrap()
         };
         assert_eq!(sized_allocs(&sizes, Some(engine), into), 0, "{name}: into");
@@ -212,8 +214,8 @@ fn warm_planar_contract_allocates_no_route_scratch() {
     check!("U(1)", u1(3), u1(4), f64);
     let fib = |a, b| {
         GradedSpace::try_new(
-            Arc::new(TableRule::fibonacci()),
-            [(TableSector::new(1), a), (TableSector::new(2), b)],
+            Arc::new(table_fibonacci()),
+            [(fib_object(1), a), (fib_object(2), b)],
         )
         .unwrap()
     };
@@ -331,7 +333,7 @@ fn engine_scratch_is_bounded_across_route_switching_and_trim_releases_it() {
     let mut wrong = small.0.contract(engine, &small.1, &dynamic_tree).unwrap();
     assert!(large
         .0
-        .contract_into(engine, &large.1, &dynamic_tree, &mut wrong, 1.0, 0.0)
+        .contract_into(engine, &large.1, &dynamic_tree, Dest::overwrite(&mut wrong))
         .is_err());
     let empty = symtn::scratch::retained_bytes(engine);
     assert!(
@@ -586,7 +588,7 @@ fn stale_engine_scratch_never_reaches_the_output() {
         let poison_scratch = |engine: &mut CpuEngine| {
             let (a, b) = &poisoned;
             let mut dst = a.contract(engine, b, &spec).unwrap();
-            a.contract_into(engine, b, &spec, &mut dst, 1.0, 0.0)
+            a.contract_into(engine, b, &spec, Dest::overwrite(&mut dst))
                 .unwrap();
         };
         let order: Vec<usize> = spec.codomain.iter().chain(spec.domain).copied().collect();
@@ -616,7 +618,7 @@ fn stale_engine_scratch_never_reaches_the_output() {
             let (pa, pb) = operands(v, w, &poison);
             let mut dst = pa.contract(&mut CpuEngine::serial(), &pb, &spec).unwrap();
             poison_scratch(engine);
-            a.contract_into(engine, &b, &spec, &mut dst, 1.0, 0.0)
+            a.contract_into(engine, &b, &spec, Dest::overwrite(&mut dst))
                 .unwrap();
             crate::numerics::assert_slices_close(&format!("{what}: into"), &dense(&dst), &want, 16);
         }

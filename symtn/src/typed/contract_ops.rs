@@ -56,33 +56,27 @@ where
     /// [`GenericTensorError::TensorProduct`].
     ///
     /// ```compile_fail
-    /// use symtn::sector::TableRule;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
+    /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::TensorMap;
-    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64>) {
+    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, f64>) {
     ///     let _ = tensor.otimes(engine, tensor);
     /// }
     /// ```
-    ///
-    /// An adjoint view `other` (`t.adjoint_view()`) returns
-    /// [`Error::Unsupported`]: this operation would copy it. Pass
-    /// `&t.adjoint(engine)?.materialize(engine)?` instead.
-    pub fn otimes<'a>(
+    pub fn otimes(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D>>,
+        other: &TensorMap<R, D>,
     ) -> Result<Self, FacadeError<R>> {
         let engine = cx.engine();
         self.otimes_impl(engine, other)
     }
 
-    fn otimes_impl<'a>(
+    fn otimes_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D>>,
+        other: &TensorMap<R, D>,
     ) -> Result<Self, FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
-        other.refuse_borrowed_view("otimes")?;
         if !self.runtime.same_runtime(&other.runtime) {
             return Err(Error::RuntimeMismatch.into());
         }
@@ -314,8 +308,7 @@ where
     /// - [`Error::Operation`] with
     ///   [`crate::typed::OperationError::UnsupportedContractionBraiding`] for
     ///   non-symmetric (anyonic or `NoBraiding`) providers, whatever the axes
-    ///   (checked Generic wraps it in [`GenericTensorError::Facade`]), before any other check on `other`
-    ///   and before a borrowed adjoint view is resolved.
+    ///   (checked Generic wraps it in [`GenericTensorError::Facade`]), before any other check on `other`.
     /// - [`Error::Operation`] with
     ///   [`crate::typed::OperationError::InvalidAxisSet`] (`tensor` `"lhs"` /
     ///   `"rhs"`) for a malformed contracted-axis list, and with
@@ -355,33 +348,30 @@ where
     /// assert_eq!(out.permute(engine, &[0, 1], &[])?.dense_data()?, t.contract(engine, &id, &spec)?.dense_data()?);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn contract<'a>(
+    pub fn contract(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
         let engine = cx.engine();
         self.contract_impl(engine, other, spec)
     }
 
-    fn contract_impl<'a>(
+    fn contract_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        let other = other.into();
         // The one check the expert layer cannot make: it never sees the two
         // runtimes, and mixing execution state across them is a trust-boundary
         // violation rather than an algebra error. Scalar type and placement
         // need no arm here — `D` and `S` are type parameters.
-        if !self.runtime.same_runtime(&other.base.runtime) {
+        if !self.runtime.same_runtime(&other.runtime) {
             return Err(Error::RuntimeMismatch.into());
         }
         self.admit_braiding(BraidingOp::Contraction)?;
-        let other = other.operand()?;
-        let other = &*other;
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
             if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
                 // The compact arm multiplies spectra itself, before any
@@ -482,38 +472,34 @@ where
     /// validation (a backend or other execution error) the destination's
     /// contents are unspecified, while its space and block structure stay
     /// intact.
-    pub fn contract_into<'a>(
+    pub fn contract_into(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.contract_into_impl(engine, other, spec, destination, alpha, beta)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn contract_into_impl<'a>(
+    fn contract_into_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let other = other.into();
-        if !self.runtime.same_runtime(&other.base.runtime)
+        if !self.runtime.same_runtime(&other.runtime)
             || !self.runtime.same_runtime(&destination.runtime)
         {
             return Err(Error::RuntimeMismatch.into());
         }
         self.admit_braiding(BraidingOp::Contraction)?;
-        let other = other.operand()?;
-        let other = &*other;
         // The held admitted identities: provider-free, and the provider's
         // own by #2046.
         let identity = self.logical_space().space().admission().rule_identity();
@@ -556,22 +542,22 @@ where
 
     /// The admitted orders of a planar `spec` against `other`, after the
     /// checks `planar_contract` shares with `contract`: placement (Host
-    /// only) and the planarity of `spec`. Both precede a borrowed adjoint's
-    /// resolution.
+    /// only) and the planarity of `spec`.
     fn planar_orders(
         &self,
-        other: TensorRef<'_, R, D, S>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
     ) -> Result<symtn_tensors::PlanarContractOrders, Error> {
-        if S::as_host(EXEC, self).is_none() || S::as_host(EXEC, other.base).is_none() {
+        if S::as_host(EXEC, self).is_none() || S::as_host(EXEC, other).is_none() {
             return Err(Error::UnsupportedOnDevice(
                 "planar_contract has no device route; transfer with to_host()".to_owned(),
             ));
         }
         let space = self.logical_space().space();
+        let other_space = other.logical_space().space();
         Ok(symtn_tensors::PlanarContractOrders::validate(
             (space.nout(), space.rank()),
-            other.logical_shape(),
+            (other_space.nout(), other_space.rank()),
             spec.lhs,
             spec.rhs,
             &spec.output_axes(),
@@ -581,10 +567,6 @@ where
 
     /// The one braiding admission ([`symtn_tensors::admit_braiding`]) of the
     /// contraction entries, from `self`'s provider style alone.
-    ///
-    /// Why each entry calls it before resolving `other`: a borrowed adjoint
-    /// view resolves through fallible provider work, which must not decide
-    /// the outcome before the braiding refusal does.
     fn admit_braiding(&self, op: BraidingOp) -> Result<(), Error> {
         Ok(symtn_tensors::admit_braiding(
             op,
@@ -659,21 +641,23 @@ where
     /// - Contracted-leg, rule-identity and provider failures as for
     ///   [`Self::contract`], without its ordinary braiding admission.
     ///
-    /// Placement and planarity read `other` without resolving a borrowed
-    /// adjoint view.
-    ///
     /// ```
     /// use std::sync::Arc;
     ///
     /// use num_complex::Complex64;
-    /// use symtn::sector::{TableRule, TableSector};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::new();
-    /// let fib = Arc::new(TableRule::fibonacci());
-    /// let v = GradedSpace::try_new(Arc::clone(&fib), [(TableSector::new(2), 1)])?;
-    /// let b = GradedSpace::try_new(fib, [(TableSector::new(1), 2), (TableSector::new(2), 3)])?;
+    /// let category = TableCategory::fibonacci();
+    /// let (one, tau) = (category.object(1).unwrap(), category.object(2).unwrap());
+    /// let fib = Arc::new(
+    ///     CategoryRule::try_new(category, EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new())
+    ///         .unwrap(),
+    /// );
+    /// let v = GradedSpace::try_new(Arc::clone(&fib), [(tau, 1)])?;
+    /// let b = GradedSpace::try_new(fib, [(one, 2), (tau, 3)])?;
     /// // Golden-chain two-site H_eff: θ′[l s1 s2; r] := H[s1 s2; t1 t2] θ[l t1 t2; r].
     /// let h: TensorMap<_, Complex64> = TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 1)?;
     /// let theta: TensorMap<_, Complex64> =
@@ -690,33 +674,29 @@ where
     /// assert!(residual < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn planar_contract<'a>(
+    pub fn planar_contract(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
         let engine = cx.engine();
         self.planar_contract_impl(engine, other, spec)
     }
 
-    fn planar_contract_impl<'a>(
+    fn planar_contract_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        let other = other.into();
-        if !self.runtime.same_runtime(&other.base.runtime) {
+        if !self.runtime.same_runtime(&other.runtime) {
             return Err(Error::RuntimeMismatch.into());
         }
-        // Placement and planarity precede borrowed-adjoint resolution.
         let orders = self.planar_orders(other, spec)?;
         if self.is_bosonic() {
             return self.contract(&mut *engine, other, spec);
         }
-        let other = other.operand()?;
-        let other = &*other;
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
             EXEC,
             engine,
@@ -749,50 +729,43 @@ where
     /// [`Error::UnsupportedDestination`] for a lazy-adjoint or compact
     /// diagonal destination, and [`Error::DestinationShared`] for one that
     /// aliases an operand; [`Error::UnsupportedOnDevice`] for CUDA
-    /// storage; then the planarity errors of [`Self::planar_contract`]. These
-    /// checks read a borrowed adjoint view unresolved. Then the remaining errors of
-    /// [`Self::contract_into`] (`SpaceMismatch`,
-    /// [`Error::DestinationShared`]), which run after the view is resolved.
+    /// storage; then the planarity errors of [`Self::planar_contract`]; then the
+    /// remaining errors of [`Self::contract_into`] (`SpaceMismatch`,
+    /// [`Error::DestinationShared`]).
     ///
     /// # Failure
     ///
     /// A validation or capability error leaves `destination` bit-identical:
     /// every check completes before the first write.
-    pub fn planar_contract_into<'a>(
+    pub fn planar_contract_into(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.planar_contract_into_impl(engine, other, spec, destination, alpha, beta)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn planar_contract_into_impl<'a>(
+    fn planar_contract_into_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let other = other.into();
-        let base = other.base;
-        if !self.runtime.same_runtime(&base.runtime)
+        if !self.runtime.same_runtime(&other.runtime)
             || !self.runtime.same_runtime(&destination.runtime)
         {
             return Err(Error::RuntimeMismatch.into());
         }
-        // An adjoint view has its base's rule identity, and aliases a dense
-        // destination exactly when its base does, so these checks read the
-        // base before it is resolved.
         let identity = self.logical_space().space().admission().rule_identity();
-        if identity != base.logical_space().space().admission().rule_identity()
+        if identity != other.logical_space().space().admission().rule_identity()
             || identity
                 != destination
                     .logical_space()
@@ -803,14 +776,11 @@ where
             return Err(Error::RuleMismatch.into());
         }
         destination_precheck(destination, &self.storage_body().data)?;
-        destination_precheck(destination, &base.storage_body().data)?;
-        // Placement and planarity precede borrowed-adjoint resolution.
+        destination_precheck(destination, &other.storage_body().data)?;
         let orders = self.planar_orders(other, spec)?;
         if self.is_bosonic() {
-            return self.contract_into(&mut *engine, other, spec, destination, alpha, beta);
+            return self.contract_into_impl(engine, other, spec, destination, alpha, beta);
         }
-        let other = other.operand()?;
-        let other = &*other;
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
             EXEC,
             engine,
@@ -848,14 +818,10 @@ where
     /// embedded `TensorMap` or layout is published. After that transaction
     /// succeeds, the operation builds the two embedded tensors by copying
     /// their dense data (materializing a compact operand when necessary).
-    ///
-    /// An adjoint view `other` (`t.adjoint_view()`) returns
-    /// [`Error::Unsupported`]: this operation would copy it. Pass
-    /// `&t.adjoint(engine)?.materialize(engine)?` instead.
-    pub fn deligne_product<'a, R2, C>(
+    pub fn deligne_product<R2, C>(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R2, D>>,
+        other: &TensorMap<R2, D>,
         product: Arc<ProductFusionRule<R, R2, C>>,
     ) -> Result<TensorMap<ProductFusionRule<R, R2, C>, D>, Error>
     where
@@ -890,10 +856,10 @@ where
         self.deligne_product_impl(engine, other, product)
     }
 
-    fn deligne_product_impl<'a, R2, C>(
+    fn deligne_product_impl<R2, C>(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R2, D>>,
+        other: &TensorMap<R2, D>,
         product: Arc<ProductFusionRule<R, R2, C>>,
     ) -> Result<TensorMap<ProductFusionRule<R, R2, C>, D>, Error>
     where
@@ -924,9 +890,6 @@ where
                 Mode = MultiplicityFreeAdmissionMode,
             >,
     {
-        let other = other.into().operand()?;
-        let other = &*other;
-        other.refuse_borrowed_view("deligne_product")?;
         if !self.runtime.same_runtime(&other.runtime) {
             return Err(Error::RuntimeMismatch);
         }
@@ -1033,29 +996,28 @@ where
     /// [`Self::contract`].
     ///
     /// ```compile_fail
-    /// use symtn::sector::TableRule;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
+    /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::TensorMap;
-    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64>) {
+    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, f64>) {
     ///     let _ = tensor.compose(engine, tensor);
     /// }
     /// ```
     #[doc(alias = "mul")]
-    pub fn compose<'a>(
+    pub fn compose(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
     ) -> Result<Self, FacadeError<R>> {
         let engine = cx.engine();
         self.compose_impl(engine, other)
     }
 
-    fn compose_impl<'a>(
+    fn compose_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
     ) -> Result<Self, FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
         // Runtime first, exactly as `contract`: crossing runtimes is a
         // trust-boundary violation rather than an algebra error, and the
         // expert layer never sees the two runtimes.
@@ -1267,7 +1229,8 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
     ) -> Result<Self, Error>;
 
     /// Replays `plan` on every member of the checked operands (each its
-    /// stored block structure and payload) into `dst`.
+    /// stored block structure and payload) into `dst`:
+    /// `dst = alpha · contract(lhs, rhs) + init(dst)` per member.
     #[allow(clippy::too_many_arguments)]
     fn contract_members(
         _: ExecToken,
@@ -1278,6 +1241,7 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
+        alpha: D,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error>;
 
@@ -1324,6 +1288,7 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
+        alpha: D,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error> {
         workspace
@@ -1338,6 +1303,7 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
                 (rhs.0, rhs.1),
                 &mut workspace.members,
                 members,
+                alpha,
                 init,
             )?;
         Ok(())

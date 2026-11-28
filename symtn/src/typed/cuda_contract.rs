@@ -151,6 +151,7 @@ where
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
+        alpha: D,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error> {
         symtn_tensors::execute_storage_contract_members_cuda(
@@ -161,6 +162,7 @@ where
             rhs,
             &mut workspace.members_cuda,
             members,
+            alpha,
             init,
         )?;
         Ok(())

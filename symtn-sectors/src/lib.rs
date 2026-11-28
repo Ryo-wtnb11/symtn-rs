@@ -58,10 +58,8 @@ pub use fusion_symbols::{
     fermion::FermionParityIrrep,
     finite::ZNIrrep,
     lie::{CU1Irrep, GroupId, LieIrrep, U1Irrep},
+    table::{TableCategory, TableError, TableObject},
 };
-
-mod table_rule;
-pub use table_rule::{TableRule, TableRuleError, TableSector};
 
 mod lie;
 pub use lie::{LieGroupFusionRule, LieGroupFusionRuleError};

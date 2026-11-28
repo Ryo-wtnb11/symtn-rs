@@ -14,6 +14,7 @@
 //! workspace state.
 
 use crate::prepared;
+use symtn::typed::Dest;
 
 use std::cell::RefCell;
 use std::fmt::Debug;
@@ -256,7 +257,13 @@ macro_rules! prepared_impl {
                 workspace: &mut ContractWorkspace<R, D>,
             ) {
                 self.plan
-                    .execute_into(&mut *self.engine.borrow_mut(), lhs, rhs, dst, workspace)
+                    .execute_into(
+                        &mut *self.engine.borrow_mut(),
+                        lhs,
+                        rhs,
+                        Dest::overwrite(dst),
+                        workspace,
+                    )
                     .unwrap()
             }
         }

@@ -1,7 +1,6 @@
 //! #1995: inv, pinv, exp and solve report the same first error for the same
 //! misuse in both fusion modes, in one order — runtime, rule, operand shape
-//! (codomain equality, isomorphism, endomorphism), borrowed-view admission,
-//! then representation — on multiplicity-free U(1) and SU(2) and on the
+//! (codomain equality, isomorphism, endomorphism), then representation — on multiplicity-free U(1) and SU(2) and on the
 //! checked SU(3) rule (fusion-symbols; those rows need `cgc-gen`). The expected first error of every row is the
 //! one TensorKit's precedence implies (`src/tensors/linalg.jl` `inv`, `\`,
 //! `exp!`; `src/tensors/diagonal.jl` `D \ t`), written out below rather than
@@ -23,14 +22,6 @@ const NOT_ISO_SOLVE: &str =
     "space mismatch: solve requires an isomorphic divisor codomain and domain";
 const NOT_ISO_INV: &str = "space mismatch: inv requires isomorphic codomain and domain";
 const NOT_ENDO: &str = "space mismatch: exp requires an endomorphism (codomain == domain)";
-
-fn unsupported_solve() -> String {
-    Error::Unsupported {
-        operation: "solve",
-        alternative: crate::error::Alternative::Materialize,
-    }
-    .to_string()
-}
 
 /// The row text of a result: `ok`, or the error's root cause without the
 /// per-mode wrapper (the facade error type is per mode by design, #1862).
@@ -90,7 +81,6 @@ macro_rules! misuse {
         let vw = rand(&runtime, v, w, 2);
         let wv = rand(&runtime, w, v, 3);
         let wv_other = rand(&other, w, v, 4);
-        let vw_other = rand(&other, v, w, 5);
         let y = rand(&runtime, v, v, 6);
         let d: TensorMap<_, $dtype> = TensorMap::diagonal(
             $engine,
@@ -108,18 +98,19 @@ macro_rules! misuse {
             }),
         )
         .unwrap();
-        let solve = |$engine: &mut dyn Engine,
-                     lhs: &TensorMap<_, $dtype>,
-                     rhs: TensorRef<'_, _, $dtype>| {
-            text(&lhs.solve($engine, &[0], &[1], rhs, &[0], &[1]))
-        };
+        let solve =
+            |$engine: &mut dyn Engine, lhs: &TensorMap<_, $dtype>, rhs: &TensorMap<_, $dtype>| {
+                text(&lhs.solve($engine, &[0], &[1], rhs, &[0], &[1]))
+            };
         let lazy_wv = wv.adjoint($engine).unwrap();
         let (lazy_exp, lazy_exp_copies) = materializations(|| lazy_wv.exp($engine, &[0], &[1]));
 
-        // `D \ y'` reads the view: equal to the owned adjoint, and to the
-        // dense LU route on the materialized divisor (an independent oracle).
+        // `D \ y'` reads the lazy adjoint in place: equal to the materialized
+        // adjoint, and to the dense LU route on the materialized divisor (an
+        // independent oracle).
+        let y_lazy = y.adjoint($engine).unwrap();
         let (compact_view, copies) =
-            materializations(|| d.solve($engine, &[0], &[1], y.adjoint_view(), &[0], &[1]));
+            materializations(|| d.solve($engine, &[0], &[1], &y_lazy, &[0], &[1]));
         let y_owned = y.adjoint($engine).unwrap().materialize($engine).unwrap();
         let compact_view_ok = compact_view.as_ref().map(|x| {
             let lu = d
@@ -147,31 +138,15 @@ macro_rules! misuse {
         });
 
         vec![
-            ("solve runtime", solve($engine, &vw, (&wv_other).into())),
-            (
-                "solve runtime borrowed",
-                solve($engine, &vw, vw_other.adjoint_view()),
-            ),
-            ("solve codomain", solve($engine, &vv, (&wv).into())),
+            ("solve runtime", solve($engine, &vw, &wv_other)),
+            ("solve codomain", solve($engine, &vv, &wv)),
             (
                 "solve codomain and non-isomorphic",
-                solve($engine, &vw, (&wv).into()),
+                solve($engine, &vw, &wv),
             ),
+            ("solve non-isomorphic", solve($engine, &vw, &vv)),
             (
-                "solve codomain borrowed",
-                solve($engine, &vv, vw.adjoint_view()),
-            ),
-            ("solve non-isomorphic", solve($engine, &vw, (&vv).into())),
-            (
-                "solve non-isomorphic borrowed",
-                solve($engine, &vw, y.adjoint_view()),
-            ),
-            (
-                "solve borrowed dense divisor",
-                solve($engine, &vv, y.adjoint_view()),
-            ),
-            (
-                "solve borrowed compact divisor",
+                "solve lazy rhs compact divisor",
                 match compact_view_ok {
                     Ok(copies) => format!("ok, {copies} copies"),
                     Err(error) => error.to_string(),
@@ -179,11 +154,7 @@ macro_rules! misuse {
             ),
             (
                 "solve singular compact divisor",
-                solve($engine, &singular, (&y).into()),
-            ),
-            (
-                "solve singular compact divisor borrowed",
-                solve($engine, &singular, y.adjoint_view()),
+                solve($engine, &singular, &y),
             ),
             ("inv non-isomorphic", text(&vw.inv($engine, &[0], &[1]))),
             (
@@ -203,19 +174,11 @@ macro_rules! misuse {
 fn expected_misuse(singular: &str) -> Vec<(&'static str, String)> {
     vec![
         ("solve runtime", RUNTIME.to_string()),
-        ("solve runtime borrowed", RUNTIME.to_string()),
         ("solve codomain", CODOMAIN.to_string()),
         ("solve codomain and non-isomorphic", CODOMAIN.to_string()),
-        ("solve codomain borrowed", CODOMAIN.to_string()),
         ("solve non-isomorphic", NOT_ISO_SOLVE.to_string()),
-        ("solve non-isomorphic borrowed", NOT_ISO_SOLVE.to_string()),
-        ("solve borrowed dense divisor", unsupported_solve()),
-        ("solve borrowed compact divisor", "ok, 0 copies".to_string()),
+        ("solve lazy rhs compact divisor", "ok, 0 copies".to_string()),
         ("solve singular compact divisor", singular.to_string()),
-        (
-            "solve singular compact divisor borrowed",
-            singular.to_string(),
-        ),
         ("inv non-isomorphic", NOT_ISO_INV.to_string()),
         ("inv non-isomorphic lazy", NOT_ISO_INV.to_string()),
         ("exp non-endomorphic", NOT_ENDO.to_string()),
@@ -357,8 +320,8 @@ fn misuse_reports_one_first_error_in_both_modes() {
     assert!(differing_rows.is_empty(), "{}", differing_rows.join("\n"));
 }
 
-/// A rule mismatch precedes every later check, including a borrowed rhs and
-/// one whose moved roles would copy it.
+/// A rule mismatch precedes every later check, including for a lazy rhs whose
+/// moved roles would materialize it.
 macro_rules! rule_rows {
     ($engine:ident, $divisor_leg:expr, $rhs_leg:expr, $dtype:ty) => {{
         let (a, b) = (&$divisor_leg, &$rhs_leg);
@@ -369,14 +332,15 @@ macro_rules! rule_rows {
         let rhs = TensorMap::<_, $dtype>::rand_with_seed($engine, &runtime, [b], [b], 2).unwrap();
         let rhs_other =
             TensorMap::<_, $dtype>::rand_with_seed($engine, &other, [b], [b], 3).unwrap();
+        let rhs_lazy = rhs.adjoint($engine).unwrap();
         vec![
             text(&divisor.solve($engine, &[0], &[1], &rhs, &[0], &[1])),
-            text(&divisor.solve($engine, &[0], &[1], rhs.adjoint_view(), &[0], &[1])),
-            text(&divisor.solve($engine, &[1], &[0], rhs.adjoint_view(), &[1], &[0])),
+            text(&divisor.solve($engine, &[0], &[1], &rhs_lazy, &[0], &[1])),
+            text(&divisor.solve($engine, &[1], &[0], &rhs_lazy, &[1], &[0])),
             // Malformed roles: the rule still precedes the permute's own error,
-            // for an owned and a borrowed rhs alike.
+            // for an owned and a lazy rhs alike.
             text(&divisor.solve($engine, &[5], &[0], &rhs, &[0], &[1])),
-            text(&divisor.solve($engine, &[5], &[0], rhs.adjoint_view(), &[0], &[1])),
+            text(&divisor.solve($engine, &[5], &[0], &rhs_lazy, &[0], &[1])),
             // Runtime precedes rule.
             text(&divisor.solve($engine, &[0], &[1], &rhs_other, &[0], &[1])),
         ]

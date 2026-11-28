@@ -37,6 +37,7 @@ macro_rules! full_transpose {
 use crate::report;
 use report::Report;
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Direction;
 
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
@@ -250,13 +251,13 @@ fn device_into_admits_the_exact_layout_on_the_shared_runtime_store() {
     symtn::cache::clear();
     let mut first = expected.to_cuda(cuda).unwrap();
     source
-        .permute_into(cuda, &[2, 0], &[1, 3], &mut first, 1.0, 0.0)
+        .permute_into(cuda, &[2, 0], &[1, 3], Dest::overwrite(&mut first))
         .unwrap();
     let cold = completed_transformers();
 
     let mut second = expected.to_cuda(cuda).unwrap();
     source
-        .permute_into(cuda, &[2, 0], &[1, 3], &mut second, 1.0, 0.0)
+        .permute_into(cuda, &[2, 0], &[1, 3], Dest::overwrite(&mut second))
         .unwrap();
     let warm = completed_transformers();
     assert_eq!(
@@ -280,7 +281,7 @@ fn device_into_admits_the_exact_layout_on_the_shared_runtime_store() {
         .to_cuda(cuda)
         .unwrap();
     let error = source
-        .permute_into(cuda, &[2, 0], &[1, 3], &mut wrong, 1.0, 0.0)
+        .permute_into(cuda, &[2, 0], &[1, 3], Dest::overwrite(&mut wrong))
         .unwrap_err();
     assert!(
         matches!(&error, symtn::typed::Error::Operation(operation)
@@ -310,7 +311,7 @@ fn device_into_rejections_happen_before_any_device_work() {
     {
         let mut warm = device_destination(cuda);
         source
-            .permute_into(cuda, &[2, 0], &[1, 3], &mut warm, 1.0, 0.0)
+            .permute_into(cuda, &[2, 0], &[1, 3], Dest::overwrite(&mut warm))
             .unwrap();
     }
 
@@ -371,9 +372,9 @@ fn device_into_rejections_happen_before_any_device_work() {
         let witness = foreign.clone();
         let error = rejects_like_host!(
             "runtime mismatch precedes rule mismatch",
-            z2_host.permute_into(engine, &[0], &[1], &mut host_foreign, 1.0, 0.0),
+            z2_host.permute_into(engine, &[0], &[1], Dest::overwrite(&mut host_foreign)),
             witness,
-            z2_source.permute_into(cuda, &[0], &[1], &mut foreign, 1.0, 0.0)
+            z2_source.permute_into(cuda, &[0], &[1], Dest::overwrite(&mut foreign))
         );
         assert_eq!(error, Error::RuntimeMismatch);
     }
@@ -391,9 +392,9 @@ fn device_into_rejections_happen_before_any_device_work() {
         let witness = z3_destination.clone();
         let error = rejects_like_host!(
             "rule mismatch precedes the lazy-adjoint source",
-            z2_host_lazy_source.permute_into(engine, &[0], &[1], &mut host_z3, 1.0, 0.0),
+            z2_host_lazy_source.permute_into(engine, &[0], &[1], Dest::overwrite(&mut host_z3)),
             witness,
-            z2_lazy_source.permute_into(cuda, &[0], &[1], &mut z3_destination, 1.0, 0.0)
+            z2_lazy_source.permute_into(cuda, &[0], &[1], Dest::overwrite(&mut z3_destination))
         );
         assert_eq!(error, Error::RuleMismatch);
     }
@@ -409,12 +410,15 @@ fn device_into_rejections_happen_before_any_device_work() {
             engine,
             &[2, 0],
             &[1, 3],
-            &mut host_lazy_destination,
-            1.0,
-            0.0
+            Dest::overwrite(&mut host_lazy_destination)
         ),
         lazy_parent,
-        lazy_source.permute_into(cuda, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
+        lazy_source.permute_into(
+            cuda,
+            &[2, 0],
+            &[1, 3],
+            Dest::overwrite(&mut lazy_destination)
+        )
     );
     assert_eq!(
         error,
@@ -431,12 +435,15 @@ fn device_into_rejections_happen_before_any_device_work() {
             engine,
             &[2, 0],
             &[1, 3],
-            &mut host_lazy_destination,
-            1.0,
-            0.0
+            Dest::overwrite(&mut host_lazy_destination)
         ),
         lazy_parent,
-        source.permute_into(cuda, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
+        source.permute_into(
+            cuda,
+            &[2, 0],
+            &[1, 3],
+            Dest::overwrite(&mut lazy_destination)
+        )
     );
     assert_eq!(
         error,
@@ -454,9 +461,9 @@ fn device_into_rejections_happen_before_any_device_work() {
         let witness = source.clone();
         let error = rejects_like_host!(
             "the alias check precedes the operation build",
-            host.permute_into(engine, &[0, 0], &[1, 3], &mut host_alias, 1.0, 0.0),
+            host.permute_into(engine, &[0, 0], &[1, 3], Dest::overwrite(&mut host_alias)),
             witness,
-            source.permute_into(cuda, &[0, 0], &[1, 3], &mut alias, 1.0, 0.0)
+            source.permute_into(cuda, &[0, 0], &[1, 3], Dest::overwrite(&mut alias))
         );
         assert_eq!(error, Error::DestinationShared);
     }
@@ -473,12 +480,10 @@ fn device_into_rejections_happen_before_any_device_work() {
                 engine,
                 &[2, 0],
                 &[1, 3],
-                &mut host_parent_alias,
-                1.0,
-                0.0
+                Dest::overwrite(&mut host_parent_alias)
             ),
             witness,
-            lazy_source.permute_into(cuda, &[2, 0], &[1, 3], &mut parent_alias, 1.0, 0.0)
+            lazy_source.permute_into(cuda, &[2, 0], &[1, 3], Dest::overwrite(&mut parent_alias))
         );
         assert_eq!(error, Error::DestinationShared);
     }
@@ -496,9 +501,14 @@ fn device_into_rejections_happen_before_any_device_work() {
         let witness = wrong_space.clone();
         let error = rejects_like_host!(
             "the space check precedes unique ownership",
-            host.permute_into(engine, &[2, 0], &[1, 3], &mut host_wrong_space, 1.0, 0.0),
+            host.permute_into(
+                engine,
+                &[2, 0],
+                &[1, 3],
+                Dest::overwrite(&mut host_wrong_space)
+            ),
             witness,
-            source.permute_into(cuda, &[2, 0], &[1, 3], &mut wrong_space, 1.0, 0.0)
+            source.permute_into(cuda, &[2, 0], &[1, 3], Dest::overwrite(&mut wrong_space))
         );
         assert!(
             matches!(&error, symtn::typed::Error::Operation(operation)
@@ -518,9 +528,9 @@ fn device_into_rejections_happen_before_any_device_work() {
         let witness = shared.clone();
         let error = rejects_like_host!(
             "shared destination",
-            host.permute_into(engine, &[2, 0], &[1, 3], &mut host_shared, 1.0, 0.0),
+            host.permute_into(engine, &[2, 0], &[1, 3], Dest::overwrite(&mut host_shared)),
             witness,
-            source.permute_into(cuda, &[2, 0], &[1, 3], &mut shared, 1.0, 0.0)
+            source.permute_into(cuda, &[2, 0], &[1, 3], Dest::overwrite(&mut shared))
         );
         assert!(error.report().contains("shares its storage"), "{error}");
     }
@@ -535,15 +545,15 @@ fn device_into_rejections_happen_before_any_device_work() {
     let witness = destination.clone();
     rejects_like_host!(
         "malformed axes",
-        host.permute_into(engine, &[0, 0], &[1, 3], &mut host_dst, 1.0, 0.0),
+        host.permute_into(engine, &[0, 0], &[1, 3], Dest::overwrite(&mut host_dst)),
         witness,
-        source.permute_into(cuda, &[0, 0], &[1, 3], &mut destination, 1.0, 0.0)
+        source.permute_into(cuda, &[0, 0], &[1, 3], Dest::overwrite(&mut destination))
     );
     rejects_like_host!(
         "non-planar transpose",
-        host.transpose_into(engine, &[1, 2], &[3, 0], &mut host_dst, 1.0, 0.0),
+        host.transpose_into(engine, &[1, 2], &[3, 0], Dest::overwrite(&mut host_dst)),
         witness,
-        source.transpose_into(cuda, &[1, 2], &[3, 0], &mut destination, 1.0, 0.0)
+        source.transpose_into(cuda, &[1, 2], &[3, 0], Dest::overwrite(&mut destination))
     );
 
     let v = u1_leg_2_1_2();
@@ -554,9 +564,9 @@ fn device_into_rejections_happen_before_any_device_work() {
         let witness = rank_three.clone();
         let error = rejects_like_host!(
             "repartition destination of another rank",
-            host.repartition_into(engine, &mut host_rank_three, 1.0, 0.0),
+            host.repartition_into(engine, Dest::overwrite(&mut host_rank_three)),
             witness,
-            source.repartition_into(cuda, &mut rank_three, 1.0, 0.0)
+            source.repartition_into(cuda, Dest::overwrite(&mut rank_three))
         );
         assert!(
             error.report().contains("does not match source rank"),

@@ -616,18 +616,19 @@ fn warmed_complex_symbol_reductions_do_not_allocate() {
     // What: the complex-symbol lane reads the real quantum dimension
     // through the same seam, so warm Ising `inner`, `norm` and `tr` stay
     // allocation-free on the caller thread, owned and lazy.
-    use symtn::sector::{TableRule, TableSector};
+
+    use crate::tables::*;
     let runtime = Runtime::new();
     let space = GradedSpace::try_new(
-        Arc::new(TableRule::ising()),
+        Arc::new(table_ising()),
         [
-            (TableSector::new(1), 3),
-            (TableSector::new(2), 2),
-            (TableSector::new(3), 4),
+            (ising_object(1), 3),
+            (ising_object(2), 2),
+            (ising_object(3), 4),
         ],
     )
     .unwrap();
-    let lhs: TensorMap<TableRule, Complex64> = TensorMap::rand_with_seed(
+    let lhs: TensorMap<TableCategoryRule, Complex64> = TensorMap::rand_with_seed(
         engine,
         &runtime,
         [&space, &space],
@@ -635,7 +636,7 @@ fn warmed_complex_symbol_reductions_do_not_allocate() {
         228_101,
     )
     .unwrap();
-    let rhs: TensorMap<TableRule, Complex64> = TensorMap::rand_with_seed(
+    let rhs: TensorMap<TableCategoryRule, Complex64> = TensorMap::rand_with_seed(
         engine,
         &runtime,
         [&space, &space],

@@ -184,7 +184,9 @@ fn cuda_gemm_region_strided_into<D: CudaScalar>(
 /// operand, as ONE `dot_general` with a trailing batch mode:
 /// `dst[dst_offset + i·dst_member_stride][m x n] = lhs[lhs_offset +
 /// i·lhs_member_stride][m x k] · rhs[rhs_offset + i·rhs_member_stride][k x n]`
-/// for `i < members` (overwrite, `beta = 0`).
+/// for `i < members`, as `dst = alpha · lhs · rhs + beta · dst` with
+/// `alpha` and `beta` in the same epilogue (`beta = 0` overwrites without
+/// reading `dst`).
 ///
 /// The views are `[m, k, B]`, `[k, n, B]` and `[m, n, B]` with the member
 /// stride on the last axis; Tenferro orders the output modes `[lhs_free,
@@ -209,45 +211,8 @@ pub fn cuda_gemm_region_batched_into<D: CudaScalar>(
     k: usize,
     n: usize,
     members: usize,
-) -> Result<(), DenseError> {
-    cuda_gemm_region_batched_scaled_into::<D>(
-        ctx,
-        dst,
-        dst_offset,
-        dst_member_stride,
-        lhs,
-        lhs_offset,
-        lhs_member_stride,
-        rhs,
-        rhs_offset,
-        rhs_member_stride,
-        m,
-        k,
-        n,
-        members,
-        D::ONE,
-    )
-}
-
-/// Batched region GEMM with one common alpha and overwrite semantics.
-#[doc(hidden)]
-#[allow(clippy::too_many_arguments)]
-pub fn cuda_gemm_region_batched_scaled_into<D: CudaScalar>(
-    ctx: &mut CudaDenseContext,
-    dst: &mut CudaDenseStorage,
-    dst_offset: usize,
-    dst_member_stride: usize,
-    lhs: &CudaDenseStorage,
-    lhs_offset: usize,
-    lhs_member_stride: usize,
-    rhs: &CudaDenseStorage,
-    rhs_offset: usize,
-    rhs_member_stride: usize,
-    m: usize,
-    k: usize,
-    n: usize,
-    members: usize,
     alpha: D,
+    beta: D,
 ) -> Result<(), DenseError> {
     const OP: &str = "cuda_gemm_batched";
     ensure_cuda_device(
@@ -308,7 +273,7 @@ pub fn cuda_gemm_region_batched_scaled_into<D: CudaScalar>(
         lhs_conj: false,
         rhs_conj: false,
         alpha: alpha.contraction_scalar(),
-        beta: D::ZERO.contraction_scalar(),
+        beta: beta.contraction_scalar(),
     };
     record(|stats| stats.gemm_calls += 1);
     ctx.backend

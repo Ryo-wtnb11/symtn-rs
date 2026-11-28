@@ -11,7 +11,8 @@ use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::HashSet;
 use std::sync::Arc;
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::sector::{TableRule, TableSector};
+
+use crate::tables::*;
 use symtn::typed::Engine;
 use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 
@@ -450,8 +451,8 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
 
     // Levels only matter for non-symmetric braiding.
     let fib = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 2)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 2)],
     )
     .unwrap();
     let fib_tensor = |engine: &mut dyn Engine, runtime: &Runtime| {
@@ -459,7 +460,7 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
         TensorMap::<_, Complex64>::rand_with_seed(engine, runtime, [&fib, &dual], [&fib, &dual], 5)
             .unwrap()
     };
-    let complex_bits = |engine: &mut dyn Engine, t: &TensorMap<TableRule, Complex64>| {
+    let complex_bits = |engine: &mut dyn Engine, t: &TensorMap<TableCategoryRule, Complex64>| {
         t.materialize(engine)
             .unwrap()
             .dense_data()

@@ -11,6 +11,7 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
@@ -246,9 +247,7 @@ macro_rules! check_values {
             .trace_pairs_into(
                 $engine,
                 PAIRS,
-                &mut into,
-                <$scalar>::from(2.0),
-                <$scalar>::from(0.5),
+                Dest::scaled(&mut into, <$scalar>::from(2.0), <$scalar>::from(0.5)),
             )
             .unwrap();
         let (uncached, mut uncached_into) = without_compiled_traces(|| {
@@ -262,9 +261,11 @@ macro_rules! check_values {
                 .trace_pairs_into(
                     $engine,
                     PAIRS,
-                    &mut uncached_into,
-                    <$scalar>::from(2.0),
-                    <$scalar>::from(0.5),
+                    Dest::scaled(
+                        &mut uncached_into,
+                        <$scalar>::from(2.0),
+                        <$scalar>::from(0.5),
+                    ),
                 )
                 .unwrap()
         });

@@ -33,6 +33,7 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use num_complex::{Complex32, Complex64};
 
@@ -940,9 +941,7 @@ fn a_zero_scale_into_clears_a_nan_poisoned_destination() {
                     cuda,
                     &[1, 2],
                     &[0],
-                    &mut destination,
-                    alpha,
-                    D::from_real(0.0),
+                    Dest::scaled(&mut destination, alpha, D::from_real(0.0)),
                 )
                 .unwrap();
             for (index, &value) in destination
@@ -1084,9 +1083,7 @@ fn assert_contract_and_compose_match_host<R, D>(
                 codomain: &[0],
                 domain: &[1],
             },
-            &mut destination,
-            D::entry(1.0, 0.0),
-            D::entry(0.0, 0.0),
+            Dest::scaled(&mut destination, D::entry(1.0, 0.0), D::entry(0.0, 0.0)),
         )
         .unwrap();
     assert_matches_host(
@@ -1108,9 +1105,7 @@ fn assert_contract_and_compose_match_host<R, D>(
                 codomain: &[0],
                 domain: &[1],
             },
-            &mut destination,
-            D::entry(1.0, 0.0),
-            D::entry(0.0, 0.0),
+            Dest::scaled(&mut destination, D::entry(1.0, 0.0), D::entry(0.0, 0.0)),
         )
         .unwrap();
     assert_matches_host(
@@ -1381,9 +1376,7 @@ fn assert_transforms_match_host<R, D>(
                 cuda,
                 &[1, 2],
                 &[0],
-                &mut destination,
-                alpha,
-                D::from_real(0.0),
+                Dest::scaled(&mut destination, alpha, D::from_real(0.0)),
             )
             .unwrap();
         assert_matches_host(
@@ -1404,7 +1397,7 @@ fn assert_transforms_match_host<R, D>(
             .to_cuda(cuda)
             .unwrap();
         device
-            .repartition_into(cuda, &mut bent, alpha, D::from_real(0.0))
+            .repartition_into(cuda, Dest::scaled(&mut bent, alpha, D::from_real(0.0)))
             .unwrap();
         assert_matches_host(
             bent.to_host(cuda).unwrap().dense_data().unwrap(),
@@ -1424,7 +1417,12 @@ fn assert_transforms_match_host<R, D>(
             .to_cuda(cuda)
             .unwrap();
         device
-            .transpose_into(cuda, &[2], &[1, 0], &mut cyclic, alpha, D::from_real(0.0))
+            .transpose_into(
+                cuda,
+                &[2],
+                &[1, 0],
+                Dest::scaled(&mut cyclic, alpha, D::from_real(0.0)),
+            )
             .unwrap();
         assert_matches_host(
             cyclic.to_host(cuda).unwrap().dense_data().unwrap(),
@@ -1520,9 +1518,7 @@ fn a_single_precision_into_costs_the_same_every_call() {
                 cuda,
                 &[1, 2],
                 &[0],
-                &mut destination,
-                D::entry(1.0, 0.0),
-                D::entry(0.0, 0.0),
+                Dest::scaled(&mut destination, D::entry(1.0, 0.0), D::entry(0.0, 0.0)),
             )
             .unwrap();
 
@@ -1538,9 +1534,7 @@ fn a_single_precision_into_costs_the_same_every_call() {
                         cuda,
                         &[1, 2],
                         &[0],
-                        &mut destination,
-                        alpha,
-                        D::entry(0.0, 0.0),
+                        Dest::scaled(&mut destination, alpha, D::entry(0.0, 0.0)),
                     )
                     .unwrap();
                 let after = cuda_transfer_stats();

@@ -148,10 +148,9 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         codomain_axes: &[usize],
         domain_axes: &[usize],
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.permute_into_impl(engine, codomain_axes, domain_axes, destination, alpha, beta)
     }
@@ -200,17 +199,15 @@ where
     /// validation (a backend or other execution error) the destination's
     /// contents are unspecified, while its space and block structure stay
     /// intact.
-    #[allow(clippy::too_many_arguments)]
     pub fn braid_into(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
         codomain_axes: &[usize],
         domain_axes: &[usize],
         levels: &[usize],
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.braid_into_impl(
             engine,
@@ -272,10 +269,9 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         codomain_axes: &[usize],
         domain_axes: &[usize],
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.transpose_into_impl(engine, codomain_axes, domain_axes, destination, alpha, beta)
     }
@@ -336,10 +332,9 @@ where
     pub fn repartition_into(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.repartition_into_impl(engine, destination, alpha, beta)
     }
@@ -910,18 +905,5 @@ where
                 repr: TypedTensorRepr::Owned(Arc::clone(&view.parent)),
             },
         })
-    }
-
-    /// Borrowed adjoint view: the operand [`Self::adjoint`] would give,
-    /// passed without building it. See [`TensorRef`].
-    pub fn adjoint_view(&self) -> TensorRef<'_, R, D, S> {
-        TensorRef {
-            base: self,
-            adjoint: Some(|tensor| {
-                tensor.lazy_adjoint().map_err(|error| {
-                    <R::Mode as TypedTensorModeDispatch<R>>::facade_error_into_error(EXEC, error)
-                })
-            }),
-        }
     }
 }

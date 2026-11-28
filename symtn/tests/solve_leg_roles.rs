@@ -90,32 +90,12 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
         matches!(a.solve(engine, a_rows, a_cols, &b, &[0, 0], &[1, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
 
-    let before = completed_transformers();
-    assert!(matches!(
-        a.solve(engine, a_rows, a_cols, b.adjoint_view(), b_rows, b_cols),
-        Err(Error::Unsupported {
-            operation: "solve",
-            ..
-        })
-    ));
-    let after = completed_transformers();
-    assert_eq!(
-        before.hits() + before.misses(),
-        after.hits() + after.misses()
-    );
-
     let other_runtime = Runtime::new();
     let other_b: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &other_runtime, [&leg, &leg], [&leg, &leg], 8).unwrap();
+    let other_b_adjoint = other_b.adjoint(engine).unwrap();
     assert!(matches!(
-        a.solve(
-            engine,
-            a_rows,
-            a_cols,
-            other_b.adjoint_view(),
-            b_rows,
-            b_cols
-        ),
+        a.solve(engine, a_rows, a_cols, &other_b_adjoint, b_rows, b_cols),
         Err(Error::RuntimeMismatch)
     ));
 }
@@ -201,14 +181,6 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
         .dual()
         .unwrap();
     check!(engine, v, w);
-}
-
-/// The process-global completed-transformer cache (`symtn::cache`).
-fn completed_transformers() -> symtn::cache::StructureCacheInfo {
-    symtn::cache::stats()
-        .into_iter()
-        .find(|info| info.kind() == symtn::cache::StructureCacheKind::CompletedTreeTransformer)
-        .expect("every structure cache kind reports")
 }
 
 /// Re-executes exactly one global-cache probe with fresh-process cache state.

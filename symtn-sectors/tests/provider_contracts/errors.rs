@@ -11,8 +11,9 @@
 //!   `checked_rigid_dimension_accepts_the_largest_su2_dynkin_label`,
 //!   `rigid_failures_remain_typed`.
 //! - Table R/twist rejection message on a fusion-only entry:
-//!   `tests/table_rule.rs` `fusion_only_entry_has_f_data_and_panics_on_r_and_twist`.
+//!   `tests/table_categories.rs` `fusion_only_entry_has_f_data_and_panics_on_r_and_twist`.
 
+use crate::tables::*;
 use std::panic::{self, AssertUnwindSafe};
 
 use crate::product_codec::ParityProductCodec;
@@ -47,7 +48,7 @@ fn enumerated_rules_check_left_right_then_coupled() {
 
 #[test]
 fn table_checks_left_right_then_coupled() {
-    let fib = TableRule::fibonacci();
+    let fib = table_fibonacci();
     assert_eq!(fib.try_nsymbol(s(2), s(3), s(4)), invalid(2));
     assert_eq!(fib.try_nsymbol(s(0), s(3), s(4)), invalid(3));
     assert_eq!(fib.try_nsymbol(s(0), s(0), s(4)), invalid(4));
@@ -292,7 +293,7 @@ fn product_fusion_reports_an_unpairable_channel_after_both_factors() {
 #[test]
 fn product_with_a_fusion_only_factor_panics_with_the_table_message() {
     let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
-        TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap(),
+        table_by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c"),
         ZNFusionRule::new(2).unwrap(),
     )
     .unwrap();

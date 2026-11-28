@@ -25,9 +25,10 @@
 
 #![cfg(feature = "cuda")]
 
+use crate::su2::{su2_irrep, su2_rule};
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.
-use crate::su2::{su2_irrep, su2_rule};
+use symtn::typed::Dest;
 macro_rules! full_rotation {
     ($tensor:expr) => {{
         let tensor = &$tensor;
@@ -54,9 +55,7 @@ macro_rules! full_transpose_into {
             $engine,
             &codomain_axes,
             &domain_axes,
-            $destination,
-            $alpha,
-            Default::default(),
+            Dest::scaled($destination, $alpha, Default::default()),
         )
     }};
 }
@@ -962,7 +961,12 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
             &format!("U1/f64 permute_into alpha={alpha}"),
             real,
             permuted,
-            |e, t, d| t.permute_into(e, &[2, 0], &[1, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(
+                e,
+                &[2, 0],
+                &[1, 3],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         if alpha != 0.0 {
             assert_moved(
@@ -985,7 +989,12 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
             &format!("U1/f64 transpose_into alpha={alpha}"),
             real,
             cyclic,
-            |e, t, d| t.transpose_into(e, &[1, 3], &[0, 2], d, alpha, Default::default())
+            |e, t, d| t.transpose_into(
+                e,
+                &[1, 3],
+                &[0, 2],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         device_overwrite_matches_host!(
             engine,
@@ -993,7 +1002,7 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
             &format!("U1/f64 repartition_into alpha={alpha}"),
             real,
             bent,
-            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, Dest::scaled(d, alpha, Default::default()))
         );
     }
 
@@ -1010,7 +1019,12 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
             &format!("U1/f64 non-finite alpha={alpha}"),
             real,
             permuted_model,
-            |e, t, d| t.permute_into(e, &[2, 0], &[1, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(
+                e,
+                &[2, 0],
+                &[1, 3],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         assert!(
             written
@@ -1040,7 +1054,12 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
             &format!("U1/c64 permute_into alpha={alpha}"),
             complex,
             permuted,
-            |e, t, d| t.permute_into(e, &[2, 0], &[1, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(
+                e,
+                &[2, 0],
+                &[1, 3],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         device_overwrite_matches_host!(
             engine,
@@ -1056,7 +1075,7 @@ fn device_into_matches_the_host_for_every_alpha_and_method() {
             &format!("U1/c64 repartition_into alpha={alpha}"),
             complex,
             bent,
-            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, Dest::scaled(d, alpha, Default::default()))
         );
     }
 }
@@ -1087,7 +1106,12 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             &format!("SU2/f64 permute_into alpha={alpha}"),
             su2_real,
             permuted,
-            |e, t, d| t.permute_into(e, &[1, 2], &[3, 0], d, alpha, Default::default())
+            |e, t, d| t.permute_into(
+                e,
+                &[1, 2],
+                &[3, 0],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         if alpha != 0.0 {
             assert_not_a_reordering(
@@ -1110,7 +1134,7 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             &format!("SU2/f64 repartition_into alpha={alpha}"),
             su2_real,
             bent,
-            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, Dest::scaled(d, alpha, Default::default()))
         );
     }
     let su2_permuted_c = su2_complex.permute(engine, &[1, 2], &[3, 0]).unwrap();
@@ -1124,9 +1148,7 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             e,
             &[1, 2],
             &[3, 0],
-            d,
-            Complex64::new(0.75, -0.25),
-            Complex64::new(0.0, 0.0)
+            Dest::scaled(d, Complex64::new(0.75, -0.25), Complex64::new(0.0, 0.0))
         )
     );
     assert_not_a_reordering(
@@ -1174,7 +1196,12 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             &format!("fZ2xU1 permute_into alpha={alpha}"),
             host,
             permuted,
-            |e, t, d| t.permute_into(e, &[2, 1], &[0, 3], d, alpha, Default::default())
+            |e, t, d| t.permute_into(
+                e,
+                &[2, 1],
+                &[0, 3],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         if alpha != 0.0 {
             assert_not_a_reordering(
@@ -1189,7 +1216,12 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             &format!("fZ2xU1 transpose_into alpha={alpha}"),
             host,
             cyclic,
-            |e, t, d| t.transpose_into(e, &[1, 3], &[0, 2], d, alpha, Default::default())
+            |e, t, d| t.transpose_into(
+                e,
+                &[1, 3],
+                &[0, 2],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         device_overwrite_matches_host!(
             engine,
@@ -1197,7 +1229,7 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             &format!("fZ2xU1 repartition_into alpha={alpha}"),
             host,
             bent,
-            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, Dest::scaled(d, alpha, Default::default()))
         );
     }
 
@@ -1243,7 +1275,12 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             &format!("fZ2xSU2 permute_into alpha={alpha}"),
             host,
             permuted,
-            |e, t, d| t.permute_into(e, &[1, 2], &[3, 0], d, alpha, Default::default())
+            |e, t, d| t.permute_into(
+                e,
+                &[1, 2],
+                &[3, 0],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         if alpha != Complex64::new(0.0, 0.0) {
             assert_not_a_reordering(
@@ -1266,7 +1303,7 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
             &format!("fZ2xSU2 repartition_into alpha={alpha}"),
             host,
             bent,
-            |e, t, d| t.repartition_into(e, d, alpha, Default::default())
+            |e, t, d| t.repartition_into(e, Dest::scaled(d, alpha, Default::default()))
         );
     }
 }
@@ -1317,7 +1354,12 @@ fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
             &format!("NaN source *_into alpha={alpha}"),
             poisoned_source,
             model,
-            |e, t, d| t.permute_into(e, &[1, 2], &[3, 0], d, alpha, Default::default())
+            |e, t, d| t.permute_into(
+                e,
+                &[1, 2],
+                &[3, 0],
+                Dest::scaled(d, alpha, Default::default())
+            )
         );
         // The exact NaN *set*, not merely "some NaN survived": `any` would
         // pass if only one of the poisoned blocks propagated. `device ==
@@ -1329,9 +1371,7 @@ fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
                 engine,
                 &[1, 2],
                 &[3, 0],
-                &mut host_expected,
-                alpha,
-                Default::default(),
+                Dest::scaled(&mut host_expected, alpha, Default::default()),
             )
             .unwrap();
         let expected_nans = nan_positions(host_expected.dense_data().unwrap());
@@ -1376,7 +1416,7 @@ fn device_into_has_no_identity_short_circuit() {
         "identity permute_into",
         host,
         host,
-        |e, t, d| t.permute_into(e, &[0, 1], &[2, 3], d, -2.5, 0.0)
+        |e, t, d| t.permute_into(e, &[0, 1], &[2, 3], Dest::scaled(d, -2.5, 0.0))
     );
     assert_payload_close(
         written.dense_data().unwrap(),
@@ -1392,7 +1432,7 @@ fn device_into_has_no_identity_short_circuit() {
         "same-split repartition_into",
         host,
         host,
-        |e, t, d| t.repartition_into(e, d, 2.0, 0.0)
+        |e, t, d| t.repartition_into(e, Dest::scaled(d, 2.0, 0.0))
     );
     assert_payload_close(
         written.dense_data().unwrap(),
@@ -1555,21 +1595,32 @@ fn assert_lazy_into_matches_host<R, D>(
     case!(
         "permute",
         |t| t.permute(engine, codomain_axes, domain_axes),
-        |e, s, d| s.permute_into(e, codomain_axes, domain_axes, d, alpha, beta)
+        |e, s, d| s.permute_into(e, codomain_axes, domain_axes, Dest::scaled(d, alpha, beta))
     );
     case!(
         "braid",
         |t| t.braid(engine, codomain_axes, domain_axes, &levels),
-        |e, s, d| s.braid_into(e, codomain_axes, domain_axes, &levels, d, alpha, beta)
+        |e, s, d| s.braid_into(
+            e,
+            codomain_axes,
+            domain_axes,
+            &levels,
+            Dest::scaled(d, alpha, beta)
+        )
     );
     case!(
         "transpose",
         |t| t.transpose(engine, &full_codomain, &full_domain),
-        |e, s, d| s.transpose_into(e, &full_codomain, &full_domain, d, alpha, beta)
+        |e, s, d| s.transpose_into(
+            e,
+            &full_codomain,
+            &full_domain,
+            Dest::scaled(d, alpha, beta)
+        )
     );
     case!(
         "repartition",
         |t| t.repartition(engine, new_split),
-        |e, s, d| s.repartition_into(e, d, alpha, beta)
+        |e, s, d| s.repartition_into(e, Dest::scaled(d, alpha, beta))
     );
 }

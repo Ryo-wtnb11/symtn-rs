@@ -4,6 +4,8 @@
 mod su2;
 use num_complex::{Complex32, Complex64};
 use symtn_core as sector_types;
+#[path = "../../tests/support/tables.rs"]
+mod tables;
 
 mod braiding_probe;
 #[macro_use]
@@ -36,8 +38,8 @@ mod ulp;
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
+mod adjoint_operand_allocations;
 mod adjoint_view_allocations;
-mod adjoint_view_operand_allocations;
 mod batched_failure_allocations;
 mod checked_staged_structure_allocations;
 mod compact_factor_plan_allocations;

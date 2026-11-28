@@ -13,6 +13,7 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use symtn::typed::{
     Complex64, ContractSpec, Engine, Error, GradedSpace, OperationError, Runtime, TensorMap,
@@ -149,15 +150,25 @@ macro_rules! into_matrix {
             let linear: Vec<usize> = codomain.iter().chain(&domain).copied().collect();
             let mut destination = fresh($engine);
             permutation(
-                &t.permute_into($engine, &codomain, &domain, &mut destination, one, zero)
-                    .unwrap_err(),
+                &t.permute_into(
+                    $engine,
+                    &codomain,
+                    &domain,
+                    Dest::scaled(&mut destination, one, zero),
+                )
+                .unwrap_err(),
                 &linear,
                 4,
             );
             let mut destination = fresh($engine);
             permutation(
-                &t.transpose_into($engine, &codomain, &domain, &mut destination, one, zero)
-                    .unwrap_err(),
+                &t.transpose_into(
+                    $engine,
+                    &codomain,
+                    &domain,
+                    Dest::scaled(&mut destination, one, zero),
+                )
+                .unwrap_err(),
                 &linear,
                 4,
             );
@@ -168,9 +179,7 @@ macro_rules! into_matrix {
                     &codomain,
                     &domain,
                     &[0, 1, 2, 3],
-                    &mut destination,
-                    one,
-                    zero,
+                    Dest::scaled(&mut destination, one, zero),
                 )
                 .unwrap_err(),
                 &linear,
@@ -184,7 +193,7 @@ macro_rules! into_matrix {
             };
             let mut destination = fresh($engine);
             permutation(
-                &t.contract_into($engine, t, &spec, &mut destination, one, zero)
+                &t.contract_into($engine, t, &spec, Dest::scaled(&mut destination, one, zero))
                     .unwrap_err(),
                 &linear,
                 4,
@@ -199,7 +208,7 @@ macro_rules! into_matrix {
             };
             let mut destination = fresh($engine);
             subset(
-                &t.contract_into($engine, t, &spec, &mut destination, one, zero)
+                &t.contract_into($engine, t, &spec, Dest::scaled(&mut destination, one, zero))
                     .unwrap_err(),
                 "lhs",
                 &axes,
@@ -208,8 +217,12 @@ macro_rules! into_matrix {
         }
         let mut destination = fresh($engine);
         subset(
-            &t.trace_pairs_into($engine, &[(0, 9)], &mut destination, one, zero)
-                .unwrap_err(),
+            &t.trace_pairs_into(
+                $engine,
+                &[(0, 9)],
+                Dest::scaled(&mut destination, one, zero),
+            )
+            .unwrap_err(),
             "trace pairs",
             &[0, 9],
             4,

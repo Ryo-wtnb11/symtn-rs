@@ -2,6 +2,7 @@ use super::*;
 use crate::probe::{self, Event};
 #[cfg(test)]
 use crate::su2::su2_rule;
+use crate::tables::*;
 
 #[test]
 fn tree_pair_plan_builder_handles_su2_one_by_one_domain_crossing() {
@@ -1636,7 +1637,7 @@ fn rank5_compact_transpose_with_trailing_bend_replays_like_per_pair() {
         |x: f64| x
     );
     assert_rank5_compact_transpose_replays_like_per_pair!(
-        symtn_core::TableRule::fibonacci(),
+        table_fibonacci(),
         Complex64,
         [SectorId::new(0), SectorId::new(1)],
         |x: f64| Complex64::new(x, 0.5 - x / 3.0)

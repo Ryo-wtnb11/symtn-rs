@@ -16,12 +16,13 @@ use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::sync::Arc;
 
+use crate::tables::*;
 use smallvec::SmallVec;
 use symtn_core::{
     BlockKey, BlockStructure, BraidingStyleKind, CoreError, FusionProductSpace, FusionRule,
     FusionStyleKind, FusionTreeGroupKey, FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey,
     FusionTreeRef, RuleIdentity, SectorId, SectorLeg, SectorStructure, SectorVec,
-    StructureCacheEquivalent, TableRule, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
+    StructureCacheEquivalent, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 fn fx<T: Hash + ?Sized>(value: &T) -> u64 {
@@ -514,7 +515,7 @@ fn real_structures() -> Vec<(&'static str, Arc<BlockStructure>)> {
                 &[leg(&fib, false), leg(&fib, false), leg(&fib, true)],
                 &[leg(&fib, false)],
             )
-            .coupled_subblock_structure_from_leg_degeneracies(&TableRule::fibonacci())
+            .coupled_subblock_structure_from_leg_degeneracies(&table_fibonacci())
             .unwrap(),
         ),
         (

@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 use crate::su2::su2_irrep;
+use crate::tables::*;
 use num_complex::Complex64;
 use symtn::sector::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionRule, FusionStyleKind,
@@ -15,7 +16,6 @@ use symtn::sector::{
     RuleIdentity, SectorCodec, SectorId, SectorOrderKey, SectorVec, U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, FusionAlgebraError};
-use symtn_sectors::TableSector;
 
 pub fn fnv1a(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
@@ -27,19 +27,19 @@ pub fn unit_interval(hash: u64) -> f64 {
     (hash >> 11) as f64 / (1u64 << 53) as f64 - 0.5
 }
 
-pub fn labels(sectors: &[TableSector]) -> String {
+pub fn labels(sectors: &[TableObject]) -> String {
     sectors
         .iter()
-        .map(|sector| sector.label().to_string())
+        .map(|sector| sector.index().to_string())
         .collect::<Vec<_>>()
         .join(",")
 }
 
 /// The fixture's `entry`: AnyonWiki labels, zero-based indices.
-pub fn entry(tag: &str, trees: &BlockFusionTrees<TableSector>, index: &[usize]) -> Complex64 {
+pub fn entry(tag: &str, trees: &BlockFusionTrees<TableObject>, index: &[usize]) -> Complex64 {
     let key = format!(
         "{tag}|{}|{}|{}|{}|{}|{}",
-        trees.coupled().label(),
+        trees.coupled().index(),
         labels(trees.codomain_uncoupled()),
         labels(trees.codomain_innerlines()),
         labels(trees.domain_uncoupled()),

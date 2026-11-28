@@ -24,6 +24,9 @@ mod probe;
 mod su2;
 #[cfg(test)]
 use symtn_core as sector_types;
+#[cfg(test)]
+#[path = "../../tests/support/tables.rs"]
+mod tables;
 mod tensortrace;
 #[cfg(test)]
 mod test_support;

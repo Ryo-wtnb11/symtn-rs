@@ -18,10 +18,11 @@ use crate::su2::su2_rule;
 
 use std::panic::{self, AssertUnwindSafe};
 
+use crate::tables::*;
 use symtn_sectors::{
     CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FermionParityIrrep,
-    FusionRule, MultiplicityFreeRigidSymbols, SectorCodec, SectorId, TableRule, U1FusionRule,
-    U1Irrep, ZNFusionRule, ZNIrrep,
+    FusionRule, MultiplicityFreeRigidSymbols, SectorCodec, SectorId, U1FusionRule, U1Irrep,
+    ZNFusionRule, ZNIrrep,
 };
 
 fn assert_dual_forwards<R: FusionRule + CheckedFusionAlgebra>(rule: &R, ids: &[SectorId]) {
@@ -203,7 +204,7 @@ fn cu1_infallible_entry_points_match_checked_domain() {
 
 #[test]
 fn fibonacci_infallible_entry_points_match_checked_domain() {
-    let rule = TableRule::fibonacci();
+    let rule = table_fibonacci();
     let ids: Vec<SectorId> = (0..7)
         .map(SectorId::new)
         .chain([SectorId::new(usize::MAX)])

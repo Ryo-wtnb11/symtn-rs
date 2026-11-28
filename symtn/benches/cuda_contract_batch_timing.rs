@@ -12,6 +12,7 @@
 
 #[path = "../../tests/support/su2.rs"]
 mod su2;
+use symtn::typed::Dest;
 use symtn_core as sector_types;
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -137,8 +138,14 @@ fn dynamic_tree_release_measurement() {
                 .to_cuda(&mut *cuda)
                 .unwrap();
             let warm_into = median_of(&mut || {
-                plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
-                    .unwrap();
+                plan.execute_into(
+                    &mut *cuda,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut workspace,
+                )
+                .unwrap();
             });
             let eager_inputs: Vec<_> = left
                 .iter()
@@ -240,16 +247,28 @@ fn direct_core_release_measurement() {
                 .to_cuda(&mut *cuda)
                 .unwrap();
             let (_, first_into) = observe(|| {
-                plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
-                    .unwrap();
+                plan.execute_into(
+                    &mut *cuda,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut workspace,
+                )
+                .unwrap();
                 black_box(&dst);
             });
             let warm_into = median(
                 (0..11)
                     .map(|_| {
                         observe(|| {
-                            plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
-                                .unwrap();
+                            plan.execute_into(
+                                &mut *cuda,
+                                &lhs,
+                                &rhs,
+                                Dest::overwrite(&mut dst),
+                                &mut workspace,
+                            )
+                            .unwrap();
                             black_box(&dst);
                         })
                         .1
@@ -362,15 +381,27 @@ fn signed_core_release_measurement() {
                 .to_cuda(&mut *cuda)
                 .unwrap();
             let (_, first_into) = observe(|| {
-                plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
-                    .unwrap()
+                plan.execute_into(
+                    &mut *cuda,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut workspace,
+                )
+                .unwrap()
             });
             let warm_into = median(
                 (0..11)
                     .map(|_| {
                         observe(|| {
-                            plan.execute_into(&mut *cuda, &lhs, &rhs, &mut dst, &mut workspace)
-                                .unwrap();
+                            plan.execute_into(
+                                &mut *cuda,
+                                &lhs,
+                                &rhs,
+                                Dest::overwrite(&mut dst),
+                                &mut workspace,
+                            )
+                            .unwrap();
                         })
                         .1
                     })

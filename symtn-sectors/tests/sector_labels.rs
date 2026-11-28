@@ -4,11 +4,12 @@ use std::collections::BTreeSet;
 
 use crate::product_codec::ParityProductCodec;
 
+use crate::tables::*;
 use symtn_sectors::{
     BraidingStyleKind, CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule,
     FermionParityIrrep, FusionAlgebraError, FusionRule, FusionStyleKind, ProductFusionRule,
     ProductSector, ProductSectorCodecError, RuleIdentity, SectorCodec, SectorId, SectorVec,
-    TableRule, TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
+    U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 #[test]
@@ -141,8 +142,8 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
         [FermionParityIrrep::ODD],
         2,
     );
-    assert_decode_total(&TableRule::fibonacci(), [TableSector::new(2)], 2);
-    assert_decode_total(&TableRule::ising(), [TableSector::new(3)], 2);
+    assert_decode_total(&table_fibonacci(), [fib_object(2)], 2);
+    assert_decode_total(&table_ising(), [ising_object(3)], 2);
     assert_decode_total(
         &su2_rule(),
         [1, 2, u32::MAX as usize - 1, u32::MAX as usize].map(su2_irrep),

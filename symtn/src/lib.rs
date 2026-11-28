@@ -96,6 +96,9 @@ pub mod cache;
 mod su2;
 #[cfg(test)]
 use symtn_core as sector_types;
+#[cfg(test)]
+#[path = "../../tests/support/tables.rs"]
+mod tables;
 // Compiles the repository README quickstart as a doctest (never part of the
 // shipped API; the README sits outside the package directory).
 #[cfg(doctest)]

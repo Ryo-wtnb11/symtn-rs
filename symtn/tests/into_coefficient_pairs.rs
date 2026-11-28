@@ -15,6 +15,7 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use num_complex::{Complex32, Complex64};
@@ -140,7 +141,12 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| t.permute_into($engine, &[2, 0], &[1, 3], d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.permute_into(
+                    $engine,
+                    &[2, 0],
+                    &[1, 3],
+                    Dest::scaled(d, alpha, beta)
+                ),
                 8
             );
             let levels = [0, 1, 2, 3];
@@ -157,9 +163,7 @@ macro_rules! suite {
                     &[1, 0],
                     &[3, 2],
                     &levels,
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 8
             );
@@ -175,9 +179,7 @@ macro_rules! suite {
                     $engine,
                     &[1, 3],
                     &[0, 2],
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 8
             );
@@ -189,7 +191,7 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| t.repartition_into($engine, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.repartition_into($engine, Dest::scaled(d, alpha, beta)),
                 8
             );
 
@@ -203,7 +205,11 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| t.trace_pairs_into($engine, &pairs, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.trace_pairs_into(
+                    $engine,
+                    &pairs,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 16
             );
             let lazy = t.adjoint($engine).unwrap();
@@ -219,7 +225,11 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| lazy.trace_pairs_into($engine, &pairs, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lazy.trace_pairs_into(
+                    $engine,
+                    &pairs,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 16
             );
 
@@ -231,7 +241,7 @@ macro_rules! suite {
                 t2,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| t.axpby_into($engine, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.axpby_into($engine, Dest::scaled(d, alpha, beta)),
                 2
             );
             let before = t2.adjoint($engine).unwrap().materialize($engine).unwrap();
@@ -242,7 +252,7 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| lazy.axpby_into($engine, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lazy.axpby_into($engine, Dest::scaled(d, alpha, beta)),
                 2
             );
 
@@ -267,7 +277,12 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| t.contract_into($engine, &rhs, &spec, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.contract_into(
+                    $engine,
+                    &rhs,
+                    &spec,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 32
             );
             let before = lazy
@@ -282,7 +297,12 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| lazy.contract_into($engine, &rhs, &spec, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lazy.contract_into(
+                    $engine,
+                    &rhs,
+                    &spec,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 32
             );
 
@@ -305,8 +325,12 @@ macro_rules! suite {
                 before,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| t
-                    .planar_contract_into($engine, &rhs, &planar, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.planar_contract_into(
+                    $engine,
+                    &rhs,
+                    &planar,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 32
             );
         }
@@ -348,7 +372,12 @@ macro_rules! suite {
                 prior,
                 alpha,
                 beta,
-                |d: &mut TensorMap<_, D>| lhs.contract_into($engine, &rhs, &spec, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lhs.contract_into(
+                    $engine,
+                    &rhs,
+                    &spec,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 8
             );
         }
@@ -360,9 +389,7 @@ macro_rules! suite {
             $engine,
             &rhs,
             &spec,
-            &mut destination,
-            D::alpha(),
-            D::real(1.0),
+            Dest::scaled(&mut destination, D::alpha(), D::real(1.0)),
         )
         .unwrap();
         for &index in &unreached {
@@ -393,9 +420,7 @@ macro_rules! suite {
                     $engine,
                     &[2, 0],
                     &[1, 3],
-                    d,
-                    zero,
-                    beta
+                    Dest::scaled(d, zero, beta)
                 ),
                 2
             );
@@ -410,9 +435,7 @@ macro_rules! suite {
                 |d: &mut TensorMap<_, D>| nan_source.trace_pairs_into(
                     $engine,
                     &[(0, 2)],
-                    d,
-                    zero,
-                    beta
+                    Dest::scaled(d, zero, beta)
                 ),
                 2
             );
@@ -423,7 +446,8 @@ macro_rules! suite {
                 t2,
                 zero,
                 beta,
-                |d: &mut TensorMap<_, D>| nan_source.axpby_into($engine, d, zero, beta),
+                |d: &mut TensorMap<_, D>| nan_source
+                    .axpby_into($engine, Dest::scaled(d, zero, beta)),
                 2
             );
             check_into!(
@@ -433,8 +457,12 @@ macro_rules! suite {
                 prior,
                 zero,
                 beta,
-                |d: &mut TensorMap<_, D>| nan_lhs
-                    .contract_into($engine, &rhs, &spec, d, zero, beta),
+                |d: &mut TensorMap<_, D>| nan_lhs.contract_into(
+                    $engine,
+                    &rhs,
+                    &spec,
+                    Dest::scaled(d, zero, beta)
+                ),
                 2
             );
         }
@@ -443,8 +471,13 @@ macro_rules! suite {
         // exactly as the eager result, unreached blocks as +0.
         for alpha in [D::real(1.0), D::alpha()] {
             let mut destination = prior.scale($engine, D::real(f64::NAN)).unwrap();
-            lhs.contract_into($engine, &rhs, &spec, &mut destination, alpha, D::real(0.0))
-                .unwrap();
+            lhs.contract_into(
+                $engine,
+                &rhs,
+                &spec,
+                Dest::scaled(&mut destination, alpha, D::real(0.0)),
+            )
+            .unwrap();
             let got = destination.dense_data().unwrap();
             assert!(
                 !got.iter().any(|value| value.is_nan()),
@@ -476,9 +509,7 @@ macro_rules! suite {
                     $engine,
                     &[2, 0],
                     &[1, 3],
-                    &mut destination,
-                    alpha,
-                    D::real(0.0),
+                    Dest::scaled(&mut destination, alpha, D::real(0.0)),
                 )
                 .unwrap();
             assert!(!destination
@@ -492,7 +523,11 @@ macro_rules! suite {
                 .scale($engine, D::real(f64::NAN))
                 .unwrap();
             source
-                .trace_pairs_into($engine, &[(0, 2)], &mut destination, alpha, D::real(0.0))
+                .trace_pairs_into(
+                    $engine,
+                    &[(0, 2)],
+                    Dest::scaled(&mut destination, alpha, D::real(0.0)),
+                )
                 .unwrap();
             assert!(!destination
                 .dense_data()
@@ -500,7 +535,7 @@ macro_rules! suite {
                 .iter()
                 .any(|value| value.is_nan()));
             let mut destination = source.scale($engine, D::real(f64::NAN)).unwrap();
-            t.axpby_into($engine, &mut destination, alpha, D::real(0.0))
+            t.axpby_into($engine, Dest::scaled(&mut destination, alpha, D::real(0.0)))
                 .unwrap();
             assert!(!destination
                 .dense_data()
@@ -517,9 +552,7 @@ macro_rules! suite {
                 $engine,
                 &rhs,
                 &spec,
-                &mut destination,
-                D::real(1.0),
-                D::real(0.0)
+                Dest::scaled(&mut destination, D::real(1.0), D::real(0.0))
             ),
             Err(Error::DestinationShared)
         );
@@ -692,14 +725,17 @@ macro_rules! device_suite {
             same!(
                 &what("permute_into"),
                 t2.permute(engine, &[2, 0], &[1, 3]).unwrap(),
-                |d: &mut TensorMap<_, D>| t.permute_into(engine, &[2, 0], &[1, 3], d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.permute_into(
+                    engine,
+                    &[2, 0],
+                    &[1, 3],
+                    Dest::scaled(d, alpha, beta)
+                ),
                 |d: &mut TensorMap<_, D, _>| dt.permute_into(
                     cuda,
                     &[2, 0],
                     &[1, 3],
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 8
             );
@@ -711,18 +747,14 @@ macro_rules! device_suite {
                     &[1, 0],
                     &[3, 2],
                     &levels,
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 |d: &mut TensorMap<_, D, _>| dt.braid_into(
                     cuda,
                     &[1, 0],
                     &[3, 2],
                     &levels,
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 8
             );
@@ -733,32 +765,37 @@ macro_rules! device_suite {
                     engine,
                     &[1, 3],
                     &[0, 2],
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 |d: &mut TensorMap<_, D, _>| dt.transpose_into(
                     cuda,
                     &[1, 3],
                     &[0, 2],
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 8
             );
             same!(
                 &what("repartition_into"),
                 t2.repartition(engine, 1).unwrap(),
-                |d: &mut TensorMap<_, D>| t.repartition_into(engine, d, alpha, beta),
-                |d: &mut TensorMap<_, D, _>| dt.repartition_into(cuda, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.repartition_into(engine, Dest::scaled(d, alpha, beta)),
+                |d: &mut TensorMap<_, D, _>| dt
+                    .repartition_into(cuda, Dest::scaled(d, alpha, beta)),
                 8
             );
             same!(
                 &what("trace_pairs_into"),
                 t2.trace_pairs(engine, &[(0, 2)]).unwrap(),
-                |d: &mut TensorMap<_, D>| t.trace_pairs_into(engine, &[(0, 2)], d, alpha, beta),
-                |d: &mut TensorMap<_, D, _>| dt.trace_pairs_into(cuda, &[(0, 2)], d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.trace_pairs_into(
+                    engine,
+                    &[(0, 2)],
+                    Dest::scaled(d, alpha, beta)
+                ),
+                |d: &mut TensorMap<_, D, _>| dt.trace_pairs_into(
+                    cuda,
+                    &[(0, 2)],
+                    Dest::scaled(d, alpha, beta)
+                ),
                 16
             );
             same!(
@@ -767,21 +804,23 @@ macro_rules! device_suite {
                     .unwrap()
                     .trace_pairs(engine, &[(0, 2)])
                     .unwrap(),
-                |d: &mut TensorMap<_, D>| lazy.trace_pairs_into(engine, &[(0, 2)], d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lazy.trace_pairs_into(
+                    engine,
+                    &[(0, 2)],
+                    Dest::scaled(d, alpha, beta)
+                ),
                 |d: &mut TensorMap<_, D, _>| dlazy.trace_pairs_into(
                     cuda,
                     &[(0, 2)],
-                    d,
-                    alpha,
-                    beta
+                    Dest::scaled(d, alpha, beta)
                 ),
                 16
             );
             same!(
                 &what("axpby_into"),
                 t2,
-                |d: &mut TensorMap<_, D>| t.axpby_into(engine, d, alpha, beta),
-                |d: &mut TensorMap<_, D, _>| dt.axpby_into(cuda, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.axpby_into(engine, Dest::scaled(d, alpha, beta)),
+                |d: &mut TensorMap<_, D, _>| dt.axpby_into(cuda, Dest::scaled(d, alpha, beta)),
                 2
             );
             same!(
@@ -790,8 +829,18 @@ macro_rules! device_suite {
                     .unwrap()
                     .scale(engine, D::real(0.5))
                     .unwrap(),
-                |d: &mut TensorMap<_, D>| t.contract_into(engine, &rhs, &spec, d, alpha, beta),
-                |d: &mut TensorMap<_, D, _>| dt.contract_into(cuda, &drhs, &spec, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| t.contract_into(
+                    engine,
+                    &rhs,
+                    &spec,
+                    Dest::scaled(d, alpha, beta)
+                ),
+                |d: &mut TensorMap<_, D, _>| dt.contract_into(
+                    cuda,
+                    &drhs,
+                    &spec,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 32
             );
             same!(
@@ -800,28 +849,53 @@ macro_rules! device_suite {
                     .unwrap()
                     .scale(engine, D::real(0.5))
                     .unwrap(),
-                |d: &mut TensorMap<_, D>| lazy.contract_into(engine, &rhs, &spec, d, alpha, beta),
-                |d: &mut TensorMap<_, D, _>| dlazy
-                    .contract_into(cuda, &drhs, &spec, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lazy.contract_into(
+                    engine,
+                    &rhs,
+                    &spec,
+                    Dest::scaled(d, alpha, beta)
+                ),
+                |d: &mut TensorMap<_, D, _>| dlazy.contract_into(
+                    cuda,
+                    &drhs,
+                    &spec,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 32
             );
             same!(
                 &what("partial contract_into"),
                 prior_partial,
-                |d: &mut TensorMap<_, D>| lhs
-                    .contract_into(engine, &prhs, &partial, d, alpha, beta),
-                |d: &mut TensorMap<_, D, _>| dlhs
-                    .contract_into(cuda, &dprhs, &partial, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lhs.contract_into(
+                    engine,
+                    &prhs,
+                    &partial,
+                    Dest::scaled(d, alpha, beta)
+                ),
+                |d: &mut TensorMap<_, D, _>| dlhs.contract_into(
+                    cuda,
+                    &dprhs,
+                    &partial,
+                    Dest::scaled(d, alpha, beta)
+                ),
                 8
             );
             if beta == D::real(0.0) {
                 same!(
                     &what("NaN partial contract_into"),
                     prior_partial.scale(engine, nan).unwrap(),
-                    |d: &mut TensorMap<_, D>| lhs
-                        .contract_into(engine, &prhs, &partial, d, alpha, beta),
-                    |d: &mut TensorMap<_, D, _>| dlhs
-                        .contract_into(cuda, &dprhs, &partial, d, alpha, beta),
+                    |d: &mut TensorMap<_, D>| lhs.contract_into(
+                        engine,
+                        &prhs,
+                        &partial,
+                        Dest::scaled(d, alpha, beta)
+                    ),
+                    |d: &mut TensorMap<_, D, _>| dlhs.contract_into(
+                        cuda,
+                        &dprhs,
+                        &partial,
+                        Dest::scaled(d, alpha, beta)
+                    ),
                     8
                 );
                 same!(
@@ -834,17 +908,13 @@ macro_rules! device_suite {
                         engine,
                         &[2, 0],
                         &[1, 3],
-                        d,
-                        alpha,
-                        beta
+                        Dest::scaled(d, alpha, beta)
                     ),
                     |d: &mut TensorMap<_, D, _>| dt.permute_into(
                         cuda,
                         &[2, 0],
                         &[1, 3],
-                        d,
-                        alpha,
-                        beta
+                        Dest::scaled(d, alpha, beta)
                     ),
                     8
                 );
@@ -854,10 +924,18 @@ macro_rules! device_suite {
                         .unwrap()
                         .scale(engine, nan)
                         .unwrap(),
-                    |d: &mut TensorMap<_, D>| lazy
-                        .contract_into(engine, &rhs, &spec, d, alpha, beta),
-                    |d: &mut TensorMap<_, D, _>| dlazy
-                        .contract_into(cuda, &drhs, &spec, d, alpha, beta),
+                    |d: &mut TensorMap<_, D>| lazy.contract_into(
+                        engine,
+                        &rhs,
+                        &spec,
+                        Dest::scaled(d, alpha, beta)
+                    ),
+                    |d: &mut TensorMap<_, D, _>| dlazy.contract_into(
+                        cuda,
+                        &drhs,
+                        &spec,
+                        Dest::scaled(d, alpha, beta)
+                    ),
                     32
                 );
                 same!(
@@ -871,18 +949,14 @@ macro_rules! device_suite {
                         &[1, 0],
                         &[3, 2],
                         &levels,
-                        d,
-                        alpha,
-                        beta
+                        Dest::scaled(d, alpha, beta)
                     ),
                     |d: &mut TensorMap<_, D, _>| dt.braid_into(
                         cuda,
                         &[1, 0],
                         &[3, 2],
                         &levels,
-                        d,
-                        alpha,
-                        beta
+                        Dest::scaled(d, alpha, beta)
                     ),
                     8
                 );
@@ -896,17 +970,13 @@ macro_rules! device_suite {
                         engine,
                         &[1, 3],
                         &[0, 2],
-                        d,
-                        alpha,
-                        beta
+                        Dest::scaled(d, alpha, beta)
                     ),
                     |d: &mut TensorMap<_, D, _>| dt.transpose_into(
                         cuda,
                         &[1, 3],
                         &[0, 2],
-                        d,
-                        alpha,
-                        beta
+                        Dest::scaled(d, alpha, beta)
                     ),
                     8
                 );
@@ -916,8 +986,10 @@ macro_rules! device_suite {
                         .unwrap()
                         .scale(engine, nan)
                         .unwrap(),
-                    |d: &mut TensorMap<_, D>| t.repartition_into(engine, d, alpha, beta),
-                    |d: &mut TensorMap<_, D, _>| dt.repartition_into(cuda, d, alpha, beta),
+                    |d: &mut TensorMap<_, D>| t
+                        .repartition_into(engine, Dest::scaled(d, alpha, beta)),
+                    |d: &mut TensorMap<_, D, _>| dt
+                        .repartition_into(cuda, Dest::scaled(d, alpha, beta)),
                     8
                 );
                 same!(
@@ -926,21 +998,23 @@ macro_rules! device_suite {
                         .unwrap()
                         .scale(engine, nan)
                         .unwrap(),
-                    |d: &mut TensorMap<_, D>| t.trace_pairs_into(engine, &[(0, 2)], d, alpha, beta),
+                    |d: &mut TensorMap<_, D>| t.trace_pairs_into(
+                        engine,
+                        &[(0, 2)],
+                        Dest::scaled(d, alpha, beta)
+                    ),
                     |d: &mut TensorMap<_, D, _>| dt.trace_pairs_into(
                         cuda,
                         &[(0, 2)],
-                        d,
-                        alpha,
-                        beta
+                        Dest::scaled(d, alpha, beta)
                     ),
                     16
                 );
                 same!(
                     &what("NaN axpby_into"),
                     t2.scale(engine, nan).unwrap(),
-                    |d: &mut TensorMap<_, D>| t.axpby_into(engine, d, alpha, beta),
-                    |d: &mut TensorMap<_, D, _>| dt.axpby_into(cuda, d, alpha, beta),
+                    |d: &mut TensorMap<_, D>| t.axpby_into(engine, Dest::scaled(d, alpha, beta)),
+                    |d: &mut TensorMap<_, D, _>| dt.axpby_into(cuda, Dest::scaled(d, alpha, beta)),
                     2
                 );
             }
@@ -963,33 +1037,38 @@ macro_rules! device_suite {
                     engine,
                     &[2, 0],
                     &[1, 3],
-                    d,
-                    zero,
-                    beta
+                    Dest::scaled(d, zero, beta)
                 ),
                 |d: &mut TensorMap<_, D, _>| dnan_t.permute_into(
                     cuda,
                     &[2, 0],
                     &[1, 3],
-                    d,
-                    zero,
-                    beta
+                    Dest::scaled(d, zero, beta)
                 ),
                 2
             );
             same!(
                 &what("contract_into"),
                 t2.contract(engine, &rhs, &spec).unwrap(),
-                |d: &mut TensorMap<_, D>| t.contract_into(engine, &nan_rhs, &spec, d, zero, beta),
-                |d: &mut TensorMap<_, D, _>| dt
-                    .contract_into(cuda, &dnan_rhs, &spec, d, zero, beta),
+                |d: &mut TensorMap<_, D>| t.contract_into(
+                    engine,
+                    &nan_rhs,
+                    &spec,
+                    Dest::scaled(d, zero, beta)
+                ),
+                |d: &mut TensorMap<_, D, _>| dt.contract_into(
+                    cuda,
+                    &dnan_rhs,
+                    &spec,
+                    Dest::scaled(d, zero, beta)
+                ),
                 2
             );
             same!(
                 &what("axpby_into"),
                 t2,
-                |d: &mut TensorMap<_, D>| nan_t.axpby_into(engine, d, zero, beta),
-                |d: &mut TensorMap<_, D, _>| dnan_t.axpby_into(cuda, d, zero, beta),
+                |d: &mut TensorMap<_, D>| nan_t.axpby_into(engine, Dest::scaled(d, zero, beta)),
+                |d: &mut TensorMap<_, D, _>| dnan_t.axpby_into(cuda, Dest::scaled(d, zero, beta)),
                 2
             );
         }
@@ -1004,16 +1083,18 @@ macro_rules! device_suite {
                     $label
                 ),
                 prior,
-                |d: &mut TensorMap<_, D>| lazy.axpby_into(engine, d, alpha, beta),
-                |d: &mut TensorMap<_, D, _>| dlazy.axpby_into(cuda, d, alpha, beta),
+                |d: &mut TensorMap<_, D>| lazy.axpby_into(engine, Dest::scaled(d, alpha, beta)),
+                |d: &mut TensorMap<_, D, _>| dlazy.axpby_into(cuda, Dest::scaled(d, alpha, beta)),
                 2
             );
         }
         same!(
             &format!("{} device lazy axpby_into over NaN, beta=0", $label),
             poisoned,
-            |d: &mut TensorMap<_, D>| lazy.axpby_into(engine, d, D::beta(), D::real(0.0)),
-            |d: &mut TensorMap<_, D, _>| dlazy.axpby_into(cuda, d, D::beta(), D::real(0.0)),
+            |d: &mut TensorMap<_, D>| lazy
+                .axpby_into(engine, Dest::scaled(d, D::beta(), D::real(0.0))),
+            |d: &mut TensorMap<_, D, _>| dlazy
+                .axpby_into(cuda, Dest::scaled(d, D::beta(), D::real(0.0))),
             2
         );
         let mut destination = prior.to_cuda(cuda).unwrap();
@@ -1021,9 +1102,7 @@ macro_rules! device_suite {
         assert_eq!(
             dlazy.materialize(cuda).unwrap().axpby_into(
                 cuda,
-                &mut destination,
-                D::real(1.0),
-                D::real(0.0)
+                Dest::scaled(&mut destination, D::real(1.0), D::real(0.0))
             ),
             Err(Error::DestinationShared)
         );

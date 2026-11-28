@@ -4,10 +4,10 @@ use crate::su2::{su2_irrep, su2_rule};
 
 use crate::product_codec::ParityProductCodec;
 
+use crate::tables::*;
 use symtn_sectors::{
     CU1FusionRule, FermionParityFusionRule, FermionParityIrrep, FusionRule, ProductFusionRule,
-    ProductSector, SectorCodec, SectorId, SectorOrderKey, TableRule, U1FusionRule, U1Irrep,
-    ZNFusionRule,
+    ProductSector, SectorCodec, SectorId, SectorOrderKey, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 
 use super::s;
@@ -32,7 +32,7 @@ fn u1_positions_leave_room_for_half_integer_charges() {
 #[test]
 fn single_factor_rules_order_by_id() {
     let z5 = ZNFusionRule::new(5).unwrap();
-    let fib = TableRule::fibonacci();
+    let fib = table_fibonacci();
     for id in [0, 1] {
         assert_eq!(
             positions(ZNFusionRule::new(2).unwrap().sector_order_key(s(id))),

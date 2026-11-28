@@ -8,6 +8,7 @@
 
 use num_complex::Complex64;
 use symtn::sector::U1FusionRule;
+use symtn::typed::Dest;
 use symtn::typed::{ContractSpec, CpuEngine, GradedSpace, Runtime, TensorMap};
 use symtn_operations::host_pool::eager_test_engine;
 use tenferro_cpu::threadteam::ledger;
@@ -58,17 +59,21 @@ macro_rules! no_decision_ops_create_no_root {
             let cases: [(&str, Vec<u64>); 7] = [
                 (
                     "axpby_into",
-                    roots_of(&mut engine, |e| x.axpby_into(e, &mut y, one, one).unwrap()),
+                    roots_of(&mut engine, |e| {
+                        x.axpby_into(e, Dest::scaled(&mut y, one, one)).unwrap()
+                    }),
                 ),
                 (
                     "copy",
-                    roots_of(&mut engine, |e| x.axpby_into(e, &mut y, one, zero).unwrap()),
+                    roots_of(&mut engine, |e| {
+                        x.axpby_into(e, Dest::scaled(&mut y, one, zero)).unwrap()
+                    }),
                 ),
                 ("inner", roots_of(&mut engine, |e| x.inner(e, &y).unwrap())),
                 ("norm", roots_of(&mut engine, |e| x.norm(e, 2.0).unwrap())),
                 (
-                    "scale_assign",
-                    roots_of(&mut engine, |e| y.scale_assign(e, one).unwrap()),
+                    "scale_in_place",
+                    roots_of(&mut engine, |e| y.scale_in_place(e, one).unwrap()),
                 ),
                 (
                     "to_physical_dense",
@@ -127,7 +132,7 @@ fn forking_contraction_creates_one_root() {
     x.permute(&mut engine, &[1], &[0]).unwrap();
     for beta in [0.0, 1.0] {
         let roots = roots_of(&mut engine, |e| {
-            x.planar_contract_into(e, &y, &COMPOSE, &mut out, 1.0, beta)
+            x.planar_contract_into(e, &y, &COMPOSE, Dest::scaled(&mut out, 1.0, beta))
                 .unwrap()
         });
         assert_eq!(roots.len(), 1, "one root at beta = {beta}");

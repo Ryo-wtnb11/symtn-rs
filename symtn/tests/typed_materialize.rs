@@ -12,6 +12,7 @@
 use crate::common::ErrorKind as _;
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use num_complex::Complex64;
 use symtn::sector::{
@@ -136,7 +137,7 @@ macro_rules! assert_independent_owned_copy {
             .to_vec();
         let mut written = result;
         let pointer = written.dense_data().unwrap().as_ptr();
-        written.scale_assign($engine, 2.0.into()).unwrap();
+        written.scale_in_place($engine, 2.0.into()).unwrap();
         // In place means uniquely owned: nothing else holds this payload.
         assert_eq!(
             written.dense_data().unwrap().as_ptr(),
@@ -598,14 +599,7 @@ fn materialize_is_the_remedy_for_apis_that_reject_lazy_adjoints() {
     let pointer = destination.dense_data().unwrap().as_ptr();
     lazy.materialize(engine)
         .unwrap()
-        .permute_into(
-            engine,
-            &[0],
-            &[1],
-            &mut destination,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
-        )
+        .permute_into(engine, &[0], &[1], Dest::overwrite(&mut destination))
         .unwrap();
     assert_eq!(destination.dense_data().unwrap().as_ptr(), pointer);
     assert_eq!(tensor.dense_data().unwrap(), before.as_slice());

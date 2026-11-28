@@ -13,6 +13,7 @@
 
 use crate::report;
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use std::sync::Arc;
@@ -96,7 +97,7 @@ macro_rules! multiplicity_free_matrix {
             let mut target = non_dual_target($engine, $ops);
             assert_eq!(
                 class(
-                    t.trace_pairs_into($ops, &pairs, &mut target, one, half)
+                    t.trace_pairs_into($ops, &pairs, Dest::scaled(&mut target, one, half))
                         .unwrap_err()
                 ),
                 "pair list"
@@ -106,7 +107,7 @@ macro_rules! multiplicity_free_matrix {
         let mut target = non_dual_target($engine, $ops);
         assert_eq!(
             class(
-                t.trace_pairs_into($ops, &[(0, 2)], &mut target, one, half)
+                t.trace_pairs_into($ops, &[(0, 2)], Dest::scaled(&mut target, one, half))
                     .unwrap_err()
             ),
             "non-dual pair"
@@ -116,7 +117,7 @@ macro_rules! multiplicity_free_matrix {
         let mut target = wrong_target($engine, $ops);
         assert_eq!(
             class(
-                t.trace_pairs_into($ops, &[(0, 2)], &mut target, one, half)
+                t.trace_pairs_into($ops, &[(0, 2)], Dest::scaled(&mut target, one, half))
                     .unwrap_err()
             ),
             "destination space"
@@ -132,7 +133,7 @@ macro_rules! multiplicity_free_matrix {
         assert_eq!(
             class(
                 mismatched
-                    .trace_pairs_into($ops, &[(0, 1)], &mut target, one, half)
+                    .trace_pairs_into($ops, &[(0, 1)], Dest::scaled(&mut target, one, half))
                     .unwrap_err()
             ),
             "non-dual pair"

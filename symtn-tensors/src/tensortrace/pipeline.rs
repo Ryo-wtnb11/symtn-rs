@@ -816,8 +816,9 @@ where
 #[cfg(test)]
 mod channel_factor_tests {
     use super::*;
+    use crate::tables::*;
     use num_complex::Complex64;
-    use symtn_core::{FusionTreeKey, TableRule};
+    use symtn_core::FusionTreeKey;
 
     /// Fibonacci `(τ) → τ` and `(τ, τ) → τ` trace trees, where TensorKit's
     /// `dim(τ)/dim(τ)` is exactly 1 and a non-dual second `τ` contributes
@@ -825,7 +826,7 @@ mod channel_factor_tests {
     /// factor gave `1 - 2⁻⁵³`.
     #[test]
     fn multiplicity_free_channel_factor_is_the_dimension_quotient() {
-        let rule = TableRule::fibonacci();
+        let rule = table_fibonacci();
         // The table's derived twist (Σ_b d_b/d_τ R^{ττ}_b), which is within
         // (1, 1) ulp of the correctly rounded hand value `cispi(-4/5)`; the
         // factor multiplies it by an exact 1, so it is pinned bitwise.

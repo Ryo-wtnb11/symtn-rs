@@ -541,10 +541,9 @@ where
         &self,
         cx: &mut (impl ExecContext + ?Sized),
         pairs: &[(usize, usize)],
-        destination: &mut Self,
-        alpha: D,
-        beta: D,
+        destination: Dest<'_, Self, D>,
     ) -> Result<(), FacadeError<R>> {
+        let (destination, alpha, beta) = destination.into_parts();
         let engine = cx.engine();
         self.trace_pairs_into_impl(engine, pairs, destination, alpha, beta)
     }
@@ -907,6 +906,7 @@ where
 
 #[cfg(test)]
 mod copy_c_scratch_tests {
+    use crate::typed::Dest;
     use std::sync::Arc;
     use symtn_dense::Engine;
 
@@ -1012,7 +1012,12 @@ mod copy_c_scratch_tests {
             let copy_c = probe::record();
             operands
                 .0
-                .contract_into(engine, operands.1, &MOVED, &mut destination, alpha, beta)
+                .contract_into(
+                    engine,
+                    operands.1,
+                    &MOVED,
+                    Dest::scaled(&mut destination, alpha, beta),
+                )
                 .unwrap();
             assert_eq!(
                 copy_c.get(Event::CopyCReplay),
@@ -1073,7 +1078,7 @@ mod copy_c_scratch_tests {
             .scale(engine, 1.0)
             .unwrap();
         let densified = probe::record();
-        t.contract_into(engine, &d, &MOVED, &mut destination, 1.0, 0.0)
+        t.contract_into(engine, &d, &MOVED, Dest::overwrite(&mut destination))
             .unwrap();
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
         assert_eq!(densified.get(Event::CopyCReplay), 0, "no contraction ran");

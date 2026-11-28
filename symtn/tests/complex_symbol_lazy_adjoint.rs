@@ -1,5 +1,5 @@
 //! The lazy adjoint of a complex-symbol rule: Ising through
-//! `TableRule`, whose R-symbols are complex, so a transform of `t^H` read
+//! `TableCategoryRule`, whose R-symbols are complex, so a transform of `t^H` read
 //! through its parent must use the dagger (inverse, conjugated) operation.
 //!
 //! Oracles:
@@ -19,24 +19,26 @@
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::typed::{BlockFusionTrees, GradedSpace, Runtime, TensorMap};
-use symtn_sectors::{TableRule, TableSector};
+
+use crate::tables::*;
 
 /// At most a few unit-modulus 2x2 recouplings and one dense pass touch any
 /// entry of the `O(1)`-magnitude payload.
 const BOUND: f64 = 256.0 * f64::EPSILON;
 
-type Ising = TensorMap<TableRule, Complex64>;
+type Ising = TensorMap<TableCategoryRule, Complex64>;
 type Transform<'a> = &'a dyn Fn(&mut dyn Engine, &Ising) -> Result<Ising, symtn::typed::Error>;
-type Entries = BTreeMap<(BlockFusionTrees<TableSector>, Vec<usize>), Complex64>;
+type Entries = BTreeMap<(BlockFusionTrees<TableObject>, Vec<usize>), Complex64>;
 
 fn hashed(
-    coupled: &TableSector,
-    codomain: (&[TableSector], &[TableSector]),
-    domain: (&[TableSector], &[TableSector]),
+    coupled: &TableObject,
+    codomain: (&[TableObject], &[TableObject]),
+    domain: (&[TableObject], &[TableObject]),
     indices: &[usize],
     salt: u8,
 ) -> f64 {
@@ -51,7 +53,7 @@ fn hashed(
     }
 }
 
-fn entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt: u8) -> Complex64 {
+fn entry(trees: &BlockFusionTrees<TableObject>, indices: &[usize], salt: u8) -> Complex64 {
     let side = |salt| {
         hashed(
             trees.coupled(),
@@ -65,7 +67,7 @@ fn entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt: u8) -> 
 }
 
 /// The parent entry the adjoint entry `(trees, indices)` reads, conjugated.
-fn adjoint_entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt: u8) -> Complex64 {
+fn adjoint_entry(trees: &BlockFusionTrees<TableObject>, indices: &[usize], salt: u8) -> Complex64 {
     let rank = trees.codomain_uncoupled().len();
     let mut parent = indices[rank..].to_vec();
     parent.extend_from_slice(&indices[..rank]);
@@ -81,7 +83,7 @@ fn adjoint_entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt:
     Complex64::new(side(2 * salt), side(2 * salt + 1)).conj()
 }
 
-fn entries(tensor: &TensorMap<TableRule, Complex64>) -> Entries {
+fn entries(tensor: &TensorMap<TableCategoryRule, Complex64>) -> Entries {
     let mut out = Entries::new();
     for (trees, block) in tensor.subblocks().unwrap() {
         let shape = block.shape().to_vec();
@@ -120,18 +122,18 @@ fn assert_close(what: &str, got: &Entries, want: &Entries) {
 
 struct Fixture {
     runtime: Runtime,
-    leg: GradedSpace<TableRule>,
+    leg: GradedSpace<TableCategoryRule>,
 }
 
 fn fixture() -> Fixture {
     // AnyonWiki Ising: 1 = unit, 2 = psi, 3 = sigma; nontrivial degeneracy on
     // sigma so every block is a genuine matrix.
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::ising()),
+        Arc::new(table_ising()),
         [
-            (TableSector::new(1), 1),
-            (TableSector::new(2), 1),
-            (TableSector::new(3), 2),
+            (ising_object(1), 1),
+            (ising_object(2), 1),
+            (ising_object(3), 2),
         ],
     )
     .unwrap();
@@ -141,7 +143,7 @@ fn fixture() -> Fixture {
     }
 }
 
-fn parent(fixture: &Fixture, salt: u8) -> TensorMap<TableRule, Complex64> {
+fn parent(fixture: &Fixture, salt: u8) -> TensorMap<TableCategoryRule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let v = &fixture.leg;
     TensorMap::from_subblock_fn(
@@ -236,7 +238,7 @@ fn ising_lazy_adjoint_transforms_equal_transforms_of_the_materialized_adjoint() 
 }
 
 #[test]
-fn ising_compose_with_an_adjoint_view_equals_the_materialized_adjoint() {
+fn ising_compose_with_a_lazy_adjoint_equals_the_materialized_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let fixture = fixture();
     let t = parent(&fixture, 2);
@@ -244,9 +246,10 @@ fn ising_compose_with_an_adjoint_view_equals_the_materialized_adjoint() {
     // (V V V <- V) o (V <- V V V)
     let materialized = s.adjoint(engine).unwrap().materialize(engine).unwrap();
     let want = entries(&t.compose(engine, &materialized).unwrap());
+    let s_adjoint = s.adjoint(engine).unwrap();
     assert_close(
         "compose(t, s^H view)",
-        &entries(&t.compose(engine, s.adjoint_view()).unwrap()),
+        &entries(&t.compose(engine, &s_adjoint).unwrap()),
         &want,
     );
     // (V <- V V V) o (V V V <- V), the lazy operand on the left.
@@ -278,9 +281,8 @@ fn ising_axpby_with_lazy_adjoints_equals_the_materialized_combination() {
         &want,
     );
     // One lazy operand, read in its logical orientation.
-    let one = eager_t
-        .axpby(engine, alpha, s.adjoint_view(), beta)
-        .unwrap();
+    let s_adjoint = s.adjoint(engine).unwrap();
+    let one = eager_t.axpby(engine, alpha, &s_adjoint, beta).unwrap();
     assert_close("axpby(t^H, s^H view)", &entries(&one), &want);
 }
 
@@ -323,21 +325,23 @@ fn ising_lazy_adjoint_into_transforms_equal_the_materialized_update() {
             engine,
             format!("braid_into levels {levels:?}"),
             &|engine, x| x.braid(engine, &[2, 0], &[3, 1], &levels),
-            &|engine, x, d, a, b| x.braid_into(engine, &[2, 0], &[3, 1], &levels, d, a, b),
+            &|engine, x, d, a, b| {
+                x.braid_into(engine, &[2, 0], &[3, 1], &levels, Dest::scaled(d, a, b))
+            },
         );
     }
     check(
         engine,
         "transpose_into".to_string(),
         &|engine, x| x.transpose(engine, &[3, 2], &[0, 1]),
-        &|engine, x, d, a, b| x.transpose_into(engine, &[3, 2], &[0, 1], d, a, b),
+        &|engine, x, d, a, b| x.transpose_into(engine, &[3, 2], &[0, 1], Dest::scaled(d, a, b)),
     );
     for split in [0, 2, 3] {
         check(
             engine,
             format!("repartition_into {split}"),
             &|engine, x| x.repartition(engine, split),
-            &|engine, x, d, a, b| x.repartition_into(engine, d, a, b),
+            &|engine, x, d, a, b| x.repartition_into(engine, Dest::scaled(d, a, b)),
         );
     }
 }

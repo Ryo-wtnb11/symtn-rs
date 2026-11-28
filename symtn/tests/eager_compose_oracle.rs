@@ -97,7 +97,7 @@ where
             "B'*A' view",
             b.adjoint(engine)
                 .unwrap()
-                .compose(engine, a.adjoint_view())
+                .compose(engine, &a_adjoint)
                 .unwrap(),
         ),
         (
@@ -107,9 +107,10 @@ where
     ] {
         assert_oracle(&what(case), &product, &b_h, &a_h);
     }
+    let c_adjoint = c.adjoint(engine).unwrap();
     assert_oracle(
         &what("C*C'"),
-        &c.compose(engine, c.adjoint_view()).unwrap(),
+        &c.compose(engine, &c_adjoint).unwrap(),
         &c,
         &c_h,
     );
@@ -161,8 +162,9 @@ where
         "{}",
         what("space")
     );
+    let a_adjoint = a.adjoint(engine).unwrap();
     assert!(
-        space_mismatch(b.compose(engine, a.adjoint_view()), backward),
+        space_mismatch(b.compose(engine, &a_adjoint), backward),
         "{}",
         what("adjoint space")
     );

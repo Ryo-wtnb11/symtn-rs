@@ -634,11 +634,13 @@ mod factorizations {
                 eager.left_null($engine, r, c).unwrap(),
             );
             assert_eq!(n.domain(), en.domain(), "{label} left_null bond");
+            let n_adjoint = n.adjoint($engine).unwrap();
+            let en_adjoint = en.adjoint($engine).unwrap();
             assert_factor_close!(
                 $engine,
                 format!("{label} left_null projector"),
-                n.compose($engine, n.adjoint_view()).unwrap(),
-                en.compose($engine, en.adjoint_view()).unwrap()
+                n.compose($engine, &n_adjoint).unwrap(),
+                en.compose($engine, &en_adjoint).unwrap()
             );
             let (n, en) = (
                 lazy.right_null($engine, r, c).unwrap(),

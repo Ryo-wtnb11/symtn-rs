@@ -785,11 +785,11 @@ fn certified_trivial_gauge_direct_braid_matches_artin_and_hand_oracle() {
 
 #[test]
 fn table_rule_never_takes_the_direct_unique_braid() {
-    // What: a pointed `TableRule` is `Unique` but certifies neither a
+    // What: a pointed `TableCategoryRule` is `Unique` but certifies neither a
     // symmetric braiding nor a trivial associator gauge, so its braids run
     // the Artin steps (which read F and R) and never the direct path, which
     // assumes F = 1. The semion has F^{sss}_s = −1.
-    let semion = TableRule::by_uuid("37fa4d16-97c6-11f1-9c13-c70bad3f9e94").unwrap();
+    let semion = table_by_uuid("37fa4d16-97c6-11f1-9c13-c70bad3f9e94");
     assert_eq!(semion.fusion_style(), FusionStyleKind::Unique);
     let tree = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, false, false], [0], [1, 1])
         .unwrap();

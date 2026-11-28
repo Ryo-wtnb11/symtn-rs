@@ -21,12 +21,14 @@
 
 use crate::su2::{su2_irrep, su2_rule};
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
+use crate::tables::*;
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, TableRule,
-    TableSector, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{
     BlockFusionTrees, ContractSpec, Error, GradedSpace, OperationError, Runtime, TensorMap,
@@ -35,7 +37,7 @@ use symtn::typed::{
 use crate::table_fixture;
 use table_fixture::*;
 
-type Table = TensorMap<TableRule, Complex64>;
+type Table = TensorMap<TableCategoryRule, Complex64>;
 
 fn spec<'a>(
     lhs: &'a [usize],
@@ -88,16 +90,16 @@ fn close(got: f64, want: f64) -> bool {
 
 struct Case {
     runtime: Runtime,
-    v: GradedSpace<TableRule>,
+    v: GradedSpace<TableCategoryRule>,
 }
 
 impl Case {
-    fn new(rule: TableRule, sectors: &[(u16, usize)]) -> Self {
+    fn new(rule: TableCategoryRule, sectors: &[(u16, usize)]) -> Self {
         let v = GradedSpace::try_new(
-            Arc::new(rule),
+            Arc::new(rule.clone()),
             sectors
                 .iter()
-                .map(|&(label, degeneracy)| (TableSector::new(label), degeneracy)),
+                .map(|&(label, degeneracy)| (table_object(&rule, label), degeneracy)),
         )
         .unwrap();
         Self {
@@ -107,11 +109,11 @@ impl Case {
     }
 
     fn fibonacci() -> Self {
-        Self::new(TableRule::fibonacci(), &[(1, 1), (2, 2)])
+        Self::new(table_fibonacci(), &[(1, 1), (2, 2)])
     }
 
     fn ising() -> Self {
-        Self::new(TableRule::ising(), &[(1, 1), (2, 1), (3, 2)])
+        Self::new(table_ising(), &[(1, 1), (2, 1), (3, 2)])
     }
 
     fn filled(&self, tag: &str, codomain: usize, domain: usize) -> Table {
@@ -249,11 +251,10 @@ fn geometries_match(case: &Case, rotated: &Rotated) {
     // `θ[l s1 s2; a] * conj(θ[l s1 s2; b])`: conj is the lazy adjoint.
     let theta = case.filled("t6", 3, 1);
     let g6 = spec(&[0, 1, 2], &[1, 2, 3], &[0], &[1]);
+    let theta_adjoint = theta.adjoint(engine).unwrap();
     case.assert_matches(
         "g6",
-        &theta
-            .planar_contract(engine, theta.adjoint_view(), &g6)
-            .unwrap(),
+        &theta.planar_contract(engine, &theta_adjoint, &g6).unwrap(),
         rotated.g6,
     );
 }
@@ -275,7 +276,7 @@ fn into_is_alpha_planar_plus_beta(case: &Case) {
     let (a, b) = (case.filled("a1", 2, 2), case.filled("b1", 2, 2));
     let d1 = case.filled("d1", 2, 2);
     let mut got = case.filled("d1", 2, 2);
-    a.planar_contract_into(engine, &b, &G1, &mut got, alpha, beta)
+    a.planar_contract_into(engine, &b, &G1, Dest::scaled(&mut got, alpha, beta))
         .unwrap();
     let want = a
         .planar_contract(engine, &b, &G1)
@@ -288,7 +289,7 @@ fn into_is_alpha_planar_plus_beta(case: &Case) {
     let c3 = h.planar_contract(engine, &theta, &G3).unwrap();
     let d3 = case.filled_like("d3", &c3);
     let mut got = case.filled_like("d3", &c3);
-    h.planar_contract_into(engine, &theta, &G3, &mut got, alpha, beta)
+    h.planar_contract_into(engine, &theta, &G3, Dest::scaled(&mut got, alpha, beta))
         .unwrap();
     assert_entries_close(
         "into g3",
@@ -344,14 +345,7 @@ fn non_planar_specs_are_rejected(case: &Case) {
         let mut destination = case.filled("dst", 2, 2);
         let before = destination.dense_data().unwrap().to_vec();
         let into = a
-            .planar_contract_into(
-                engine,
-                &b,
-                &spec,
-                &mut destination,
-                Complex64::ONE,
-                Complex64::ONE,
-            )
+            .planar_contract_into(engine, &b, &spec, Dest::accumulate(&mut destination))
             .unwrap_err();
         assert_eq!(into, error, "{name}: the destination form reports the same");
         let after = destination.dense_data().unwrap();
@@ -428,10 +422,10 @@ macro_rules! bosonic_planar_is_contract {
             let ordinary = lhs.contract($engine, rhs, &spec).unwrap();
             assert_eq!(planar.dense_data().unwrap(), ordinary.dense_data().unwrap());
             let mut into = lhs.contract($engine, rhs, &spec).unwrap();
-            lhs.planar_contract_into($engine, rhs, &spec, &mut into, 0.5, -1.25)
+            lhs.planar_contract_into($engine, rhs, &spec, Dest::scaled(&mut into, 0.5, -1.25))
                 .unwrap();
             let mut want = lhs.contract($engine, rhs, &spec).unwrap();
-            lhs.contract_into($engine, rhs, &spec, &mut want, 0.5, -1.25)
+            lhs.contract_into($engine, rhs, &spec, Dest::scaled(&mut want, 0.5, -1.25))
                 .unwrap();
             assert_eq!(into.dense_data().unwrap(), want.dense_data().unwrap());
         }
@@ -628,7 +622,7 @@ fn max_distance(lhs: &[f64], rhs: &[f64]) -> f64 {
 /// fℤ₂×U(1) (design §7.5): the cyclic geometry with an operand transposed
 /// on each side and a rotated output equals the explicit steps and differs
 /// from `contract`; a lazy-adjoint operand equals the steps over the same
-/// adjoint view.
+/// lazy adjoint.
 #[test]
 fn fermionic_u1_planar_contract_is_the_explicit_steps() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -659,9 +653,8 @@ fn fermionic_u1_planar_contract_is_the_explicit_steps() {
     let theta =
         TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v, &v], [&v], 23).unwrap();
     let g6 = spec(&[0, 1, 2], &[1, 2, 3], &[0], &[1]);
-    let planar = theta
-        .planar_contract(engine, theta.adjoint_view(), &g6)
-        .unwrap();
+    let theta_adjoint = theta.adjoint(engine).unwrap();
+    let planar = theta.planar_contract(engine, &theta_adjoint, &g6).unwrap();
     let materialized = theta.adjoint(engine).unwrap().materialize(engine).unwrap();
     let materialized_transpose = materialized.transpose(engine, &[3, 2, 1], &[0]).unwrap();
     let explicit = theta
@@ -675,7 +668,8 @@ fn fermionic_u1_planar_contract_is_the_explicit_steps() {
         max_distance(got, explicit.dense_data().unwrap()) <= 1e-12 * scale.max(1.0),
         "lazy adjoint steps"
     );
-    let ordinary = theta.contract(engine, theta.adjoint_view(), &g6).unwrap();
+    let theta_adjoint = theta.adjoint(engine).unwrap();
+    let ordinary = theta.contract(engine, &theta_adjoint, &g6).unwrap();
     assert!(
         max_distance(got, ordinary.dense_data().unwrap()) > 1e-3 * scale,
         "the supertrace twist distinguishes contract on the adjoint"
@@ -731,8 +725,13 @@ fn fermionic_planar_contract_into_is_alpha_steps_plus_beta() {
         |t, i| parity_entry("fdst", t, i),
     )
     .unwrap();
-    x.planar_contract_into(engine, &y, &cyclic, &mut destination, alpha, beta)
-        .unwrap();
+    x.planar_contract_into(
+        engine,
+        &y,
+        &cyclic,
+        Dest::scaled(&mut destination, alpha, beta),
+    )
+    .unwrap();
     let got = destination.dense_data().unwrap();
     let start = initial.dense_data().unwrap();
     let expect = |op: &[Complex64]| -> Vec<Complex64> {

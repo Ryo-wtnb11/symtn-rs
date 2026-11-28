@@ -23,7 +23,7 @@ fn overwrite_members<E: DenseExecutor>(
     scales: &[(usize, f64)],
 ) -> Result<Vec<f64>, OperationError> {
     let mut out = vec![f64::NAN; members * dst.required_len().unwrap()];
-    tree_transform_members_overwrite_raw(
+    tree_transform_members_raw(
         engine,
         &mut StridedHostKernelAdapter::default(),
         dense,
@@ -35,6 +35,8 @@ fn overwrite_members<E: DenseExecutor>(
         source,
         members,
         scales,
+        num_traits::One::one(),
+        num_traits::Zero::zero(),
     )?;
     Ok(out)
 }
@@ -173,7 +175,7 @@ fn every_element_of_every_member_is_written_once() {
         let mut out = vec![f64::NAN; members * len];
         let ran = if custom {
             let mut dense = Forwarding::default();
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 &mut engine,
                 &mut kernels,
                 &mut dense,
@@ -185,9 +187,11 @@ fn every_element_of_every_member_is_written_once() {
                 &source,
                 members,
                 &[],
+                num_traits::One::one(),
+                num_traits::Zero::zero(),
             )
         } else {
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 &mut engine,
                 &mut kernels,
                 &mut DefaultDenseExecutor::new(),
@@ -199,6 +203,8 @@ fn every_element_of_every_member_is_written_once() {
                 &source,
                 members,
                 &[],
+                num_traits::One::one(),
+                num_traits::Zero::zero(),
             )
         };
         ran.unwrap();
@@ -303,7 +309,7 @@ fn member_scales_are_resolved_once_per_role() {
                 .collect::<Vec<_>>();
             let mut out = vec![f64::NAN; members * dst.required_len().unwrap()];
             let watch = crate::transform_replay::alpha_lookups::watch(scales.as_ptr() as usize);
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 &mut engine(4, strategy),
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
@@ -315,6 +321,8 @@ fn member_scales_are_resolved_once_per_role() {
                 &source,
                 members,
                 &scales,
+                num_traits::One::one(),
+                num_traits::Zero::zero(),
             )
             .unwrap();
             assert_eq!(watch.take(), roles, "{strategy:?}, {members} members");
@@ -333,7 +341,7 @@ fn a_huge_batch_of_empty_members_splits_without_overflow() {
         TreeTransformStructure::<f64>::compile_structures(&blocks, &blocks, &[]).unwrap();
     let mut engine = engine(4, CpuBatchStrategy::Outer);
     let mut workspace = TreeTransformWorkspace::<f64>::default();
-    tree_transform_members_overwrite_raw(
+    tree_transform_members_raw(
         &mut engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
@@ -345,6 +353,8 @@ fn a_huge_batch_of_empty_members_splits_without_overflow() {
         &[],
         isize::MAX as usize,
         &[],
+        num_traits::One::one(),
+        num_traits::Zero::zero(),
     )
     .unwrap();
     assert!(workspace.member_scratch.len() >= 2, "the moves split");
@@ -380,7 +390,7 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
     let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
     let mut workspace = TreeTransformWorkspace::default();
     let mut out = vec![f64::NAN; members * len];
-    tree_transform_members_overwrite_raw(
+    tree_transform_members_raw(
         &mut engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
@@ -392,6 +402,8 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
         &source,
         members,
         &[],
+        num_traits::One::one(),
+        num_traits::Zero::zero(),
     )
     .unwrap();
     assert_eq!(
@@ -404,7 +416,7 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
     let element = |member: usize, block: usize| base + member * len + layout[block].0;
     let mut kernels = ObservedKernels::failing_at(element(2, 0));
     let mut dense = Forwarding::default();
-    let error = tree_transform_members_overwrite_raw(
+    let error = tree_transform_members_raw(
         &mut engine,
         &mut kernels,
         &mut dense,
@@ -416,6 +428,8 @@ fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
         &source,
         members,
         &[],
+        num_traits::One::one(),
+        num_traits::Zero::zero(),
     )
     .unwrap_err();
     assert!(
@@ -456,7 +470,7 @@ fn a_member_range_panic_breaks_the_engine() {
     let mut workspace = TreeTransformWorkspace::default();
     let run =
         |engine: &mut CpuEngine, workspace: &mut TreeTransformWorkspace<f64>, source: &[f64]| {
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
@@ -468,6 +482,8 @@ fn a_member_range_panic_breaks_the_engine() {
                 source,
                 members,
                 &[],
+                num_traits::One::one(),
+                num_traits::Zero::zero(),
             )
         };
     let calm = vec![1.0; members * len];

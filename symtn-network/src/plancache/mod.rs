@@ -1232,8 +1232,8 @@ fn topology_optimizer(optimizer: &Optimizer) -> Optimizer {
     #[cfg(feature = "cotengra-python")]
     if let Optimizer::CotengraPython(config) = optimizer {
         let mut config = config.clone();
-        // Normal cached contractions are path-only. `optimize_sliced` consumes
-        // slicing explicitly and does not go through this cache, so slicing
+        // Normal cached contractions are path-only. A `SlicedPlan` from
+        // `optimize_sliced` goes through `Network::plan`, not this cache, so slicing
         // policy must not fragment ordinary plan-cache entries.
         config.slicing = crate::plancache::CotengraSlicingConfig::None;
         // The timeout supervises a cold search; it cannot change the resulting

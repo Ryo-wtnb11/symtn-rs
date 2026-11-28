@@ -286,22 +286,20 @@ where
     /// device first (#1383). A lazy adjoint CUDA operand returns
     /// [`Error::UnsupportedOnDevice`].
     #[doc(alias = "dot")]
-    pub fn inner<'a>(
+    pub fn inner(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
     ) -> Result<D, FacadeError<R>> {
         let engine = cx.engine();
         self.inner_impl(engine, other)
     }
 
-    fn inner_impl<'a>(
+    fn inner_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
     ) -> Result<D, FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
         super::linear_ops::require_same_runtime_and_space(self, other)?;
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
             if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
@@ -632,16 +630,23 @@ where
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use symtn::sector::{TableRule, TableSector};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::new();
+    /// let category = TableCategory::fibonacci();
+    /// let tau_label = category.object(2).unwrap();
+    /// let rule = CategoryRule::try_new(
+    ///     category,
+    ///     EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
+    /// )
+    /// .unwrap();
     /// let tau = GradedSpace::try_new(
-    ///     Arc::new(TableRule::fibonacci()),
-    ///     [(TableSector::new(2), 1)],
+    ///     Arc::new(rule),
+    ///     [(tau_label, 1)],
     /// )?;
-    /// let id: TensorMap<TableRule, Complex64> =
+    /// let id: TensorMap<_, Complex64> =
     ///     TensorMap::isomorphism(engine, &runtime, [&tau], [&tau])?;
     /// let golden_ratio = (1.0 + 5.0_f64.sqrt()) / 2.0;
     /// assert!((id.tr(engine)? - Complex64::new(golden_ratio, 0.0)).norm() < 1e-15);

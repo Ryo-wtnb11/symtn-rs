@@ -3,6 +3,7 @@
 //! without a device reports no device transform state and still clears its
 //! Host transform store.
 
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use std::sync::Arc;
@@ -110,7 +111,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
         TensorMap::from_subblock_fn(engine, &other, [&z3_leg], [&z3_leg], |_, _| f64::NAN).unwrap();
     assert_eq!(
         z2_source
-            .permute_into(engine, &[0], &[1], &mut foreign, 1.0, 0.0)
+            .permute_into(engine, &[0], &[1], Dest::overwrite(&mut foreign))
             .unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     );
@@ -123,7 +124,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
         z2_source
             .adjoint(engine)
             .unwrap()
-            .permute_into(engine, &[0], &[1], &mut z3_destination, 1.0, 0.0)
+            .permute_into(engine, &[0], &[1], Dest::overwrite(&mut z3_destination))
             .unwrap_err(),
         symtn::typed::Error::RuleMismatch
     );
@@ -137,13 +138,23 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     };
     assert_eq!(
         lazy_source
-            .permute_into(engine, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
+            .permute_into(
+                engine,
+                &[2, 0],
+                &[1, 3],
+                Dest::overwrite(&mut lazy_destination)
+            )
             .unwrap_err(),
         lazy
     );
     assert_eq!(
         source
-            .permute_into(engine, &[2, 0], &[1, 3], &mut lazy_destination, 1.0, 0.0)
+            .permute_into(
+                engine,
+                &[2, 0],
+                &[1, 3],
+                Dest::overwrite(&mut lazy_destination)
+            )
             .unwrap_err(),
         lazy
     );
@@ -153,7 +164,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     let mut alias = source.clone();
     assert_eq!(
         source
-            .permute_into(engine, &[0, 0], &[1, 3], &mut alias, 1.0, 0.0)
+            .permute_into(engine, &[0, 0], &[1, 3], Dest::overwrite(&mut alias))
             .unwrap_err(),
         symtn::typed::Error::DestinationShared
     );
@@ -164,7 +175,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     assert_eq!(
         message(
             source
-                .permute_into(engine, &[2, 0], &[1, 3], &mut wrong_space, 1.0, 0.0)
+                .permute_into(engine, &[2, 0], &[1, 3], Dest::overwrite(&mut wrong_space))
                 .unwrap_err()
         ),
         "tensor operation failed: space mismatch: destination fusion space or block layout \
@@ -177,7 +188,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     assert_eq!(
         message(
             source
-                .permute_into(engine, &[2, 0], &[1, 3], &mut shared, 1.0, 0.0)
+                .permute_into(engine, &[2, 0], &[1, 3], Dest::overwrite(&mut shared))
                 .unwrap_err()
         ),
         "the destination shares its storage with another tensor handle"
@@ -190,7 +201,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     assert_eq!(
         message(
             source
-                .repartition_into(engine, &mut rank_three, 1.0, 0.0)
+                .repartition_into(engine, Dest::overwrite(&mut rank_three))
                 .unwrap_err()
         ),
         "invalid argument: repartition destination rank 3 does not match source rank 4"
@@ -221,7 +232,7 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
         .iter()
         .all(|value| value.is_nan()));
     source
-        .permute_into(engine, &[2, 0], &[1, 3], &mut poisoned, 1.0, 0.0)
+        .permute_into(engine, &[2, 0], &[1, 3], Dest::overwrite(&mut poisoned))
         .unwrap();
     assert!(
         poisoned
@@ -243,7 +254,12 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
     // No identity short circuit: `alpha * self` is written.
     let mut identity = source.scale(engine, f64::NAN).unwrap();
     source
-        .permute_into(engine, &[0, 1], &[2, 3], &mut identity, -2.5, 0.0)
+        .permute_into(
+            engine,
+            &[0, 1],
+            &[2, 3],
+            Dest::scaled(&mut identity, -2.5, 0.0),
+        )
         .unwrap();
     assert_eq!(
         identity.dense_data().unwrap(),
@@ -251,7 +267,7 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
     );
     let mut same_split = source.scale(engine, f64::NAN).unwrap();
     source
-        .repartition_into(engine, &mut same_split, 2.0, 0.0)
+        .repartition_into(engine, Dest::scaled(&mut same_split, 2.0, 0.0))
         .unwrap();
     assert_eq!(
         same_split.dense_data().unwrap(),
@@ -280,7 +296,12 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
     for alpha in [0.0, -0.0] {
         let mut destination = nan_source.permute(engine, &[1, 2], &[3, 0]).unwrap();
         nan_source
-            .permute_into(engine, &[1, 2], &[3, 0], &mut destination, alpha, 0.0)
+            .permute_into(
+                engine,
+                &[1, 2],
+                &[3, 0],
+                Dest::scaled(&mut destination, alpha, 0.0),
+            )
             .unwrap();
         assert!(
             destination

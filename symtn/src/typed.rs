@@ -352,11 +352,11 @@ pub use batched::{
     StructureSignature,
 };
 
+#[cfg(test)]
+mod lazy_adjoint_tests;
 mod serialization;
 #[cfg(test)]
 mod spectrum_match_tests;
-#[cfg(test)]
-mod view_tests;
 pub use serialization::{
     DecodeError, DecodeLimits, EncodeError, PersistedScalar, TypedPersistenceCodec,
 };
@@ -444,11 +444,13 @@ use fusion_tree::{diagonal_factor_on, full_svd_spectrum_matches_bonds};
 pub use fusion_tree::{
     BlockFusionTrees, CoupledBlock, CoupledBlockPayload, FusionTreeLabels, SectorSpectrum,
 };
+mod dest;
+pub use dest::Dest;
 mod tensor_repr;
 use tensor_repr::{
-    borrowed_view_unsupported, owned_repr, TypedAdjointView, TypedTensorBody, TypedTensorRepr,
+    materialize_unsupported, owned_repr, TypedAdjointView, TypedTensorBody, TypedTensorRepr,
 };
-pub use tensor_repr::{PayloadConversion, PhysicalDense, TensorMap, TensorRef};
+pub use tensor_repr::{PayloadConversion, PhysicalDense, TensorMap};
 mod cat;
 mod compact_arms;
 mod construction;

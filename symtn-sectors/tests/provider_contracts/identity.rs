@@ -5,17 +5,16 @@
 //!   `src/lie.rs` `validation_and_identity_are_typed_and_stable`; rank
 //!   distinction: `stored_identity_is_shared_and_distinguishes_rank`.
 //! - Every shipped table entry distinct, stable, and unequal to Z2 / Z_2:
-//!   `tests/table_rule.rs` `every_shipped_entry_constructs_with_its_own_identity`.
+//!   `tests/table_categories.rs` `every_shipped_entry_constructs_with_its_own_identity`.
 //! - Product identity keeps child order, codec and stateful children:
 //!   `tests/rule_identity.rs`.
 
 use crate::su2::su2_rule;
+use crate::tables::*;
 
 use crate::product_codec::ParityProductCodec;
 
 use symtn_sectors::*;
-
-use super::table_identity;
 
 #[test]
 fn stateless_rules_are_identified_by_their_type() {
@@ -51,12 +50,12 @@ fn enumerated_rules_are_identified_by_their_category_value() {
 #[test]
 fn table_identities_follow_the_table() {
     assert_ne!(
-        TableRule::fibonacci().rule_identity(),
-        TableRule::ising().rule_identity()
+        table_fibonacci().rule_identity(),
+        table_ising().rule_identity()
     );
     assert_eq!(
-        TableRule::fibonacci().rule_identity(),
-        TableRule::fibonacci().rule_identity()
+        table_fibonacci().rule_identity(),
+        table_fibonacci().rule_identity()
     );
 }
 
@@ -168,15 +167,13 @@ fn product_identity_composes_factor_identities_under_the_codec() {
 }
 
 #[test]
-fn table_identity_is_the_uuid_under_the_table_tag() {
-    assert_eq!(
-        TableRule::fibonacci().rule_identity(),
-        table_identity(&fusion_symbols::table::TableCategory::fibonacci())
-    );
-    assert_eq!(
-        TableRule::ising().rule_identity(),
-        table_identity(&fusion_symbols::table::TableCategory::ising())
-    );
+fn table_identity_is_the_category_value() {
+    // Every shipped entry: `tests/table_categories.rs`
+    // `every_shipped_entry_constructs_with_its_own_identity`.
+    let fib = table_fibonacci().rule_identity();
+    let uuid = fusion_symbols::table::TableCategory::fibonacci().uuid();
+    assert_eq!(fib, table_by_uuid(uuid).rule_identity());
+    assert_ne!(fib, table_ising().rule_identity());
 }
 
 /// A stored identity keeps its equality after every rule over the group is

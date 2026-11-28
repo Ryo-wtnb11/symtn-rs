@@ -30,7 +30,7 @@ use symtn_operations::fusion_replay::FusionBlockContractPlan;
 
 use symtn_operations::stacked::{StackedDirectReplay, StackedStorageView, StackedStorageViewMut};
 use symtn_operations::{
-    admit_tree_transform_members_overwrite_raw, tree_transform_members_overwrite_raw,
+    admit_tree_transform_members_overwrite_raw, tree_transform_members_raw,
     ContractDestinationInit, DenseTreeTransformOperations, Rank2Gemm, TreeTransformWorkspace,
 };
 
@@ -88,9 +88,10 @@ where
         members: usize,
     ) -> Result<(), OperationError>;
 
-    /// One `B > 1` overwrite stage over member-major stacks.
+    /// One `B > 1` stage over member-major stacks,
+    /// `dst = alpha · transform(src) + beta · dst`.
     #[allow(clippy::too_many_arguments)]
-    fn overwrite_members(
+    fn transform_members(
         &mut self,
         engine: &mut dyn Engine,
         stage: Stage,
@@ -101,6 +102,8 @@ where
         src: &[D],
         members: usize,
         destination_scales: &[(usize, C)],
+        alpha: D,
+        beta: D,
     ) -> Result<(), OperationError>;
 
     /// The `B > 1` member expansion of `plan`.
@@ -110,7 +113,9 @@ where
         members: usize,
     ) -> Result<StackedDirectReplay<C>, OperationError>;
 
-    /// Replays a `B > 1` core over member-major stacks.
+    /// Replays a `B > 1` core over member-major stacks, `dst = alpha · core +
+    /// beta · dst`; with `scale_inactive` the inactive layouts become
+    /// `beta · dst`, else the caller proves them zero.
     #[allow(clippy::too_many_arguments)]
     fn stacked_core<G: Rank2Gemm<D>>(
         &mut self,
@@ -120,7 +125,9 @@ where
         dst: &mut [D],
         left: &[D],
         right: &[D],
-        zero_inactive: bool,
+        scale_inactive: bool,
+        alpha: D,
+        beta: D,
     ) -> Result<(), OperationError>;
 }
 
@@ -210,7 +217,7 @@ where
         Err(EAGER_IS_ONE_MEMBER)
     }
 
-    fn overwrite_members(
+    fn transform_members(
         &mut self,
         _engine: &mut dyn Engine,
         _: Stage,
@@ -221,6 +228,8 @@ where
         _: &[D],
         _: usize,
         _: &[(usize, C)],
+        _: D,
+        _: D,
     ) -> Result<(), OperationError> {
         Err(EAGER_IS_ONE_MEMBER)
     }
@@ -242,6 +251,8 @@ where
         _: &[D],
         _: &[D],
         _: bool,
+        _: D,
+        _: D,
     ) -> Result<(), OperationError> {
         Err(EAGER_IS_ONE_MEMBER)
     }
@@ -293,7 +304,7 @@ where
         )
     }
 
-    fn overwrite_members(
+    fn transform_members(
         &mut self,
         engine: &mut dyn Engine,
         stage: Stage,
@@ -304,8 +315,10 @@ where
         src: &[D],
         members: usize,
         destination_scales: &[(usize, C)],
+        alpha: D,
+        beta: D,
     ) -> Result<(), OperationError> {
-        tree_transform_members_overwrite_raw(
+        tree_transform_members_raw(
             engine,
             &mut crate::StridedHostKernelAdapter::default(),
             self.backend.dense_mut(),
@@ -317,6 +330,8 @@ where
             src,
             members,
             destination_scales,
+            alpha,
+            beta,
         )
     }
 
@@ -336,7 +351,9 @@ where
         dst: &mut [D],
         left: &[D],
         right: &[D],
-        zero_inactive: bool,
+        scale_inactive: bool,
+        alpha: D,
+        beta: D,
     ) -> Result<(), OperationError> {
         let members = replay.members();
         let [dst_len, left_len, right_len] = replay.member_lens();
@@ -352,7 +369,9 @@ where
             &mut dst,
             &left,
             &right,
-            zero_inactive,
+            scale_inactive,
+            alpha,
+            beta,
         )
     }
 }
@@ -535,7 +554,7 @@ where
     C: Copy,
 {
     if members != 1 {
-        return stage.overwrite_members(
+        return stage.transform_members(
             engine,
             slot,
             structure,
@@ -545,6 +564,8 @@ where
             src,
             members,
             destination_scales,
+            D::one(),
+            D::zero(),
         );
     }
     let (backend, workspace) = stage.ordinary(slot);
@@ -674,8 +695,7 @@ impl<'r, C: DenseBlockScalar> RouteView<'r, C> {
 /// the destination or a temporary, `tensoradd!` the temporary into the
 /// destination.
 ///
-/// `B > 1` admits only the member overwrite contract (`alpha = 1`,
-/// `Axpby(0)` or `Zeroed`) with a caller-owned core slot, and checks every structure,
+/// `B > 1` needs a caller-owned core slot and checks every structure,
 /// length and transform before the first write. At `B = 1` each stage
 /// validates its inputs before its first write and only the last stage writes
 /// `dst`, so a validation error leaves `dst` unchanged at every `B`.
@@ -742,15 +762,6 @@ where
 
     let mut stacked = None;
     if members != 1 {
-        let overwrite = match init {
-            ContractDestinationInit::Zeroed => true,
-            ContractDestinationInit::Axpby(beta) => beta.is_zero(),
-        };
-        if alpha != D::one() || !overwrite {
-            return Err(OperationError::Internal {
-                message: "member contraction overwrites its destination with unit alpha",
-            });
-        }
         let slot = core.as_deref_mut().ok_or(OperationError::Internal {
             message: "member contraction needs a caller-owned core slot",
         })?;
@@ -981,6 +992,8 @@ where
             left,
             right,
             matches!(core_init, ContractDestinationInit::Axpby(_)),
+            core_alpha,
+            core_init.active_beta(),
         )?;
     }
 
@@ -999,7 +1012,7 @@ where
         let Some(dst_data) = dst_data else {
             return Err(EAGER_IS_ONE_MEMBER);
         };
-        return stage.overwrite_members(
+        return stage.transform_members(
             engine,
             Stage::Output,
             transform,
@@ -1009,6 +1022,8 @@ where
             &core_dst.as_slice()[..core_dst_len],
             members,
             &[],
+            output_alpha,
+            init.active_beta(),
         );
     }
     let (backend, workspace) = stage.ordinary(Stage::Output);
@@ -1254,6 +1269,7 @@ pub(super) fn execute_members_host<E, EC, D, C>(
     lhs: &[D],
     rhs: &[D],
     members: usize,
+    alpha: D,
     init: ContractDestinationInit<D>,
 ) -> Result<(), OperationError>
 where
@@ -1297,7 +1313,7 @@ where
         lhs,
         rhs,
         members,
-        D::one(),
+        alpha,
     )
 }
 
@@ -1337,6 +1353,7 @@ where
         lhs,
         rhs,
         members,
+        D::one(),
         ContractDestinationInit::Axpby(D::zero()),
     )
 }

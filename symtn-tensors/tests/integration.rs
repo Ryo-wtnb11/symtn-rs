@@ -4,6 +4,8 @@ mod categorical_recoupling;
 #[path = "../../tests/support/su2.rs"]
 mod su2;
 use symtn_core as sector_types;
+#[path = "../../tests/support/tables.rs"]
+mod tables;
 
 mod cuda_tree_transform_categorical;
 #[path = "../../tests/support/export_scan.rs"]

@@ -7,6 +7,7 @@
 //! its result, and `contract_into` nothing output-sized.
 
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
@@ -70,14 +71,14 @@ fn split_moving_eager_contract_keeps_its_copy_c_temporary_in_the_engine() {
     symtn::scratch::trim(engine);
     assert_eq!(
         sized_allocs(output_bytes, || a
-            .contract_into(engine, &b, &spec, &mut destination, 1.0, 0.0)
+            .contract_into(engine, &b, &spec, Dest::overwrite(&mut destination))
             .unwrap()),
         1
     );
     for _ in 0..3 {
         assert_eq!(
             sized_allocs(output_bytes, || a
-                .contract_into(engine, &b, &spec, &mut destination, 1.0, 0.0)
+                .contract_into(engine, &b, &spec, Dest::overwrite(&mut destination))
                 .unwrap()),
             0
         );

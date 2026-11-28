@@ -2,6 +2,7 @@
 //! staging and commit around a write into the caller's buffer.
 
 use super::*;
+use symtn::typed::Dest;
 
 type ToyTensor = TensorMap<CheckedOnlyToy, f64>;
 
@@ -44,12 +45,14 @@ const OPERATIONS: [(&str, Eager, IntoOp); 2] = [
     (
         "permute",
         |engine, t| t.permute(engine, &[1, 0, 2], &[]),
-        |engine, t, d, a, b| t.permute_into(engine, &[1, 0, 2], &[], d, a, b),
+        |engine, t, d, a, b| t.permute_into(engine, &[1, 0, 2], &[], Dest::scaled(d, a, b)),
     ),
     (
         "braid",
         |engine, t| t.braid(engine, &[1, 0, 2], &[], &[0, 1, 2]),
-        |engine, t, d, a, b| t.braid_into(engine, &[1, 0, 2], &[], &[0, 1, 2], d, a, b),
+        |engine, t, d, a, b| {
+            t.braid_into(engine, &[1, 0, 2], &[], &[0, 1, 2], Dest::scaled(d, a, b))
+        },
     ),
 ];
 

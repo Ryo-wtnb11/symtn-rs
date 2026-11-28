@@ -65,7 +65,7 @@ fn checked_su2_distinguishes_invalid_inputs_from_unrepresentable_fusion() {
 fn checked_fibonacci_matches_valid_operations_and_rejects_unknown_sectors() {
     // What: Fibonacci's checked companion preserves every valid operation
     // and rejects IDs outside the two-sector algebra with the exact input.
-    let rule = TableRule::fibonacci();
+    let rule = table_fibonacci();
     let vacuum = SectorId::new(0);
     let tau = SectorId::new(1);
     assert_eq!(rule.try_dual_sector(tau), Ok(rule.dual(tau)));

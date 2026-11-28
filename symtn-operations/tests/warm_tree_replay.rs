@@ -25,7 +25,7 @@ use symtn_dense::{
     DenseScalar, DenseTensor, DenseWrite, Engine,
 };
 use symtn_operations::{
-    tree_transform_members_overwrite_raw, DenseTreeTransformOperations, StridedHostKernelAdapter,
+    tree_transform_members_raw, DenseTreeTransformOperations, StridedHostKernelAdapter,
     TreeTransformBackend, TreeTransformBlockSpec, TreeTransformStructure, TreeTransformWorkspace,
 };
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
@@ -271,7 +271,7 @@ fn warm_parallel_tree_replay_allocates_nothing_but_provider_locks() {
         let ((structure, transform, _), members) = batches[which];
         let (destination, source) = &mut buffers[which];
         counting_alloc::measure_process(|| {
-            tree_transform_members_overwrite_raw(
+            tree_transform_members_raw(
                 engine,
                 &mut kernels,
                 &mut dense,
@@ -283,6 +283,8 @@ fn warm_parallel_tree_replay_allocates_nothing_but_provider_locks() {
                 source,
                 members,
                 &[],
+                num_traits::One::one(),
+                num_traits::Zero::zero(),
             )
             .unwrap()
         })

@@ -9,14 +9,7 @@ use crate::slice::SliceKind;
 
 /// Validation failures for coefficient-free symmetric slicing descriptors.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SliceError {
-    EmptyRange {
-        at: usize,
-    },
-    ReversedRange {
-        start: usize,
-        end: usize,
-    },
+pub(crate) enum SliceError {
     UnknownLabel(TemporaryLabel),
     DuplicateLabel(TemporaryLabel),
     InvalidAuthority {
@@ -50,11 +43,12 @@ pub enum SliceError {
     SliceCountOverflow,
 }
 
-pub type SliceResult<T> = std::result::Result<T, SliceError>;
+pub(crate) type SliceResult<T> = std::result::Result<T, SliceError>;
 
-/// Failure while lowering or binding a symmetric sliced plan.
+/// Failure while lowering or binding a symmetric sliced plan; the network
+/// boundary folds it into the tensor error ([`fold_lower_error`]).
 #[derive(Debug)]
-pub enum SymmetricSliceLowerError<E> {
+pub(crate) enum SymmetricSliceLowerError<E> {
     Tensor(E),
     InvalidPlan(ContractError),
     InvalidSlice(SliceError),
@@ -72,15 +66,6 @@ pub enum SymmetricSliceLowerError<E> {
         label: TemporaryLabel,
         authority: TensorAxis,
     },
-}
-
-/// Failure while binding or executing a symmetric sliced plan.
-#[derive(Debug)]
-pub enum SymmetricSliceExecutionError<E> {
-    Bind(SymmetricSliceLowerError<E>),
-    Tensor(E),
-    WorkspaceLimitExceeded { limit: usize, required: usize },
-    WorkspaceArithmeticOverflow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -262,10 +247,6 @@ impl std::error::Error for ContractError {}
 impl Display for SliceError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EmptyRange { at } => write!(f, "empty degeneracy range at {at}"),
-            Self::ReversedRange { start, end } => {
-                write!(f, "reversed degeneracy range [{start}, {end})")
-            }
             Self::UnknownLabel(label) => write!(f, "unknown sliced label `{label}`"),
             Self::DuplicateLabel(label) => write!(f, "duplicate sliced label `{label}`"),
             Self::InvalidAuthority {
@@ -341,47 +322,17 @@ impl<E: Display> Display for SymmetricSliceLowerError<E> {
     }
 }
 
-impl<E> std::error::Error for SymmetricSliceLowerError<E>
+/// A binding failure is an invalid argument of the planned call; a tensor
+/// failure is reported as is.
+pub(crate) fn fold_lower_error<E>(error: SymmetricSliceLowerError<E>) -> E
 where
-    E: std::error::Error + 'static,
+    E: Display + From<symtn::typed::Error>,
 {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Tensor(error) => Some(error),
-            Self::InvalidPlan(error) => Some(error),
-            Self::InvalidSlice(error) => Some(error),
-            Self::RuleMismatch { .. }
-            | Self::AuthorityLegMismatch { .. }
-            | Self::MissingAuthority { .. } => None,
-        }
-    }
-}
-
-impl<E: Display> Display for SymmetricSliceExecutionError<E> {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Bind(_) => formatter.write_str("symmetric slice binding failed"),
-            Self::Tensor(_) => formatter.write_str("symmetric slice execution failed"),
-            Self::WorkspaceLimitExceeded { limit, required } => write!(
-                formatter,
-                "symmetric sliced execution observed {required} network-owned payload bytes, measured ceiling is {limit}"
-            ),
-            Self::WorkspaceArithmeticOverflow => {
-                write!(formatter, "symmetric sliced workspace byte count overflowed")
-            }
-        }
-    }
-}
-
-impl<E> std::error::Error for SymmetricSliceExecutionError<E>
-where
-    E: std::error::Error + 'static,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Bind(error) => Some(error),
-            Self::Tensor(error) => Some(error),
-            Self::WorkspaceLimitExceeded { .. } | Self::WorkspaceArithmeticOverflow => None,
-        }
-    }
+    let message = match error {
+        SymmetricSliceLowerError::Tensor(error) => return error,
+        SymmetricSliceLowerError::InvalidPlan(ref cause) => format!("{error}: {cause}"),
+        SymmetricSliceLowerError::InvalidSlice(ref cause) => format!("{error}: {cause}"),
+        error => error.to_string(),
+    };
+    symtn::typed::Error::InvalidArgument(message).into()
 }

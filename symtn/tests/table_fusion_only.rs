@@ -1,5 +1,5 @@
 //! A fusion category without braiding through the public typed API:
-//! Rep(S₃) from `TableRule` reports `NoBraiding`. The crossing-free
+//! Rep(S₃) from `TableCategoryRule` reports `NoBraiding`. The crossing-free
 //! operations (transpose, repartition, compose, otimes, and a braid whose
 //! only crossings involve the unit) work; every operation that needs an
 //! R-symbol is rejected with its typed error before any provider R call and
@@ -7,15 +7,15 @@
 //! for `NoBraiding` in `artin_braid` and `permute`.
 
 use std::sync::Arc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
+use crate::tables::*;
 use num_complex::Complex64;
 use symtn::typed::{
     ContractSpec, CoreError, Error, GradedSpace, OperationError, Runtime, TensorMap,
 };
-use symtn_sectors::{
-    BraidingStyleKind, FusionRule, SectorCodec, SectorId, TableRule, TableSector, ZNFusionRule,
-};
+use symtn_sectors::{BraidingStyleKind, FusionRule, SectorCodec, SectorId, ZNFusionRule};
 
 /// Rep(S₃), `anyonwiki_code [3,1,0,2,2,0,1]`: objects `1` (trivial), `2`
 /// (sign), `3` (two-dimensional).
@@ -36,23 +36,23 @@ fn tensorkit_rep_s3_f(row: usize, column: usize) -> Complex64 {
     Complex64::new(f[row][column], 0.0)
 }
 
-fn rep_s3() -> Arc<TableRule> {
-    Arc::new(TableRule::by_uuid(REP_S3).unwrap())
+fn rep_s3() -> Arc<TableCategoryRule> {
+    Arc::new(table_by_uuid(REP_S3))
 }
 
-fn leg(rule: &Arc<TableRule>, sectors: &[(u16, usize)]) -> GradedSpace<TableRule> {
+fn leg(rule: &Arc<TableCategoryRule>, sectors: &[(u16, usize)]) -> GradedSpace<TableCategoryRule> {
     GradedSpace::try_new(
         rule.clone(),
         sectors
             .iter()
-            .map(|&(label, d)| (TableSector::new(label), d)),
+            .map(|&(label, d)| (table_object(rule, label), d)),
     )
     .unwrap()
 }
 
 fn assert_close(
-    actual: &TensorMap<TableRule, Complex64>,
-    expected: &TensorMap<TableRule, Complex64>,
+    actual: &TensorMap<TableCategoryRule, Complex64>,
+    expected: &TensorMap<TableCategoryRule, Complex64>,
 ) {
     let (a, e) = (actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert_eq!(a.len(), e.len());
@@ -63,10 +63,10 @@ fn assert_close(
 
 fn seeded(
     runtime: &Runtime,
-    codomain: &[&GradedSpace<TableRule>],
-    domain: &[&GradedSpace<TableRule>],
+    codomain: &[&GradedSpace<TableCategoryRule>],
+    domain: &[&GradedSpace<TableCategoryRule>],
     seed: u64,
-) -> TensorMap<TableRule, Complex64> {
+) -> TensorMap<TableCategoryRule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     TensorMap::rand_with_seed(
         engine,
@@ -83,7 +83,7 @@ fn rep_s3_reports_no_braiding_and_products_inherit_it() {
     let rule = rep_s3();
     assert_eq!(rule.braiding_style(), BraidingStyleKind::NoBraiding);
     let product = symtn_sectors::ProductFusionRule::<_, _>::try_new(
-        TableRule::by_uuid(REP_S3).unwrap(),
+        table_by_uuid(REP_S3),
         ZNFusionRule::new(2).unwrap(),
     )
     .unwrap();
@@ -125,9 +125,9 @@ fn crossing_free_operations_work_without_braiding() {
         .to_vec();
     assert_eq!(channels.len(), 3);
     let basis = |engine: &mut dyn Engine,
-                 space: &GradedSpace<TableRule>,
+                 space: &GradedSpace<TableCategoryRule>,
                  channel: SectorId|
-     -> TensorMap<TableRule, Complex64> {
+     -> TensorMap<TableCategoryRule, Complex64> {
         let label = rule.decode_sector(channel).unwrap();
         TensorMap::from_subblock_fn(
             engine,
@@ -233,9 +233,7 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
             &[1, 0],
             &[2],
             &[0, 1, 2],
-            &mut destination,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
+            Dest::overwrite(&mut destination),
         )
         .unwrap_err();
     assert!(is_no_braiding_sector_braid(&error), "{error:?}");
@@ -286,7 +284,7 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
     let runtime = Runtime::new();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
-            TableRule::by_uuid(REP_S3).unwrap(),
+            table_by_uuid(REP_S3),
             ZNFusionRule::new(2).unwrap(),
         )
         .unwrap(),
@@ -296,11 +294,17 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
         product,
         [
             (
-                ProductSector::new(TableSector::new(1), ZNIrrep::new(0, 2).unwrap()),
+                ProductSector::new(
+                    table_object(&table_by_uuid(REP_S3), 1),
+                    ZNIrrep::new(0, 2).unwrap(),
+                ),
                 1,
             ),
             (
-                ProductSector::new(TableSector::new(3), ZNIrrep::new(1, 2).unwrap()),
+                ProductSector::new(
+                    table_object(&table_by_uuid(REP_S3), 3),
+                    ZNIrrep::new(1, 2).unwrap(),
+                ),
                 1,
             ),
         ],
@@ -317,9 +321,7 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
             &[1, 0],
             &[2],
             &[0, 1, 2],
-            &mut destination,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
+            Dest::overwrite(&mut destination),
         )
         .unwrap_err();
     assert!(is_no_braiding_sector_braid(&error), "{error:?}");

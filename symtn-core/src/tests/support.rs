@@ -585,27 +585,27 @@ impl FusionRule for FibonacciFAdmissibilityProbe {
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
-        TableRule::fibonacci().fusion_style()
+        table_fibonacci().fusion_style()
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        TableRule::fibonacci().braiding_style()
+        table_fibonacci().braiding_style()
     }
 
     fn vacuum(&self) -> SectorId {
-        TableRule::fibonacci().vacuum()
+        table_fibonacci().vacuum()
     }
 
     fn dual(&self, sector: SectorId) -> SectorId {
-        TableRule::fibonacci().dual(sector)
+        table_fibonacci().dual(sector)
     }
 
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-        TableRule::fibonacci().fusion_channels(left, right)
+        table_fibonacci().fusion_channels(left, right)
     }
 
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
-        TableRule::fibonacci().nsymbol(left, right, coupled)
+        table_fibonacci().nsymbol(left, right, coupled)
     }
 }
 
@@ -628,12 +628,12 @@ impl MultiplicityFreeFusionSymbols for FibonacciFAdmissibilityProbe {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(call);
-        let admissible = TableRule::fibonacci().nsymbol(left, middle, left_coupled) != 0
-            && TableRule::fibonacci().nsymbol(left_coupled, right, coupled) != 0
-            && TableRule::fibonacci().nsymbol(middle, right, right_coupled) != 0
-            && TableRule::fibonacci().nsymbol(left, right_coupled, coupled) != 0;
+        let admissible = table_fibonacci().nsymbol(left, middle, left_coupled) != 0
+            && table_fibonacci().nsymbol(left_coupled, right, coupled) != 0
+            && table_fibonacci().nsymbol(middle, right, right_coupled) != 0
+            && table_fibonacci().nsymbol(left, right_coupled, coupled) != 0;
         if admissible {
-            let value = TableRule::fibonacci().f_symbol_scalar(
+            let value = table_fibonacci().f_symbol_scalar(
                 left,
                 middle,
                 right,
@@ -652,54 +652,42 @@ impl MultiplicityFreeFusionSymbols for FibonacciFAdmissibilityProbe {
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
-        TableRule::fibonacci().r_symbol_scalar(left, right, coupled)
+        table_fibonacci().r_symbol_scalar(left, right, coupled)
     }
 }
 
 impl MultiplicityFreeRigidSymbols for FibonacciFAdmissibilityProbe {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        TableRule::fibonacci().dim_scalar(sector)
+        table_fibonacci().dim_scalar(sector)
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        TableRule::fibonacci().inv_dim_scalar(sector)
+        table_fibonacci().inv_dim_scalar(sector)
     }
 
     fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        TableRule::fibonacci().sqrt_dim_scalar(sector)
+        table_fibonacci().sqrt_dim_scalar(sector)
     }
 
     fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-        TableRule::fibonacci().inv_sqrt_dim_scalar(sector)
+        table_fibonacci().inv_sqrt_dim_scalar(sector)
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-        TableRule::fibonacci().twist_scalar(sector)
+        table_fibonacci().twist_scalar(sector)
     }
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-        TableRule::fibonacci().frobenius_schur_phase_scalar(sector)
+        table_fibonacci().frobenius_schur_phase_scalar(sector)
     }
 }
 
 pub(super) fn assert_fibonacci_f_calls_are_admissible(calls: &[[SectorId; 6]]) {
     for &[left, middle, right, coupled, left_coupled, right_coupled] in calls {
-        assert_ne!(
-            TableRule::fibonacci().nsymbol(left, middle, left_coupled),
-            0
-        );
-        assert_ne!(
-            TableRule::fibonacci().nsymbol(left_coupled, right, coupled),
-            0
-        );
-        assert_ne!(
-            TableRule::fibonacci().nsymbol(middle, right, right_coupled),
-            0
-        );
-        assert_ne!(
-            TableRule::fibonacci().nsymbol(left, right_coupled, coupled),
-            0
-        );
+        assert_ne!(table_fibonacci().nsymbol(left, middle, left_coupled), 0);
+        assert_ne!(table_fibonacci().nsymbol(left_coupled, right, coupled), 0);
+        assert_ne!(table_fibonacci().nsymbol(middle, right, right_coupled), 0);
+        assert_ne!(table_fibonacci().nsymbol(left, right_coupled, coupled), 0);
     }
 }
 

@@ -201,6 +201,7 @@ where
                     (case.rhs.space().structure(), &rhs[..members * rhs_len]),
                     workspace,
                     members,
+                    1.0,
                     symtn_tensors::ContractDestinationInit::Axpby(0.0),
                 )
                 .unwrap()

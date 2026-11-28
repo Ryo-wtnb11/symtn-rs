@@ -431,7 +431,7 @@ fn a_failed_one_member_replay_rezeroes_on_retry() {
 }
 
 #[test]
-fn member_replays_outside_the_overwrite_contract_are_unsupported_before_writes() {
+fn member_replays_need_a_member_stage_and_a_core_slot_before_writes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use crate::contract::route_host::{
         execute_dynamic_tree_route_host, EagerTreeStage, HostRouteScratch,
@@ -448,26 +448,14 @@ fn member_replays_outside_the_overwrite_contract_are_unsupported_before_writes()
     let mut backend_workspace = crate::contract::backend::TensorContractWorkspace::default();
     let mut slot = crate::contract::route_host::CoreSlot::default();
     let (mut a, mut b, mut c) = Default::default();
-    // Each row names the boundary that must reject it, so removing the
-    // overwrite-contract guard fails the first two rows.
-    const GUARD: &str = "member contraction overwrites its destination with unit alpha";
+    // Each row names the boundary that must reject it. The eager stage
+    // replays exactly one member for every alpha and destination init.
+    const EAGER: &str = "eager Host contraction replays exactly one member";
     for (alpha, init, with_slot, expected) in [
-        (2.0, ContractDestinationInit::Axpby(0.0), true, GUARD),
-        (1.0, ContractDestinationInit::Axpby(1.0), true, GUARD),
-        // The eager stage replays exactly one member; `Zeroed` (a born-zero
-        // destination) passes the overwrite guard and reaches it.
-        (
-            1.0,
-            ContractDestinationInit::Axpby(0.0),
-            true,
-            "eager Host contraction replays exactly one member",
-        ),
-        (
-            1.0,
-            ContractDestinationInit::Zeroed,
-            true,
-            "eager Host contraction replays exactly one member",
-        ),
+        (2.0, ContractDestinationInit::Axpby(0.0), true, EAGER),
+        (1.0, ContractDestinationInit::Axpby(1.0), true, EAGER),
+        (1.0, ContractDestinationInit::Axpby(0.0), true, EAGER),
+        (1.0, ContractDestinationInit::Zeroed, true, EAGER),
         // A member replay needs a caller-owned core slot.
         (
             1.0,

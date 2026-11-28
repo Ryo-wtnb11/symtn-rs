@@ -6,6 +6,7 @@
 //! Every method unified over storage has a row here.
 
 use std::sync::Arc;
+use symtn::typed::Dest;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{
@@ -30,7 +31,7 @@ fn unified_methods_resolve_in_path_form() {
     assert_eq!(sum.dense_data().unwrap(), twice.dense_data().unwrap());
     let mut zero = TensorMap::zeros_like(&t, engine).unwrap();
     assert_eq!(TensorMap::norm(&zero, engine, 2.0).unwrap(), 0.0);
-    TensorMap::axpby_into(&t, engine, &mut zero, 2.0, 0.0).unwrap();
+    TensorMap::axpby_into(&t, engine, Dest::scaled(&mut zero, 2.0, 0.0)).unwrap();
     assert_eq!(zero.dense_data().unwrap(), twice.dense_data().unwrap());
 
     // L3 compact factors.
@@ -52,10 +53,9 @@ fn unified_methods_resolve_in_path_form() {
     let adjoint = TensorMap::adjoint(&t, engine).unwrap();
     let owned = TensorMap::materialize(&adjoint, engine).unwrap();
     assert_eq!(owned.dense_data().unwrap(), t.dense_data().unwrap());
-    let view = TensorMap::adjoint_view(&t);
     // `t` is the identity, so `t ∘ t^H` is `t`.
     assert_eq!(
-        t.compose(engine, view).unwrap().dense_data().unwrap(),
+        t.compose(engine, &adjoint).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
     );
 
@@ -69,12 +69,12 @@ fn unified_methods_resolve_in_path_form() {
     let back = TensorMap::repartition(&transposed, engine, 1).unwrap();
     assert_eq!(back.dense_data().unwrap(), transposed.dense_data().unwrap());
     let mut into = TensorMap::zeros_like(&swapped, engine).unwrap();
-    TensorMap::permute_into(&t, engine, &[1], &[0], &mut into, 1.0, 0.0).unwrap();
-    TensorMap::braid_into(&t, engine, &[1], &[0], &[0, 1], &mut into, 1.0, 1.0).unwrap();
+    TensorMap::permute_into(&t, engine, &[1], &[0], Dest::overwrite(&mut into)).unwrap();
+    TensorMap::braid_into(&t, engine, &[1], &[0], &[0, 1], Dest::accumulate(&mut into)).unwrap();
     assert_eq!(into.dense_data().unwrap(), twice.dense_data().unwrap());
     let mut into = TensorMap::zeros_like(&transposed, engine).unwrap();
-    TensorMap::transpose_into(&t, engine, &[1], &[0], &mut into, 1.0, 0.0).unwrap();
-    TensorMap::repartition_into(&transposed, engine, &mut into, 1.0, 1.0).unwrap();
+    TensorMap::transpose_into(&t, engine, &[1], &[0], Dest::overwrite(&mut into)).unwrap();
+    TensorMap::repartition_into(&transposed, engine, Dest::accumulate(&mut into)).unwrap();
     assert_eq!(
         into.dense_data().unwrap(),
         TensorMap::scale(&transposed, engine, 2.0)
@@ -95,14 +95,14 @@ fn unified_methods_resolve_in_path_form() {
     let composed = TensorMap::compose(&t, engine, &t).unwrap();
     assert_eq!(composed.dense_data().unwrap(), t.dense_data().unwrap());
     let mut into = TensorMap::zeros_like(&t, engine).unwrap();
-    TensorMap::contract_into(&t, engine, &t, &spec, &mut into, 2.0, 0.0).unwrap();
+    TensorMap::contract_into(&t, engine, &t, &spec, Dest::scaled(&mut into, 2.0, 0.0)).unwrap();
     assert_eq!(into.dense_data().unwrap(), twice.dense_data().unwrap());
 
     // L9 trace. The trace of the rank-2 identity is its dimension.
     let traced = TensorMap::trace_pairs(&t, engine, &[(0, 1)]).unwrap();
     assert_eq!(traced.scalar(engine).unwrap(), 2.0);
     let mut into = TensorMap::zeros_like(&traced, engine).unwrap();
-    TensorMap::trace_pairs_into(&t, engine, &[(0, 1)], &mut into, 2.0, 0.0).unwrap();
+    TensorMap::trace_pairs_into(&t, engine, &[(0, 1)], Dest::scaled(&mut into, 2.0, 0.0)).unwrap();
     assert_eq!(into.scalar(engine).unwrap(), 4.0);
 
     // L10 prepared contract over a one-member stack of `t`.
@@ -115,7 +115,15 @@ fn unified_methods_resolve_in_path_form() {
         out.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
     );
-    ContractPlan::execute_into(&plan, engine, &stack, &stack, &mut dst, &mut workspace).unwrap();
+    ContractPlan::execute_into(
+        &plan,
+        engine,
+        &stack,
+        &stack,
+        Dest::overwrite(&mut dst),
+        &mut workspace,
+    )
+    .unwrap();
     assert_eq!(
         dst.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
@@ -128,7 +136,15 @@ fn unified_methods_resolve_in_path_form() {
         out.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
     );
-    ComposePlan::execute_into(&plan, engine, &stack, &stack, &mut dst, &mut workspace).unwrap();
+    ComposePlan::execute_into(
+        &plan,
+        engine,
+        &stack,
+        &stack,
+        Dest::overwrite(&mut dst),
+        &mut workspace,
+    )
+    .unwrap();
     assert_eq!(
         dst.member(engine, 0).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()

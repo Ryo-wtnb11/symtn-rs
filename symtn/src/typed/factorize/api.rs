@@ -62,20 +62,12 @@ where
     /// assert_eq!(a.solve(engine, &[0], &[1], &b, &[0], &[1])?.dense_data()?, b.dense_data()?);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    ///
-    /// An adjoint view `rhs` (`t.adjoint_view()`) is accepted by the current
-    /// split of a compact divisor, which reads it directly, in both fusion
-    /// modes. A dense divisor or either moved role pair would copy the view
-    /// and returns [`Error::Unsupported`]. Pass `&t.adjoint()?.materialize()?`
-    /// instead. Moved roles refuse the view after the runtime and rule checks
-    /// (which precede the leg roles' own [`Self::permute`] errors) but before
-    /// the shape checks, which need the permuted operands.
-    pub fn solve<'a>(
+    pub fn solve(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
         rows: &[usize],
         cols: &[usize],
-        rhs: impl Into<TensorRef<'a, R, D>>,
+        rhs: &TensorMap<R, D>,
         rhs_rows: &[usize],
         rhs_cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
@@ -84,26 +76,19 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn solve_impl<'a>(
+    fn solve_impl(
         &self,
         engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
-        rhs: impl Into<TensorRef<'a, R, D>>,
+        rhs: &TensorMap<R, D>,
         rhs_rows: &[usize],
         rhs_cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let rhs = rhs.into().operand()?;
-        let rhs = &*rhs;
         // Runtime and rule first, ahead of the leg roles: the permute cannot
         // change them, so the first error does not depend on the roles or on
-        // the rhs's ownership. Permuting a borrowed view would copy it, so
-        // moved roles refuse it next; the shape checks need the permuted
-        // operands. A moved compact divisor also becomes dense.
+        // the rhs's ownership; the shape checks need the permuted operands. A moved compact divisor also becomes dense.
         self.require_solve_operands(rhs)?;
-        if !self.axes_are_identity(rows, cols) || !rhs.axes_are_identity(rhs_rows, rhs_cols) {
-            rhs.refuse_borrowed_view("solve")?;
-        }
         self.with_leg_roles(engine, rows, cols, |lhs, engine| {
             rhs.with_leg_roles(engine, rhs_rows, rhs_cols, |right, engine| {
                 lhs.factor_solve(engine, right)
@@ -572,16 +557,23 @@ where
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use symtn::sector::{TableRule, TableSector};
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode, TableCategory};
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, Svd, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::new();
+    /// let category = TableCategory::fibonacci();
+    /// let (one, tau) = (category.object(1).unwrap(), category.object(2).unwrap());
+    /// let rule = CategoryRule::try_new(
+    ///     category,
+    ///     EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
+    /// )
+    /// .unwrap();
     /// let v = GradedSpace::try_new(
-    ///     Arc::new(TableRule::fibonacci()),
-    ///     [(TableSector::new(1), 1), (TableSector::new(2), 2)],
+    ///     Arc::new(rule),
+    ///     [(one, 1), (tau, 2)],
     /// )?;
-    /// let t: TensorMap<TableRule, Complex64> =
+    /// let t: TensorMap<_, Complex64> =
     ///     TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 7)?;
     /// let Svd { u, s, vh } = t.svd_full(engine, &[0, 1], &[2])?;
     /// let rebuilt = u.compose(engine, &s)?.compose(engine, &vh)?;

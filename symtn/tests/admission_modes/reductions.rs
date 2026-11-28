@@ -4,6 +4,7 @@
 //! reduction from an unweighted one.
 
 use super::*;
+use symtn::typed::Dest;
 
 /// `unit` block `[3]`, charged block `[[1, 2], [2, 3]]`.
 fn hand_value<S: PartialEq>(unit: &S, coupled: &S, ij: &[usize]) -> f64 {
@@ -79,7 +80,7 @@ in_both_modes! {
     /// `axpby(α, y, β)` is `α x + β y` and `scale(λ)` is `λ x` entry by entry,
     /// for real and genuinely complex coefficients; like TensorKit, a zero
     /// coefficient drops its operand, so a NaN or infinity under it does not
-    /// propagate, also for `axpby_into` and `scale_assign`.
+    /// propagate, also for `axpby_into` and `scale_in_place`.
     fn axpby_and_scale_are_entrywise_and_drop_zero_scaled_operands<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::new();
@@ -121,7 +122,7 @@ in_both_modes! {
                 .collect();
             same(x.axpby(engine, alpha, &y, beta).unwrap().dense_data().unwrap(), &want);
             let mut assigned = x.materialize(engine).unwrap();
-            y.axpby_into(engine, &mut assigned, beta, alpha).unwrap();
+            y.axpby_into(engine, Dest::scaled(&mut assigned, beta, alpha)).unwrap();
             same(assigned.dense_data().unwrap(), &want);
         }
         for factor in [0.0, -2.5] {
@@ -129,7 +130,7 @@ in_both_modes! {
                 x.dense_data().unwrap().iter().map(|&a| scaled(a, factor)).collect();
             same(x.scale(engine, factor).unwrap().dense_data().unwrap(), &want);
             let mut assigned = x.materialize(engine).unwrap();
-            assigned.scale_assign(engine, factor).unwrap();
+            assigned.scale_in_place(engine, factor).unwrap();
             same(assigned.dense_data().unwrap(), &want);
         }
 
@@ -188,14 +189,14 @@ in_both_modes! {
         M::reset_queries(&provider);
         for error in [
             facade_err(left.axpby(engine, 1.0, &foreign, 1.0)),
-            facade_err(foreign.axpby_into(engine, &mut left, 1.0, 1.0)),
+            facade_err(foreign.axpby_into(engine, Dest::accumulate(&mut left))),
             facade_err(left.inner(engine, &foreign)),
         ] {
             assert!(matches!(error, symtn::typed::Error::RuntimeMismatch), "{error:?}");
         }
         for error in [
             facade_err(left.axpby(engine, 1.0, &mismatched, 1.0)),
-            facade_err(mismatched.axpby_into(engine, &mut left, 1.0, 1.0)),
+            facade_err(mismatched.axpby_into(engine, Dest::accumulate(&mut left))),
             facade_err(left.inner(engine, &mismatched)),
             facade_err(non_endomorphism.tr(engine)),
             facade_err(lazy_non_endomorphism.tr(engine)),

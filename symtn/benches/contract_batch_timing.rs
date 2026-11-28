@@ -8,6 +8,7 @@
 
 #[path = "../../tests/support/su2.rs"]
 mod su2;
+use symtn::typed::Dest;
 use symtn_core as sector_types;
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -76,7 +77,8 @@ fn public_copy_c_batch_measurement() {
             .collect();
         let (_, eager_into_time, eager_into_calls, eager_into_bytes) = measure(|| {
             for dst in &mut eager_destinations {
-                a.contract_into(engine, &b, &spec, dst, 1.0, 0.0).unwrap();
+                a.contract_into(engine, &b, &spec, Dest::overwrite(dst))
+                    .unwrap();
             }
         });
         let left = vec![&a; count];
@@ -239,8 +241,14 @@ fn public_signed_direct_release_measurement() {
         let mut into = Vec::new();
         for _ in 0..31 {
             let (_, elapsed, calls, bytes) = measure(|| {
-                plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-                    .unwrap();
+                plan.execute_into(
+                    engine,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut workspace,
+                )
+                .unwrap();
                 black_box(&dst);
             });
             into.push((elapsed, calls, bytes));
@@ -303,8 +311,14 @@ fn public_dynamic_source_twist_release_measurement() {
         let mut into = Vec::new();
         for _ in 0..31 {
             let (_, elapsed, calls, bytes) = measure(|| {
-                plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut workspace)
-                    .unwrap();
+                plan.execute_into(
+                    engine,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut destination),
+                    &mut workspace,
+                )
+                .unwrap();
                 black_box(&destination);
             });
             into.push((elapsed, calls, bytes));

@@ -407,10 +407,10 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let lazy = t.adjoint(engine).unwrap();
-    adjoint_view_case(what, t, &lazy);
+    lazy_adjoint_case(what, t, &lazy);
 }
 
-fn adjoint_view_case<R, D>(what: &str, t: &TensorMap<R, D>, lazy: &TensorMap<R, D>)
+fn lazy_adjoint_case<R, D>(what: &str, t: &TensorMap<R, D>, lazy: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission,
     R::Mode: symtn::typed::TypedTensorModeDispatch<R>,
@@ -713,7 +713,7 @@ mod su3 {
         compose_case(what, &a, &b);
         let wide = label_case::<_, D>(what, &rt, &[&octet], &[&octet, &octet]);
         assert!(compose_case(what, &a, &wide), "{what}: empty factor block");
-        adjoint_view_case(what, &b, &b.adjoint(engine).unwrap());
+        lazy_adjoint_case(what, &b, &b.adjoint(engine).unwrap());
         // Only a label the provider cannot encode is an error.
         assert!(
             matches!(

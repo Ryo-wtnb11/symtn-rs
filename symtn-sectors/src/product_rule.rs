@@ -1103,9 +1103,19 @@ mod tests {
     use crate::{
         BraidingStyleKind, CanonicalUnitFusionRule, CategoricalScalar, FermionParityFusionRule,
         FermionParityIrrep, FusionStyleKind, MultiplicityFreeFusionSymbols,
-        MultiplicityFreeRigidSymbols, SectorId, TableRule, U1FusionRule, U1Irrep, ZNFusionRule,
-        ZNIrrep,
+        MultiplicityFreeRigidSymbols, SectorId, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
     };
+
+    fn table_fibonacci() -> crate::CategoryRule<
+        fusion_symbols::table::TableCategory,
+        crate::EnumeratedCodec<crate::MultiplicityFreeAdmissionMode>,
+    > {
+        crate::CategoryRule::try_new(
+            fusion_symbols::table::TableCategory::fibonacci(),
+            crate::EnumeratedCodec::new(),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn label_codec_resolves_by_method_syntax_and_component_ids_round_trip() {
@@ -1234,11 +1244,9 @@ mod tests {
         // What: a multiplicity-free product whose components disagree on the
         // coefficient scalar is representable, and its topological data is the
         // componentwise product promoted to the wider scalar.
-        let rule = ProductFusionRule::<_, _>::try_new(
-            TableRule::fibonacci(),
-            ZNFusionRule::new(2).unwrap(),
-        )
-        .unwrap();
+        let rule =
+            ProductFusionRule::<_, _>::try_new(table_fibonacci(), ZNFusionRule::new(2).unwrap())
+                .unwrap();
         let tau = SectorId::new(1);
         let vacuum_fib = SectorId::new(0);
         let t1 = rule.encode_component_ids(tau, ZNIrrep::new(1, 2).unwrap().into());
@@ -1298,16 +1306,12 @@ mod tests {
     fn product_promotion_is_component_order_independent() {
         // What: promotion does not depend on which side carries the wider
         // scalar; TensorKitSectors promotes rather than taking the left type.
-        let forward = ProductFusionRule::<_, _>::try_new(
-            TableRule::fibonacci(),
-            ZNFusionRule::new(2).unwrap(),
-        )
-        .unwrap();
-        let reversed = ProductFusionRule::<_, _>::try_new(
-            ZNFusionRule::new(2).unwrap(),
-            TableRule::fibonacci(),
-        )
-        .unwrap();
+        let forward =
+            ProductFusionRule::<_, _>::try_new(table_fibonacci(), ZNFusionRule::new(2).unwrap())
+                .unwrap();
+        let reversed =
+            ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), table_fibonacci())
+                .unwrap();
         let tau = SectorId::new(1);
         let vacuum_fib = SectorId::new(0);
 

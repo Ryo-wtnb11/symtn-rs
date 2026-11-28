@@ -333,10 +333,26 @@ where
         SL: HostReadableStorage<D>,
         SR: HostReadableStorage<D>,
     {
-        self.execute_host_with_alpha(engine, kernels, gemm, dst, lhs, rhs, zero_inactive, None)
+        self.execute_host_with_alpha(
+            engine,
+            kernels,
+            gemm,
+            dst,
+            lhs,
+            rhs,
+            Inactive::zeroed(zero_inactive),
+            None,
+            D::one(),
+            D::zero(),
+        )
     }
 
-    /// Replays exact +1 and -1 classes in at most two batch submissions.
+    /// Replays exact +1 and -1 classes in at most two batch submissions:
+    /// `dst[i] = alpha · lhs[i] · rhs[i] + beta · dst[i]`. The GEMMs carry
+    /// `alpha` and `beta`; with `scale_inactive` each inactive layout becomes
+    /// `beta · dst` in one strided pass over all members (a zero fill for
+    /// `beta = 0`, nothing for `beta = 1`), else the caller proves them zero.
+    /// `beta = 0` never reads `dst`.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn execute_signed_host<A, G, D, SD, SL, SR>(
@@ -347,12 +363,14 @@ where
         dst: &mut StackedStorageViewMut<'_, SD>,
         lhs: &StackedStorageView<'_, SL>,
         rhs: &StackedStorageView<'_, SR>,
-        zero_inactive: bool,
+        scale_inactive: bool,
+        alpha: D,
+        beta: D,
     ) -> Result<(), OperationError>
     where
         A: HostKernelAdapter<D>,
         G: Rank2Gemm<D>,
-        D: Copy + Zero + One + RecouplingCoefficientAction<C>,
+        D: Copy + Zero + One + PartialEq + RecouplingCoefficientAction<C>,
         C: std::ops::Neg<Output = C>,
         SD: HostWritableStorage<D>,
         SL: HostReadableStorage<D>,
@@ -365,8 +383,15 @@ where
             dst,
             lhs,
             rhs,
-            zero_inactive,
+            match (scale_inactive, beta) {
+                (false, _) => Inactive::Kept,
+                (true, beta) if beta.is_zero() => Inactive::Zeroed,
+                (true, beta) if beta == D::one() => Inactive::Kept,
+                (true, beta) => Inactive::Scaled(beta),
+            },
             Some(D::coefficient_as_data(-C::one())),
+            alpha,
+            beta,
         )
     }
 
@@ -379,8 +404,10 @@ where
         dst: &mut StackedStorageViewMut<'_, SD>,
         lhs: &StackedStorageView<'_, SL>,
         rhs: &StackedStorageView<'_, SR>,
-        zero_inactive: bool,
+        inactive: Inactive<D>,
         negative_alpha: Option<D>,
+        alpha: D,
+        beta: D,
     ) -> Result<(), OperationError>
     where
         A: HostKernelAdapter<D>,
@@ -408,14 +435,26 @@ where
             }
         }
         let dst_data = dst.storage.as_mut_slice();
-        // Nothing to zero opens no section: the engine is only admitted, with
-        // the entry's own refusals, and no token is taken.
-        if zero_inactive && self.inactive.is_empty() {
+        // Nothing to fill opens no section, but the engine is still admitted
+        // with the entry's own refusals: a replay with no GEMM job and kept
+        // inactive layouts must refuse a broken or foreign engine too.
+        if matches!(inactive, Inactive::Kept) || self.inactive.is_empty() {
             crate::host_pool::admit(engine)?;
-        } else if zero_inactive {
+        } else {
             let zero = [D::zero()];
             crate::host_pool::with_exec(engine, |mut exec| {
                 for (shape, strides, offset) in &self.inactive {
+                    if let Inactive::Scaled(beta) = inactive {
+                        kernels.scale_strided(
+                            exec.reborrow(),
+                            dst_data,
+                            shape,
+                            strides,
+                            *offset,
+                            beta,
+                        )?;
+                        continue;
+                    }
                     kernels.copy_scale_strided_baked(
                         exec.reborrow(),
                         dst_data,
@@ -442,11 +481,11 @@ where
                 rhs.storage.as_slice(),
                 &self.jobs,
                 &self.runs,
-                D::one(),
-                D::zero(),
+                alpha,
+                beta,
             )?;
         }
-        if let Some(alpha) = negative_alpha.filter(|_| !self.negative_jobs.is_empty()) {
+        if let Some(negative) = negative_alpha.filter(|_| !self.negative_jobs.is_empty()) {
             gemm.matmul_rank2_batch(
                 engine,
                 dst_data,
@@ -454,11 +493,32 @@ where
                 rhs.storage.as_slice(),
                 &self.negative_jobs,
                 &self.negative_runs,
-                alpha,
-                D::zero(),
+                negative * alpha,
+                beta,
             )?;
         }
         Ok(())
+    }
+}
+
+/// What a stacked replay writes into the inactive destination layouts.
+#[derive(Clone, Copy)]
+enum Inactive<D> {
+    /// The caller guarantees them zero, or `beta = 1` keeps them.
+    Kept,
+    /// Zero-filled, so the result does not depend on `dst`.
+    Zeroed,
+    /// `beta · dst`.
+    Scaled(D),
+}
+
+impl<D> Inactive<D> {
+    fn zeroed(zero: bool) -> Self {
+        if zero {
+            Self::Zeroed
+        } else {
+            Self::Kept
+        }
     }
 }
 

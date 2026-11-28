@@ -12,15 +12,17 @@
 //! the output.
 
 use crate::counting_alloc;
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{TableRule, TableSector};
+
+use crate::tables::*;
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
-type Table = TensorMap<TableRule, Complex64>;
+type Table = TensorMap<TableCategoryRule, Complex64>;
 
 fn payloads(bytes: usize, f: impl FnOnce()) -> u64 {
     let ((), allocs) = counting_alloc::measure_matching(bytes..=usize::MAX, f);
@@ -43,8 +45,8 @@ fn planar_contract_owns_only_its_output() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::new();
     let v = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 6), (TableSector::new(2), 8)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 6), (fib_object(2), 8)],
     )
     .unwrap();
     let a: Table = TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 1).unwrap();
@@ -106,30 +108,16 @@ fn planar_contract_owns_only_its_output() {
         };
         for _ in 0..2 {
             drop(a.planar_contract(engine, rhs, &spec).unwrap());
-            a.planar_contract_into(
-                engine,
-                rhs,
-                &spec,
-                &mut out,
-                Complex64::ONE,
-                Complex64::ZERO,
-            )
-            .unwrap();
+            a.planar_contract_into(engine, rhs, &spec, Dest::overwrite(&mut out))
+                .unwrap();
             drop(hand(engine, &lhs_core, &rhs_core));
         }
         let core = payloads(payload, || {
             drop(lhs_core.compose(engine, &rhs_core).unwrap())
         });
         let warm_into = payloads(payload, || {
-            a.planar_contract_into(
-                engine,
-                rhs,
-                &spec,
-                &mut out,
-                Complex64::ONE,
-                Complex64::ZERO,
-            )
-            .unwrap()
+            a.planar_contract_into(engine, rhs, &spec, Dest::overwrite(&mut out))
+                .unwrap()
         });
         let warm = payloads(payload, || {
             drop(a.planar_contract(engine, rhs, &spec).unwrap())

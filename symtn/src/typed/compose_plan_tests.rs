@@ -147,8 +147,20 @@ fn corrupted_stack_errors_are_typed() {
             .map(|_| ()),
         plan.execute(engine, &short, &rhs, &mut workspace)
             .map(|_| ()),
-        plan.execute_into(engine, &short, &rhs, &mut dst, &mut workspace),
-        plan.execute_into(engine, &lhs, &rhs, &mut short_dst, &mut workspace),
+        plan.execute_into(
+            engine,
+            &short,
+            &rhs,
+            Dest::overwrite(&mut dst),
+            &mut workspace,
+        ),
+        plan.execute_into(
+            engine,
+            &lhs,
+            &rhs,
+            Dest::overwrite(&mut short_dst),
+            &mut workspace,
+        ),
     ]
     .map(Result::err);
     assert!(short_dst.storage.iter().all(|&value| value == 1.0));

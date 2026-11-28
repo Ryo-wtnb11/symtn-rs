@@ -16,6 +16,7 @@
 //! The target-wide serial guard keeps this test's cache warm-up ordered.
 
 use crate::common;
+use symtn::typed::Dest;
 
 use crate::prepared;
 
@@ -121,8 +122,14 @@ where
         // once; the second is warm.
         for (warm_into, mut dst) in fills.into_iter().enumerate() {
             let (_, into, into_bytes) = calls(|| {
-                plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
-                    .unwrap();
+                plan.execute_into(
+                    engine,
+                    &lhs,
+                    &rhs,
+                    Dest::overwrite(&mut dst),
+                    &mut workspace,
+                )
+                .unwrap();
             });
             assert_eq!(data(&dst), value, "{key}: execute_into == execute");
             assert!(
@@ -203,15 +210,15 @@ fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
         ),
         (
             "execute_into: wrong destination",
-            show(plan.execute_into(engine, &lhs, &rhs, &mut wrong_dst, &mut ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut wrong_dst), &mut ws)),
         ),
         (
             "execute_into: short destination",
-            show(plan.execute_into(engine, &lhs, &rhs, &mut short_dst, &mut ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut short_dst), &mut ws)),
         ),
         (
             "execute_into: foreign workspace",
-            show(plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut other_ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut dst), &mut other_ws)),
         ),
         (
             "execute: foreign workspace",

@@ -33,7 +33,7 @@ use symtn::typed::{CudaPayload, CudaStorage};
 use symtn::typed::{Error, Runtime, TensorScalar};
 
 use crate::cost::{DenseCostModel, DenseTensorInfo};
-use crate::error::{SliceError, SymmetricSliceExecutionError, SymmetricSliceLowerError};
+use crate::error::{fold_lower_error, SliceError, SymmetricSliceLowerError};
 use crate::ir::NetworkIR;
 use crate::labels::{TemporaryLabel, TensorId};
 use crate::optimizer::{next_use_axes, DenseContractionOptimizer};

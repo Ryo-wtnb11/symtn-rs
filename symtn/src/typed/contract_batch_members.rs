@@ -102,7 +102,7 @@ fn check_members(
         let mut dst = workspace.take_output().unwrap();
         assert_members_are_eager(engine, name, &dst, &lhs, &rhs, &spec, members);
         dst.storage.fill(f64::NAN);
-        plan.execute_into(engine, &lhs, &rhs, &mut dst, workspace)
+        plan.execute_into(engine, &lhs, &rhs, Dest::overwrite(&mut dst), workspace)
             .unwrap();
         assert_members_are_eager(engine, name, &dst, &lhs, &rhs, &spec, members);
     }

@@ -357,11 +357,11 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     // uploaded (and allocated) per call.
     let mut destination = mixed;
     lazy_device
-        .axpby_into(cuda, &mut destination, 2.0, 0.0)
+        .axpby_into(cuda, Dest::scaled(&mut destination, 2.0, 0.0))
         .unwrap();
     let before = symtn_dense::cuda_transfer_stats();
     lazy_device
-        .axpby_into(cuda, &mut destination, -1.5, 0.5)
+        .axpby_into(cuda, Dest::scaled(&mut destination, -1.5, 0.5))
         .unwrap();
     let after = symtn_dense::cuda_transfer_stats();
     assert_eq!(after.h2d_calls - before.h2d_calls, 1);
@@ -749,7 +749,7 @@ fn device_and_host_operations_refuse_the_other_engine_kind() {
         device.norm(cpu, 2.0).map(|_| ()).unwrap_err(),
         device.scale(cpu, 2.0).map(|_| ()).unwrap_err(),
         device
-            .axpby_into(cpu, &mut destination, 1.0, 0.5)
+            .axpby_into(cpu, Dest::scaled(&mut destination, 1.0, 0.5))
             .unwrap_err(),
     ] {
         assert!(error_chain(&error).contains("CUDA engine"), "{error}");
@@ -894,37 +894,45 @@ fn typed_cuda_into_rejects_another_engines_destination_untouched() {
     check(
         "permute_into",
         host_t.permute(oracle, &[2, 0], &[1, 3]).unwrap(),
-        &|e, d| t.permute_into(e, &[2, 0], &[1, 3], d, 1.0, 0.5),
+        &|e, d| t.permute_into(e, &[2, 0], &[1, 3], Dest::scaled(d, 1.0, 0.5)),
     );
     check(
         "braid_into",
         host_t
             .braid(oracle, &[1, 0], &[3, 2], &[0, 1, 2, 3])
             .unwrap(),
-        &|e, d| t.braid_into(e, &[1, 0], &[3, 2], &[0, 1, 2, 3], d, 1.0, 0.5),
+        &|e, d| {
+            t.braid_into(
+                e,
+                &[1, 0],
+                &[3, 2],
+                &[0, 1, 2, 3],
+                Dest::scaled(d, 1.0, 0.5),
+            )
+        },
     );
     check(
         "transpose_into",
         host_t.transpose(oracle, &[1, 3], &[0, 2]).unwrap(),
-        &|e, d| t.transpose_into(e, &[1, 3], &[0, 2], d, 1.0, 0.5),
+        &|e, d| t.transpose_into(e, &[1, 3], &[0, 2], Dest::scaled(d, 1.0, 0.5)),
     );
     check(
         "repartition_into",
         host_t.repartition(oracle, 1).unwrap(),
-        &|e, d| t.repartition_into(e, d, 1.0, 0.5),
+        &|e, d| t.repartition_into(e, Dest::scaled(d, 1.0, 0.5)),
     );
     check(
         "trace_pairs_into",
         host_t.trace_pairs(oracle, &[(0, 2)]).unwrap(),
-        &|e, d| t.trace_pairs_into(e, &[(0, 2)], d, 1.0, 0.5),
+        &|e, d| t.trace_pairs_into(e, &[(0, 2)], Dest::scaled(d, 1.0, 0.5)),
     );
     check(
         "contract_into",
         host_t.contract(oracle, &host_rhs, &spec).unwrap(),
-        &|e, d| t.contract_into(e, &rhs, &spec, d, 1.0, 0.5),
+        &|e, d| t.contract_into(e, &rhs, &spec, Dest::scaled(d, 1.0, 0.5)),
     );
     check("axpby_into", host_t.clone(), &|e, d| {
-        t.axpby_into(e, d, 1.0, 0.5)
+        t.axpby_into(e, Dest::scaled(d, 1.0, 0.5))
     });
 }
 

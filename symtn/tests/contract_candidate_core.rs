@@ -19,6 +19,7 @@
 use crate::contract_cases;
 use crate::numerics;
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
+use symtn::typed::Dest;
 use symtn::typed::Engine;
 
 use std::hint::black_box;
@@ -724,11 +725,21 @@ where
             let what = format!("{symmetry} {} [{}] beta {beta:?}", case.name, D::NAME);
             let mut expected = result.scale(engine, seed).unwrap();
             temporary
-                .permute_into(engine, &codomain, &domain, &mut expected, alpha, beta)
+                .permute_into(
+                    engine,
+                    &codomain,
+                    &domain,
+                    Dest::scaled(&mut expected, alpha, beta),
+                )
                 .unwrap();
             let mut actual = result.scale(engine, seed).unwrap();
             case.lhs
-                .contract_into(engine, &case.rhs, &case.spec(), &mut actual, alpha, beta)
+                .contract_into(
+                    engine,
+                    &case.rhs,
+                    &case.spec(),
+                    Dest::scaled(&mut actual, alpha, beta),
+                )
                 .unwrap();
             assert!(
                 actual.dense_data().unwrap() == expected.dense_data().unwrap(),
@@ -743,9 +754,7 @@ where
                     engine,
                     &case.rhs,
                     &case.spec(),
-                    destination,
-                    D::entry(1.0, 0.0),
-                    D::entry(0.0, 0.0),
+                    Dest::scaled(destination, D::entry(1.0, 0.0), D::entry(0.0, 0.0)),
                 )
                 .unwrap();
         };

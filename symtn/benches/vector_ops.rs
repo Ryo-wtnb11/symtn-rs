@@ -11,12 +11,16 @@ use std::{
     time::{Duration, Instant},
 };
 use su2::{su2_irrep, su2_rule};
+use symtn::typed::Dest;
 use symtn::{
     sector::{U1FusionRule, U1Irrep},
     typed::{Complex64, GradedSpace, Runtime, TensorMap},
 };
 use symtn_core as sector_types;
-use symtn_sectors::{TableRule, TableSector};
+#[path = "../../tests/support/tables.rs"]
+mod tables;
+
+use crate::tables::*;
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
@@ -152,7 +156,7 @@ macro_rules! bench {
                 assert!(($abs)(($widen)(got - alpha * src)) <= 1e-6);
             }
             let mut dst = b.scale(engine, one)?;
-            a.axpby_into(engine, &mut dst, alpha, beta)?;
+            a.axpby_into(engine, Dest::scaled(&mut dst, alpha, beta))?;
             for ((&got, &a), &b) in dst.dense_data()?.iter().zip(x).zip(y) {
                 assert!(($abs)(($widen)(got - (beta * b + alpha * a))) <= 1e-6);
             }
@@ -161,9 +165,7 @@ macro_rules! bench {
                 black_box(&a)
                     .axpby_into(
                         engine,
-                        black_box(&mut dst),
-                        black_box(alpha),
-                        black_box(beta),
+                        Dest::scaled(black_box(&mut dst), black_box(alpha), black_box(beta)),
                     )
                     .unwrap()
             });
@@ -182,16 +184,16 @@ macro_rules! bench {
                 black_box(x).iter().map(|&v| factor * v).collect::<Vec<_>>()
             });
             let before = dst.dense_data()?.to_vec();
-            dst.scale_assign(engine, alpha)?;
+            dst.scale_in_place(engine, alpha)?;
             for (&got, &src) in dst.dense_data()?.iter().zip(&before) {
                 assert!(($abs)(($widen)(got - alpha * src)) <= 1e-6);
             }
-            run($filter, &prefix, "scale_assign", x.len(), || {
+            run($filter, &prefix, "scale_in_place", x.len(), || {
                 black_box(&mut dst)
-                    .scale_assign(engine, black_box(one))
+                    .scale_in_place(engine, black_box(one))
                     .unwrap()
             });
-            run($filter, &prefix, "scale_assign_slice", x.len(), || {
+            run($filter, &prefix, "scale_in_place_slice", x.len(), || {
                 let factor = black_box(one);
                 // Keep factor on the left, as in the public scale kernel.
                 #[allow(clippy::assign_op_pattern)]
@@ -287,8 +289,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &runtime,
         &filter,
         "Fibonacci",
-        TableRule::fibonacci(),
-        vec![TableSector::new(1), TableSector::new(2)],
+        table_fibonacci(),
+        vec![fib_object(1), fib_object(2)],
         [1.0, (1.0 + 5.0_f64.sqrt()) / 2.0],
         Complex64,
         "Complex64",
