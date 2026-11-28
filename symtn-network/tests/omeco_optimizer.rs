@@ -9,8 +9,10 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::{
     ContractionPlan, DenseContractionOptimizer, DenseCostModel, DenseTensorInfo,
-    GreedyDenseOptimizer, NetworkExecutionWorkspace, NetworkIR, OmecoOptimizer, TreeSA,
+    GreedyDenseOptimizer, NetworkExecutionWorkspace, NetworkIR, OmecoOptimizer,
 };
+
+use symtn_network::omeco::TreeSA;
 
 use crate::network_support::{net, op};
 use crate::numerics;

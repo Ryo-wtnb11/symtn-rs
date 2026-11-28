@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use omeco::{CodeOptimizer, EinCode, NestedEinsum};
+use ::omeco::{CodeOptimizer, EinCode, NestedEinsum};
 
 use crate::cost::DenseCostModel;
 use crate::error::{ContractError, Result};
@@ -36,10 +36,10 @@ pub enum OmecoOptimizer {
     /// exact dynamic program exponential in the network size; at most 128
     /// tensors and 128 labels).
     Optimal,
-    /// omeco `TreeSA` with the given configuration ([`crate::TreeSA`] and
+    /// omeco `TreeSA` with the given configuration ([`crate::omeco::TreeSA`] and
     /// its field types are re-exported): a cold-path search for networks
     /// where greedy goes wrong.
-    TreeSa(omeco::TreeSA),
+    TreeSa(::omeco::TreeSA),
 }
 
 impl DenseContractionOptimizer for OmecoOptimizer {
@@ -70,7 +70,7 @@ impl DenseContractionOptimizer for OmecoOptimizer {
         let code = EinCode::new(ixs, iy);
         let tree = match self {
             Self::Optimal => {
-                omeco::optimize_exhaustive(&code, &sizes, &omeco::ExhaustiveSearch::default())
+                ::omeco::optimize_exhaustive(&code, &sizes, &::omeco::ExhaustiveSearch::default())
                     .map_err(|error| omeco_error(error.to_string()))?
             }
             Self::TreeSa(config) => config

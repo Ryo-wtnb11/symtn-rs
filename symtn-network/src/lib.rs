@@ -77,8 +77,12 @@ pub use labels::{LabelOccurrence, TemporaryLabel, TensorAxis, TensorId};
 pub use network::{
     Network, NetworkExecutionWorkspace, NetworkOperand, PlannedNetwork, SymmetricSliceStats,
 };
+/// omeco's TreeSA configuration, for [`crate::OmecoOptimizer::TreeSa`]: `TreeSA`
+/// and the types of its fields, so callers need no direct omeco dependency.
 #[cfg(feature = "omeco")]
-pub use omeco::{expr_tree::DecompositionType, Initializer, ScoreFunction, TreeSA};
+pub mod omeco {
+    pub use ::omeco::{expr_tree::DecompositionType, Initializer, ScoreFunction, TreeSA};
+}
 #[cfg(feature = "omeco")]
 pub use omeco_optimizer::OmecoOptimizer;
 pub use optimizer::{

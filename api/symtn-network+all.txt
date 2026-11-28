@@ -1,9 +1,10 @@
 pub mod symtn_network
-pub use symtn_network::DecompositionType
-pub use symtn_network::Initializer
-pub use symtn_network::ScoreFunction
-pub use symtn_network::TreeSA
 pub use symtn_network::contract
+pub mod symtn_network::omeco
+pub use symtn_network::omeco::DecompositionType
+pub use symtn_network::omeco::Initializer
+pub use symtn_network::omeco::ScoreFunction
+pub use symtn_network::omeco::TreeSA
 #[non_exhaustive] pub enum symtn_network::ContractError
 pub symtn_network::ContractError::DimensionMismatch
 pub symtn_network::ContractError::DimensionMismatch::actual: usize
