@@ -861,30 +861,9 @@ pub fn slice_plan_for(
     cost: &DenseCostModel,
     sliced_labels: &[TemporaryLabel],
 ) -> SlicePlan {
-    let mut sliced_vec = sliced_labels.to_vec();
-    sliced_vec.sort();
-    sliced_vec.dedup();
-    slice_plan_for_ordered(ir, plan, cost, &sliced_vec)
-}
-
-/// Build a [`SlicePlan`] while preserving the caller supplied sliced-label
-/// order. This is useful for external planners such as cotengra, which carry a
-/// concrete slice enumeration order. Duplicate labels are ignored after their
-/// first occurrence.
-pub fn slice_plan_for_ordered(
-    ir: &NetworkIR,
-    plan: &ContractionPlan,
-    cost: &DenseCostModel,
-    sliced_labels: &[TemporaryLabel],
-) -> SlicePlan {
     let shapes = step_shapes(ir, plan);
-    let mut sliced = BTreeSet::<TemporaryLabel>::new();
-    let mut sliced_vec = Vec::<TemporaryLabel>::new();
-    for label in sliced_labels {
-        if sliced.insert(label.clone()) {
-            sliced_vec.push(label.clone());
-        }
-    }
+    let sliced = sliced_labels.iter().cloned().collect::<BTreeSet<_>>();
+    let sliced_vec = sliced.iter().cloned().collect::<Vec<_>>();
     let empty = BTreeSet::new();
     let kinds = sliced_vec
         .iter()
@@ -1054,20 +1033,20 @@ mod tests {
         let (ir, plan, cost) = chain_abc(2, 2, 8, 2);
         let (a, c) = (TemporaryLabel::new("a"), TemporaryLabel::new("c"));
 
-        let internal = slice_plan_for_ordered(&ir, &plan, &cost, std::slice::from_ref(&c));
+        let internal = slice_plan_for(&ir, &plan, &cost, std::slice::from_ref(&c));
         assert_eq!(internal.sliced_kinds(), &[SliceKind::Internal]);
         assert_eq!(internal.per_slice_flops(), 8.0);
         assert_eq!(internal.total_flops(), 64.0);
 
-        let both = slice_plan_for_ordered(&ir, &plan, &cost, &[c, a]);
+        let both = slice_plan_for(&ir, &plan, &cost, &[c, a]);
         assert_eq!(
             both.sliced_kinds(),
-            &[SliceKind::Internal, SliceKind::Output]
+            &[SliceKind::Output, SliceKind::Internal]
         );
         assert_eq!(both.per_slice_flops(), 4.0);
         assert_eq!(both.total_flops(), 64.0);
 
-        let none = slice_plan_for_ordered(&ir, &plan, &cost, &[]);
+        let none = slice_plan_for(&ir, &plan, &cost, &[]);
         assert!(none.sliced_kinds().is_empty());
         assert_eq!(none.total_flops(), 64.0);
     }

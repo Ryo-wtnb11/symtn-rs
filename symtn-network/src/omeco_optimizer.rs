@@ -36,8 +36,9 @@ pub enum OmecoOptimizer {
     /// exact dynamic program exponential in the network size; at most 128
     /// tensors and 128 labels).
     Optimal,
-    /// omeco `TreeSA` with the given configuration: a cold-path search for
-    /// networks where greedy goes wrong.
+    /// omeco `TreeSA` with the given configuration ([`crate::TreeSA`] and
+    /// its field types are re-exported): a cold-path search for networks
+    /// where greedy goes wrong.
     TreeSa(omeco::TreeSA),
 }
 

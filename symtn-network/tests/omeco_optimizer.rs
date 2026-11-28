@@ -9,7 +9,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::{
     ContractionPlan, DenseContractionOptimizer, DenseCostModel, DenseTensorInfo,
-    GreedyDenseOptimizer, NetworkExecutionWorkspace, NetworkIR, OmecoOptimizer,
+    GreedyDenseOptimizer, NetworkExecutionWorkspace, NetworkIR, OmecoOptimizer, TreeSA,
 };
 
 use crate::network_support::{net, op};
@@ -171,7 +171,7 @@ fn optimal_reaches_the_brute_force_minimum() {
 fn tree_sa_returns_a_valid_plan() {
     for case in cases() {
         let (ir, cost) = case.ir_and_cost();
-        let steps = OmecoOptimizer::TreeSa(omeco::TreeSA::fast())
+        let steps = OmecoOptimizer::TreeSa(TreeSA::fast())
             .optimize(&ir, &cost)
             .unwrap();
         let plan = ContractionPlan::from_steps(&ir, steps).unwrap();
@@ -221,7 +221,7 @@ fn omeco_plans_execute_to_the_greedy_values() {
     let expected = run(&GreedyDenseOptimizer);
     for optimizer in [
         OmecoOptimizer::Optimal,
-        OmecoOptimizer::TreeSa(omeco::TreeSA::fast()),
+        OmecoOptimizer::TreeSa(TreeSA::fast()),
     ] {
         let actual = run(&optimizer);
         // Each entry sums 16 * 3 * 16 products.

@@ -78,6 +78,8 @@ pub use network::{
     Network, NetworkExecutionWorkspace, NetworkOperand, PlannedNetwork, SymmetricSliceStats,
 };
 #[cfg(feature = "omeco")]
+pub use omeco::{expr_tree::DecompositionType, Initializer, ScoreFunction, TreeSA};
+#[cfg(feature = "omeco")]
 pub use omeco_optimizer::OmecoOptimizer;
 pub use optimizer::{
     ContractionStep, DenseContractionOptimizer, DensePlanCostReport, GreedyDenseOptimizer,

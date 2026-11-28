@@ -1,4 +1,8 @@
 pub mod symtn_network
+pub use symtn_network::DecompositionType
+pub use symtn_network::Initializer
+pub use symtn_network::ScoreFunction
+pub use symtn_network::TreeSA
 pub use symtn_network::contract
 #[non_exhaustive] pub enum symtn_network::ContractError
 pub symtn_network::ContractError::DimensionMismatch

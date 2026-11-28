@@ -7,7 +7,7 @@ cheap, and the order `Network::contract` and the plan cache use.
 ## omeco (feature `omeco`)
 
 `OmecoOptimizer::Optimal` (exact minimum total pair cost, small networks) and
-`OmecoOptimizer::TreeSa(omeco::TreeSA)` wrap the
+`OmecoOptimizer::TreeSa(TreeSA)` (`TreeSA` and its config types are re-exported) wrap the
 [omeco](https://crates.io/crates/omeco) crate. Pass one to `Network::plan`;
 no default path runs it. Its ties are not deterministic across processes
 (omeco iterates a `std` `HashMap`), and TreeSA runs on the global rayon pool.
