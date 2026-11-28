@@ -184,8 +184,9 @@ impl DenseContractionOptimizer for crate::ContractionPlan {
 
 /// Default dense greedy contraction optimizer.
 ///
-/// This is cheap to run and deterministic. For hard networks, import an
-/// external active-pair path (e.g. from the optional cotengra backend), build
+/// This is cheap to run and deterministic. For hard networks, use the
+/// optional `OmecoOptimizer` (feature `omeco`) or import an external
+/// active-pair path (e.g. from cotengra run by the application), build
 /// a [`crate::ContractionPlan`] from it with
 /// [`crate::ContractionPlan::from_active_pair_path`], and pass that plan to
 /// [`crate::Network::plan`].

@@ -27,7 +27,7 @@ this table together.
 | `symtn-tensors+all.txt` | `symtn-tensors` | default + `cuda,cgc-gen,testing` |
 | `symtn-matrixalgebra+all.txt` | `symtn-matrixalgebra` | default + `cgc-gen` |
 | `symtn+all.txt` | `symtn` | default + `cuda,cgc-gen,krylov` |
-| `symtn-network+all.txt` | `symtn-network` | default + `cuda,cgc-gen,opt-path,cotengra-python` |
+| `symtn-network+all.txt` | `symtn-network` | default + `cuda,cgc-gen,omeco` |
 
 The `+all` file of a crate enables every additive feature that widens its
 public surface, including the unstable `testing` tiers: they are reachable by

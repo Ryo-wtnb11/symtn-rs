@@ -917,7 +917,7 @@ const END_SLICE: &str = "END_SLICE_PLAN";
 ///
 /// This is a pure-structure type (order + slicing decision + serialization): it
 /// holds no tensor data and is produced by the path/slice search (the built-in
-/// [`greedy_slice`] or the optional cotengra backend). Pass it to
+/// [`greedy_slice`], or an order and labels chosen outside symtn). Pass it to
 /// [`crate::Network::plan`] as the optimizer: the planned network lowers the
 /// slicing against the tensors and [`crate::PlannedNetwork::execute`] runs it.
 #[derive(Debug, Clone, PartialEq)]

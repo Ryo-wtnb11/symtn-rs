@@ -8,14 +8,10 @@ use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::LieGroupFusionRule;
-#[cfg(feature = "opt-path")]
-use symtn::typed::CheckedGenericStructureError;
 use symtn::typed::{
     BlockFusionTrees, CheckedGenericPlanError, GenericTensorError, GradedSpace, TensorMap,
 };
 use symtn::typed::{Complex64, ContractSpec, Runtime, TensorScalar};
-#[cfg(feature = "opt-path")]
-use symtn_network::Optimizer;
 use symtn_network::{
     configure_plan_cache, plan_cache_config, plan_cache_stats, slice_plan_for, DenseCostModel,
     DenseTensorInfo, GreedyDenseOptimizer, LabelOrderDenseOptimizer, Network,
@@ -409,87 +405,6 @@ fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
     assert!(workspace.last_slice_stats().unwrap().peak_total_bytes() > 0);
     assert_eq!(actual.provider() as *const _, provider.as_ref() as *const _);
     assert_same(&actual, &expected);
-}
-
-#[cfg(feature = "opt-path")]
-#[derive(Clone, Copy)]
-enum PlanningFailure {
-    Dual,
-    Dimension,
-}
-
-#[cfg(feature = "opt-path")]
-fn assert_optimizer_does_not_retry_provider_failure(
-    optimizer: Optimizer,
-    failure: PlanningFailure,
-) {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::new();
-    configure_plan_cache(
-        &runtime,
-        PlanCacheConfig {
-            optimizer,
-            ..PlanCacheConfig::default()
-        },
-    );
-    let provider = Arc::new(InjectedGeneric::new());
-    let tensors = injected_chain(engine, &runtime, &provider);
-    provider.dual_calls.store(0, Ordering::SeqCst);
-    match failure {
-        PlanningFailure::Dual => provider.fail_dual.store(true, Ordering::SeqCst),
-        PlanningFailure::Dimension => provider.arm_symbol(1),
-    }
-    let first = &tensors[0];
-    let second = &tensors[1];
-    let third = &tensors[2];
-    let fourth = &tensors[3];
-    let error = net(
-        &[
-            op(&["a", "b"], &["c"]),
-            op(&["c"], &["d"]),
-            op(&["d"], &["e"]),
-            op(&["e"], &["f"]),
-        ],
-        &["a", "b"],
-        &["f"],
-    )
-    .contract(engine, &[first, second, third, fourth])
-    .unwrap_err();
-    match failure {
-        PlanningFailure::Dual => {
-            assert!(matches!(
-                error,
-                GenericTensorError::Structure(CheckedGenericStructureError::Provider(
-                    InjectedError::Dual
-                ))
-            ));
-            assert_eq!(provider.dual_calls.load(Ordering::SeqCst), 1);
-        }
-        PlanningFailure::Dimension => {
-            assert!(matches!(
-                error,
-                GenericTensorError::Structure(CheckedGenericStructureError::Provider(
-                    InjectedError::Symbol
-                ))
-            ));
-            assert_eq!(provider.symbol_calls.load(Ordering::SeqCst), 1);
-        }
-    }
-    let stats = plan_cache_stats(&runtime);
-    assert_eq!(stats.entries, 0);
-    assert_eq!(stats.topology_materializations, 0);
-    assert_eq!(stats.workspaces_created, 0);
-}
-
-#[cfg(feature = "opt-path")]
-#[test]
-fn checked_generic_optimizer_fallback_never_retries_provider_failures() {
-    let _serial = crate::counting_alloc::serial();
-    for optimizer in [Optimizer::DynamicProgramming, Optimizer::AutoHq] {
-        for failure in [PlanningFailure::Dual, PlanningFailure::Dimension] {
-            assert_optimizer_does_not_retry_provider_failure(optimizer.clone(), failure);
-        }
-    }
 }
 
 fn injected_chain(

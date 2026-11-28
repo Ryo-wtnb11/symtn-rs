@@ -186,34 +186,6 @@ impl Network {
         }
     }
 
-    #[cfg(feature = "opt-path")]
-    pub(crate) fn plan_with_optimizer_fallbacks<R, D, S>(
-        &self,
-        tensors: &[&TensorMap<R, D, S>],
-        optimizer: &dyn DenseContractionOptimizer,
-        fallbacks: &[&dyn DenseContractionOptimizer],
-    ) -> Result<PlannedNetwork, FacadeError<R>>
-    where
-        R: TypedSectorAdmission,
-        R::Mode: NetworkModeDispatch<R, D>,
-        D: TensorScalar,
-        S: TensorStorage<D>,
-    {
-        self.plan_searched(tensors, |ir, cost| {
-            let try_plan = |optimizer: &dyn DenseContractionOptimizer| {
-                ContractionPlan::from_steps(ir, optimizer.optimize(ir, cost)?)
-            };
-            let mut result = try_plan(optimizer);
-            for optimizer in fallbacks {
-                if result.is_ok() {
-                    break;
-                }
-                result = try_plan(*optimizer);
-            }
-            result
-        })
-    }
-
     /// Lowers `tensors` and runs `search`. A single operand has the empty
     /// order, but `search` still runs so a supplied [`ContractionPlan`] is
     /// checked against the network; searching optimizers answer

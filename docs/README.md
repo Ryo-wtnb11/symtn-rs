@@ -13,7 +13,7 @@ contain operation examples and method-level bounds.
 | Host/CUDA selection, resources and device checks | [Backend policy](backend_policy.md) |
 | Structured FLOP and storage obligations | [Complexity policy](complexity_parity_policy.md) |
 | Oracles, exactness and tolerances | [Numerical testing](testing_numerics.md) |
-| Optional Python path planner | [cotengra bridge](cotengra_backend.md) |
+| Order search, omeco, orders from cotengra | [Contraction order](contraction_order.md) |
 | Optional Host tensor solvers on the caller's engine | [Krylov integration](krylov.md) |
 
 For theory, see [TensorKit's manual](https://docs.juliahub.com/General/TensorKit/stable/)

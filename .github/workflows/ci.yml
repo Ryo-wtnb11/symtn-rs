@@ -110,21 +110,10 @@ jobs:
           done
         working-directory: symtn
 
-  # opt-path (wraps opt-einsum-path) and cotengra-python (shells out to an
-  # installed Python `cotengra`) have real code but no matrix coverage
-  # anywhere in CI (#153). Both need a host
-  # execution backend to run anything, so cpu-faer rides along. Unlike
-  # backend-contract this runs the actual test suite, not just `cargo
-  # check`: the point is to start exercising optimizer_fallback.rs /
-  # plan_cache.rs's feature-gated tests, which today never run in CI.
-  # cotengra-python is build + unit tests only — its one test that shells
-  # out to Python (`runs_installed_cotengra_when_requested`) early-returns
-  # unless `SYMTN_RUN_COTENGRA_PYTHON_TEST` is set, so no Python env is
-  # needed here.
-  # Why-not stop at the first red step: each step was its own matrix row with
-  # `fail-fast: false`, so `!cancelled()` keeps every package's signal in one
-  # run. Why-not a single feature union: that would stop testing the
-  # `not(feature = ...)` paths of the other feature.
+  # omeco (wraps the omeco crate) has no coverage in the default matrix. It
+  # needs a host execution backend to run anything, so cpu-faer rides along.
+  # Why-not stop at the first red step: `!cancelled()` keeps the test signal
+  # when clippy fails.
   feature-contract-network-optimizers:
     name: feature contract (network optimizers)
     runs-on: ubuntu-latest
@@ -154,25 +143,15 @@ jobs:
       # (e.g. the cgc-gen `obfuscated_if_else`s in typed.rs) never ran
       # in CI. Clippy uses `--all-targets`, mirroring that step's scope, while
       # a test step may filter to fewer targets.
-      - name: clippy symtn-network (opt-path)
+      - name: clippy symtn-network (omeco)
         if: ${{ !cancelled() }}
-        run: cargo clippy --locked -p symtn-network --no-default-features --features "opt-path,cpu-faer" --all-targets -- -D warnings
+        run: cargo clippy --locked -p symtn-network --no-default-features --features "omeco,cpu-faer" --all-targets -- -D warnings
         working-directory: symtn
-      - name: test symtn-network (opt-path)
+      - name: test symtn-network (omeco)
         if: ${{ !cancelled() }}
         run: |
-          cargo test --locked -p symtn-network --no-default-features --features "opt-path,cpu-faer" --tests
-          cargo test --locked -p symtn-network --no-default-features --features "opt-path,cpu-faer" --doc
-        working-directory: symtn
-      - name: clippy symtn-network (cotengra-python)
-        if: ${{ !cancelled() }}
-        run: cargo clippy --locked -p symtn-network --no-default-features --features "cotengra-python,cpu-faer" --all-targets -- -D warnings
-        working-directory: symtn
-      - name: test symtn-network (cotengra-python)
-        if: ${{ !cancelled() }}
-        run: |
-          cargo test --locked -p symtn-network --no-default-features --features "cotengra-python,cpu-faer" --tests
-          cargo test --locked -p symtn-network --no-default-features --features "cotengra-python,cpu-faer" --doc
+          cargo test --locked -p symtn-network --no-default-features --features "omeco,cpu-faer" --tests
+          cargo test --locked -p symtn-network --no-default-features --features "omeco,cpu-faer" --doc
         working-directory: symtn
 
   # The `krylov` feature's only coverage: the default `lint` job does not
@@ -315,24 +294,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: 'cargo test --locked -p symtn-network --no-default-features --features "cgc-gen,cpu-faer" --test serial checked_generic_network::'
         working-directory: symtn
-      # cgc-gen together with opt-path: the checked Generic optimizer
-      # no-retry tests are gated on both, and neither single-feature job
-      # compiles them (#2022 step 2 review, P1). Kept in this job so the Racah
-      # chain is reused.
-      - name: clippy symtn-network (cgc-gen + opt-path)
-        if: ${{ !cancelled() }}
-        run: cargo clippy --locked -p symtn-network --no-default-features --features "cgc-gen,opt-path,cpu-faer" --all-targets -- -D warnings
-        working-directory: symtn
       # cuda with every other optional feature: the `cuda-check` job lints
       # only `cuda,cpu-faer`, so code gated on cuda plus another feature was
       # never type-checked. A lint without a link needs no CUDA toolkit.
       - name: clippy symtn, symtn-dense, symtn-network (cuda + all optional features)
         if: ${{ !cancelled() }}
-        run: cargo clippy --locked -p symtn -p symtn-dense -p symtn-network --no-default-features --features "cuda,cpu-faer,cgc-gen,krylov,ledger-roots,opt-path,cotengra-python" --all-targets -- -D warnings
-        working-directory: symtn
-      - name: test symtn-network (cgc-gen + opt-path)
-        if: ${{ !cancelled() }}
-        run: cargo test --locked -p symtn-network --no-default-features --features "cgc-gen,opt-path,cpu-faer" --tests
+        run: cargo clippy --locked -p symtn -p symtn-dense -p symtn-network --no-default-features --features "cuda,cpu-faer,cgc-gen,krylov,ledger-roots,omeco" --all-targets -- -D warnings
         working-directory: symtn
       - name: Run checked lazy transform defining regression
         if: ${{ !cancelled() }}

@@ -21,7 +21,8 @@ mod itebd_smoke;
 mod mf_provider_conformance;
 mod network_construction_errors;
 mod network_contract;
-mod optimizer_fallback;
+#[cfg(feature = "omeco")]
+mod omeco_optimizer;
 mod plan_api_equivalence;
 mod plan_cache;
 mod plan_text_input;

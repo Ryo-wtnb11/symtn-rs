@@ -48,7 +48,7 @@ COMBOS=(
     "symtn default -"
     "symtn all cuda,cgc-gen,krylov"
     "symtn-network default -"
-    "symtn-network all cuda,cgc-gen,opt-path,cotengra-python"
+    "symtn-network all cuda,cgc-gen,omeco"
 )
 
 if [ "$mode" = --write ]; then

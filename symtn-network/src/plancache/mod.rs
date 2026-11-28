@@ -34,10 +34,6 @@ use symtn::typed::{Error, Runtime, TensorScalar};
 
 mod config;
 
-#[cfg(feature = "cotengra-python")]
-pub use config::{
-    CotengraMinimize, CotengraPythonConfig, CotengraPythonMethod, CotengraSlicingConfig,
-};
 pub use config::{
     Optimizer, PlanCacheConfig, PlanCacheStats, ReplanPolicy, DEFAULT_PLAN_CACHE_CAPACITY,
     DEFAULT_REPLAN_DRIFT_FACTOR, DEFAULT_WORKSPACE_BUDGET_BYTES,
@@ -631,8 +627,7 @@ where
         )
         .into());
     };
-    let topology_optimizer = topology_optimizer(optimizer);
-    let key = network_alias_hash(network, &topology_optimizer);
+    let key = network_alias_hash(network, optimizer);
     let lookup = with_plan_cache(runtime, |config, slot| -> Result<Lookup, FacadeError<R>> {
         if !config.enabled {
             return Ok(Lookup::Disabled);
@@ -645,7 +640,7 @@ where
         };
         let Some(alias) = aliases
             .iter()
-            .find(|alias| topology_matches(&alias.topology, network, tensors, &topology_optimizer))
+            .find(|alias| topology_matches(&alias.topology, network, tensors, optimizer))
         else {
             return Ok(Lookup::Miss);
         };
@@ -1189,59 +1184,7 @@ where
 {
     match optimizer {
         Optimizer::Greedy => network.plan(tensors, &GreedyDenseOptimizer),
-        #[cfg(feature = "opt-path")]
-        Optimizer::Optimal => network.plan(
-            tensors,
-            &crate::pathopt::OptEinsumPathOptimizer::new(crate::pathopt::PathStrategy::Optimal),
-        ),
-        // Dynamic programming yields the optimal order in polynomial time for
-        // symtn's small networks — the `@tensoropt` analog without exhaustive
-        // search cost. Upstream `dp` errors on all-dim-1 networks (the same
-        // degenerate case `auto-hq` trips on), where the order is irrelevant
-        // anyway, so fall back to greedy there.
-        #[cfg(feature = "opt-path")]
-        Optimizer::DynamicProgramming => {
-            use crate::pathopt::{OptEinsumPathOptimizer, PathStrategy};
-            let dynamic = OptEinsumPathOptimizer::new(PathStrategy::DynamicProgramming);
-            network.plan_with_optimizer_fallbacks(tensors, &dynamic, &[&GreedyDenseOptimizer])
-        }
-        // Fallback chain: auto-hq -> auto -> dp
-        // -> greedy. Upstream `opt-einsum-path` errors on some all-dim-1
-        // networks, so each failed driver falls through to the next.
-        #[cfg(feature = "opt-path")]
-        Optimizer::AutoHq => {
-            use crate::pathopt::{OptEinsumPathOptimizer, PathStrategy};
-            let auto_hq = OptEinsumPathOptimizer::new(PathStrategy::AutoHq);
-            let auto = OptEinsumPathOptimizer::new(PathStrategy::Auto);
-            let dynamic = OptEinsumPathOptimizer::new(PathStrategy::DynamicProgramming);
-            network.plan_with_optimizer_fallbacks(
-                tensors,
-                &auto_hq,
-                &[&auto, &dynamic, &GreedyDenseOptimizer],
-            )
-        }
-        #[cfg(feature = "cotengra-python")]
-        Optimizer::CotengraPython(config) => network.plan(
-            tensors,
-            &crate::cotengra_python::CotengraPythonOptimizer::new(config.clone()),
-        ),
     }
-}
-
-fn topology_optimizer(optimizer: &Optimizer) -> Optimizer {
-    #[cfg(feature = "cotengra-python")]
-    if let Optimizer::CotengraPython(config) = optimizer {
-        let mut config = config.clone();
-        // Normal cached contractions are path-only. A `SlicedPlan` from
-        // `optimize_sliced` goes through `Network::plan`, not this cache, so slicing
-        // policy must not fragment ordinary plan-cache entries.
-        config.slicing = crate::plancache::CotengraSlicingConfig::None;
-        // The timeout supervises a cold search; it cannot change the resulting
-        // plan, so it is not part of topology or persisted-plan identity.
-        config.timeout = None;
-        return Optimizer::CotengraPython(config);
-    }
-    optimizer.clone()
 }
 
 fn topology_for<R, D, S>(
@@ -1271,7 +1214,7 @@ where
             .collect(),
         output: network.output.clone(),
         output_codomain_rank: network.output_codomain_rank,
-        optimizer: topology_optimizer(optimizer),
+        optimizer: optimizer.clone(),
     })
 }
 
@@ -1459,8 +1402,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "cotengra-python")]
-    use super::topology_optimizer;
     use super::Optimizer;
     use super::{needs_replan, ReplanPolicy, WorkspaceBudget, WorkspacePools};
     use crate::network::NetworkExecutionWorkspace;
@@ -1468,32 +1409,9 @@ mod tests {
     use crate::{Network, TemporaryLabel};
     use std::sync::atomic::Ordering;
     use std::sync::{Arc, Barrier};
-    #[cfg(feature = "cotengra-python")]
-    use std::time::Duration;
     use symtn::sector::U1FusionRule;
     use symtn::typed::Complex64;
     use symtn::typed::{ContractSpec, GradedSpace, TensorMap};
-
-    #[cfg(feature = "cotengra-python")]
-    #[test]
-    fn cotengra_timeout_does_not_fragment_cache_identity_or_mutate_runtime_config() {
-        let short =
-            crate::plancache::CotengraPythonConfig::default().timeout(Duration::from_secs(1));
-        let unbounded = crate::plancache::CotengraPythonConfig::default().without_timeout();
-        let runtime_config = crate::plancache::PlanCacheConfig {
-            optimizer: Optimizer::CotengraPython(short),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            topology_optimizer(&runtime_config.optimizer),
-            topology_optimizer(&Optimizer::CotengraPython(unbounded))
-        );
-        let Optimizer::CotengraPython(config) = &runtime_config.optimizer else {
-            unreachable!()
-        };
-        assert_eq!(config.timeout, Some(Duration::from_secs(1)));
-    }
 
     /// Plan-cache state a metadata rejection must leave as it was: every
     /// counter and workspace statistic, and the network aliases.
