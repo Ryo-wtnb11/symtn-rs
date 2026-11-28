@@ -12,7 +12,7 @@ use crate::su2::{su2_irrep, su2_rule};
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Direction, GradedSpace, Runtime};
 
@@ -23,7 +23,7 @@ fn fz2_leg(dual: bool) -> GradedSpace<FermionParityFusionRule> {
     )
     .unwrap();
     if dual {
-        space.try_dual().unwrap()
+        space.dual().unwrap()
     } else {
         space
     }
@@ -74,7 +74,7 @@ on_each_engine! {
     fn a_fermionic_twist_only_keeps_or_negates_an_entry<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
 
         let leg = fz2_leg(false);
         let dual = fz2_leg(true);
@@ -99,9 +99,9 @@ on_each_engine! {
         let leg_u1 = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()), 2),
-                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()), 1),
-                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()), 1),
+                (ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()), 2),
+                (ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()), 1),
+                (ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()), 1),
             ],
         )
         .unwrap();
@@ -121,9 +121,9 @@ on_each_engine! {
         let leg_su2 = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 1),
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+                (ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
+                (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 1),
+                (ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
             ],
         )
         .unwrap();
@@ -147,7 +147,7 @@ on_each_engine! {
     fn twists_round_trip_exactly_and_trivial_twists_are_clones<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = fz2_leg(false);
         let dual = fz2_leg(true);
         let tensor: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
@@ -203,7 +203,7 @@ on_each_engine! {
     fn a_twist_without_blocks_is_empty_and_a_leg_past_the_rank_is_refused<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let even =
             GradedSpace::try_new(Arc::new(FermionParityFusionRule::new()), [(FermionParityIrrep::EVEN, 2)]).unwrap();
         let odd =

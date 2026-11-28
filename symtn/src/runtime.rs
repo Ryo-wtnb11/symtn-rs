@@ -76,7 +76,7 @@ struct RuntimeInner {
 
 /// Execution runtime for the user-layer [`crate::typed::TensorMap`] API.
 ///
-/// A `Runtime` is built once via [`Runtime::builder`] and then carried
+/// A `Runtime` is created once with [`Runtime::new`] and then carried
 /// implicitly by every tensor created from it; operations reuse the
 /// Runtime-owned completed tree-transform store without explicit context
 /// arguments. Context-local operation caches stay disabled; cloning a
@@ -100,7 +100,7 @@ struct RuntimeInner {
 /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
 ///
 /// let engine = &mut symtn::typed::CpuEngine::serial();
-/// let rt = Runtime::builder().build()?;
+/// let rt = Runtime::new();
 /// let v = GradedSpace::try_new(
 ///     Arc::new(ZNFusionRule::new(2).unwrap()),
 ///     [(ZNIrrep::new(0, 2).unwrap(), 1), (ZNIrrep::new(1, 2).unwrap(), 1)],
@@ -154,11 +154,18 @@ impl RuntimeIdentity {
 }
 
 impl Runtime {
-    /// Starts building a runtime. The runtime holds structural state only;
-    /// each numerical operation takes the caller's engine (CPU or CUDA), so
-    /// the backend is chosen per call, not here.
-    pub fn builder() -> RuntimeBuilder {
-        RuntimeBuilder::default()
+    /// A new runtime. The runtime holds structural state only; each
+    /// numerical operation takes the caller's engine (CPU or CUDA), so the
+    /// backend is chosen per call, not here.
+    // Why not `Default`: every call makes a distinct runtime identity, which
+    // a `Default` value would not suggest, and it would be a second spelling.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RuntimeInner {
+                extensions: Mutex::new(ExtensionSlot::default()),
+            }),
+        }
     }
 
     pub(crate) fn same_runtime(&self, other: &Runtime) -> bool {
@@ -264,20 +271,5 @@ fn bound_layout_identity<R>(space: &BoundDynamicFusionMapSpace<R>) -> (HomSpaceI
 impl std::fmt::Debug for Runtime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Runtime").finish_non_exhaustive()
-    }
-}
-
-/// Builder for [`Runtime`]; see [`Runtime::builder`].
-#[derive(Debug, Default)]
-pub struct RuntimeBuilder {}
-
-impl RuntimeBuilder {
-    /// Finishes the build.
-    pub fn build(self) -> Result<Runtime, Error> {
-        Ok(Runtime {
-            inner: Arc::new(RuntimeInner {
-                extensions: Mutex::new(ExtensionSlot::default()),
-            }),
-        })
     }
 }

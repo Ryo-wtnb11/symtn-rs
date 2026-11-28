@@ -11,7 +11,7 @@
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::{Arc, Barrier};
 
-use symtn::sector::{product_sector, U1FusionRule, U1Irrep};
+use symtn::sector::{ProductSector, U1FusionRule, U1Irrep};
 use symtn::typed::{
     ContractSpec, CpuEngine, Direction, Engine, ExecContext, GradedSpace, HermitianTol, LeftPolar,
     Pool, Runtime, TensorMap,
@@ -31,7 +31,8 @@ fn space() -> GradedSpace<U1Su2> {
 
 fn space_with(degeneracies: [usize; 4]) -> GradedSpace<U1Su2> {
     let provider = Arc::new(U1Su2::try_new(U1FusionRule, su2_rule()).unwrap());
-    let sector = |q, twice_spin| product_sector(U1Irrep::new(q).unwrap(), su2_irrep(twice_spin));
+    let sector =
+        |q, twice_spin| ProductSector::new(U1Irrep::new(q).unwrap(), su2_irrep(twice_spin));
     GradedSpace::try_new(
         provider,
         [
@@ -77,7 +78,7 @@ fn fixture(runtime: &Runtime) -> TensorMap<U1Su2, f64> {
 
 #[test]
 fn one_configuration_repeats_its_bits_at_every_width() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let t = fixture(&runtime);
     let serial = workload(&mut CpuEngine::serial(), &t);
     for threads in [1, 4, 8] {
@@ -213,7 +214,7 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 1
 
 #[test]
 fn factorizations_and_trace_agree_across_widths() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // Unequal blocks, small enough for the debug-build gram eigendecomposition.
     let v = space_with([5, 4, 4, 3]);
     let t = TensorMap::rand_with_seed(&mut CpuEngine::serial(), &runtime, [&v, &v], [&v], 1532)
@@ -245,7 +246,7 @@ fn factorizations_and_trace_agree_across_widths() {
 /// (`permute`'s Multi recoupling), with the plain engine's results.
 #[test]
 fn erased_engines_with_auto_trait_bounds_are_contexts() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let t = fixture(&runtime);
     let reference = &mut CpuEngine::serial();
     let want = (
@@ -281,7 +282,7 @@ fn erased_engines_with_auto_trait_bounds_are_contexts() {
 
 #[test]
 fn two_engines_on_two_threads_share_one_runtime() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let t = fixture(&runtime);
     let alone = workload(&mut engine(4), &t);
     let start = Barrier::new(2);
@@ -306,7 +307,7 @@ fn two_engines_on_two_threads_share_one_runtime() {
 
 #[test]
 fn a_broken_engine_is_refused_with_a_typed_error() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let t = fixture(&runtime);
     for threads in [1, 4] {
         let mut engine = engine(threads);
@@ -450,7 +451,7 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
 /// reported through the conversion error.
 #[test]
 fn physical_conversions_refuse_a_broken_engine() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -499,7 +500,7 @@ fn physical_conversions_refuse_a_broken_engine() {
 /// `/private/tmp/symtn-l1-rereview-probe`.)
 #[test]
 fn compact_arms_refuse_a_broken_engine_before_any_write() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let good = &mut CpuEngine::serial();

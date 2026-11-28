@@ -52,7 +52,7 @@ fn chain_tensors(engine: &mut dyn Engine, runtime: &Runtime) -> [TensorMap<U1Fus
 
 /// The version line this build writes, taken from an empty save.
 fn file_header() -> String {
-    save_plan_cache(&Runtime::builder().build().unwrap())
+    save_plan_cache(&Runtime::new())
 }
 
 fn cache_blob(entries: &[(&str, &str)]) -> String {
@@ -161,7 +161,7 @@ fn load_plan_cache_drops_unparsable_entries_and_keeps_the_rest() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let corrupt = B_C_FIRST.replacen("step 1 2 3", "step 1 2 x", 1);
     let blob = cache_blob(&[("bad", &corrupt), ("good", B_C_FIRST)]);
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_eq!(load_plan_cache(&runtime, &blob), 1);
     assert_eq!(plan_cache_stats(&runtime).persisted_orders, 1);
     assert_eq!(
@@ -175,7 +175,7 @@ fn load_plan_cache_drops_unparsable_entries_and_keeps_the_rest() {
     let stale_header = format!("{} stale\n", header.trim_end());
     let stale = cache_blob(&[("good", B_C_FIRST)]).replacen(&header, &stale_header, 1);
     assert_ne!(stale_header, header);
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_eq!(load_plan_cache(&runtime, &stale), 0);
     let tensors = chain_tensors(engine, &runtime);
     chain().contract(engine, &tensors.each_ref()).unwrap();
@@ -198,7 +198,7 @@ fn load_plan_cache_resumes_at_the_next_topo_line_after_a_corrupt_entry() {
         "TOPO b\nPLAN 999\ntensor_count 3\n",
     ] {
         let blob = format!("{header}{first}{corrupt}{last}");
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         assert_eq!(load_plan_cache(&runtime, &blob), 2, "{corrupt:?}");
         assert_eq!(plan_cache_stats(&runtime).persisted_orders, 2);
         assert_eq!(save_plan_cache(&runtime), expected, "{corrupt:?}");
@@ -209,7 +209,7 @@ fn load_plan_cache_resumes_at_the_next_topo_line_after_a_corrupt_entry() {
 fn loaded_non_greedy_order_is_replayed_instead_of_searched() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     // Record the searched order to learn this network's persisted key.
-    let searched = Runtime::builder().build().unwrap();
+    let searched = Runtime::new();
     assert_eq!(load_plan_cache(&searched, ""), 0);
     let tensors = chain_tensors(engine, &searched);
     let expected = chain().contract(engine, &tensors.each_ref()).unwrap();
@@ -221,7 +221,7 @@ fn loaded_non_greedy_order_is_replayed_instead_of_searched() {
         "the search must pick another order than A (B C)"
     );
 
-    let replayed = Runtime::builder().build().unwrap();
+    let replayed = Runtime::new();
     assert_eq!(load_plan_cache(&replayed, &blob), 1);
     let tensors = chain_tensors(engine, &replayed);
     let actual = chain().contract(engine, &tensors.each_ref()).unwrap();
@@ -240,7 +240,7 @@ fn loaded_non_greedy_order_is_replayed_instead_of_searched() {
 #[test]
 fn loaded_order_for_another_network_is_rejected_when_used() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let searched = Runtime::builder().build().unwrap();
+    let searched = Runtime::new();
     assert_eq!(load_plan_cache(&searched, ""), 0);
     let tensors = chain_tensors(engine, &searched);
     chain().contract(engine, &tensors.each_ref()).unwrap();
@@ -250,7 +250,7 @@ fn loaded_order_for_another_network_is_rejected_when_used() {
     // Parses, but its first step claims labels the chain never produces:
     // B C contracted over `k` leaves `j l`, not `k l`.
     let wrong_labels = B_C_FIRST.replacen("3 32 \"j\"", "3 32 \"k\"", 1);
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_eq!(
         load_plan_cache(&runtime, &cache_blob(&[(topology, &wrong_labels)])),
         1
@@ -334,13 +334,13 @@ fn plan_text_round_trips_labels_with_whitespace_line_breaks_and_escapes() {
 fn plan_cache_persists_and_replays_an_order_for_labels_needing_escapes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     // A searched entry saves and reloads byte-identically.
-    let searched = Runtime::builder().build().unwrap();
+    let searched = Runtime::new();
     assert_eq!(load_plan_cache(&searched, ""), 0);
     let tensors = chain_tensors(engine, &searched);
     let expected = odd_chain().contract(engine, &tensors.each_ref()).unwrap();
     let saved = save_plan_cache(&searched);
     assert_eq!(saved.lines().filter(|l| l.starts_with("TOPO ")).count(), 1);
-    let reloaded = Runtime::builder().build().unwrap();
+    let reloaded = Runtime::new();
     assert_eq!(load_plan_cache(&reloaded, &saved), 1);
     assert_eq!(save_plan_cache(&reloaded), saved);
 
@@ -348,7 +348,7 @@ fn plan_cache_persists_and_replays_an_order_for_labels_needing_escapes() {
     let topology = saved.lines().nth(1).unwrap().strip_prefix("TOPO ").unwrap();
     let blob = cache_blob(&[(topology, &odd_b_c_first())]);
     assert_ne!(saved, blob);
-    let replayed = Runtime::builder().build().unwrap();
+    let replayed = Runtime::new();
     assert_eq!(load_plan_cache(&replayed, &blob), 1);
     let tensors = chain_tensors(engine, &replayed);
     let actual = odd_chain().contract(engine, &tensors.each_ref()).unwrap();

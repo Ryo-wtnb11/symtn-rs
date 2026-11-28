@@ -106,7 +106,7 @@ fn assert_eigh_uses_a_cold_logical_copy(
 #[test]
 fn eigh_dense_lazy_near_hermitian_uses_logical_triangle_and_stays_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let source =
@@ -137,7 +137,7 @@ fn eigh_dense_lazy_near_hermitian_uses_logical_triangle_and_stays_cold() {
 #[test]
 fn eigh_dense_lazy_complex_orientation_and_failures_match_logical_oracles() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let hermitian = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -308,7 +308,7 @@ fn assert_eig_uses_a_cold_logical_copy(
 #[test]
 fn eig_dense_lazy_nonnormal_is_logical_owned_repeatable_and_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let source =
@@ -341,7 +341,7 @@ fn eig_dense_lazy_nonnormal_is_logical_owned_repeatable_and_cold() {
 #[test]
 fn eig_dense_lazy_real_order_signed_zero_and_defective_cases_match_logical_oracles() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let scalar_leg =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
@@ -408,7 +408,7 @@ fn eig_dense_lazy_real_order_signed_zero_and_defective_cases_match_logical_oracl
 #[test]
 fn eig_dense_lazy_failures_match_logical_oracle_and_stay_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let left =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
@@ -444,7 +444,7 @@ fn exp_of_a_near_hermitian_adjoint_uses_the_logical_orientation_and_stays_cold()
     // What: the fixed approximate-Hermitian dispatch must see logical A^H,
     // whose lower triangle is the conjugated parent upper triangle. A
     // parent-exp redirect feeds EIGH the other triangle and changes values.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let delta = 4.0e-15;
@@ -546,7 +546,7 @@ fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: real/complex non-self-dual U(1) and a genuine SU(2) multitree
     // remain deterministic across repeats, clones, and concurrent calls.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -585,7 +585,7 @@ fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
 #[test]
 fn exp_failure_leaves_the_lazy_receiver_and_parent_untouched() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -698,7 +698,7 @@ fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
     // What: U(1) complex blocks and a genuine SU(2) multitree use the
     // inverse identity without materializing the lazy receiver, including
     // cloned and concurrent calls, and return detached provider-native data.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -786,7 +786,7 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a singular solve changes neither parent Arc/bytes nor the lazy
     // receiver.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -847,7 +847,7 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
 fn solve_is_transactional_provider_native_and_cache_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let lhs_provider = Arc::new(U1FusionRule);
     let rhs_provider = Arc::new(U1FusionRule);
     let lhs_leg = GradedSpace::try_new(
@@ -1051,7 +1051,7 @@ where
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(solve_spy(&calls, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1152,7 +1152,7 @@ fn checked_generic_left_solve_preserves_injected_backend_provenance() {
         &calls,
         Some("injected checked solve failure"),
     )));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -1272,7 +1272,7 @@ fn pinv_redirect_preserves_semantics_ownership_and_cold_concurrency() {
     // What: full-rank, rectangular/rank-deficient, non-self-dual U(1),
     // complex data, empty support, and a genuine SU(2) multitree all use
     // the parent-factor seam and return detached provider-native outputs.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -1308,7 +1308,7 @@ fn pinv_redirect_late_svd_failure_keeps_parent_and_receiver_cold() {
     // What: a successful first-sector SVD cannot publish factors, mutate
     // parent bytes, or initialize the lazy receiver when sector two fails.
     let _dense = probe::inject_dense(Box::new(fail_second_svd(&Arc::default())));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,

@@ -93,6 +93,7 @@ where
             return Err(internal_layout_error("uncached materialization is owned").into());
         };
         let (space, data) = <R::Mode as TypedTensorProductDispatch<R, D>>::product(
+            EXEC,
             &lhs_body.space,
             lhs_body.materialized_dense_data().as_ref(),
             &rhs_body.space,
@@ -194,8 +195,6 @@ where
     /// embedding or braid direction. The crossing-free case is exactly
     /// [`Self::compose`], which every braiding style admits; general planar
     /// contraction is [`Self::planar_contract`] (TensorKit `@planar`).
-    /// Behaviour change (#1372):
-    /// a canonical `NoBraiding` contraction was accepted before.
     ///
     /// Both admission modes support Bosonic and Fermionic providers. Checked
     /// contraction requires `CheckedGenericPivotal<Scalar = f64>` and Host
@@ -337,7 +336,7 @@ where
     /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
     ///     [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
@@ -401,7 +400,7 @@ where
             }
         }
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
-            engine, self, other, spec, None,
+            EXEC, engine, self, other, spec, None,
         )?;
         Ok(self.published(space, data))
     }
@@ -543,6 +542,7 @@ where
             }
         }
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
+            EXEC,
             engine,
             self,
             other,
@@ -588,12 +588,12 @@ where
     fn admit_braiding(&self, op: BraidingOp) -> Result<(), Error> {
         Ok(symtn_tensors::admit_braiding(
             op,
-            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider()),
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider()),
         )?)
     }
 
     fn is_bosonic(&self) -> bool {
-        <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider())
+        <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider())
             == symtn_core::BraidingStyleKind::Bosonic
     }
 
@@ -670,7 +670,7 @@ where
     /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let fib = Arc::new(TableRule::fibonacci());
     /// let v = GradedSpace::try_new(Arc::clone(&fib), [(TableSector::new(2), 1)])?;
     /// let b = GradedSpace::try_new(fib, [(TableSector::new(1), 2), (TableSector::new(2), 3)])?;
@@ -718,6 +718,7 @@ where
         let other = other.operand()?;
         let other = &*other;
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
+            EXEC,
             engine,
             self,
             other,
@@ -811,6 +812,7 @@ where
         let other = other.operand()?;
         let other = &*other;
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
+            EXEC,
             engine,
             self,
             other,
@@ -1069,7 +1071,7 @@ where
             }
         }
         let (space, data) =
-            <R::Mode as TypedTensorContractDispatch<R, D>>::compose(engine, self, other)?;
+            <R::Mode as TypedTensorContractDispatch<R, D>>::compose(EXEC, engine, self, other)?;
         Ok(self.published(space, data))
     }
 }

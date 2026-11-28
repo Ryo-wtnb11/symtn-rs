@@ -273,7 +273,7 @@ fn product_fusion_reports_an_unpairable_channel_after_both_factors() {
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
     let q = 3 << 28;
     let x = u1_u1
-        .encode_sector(&product_sector(
+        .encode_sector(&ProductSector::new(
             U1Irrep::new(q).unwrap(),
             U1Irrep::new(q).unwrap(),
         ))

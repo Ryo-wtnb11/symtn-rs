@@ -194,7 +194,7 @@ fn pop_dense_element<R, D>(tensor: &mut TensorMap<R, D>) {
 #[test]
 fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -250,7 +250,7 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
         .fails_in_operation(|e| matches!(e, OperationError::InvalidPermutation { .. })));
     assert_unchanged(engine, &nonplanar, &before);
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let mut foreign = expected.zeros_like(engine).unwrap();
     foreign.runtime = other_runtime;
     poison_destination(&mut foreign);
@@ -391,7 +391,7 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
 
@@ -470,7 +470,7 @@ fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: exact-layout admission and completed replay share one Runtime
     // without serializing execution or changing results across callers.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -516,7 +516,7 @@ fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
 #[test]
 fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1_leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -582,11 +582,11 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
         ),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],
@@ -649,7 +649,7 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
 fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 1)],
@@ -730,7 +730,7 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
 fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -764,7 +764,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     };
 
     let mut foreign = destination(engine);
-    foreign.runtime = Runtime::builder().build().unwrap();
+    foreign.runtime = Runtime::new();
     let before = f64_destination_state(engine, &foreign);
     assert_eq!(
         lhs.contract_into(
@@ -783,7 +783,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     );
     assert_eq!(f64_destination_state(engine, &foreign), before);
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let foreign_rhs =
         TensorMap::from_subblock_fn(engine, &other_runtime, [&leg], [&leg], |_, indices| {
             (indices[0] + indices[1] + 1) as f64
@@ -1056,7 +1056,7 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();

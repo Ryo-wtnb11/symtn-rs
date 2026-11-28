@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Error, GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
@@ -18,7 +18,7 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let a: TensorMap<_, f64> =
@@ -104,7 +104,7 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
         after.hits() + after.misses()
     );
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let other_b: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &other_runtime, [&leg, &leg], [&leg, &leg], 8).unwrap();
     assert!(matches!(
@@ -124,7 +124,7 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
 fn compact_divisor_keeps_the_identity_path() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let divisor: TensorMap<_, f64> = TensorMap::diagonal(
@@ -152,7 +152,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
     let _serial = crate::counting_alloc::serial();
     macro_rules! check {
         ($engine:ident, $left:expr, $right:expr) => {{
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let (left, right) = ($left, $right);
             let a: TensorMap<_, f64> =
                 TensorMap::isomorphism($engine, &runtime, [&left, &right], [&left, &right])
@@ -183,7 +183,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
     let v = GradedSpace::try_new(Arc::clone(&su2), [(su2_irrep(1), 2)]).unwrap();
     let w = GradedSpace::try_new(su2, [(su2_irrep(1), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     check!(engine, v, w);
 
@@ -194,11 +194,11 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
         )
         .unwrap(),
     );
-    let sector = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
+    let sector = ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
     let v = GradedSpace::try_new(Arc::clone(&fermion), [(sector, 2)]).unwrap();
     let w = GradedSpace::try_new(fermion, [(sector, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     check!(engine, v, w);
 }

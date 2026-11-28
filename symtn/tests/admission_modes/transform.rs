@@ -22,7 +22,7 @@ in_both_modes! {
     /// full level list is the permute of the same axes for a bosonic rule.
     fn permute_round_trips_and_a_bosonic_braid_is_the_permute<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
             .unwrap();
@@ -70,7 +70,7 @@ in_both_modes! {
     /// work, and no refusal touches the source.
     fn transforms_reject_malformed_arguments_before_provider_work<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
             .unwrap();
@@ -118,13 +118,13 @@ in_both_modes! {
     /// both operands untouched.
     fn cat_and_absorb_validate_their_arguments_before_provider_work<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = |unit: usize, charged: usize| {
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), unit), (M::charged(), charged)])
                 .unwrap()
         };
-        let (a, b) = (leg(1, 2), leg(2, 1).try_dual().unwrap());
+        let (a, b) = (leg(1, 2), leg(2, 1).dual().unwrap());
         let fill = |_: &_, ij: &[usize]| ij.iter().sum::<usize>() as f64 + 1.0;
         let lhs: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&a, &b], [&leg(1, 1)], fill).unwrap();
@@ -140,7 +140,7 @@ in_both_modes! {
             engine,
             &runtime,
             [&a, &b],
-            [&leg(1, 1).try_dual().unwrap()],
+            [&leg(1, 1).dual().unwrap()],
             fill,
         )
         .unwrap();
@@ -155,7 +155,7 @@ in_both_modes! {
             .unwrap()
         };
         let (stack_lhs, stack_rhs) = (stack(leg(1, 1)), stack(leg(2, 1)));
-        let other_runtime = Runtime::builder().build().unwrap();
+        let other_runtime = Runtime::new();
         let foreign_runtime: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &other_runtime, [&a, &b], [&leg(1, 1)], fill)
                 .unwrap();

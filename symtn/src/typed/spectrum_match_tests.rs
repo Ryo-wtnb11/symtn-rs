@@ -13,7 +13,7 @@ use symtn_core::{U1FusionRule, U1Irrep};
 
 fn misses_and_data(groups: usize) -> (usize, Vec<f64>) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let sectors: Vec<_> = (0..groups as i32)
         .map(|k| U1Irrep::new(31 * k - 15_000).unwrap())
         .collect();

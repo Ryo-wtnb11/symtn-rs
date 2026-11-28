@@ -25,7 +25,7 @@ on_each_engine! {
     fn complex_inner_is_conjugate_linear_in_the_first_argument<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let i = Complex64::new(0.0, 1.0);
 
         for (sectors, seed) in [(0_usize, 1.0_f64), (1, 7.0)] {
@@ -81,10 +81,10 @@ on_each_engine! {
     fn fermionic_contract_is_minus_six_and_compose_stays_plus_six<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(FermionParityFusionRule::new());
         let odd = GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)]).unwrap();
-        let odd_dual = odd.try_dual().unwrap();
+        let odd_dual = odd.dual().unwrap();
         let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&odd], [&odd_dual], |_, _| 2.0)
             .unwrap();
         let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&odd_dual], [&odd], |_, _| 3.0)
@@ -107,7 +107,7 @@ on_each_engine! {
     fn lazy_adjoint_contraction_is_the_conjugate_transposed_product<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
         let a = TensorMap::<_, Complex64>::from_subblock_fn(
             engine, &runtime, [&u1], [&u1],

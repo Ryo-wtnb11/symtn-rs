@@ -38,7 +38,7 @@ use num_complex::{Complex32, Complex64};
 
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, ContractSpec, GradedSpace, Runtime, TensorMap};
@@ -155,8 +155,11 @@ fn fz2_su2_leg() -> GradedSpace<FermionSu2> {
     GradedSpace::try_new(
         rule,
         [
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, su2_irrep(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                2,
+            ),
+            (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(2)), 1),
         ],
     )
     .unwrap()
@@ -622,15 +625,15 @@ fn fz2_u1_leg() -> GradedSpace<FermionU1> {
         ),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                 2,
             ),
         ],
@@ -1152,7 +1155,7 @@ fn device_fermionic_signs_are_exact_at_every_payload() {
     let provider = Arc::new(FermionParityFusionRule::new());
     let odd =
         || GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)]).unwrap();
-    let odd_dual = || odd().try_dual().unwrap();
+    let odd_dual = || odd().dual().unwrap();
 
     fn run<D: DevicePayload>(
         engine: &mut dyn symtn::typed::Engine,
@@ -1693,7 +1696,7 @@ fn every_payload_dtype_satisfies_both_device_marker_traits() {
 #[test]
 fn a_non_cuda_engine_rejects_every_payload_the_same_way() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg_2_1_2();
 
     fn reject<D: DevicePayload>(

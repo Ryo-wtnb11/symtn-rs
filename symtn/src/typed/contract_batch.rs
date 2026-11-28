@@ -506,7 +506,7 @@ where
 ///
 /// # fn main() -> Result<(), Error> {
 /// let engine = &mut symtn::typed::CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let rule = Arc::new(U1FusionRule);
 /// let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 2)])?;
 /// let w = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), 3)])?;
@@ -665,7 +665,7 @@ mod failure_tests {
         // whose layout and payload are consistently one entry short, which
         // only a corrupted stack carries), leaves no observable output; the
         // buffer is kept and the next call recovers.
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(U1FusionRule);
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -751,7 +751,7 @@ mod failure_tests {
         // submission, so a corrupted stack never reaches the device)
         // keeps the temporary and the output in the workspace, so the next
         // call uploads neither and recovers.
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(U1FusionRule);
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -821,7 +821,7 @@ mod failure_tests {
 mod fermionic_unit_tests {
     use super::*;
     use crate::sector::{
-        product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule,
+        FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector,
         U1FusionRule, U1Irrep,
     };
     use crate::typed::GradedSpace;
@@ -878,7 +878,7 @@ mod fermionic_unit_tests {
     #[test]
     fn fermionic_unit_routes_submit_one_member_expanded_core_batch() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = GradedSpace::try_new(
             Arc::new(
                 ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
@@ -886,15 +886,15 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
             ],
@@ -906,9 +906,15 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                    2,
+                ),
+                (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                    1,
+                ),
             ],
         )
         .unwrap();
@@ -989,7 +995,7 @@ mod fermionic_unit_tests {
     #[test]
     fn signed_direct_submits_one_batch_per_present_sign_class() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = GradedSpace::try_new(
             Arc::new(
                 ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
@@ -997,15 +1003,15 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
             ],
@@ -1018,19 +1024,19 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
                     1,
                 ),
             ],
@@ -1042,9 +1048,15 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-                (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
-                (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                    2,
+                ),
+                (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+                (
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                    1,
+                ),
             ],
         )
         .unwrap();
@@ -1054,7 +1066,7 @@ mod fermionic_unit_tests {
                     .unwrap(),
             ),
             [(
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
                 2,
             )],
         )
@@ -1071,7 +1083,7 @@ mod fermionic_unit_tests {
     #[test]
     fn signed_direct_can_leave_inactive_destination_blocks() {
         let cpu = &mut crate::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(
             ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap(),
@@ -1080,15 +1092,15 @@ mod fermionic_unit_tests {
             Arc::clone(&rule),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
             ],
@@ -1098,17 +1110,17 @@ mod fermionic_unit_tests {
             rule,
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
             ],
         )
         .unwrap();
-        let wd = w.try_dual().unwrap();
+        let wd = w.dual().unwrap();
         let lhs =
             TensorMap::<_, f64>::from_subblock_fn(cpu, &runtime, [&v], [&wd], |_, _| 1.0).unwrap();
         let rhs =
@@ -1195,7 +1207,7 @@ mod fermionic_unit_tests {
     #[cfg(feature = "cuda")]
     #[test]
     fn cuda_dynamic_tree_admission_is_single_only() {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = |charges: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
@@ -1238,25 +1250,25 @@ mod fermionic_unit_tests {
             ),
             [
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                     2,
                 ),
                 (
-                    product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                     1,
                 ),
                 (
-                    product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                    ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
                     1,
                 ),
             ],
         )
         .unwrap();
-        let fd = f.try_dual().unwrap();
+        let fd = f.dual().unwrap();
         // contract_cases::fermionic_twist_roles "A": the copied A carries the twist.
         let (dynamic, admitted) = cuda_dynamic_admission(
             &runtime,
@@ -1304,7 +1316,7 @@ mod fermionic_unit_tests {
             + CheckedFusionAlgebra
             + SectorCodec,
     {
-        let dual = v.try_dual().unwrap();
+        let dual = v.dual().unwrap();
         let a = TensorMap::<_, f64>::from_subblock_fn(engine, runtime, [v], [&dual], |_, _| 1.0)
             .unwrap();
         let b = TensorMap::<_, f64>::from_subblock_fn(engine, runtime, [&dual], [v], |_, _| 1.0)

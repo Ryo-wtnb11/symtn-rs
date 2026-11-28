@@ -9,7 +9,7 @@ fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -140,7 +140,7 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
             .collect()
     };
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -273,7 +273,7 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         [(su_irrep(&[1i64, 0]), 2), (su_irrep(&[0, 1]), 1)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let triplets = [(0.5, -1.25), (2.0, 0.75)];
     let antitriplet = [(-1.0, 4.0)];
@@ -378,7 +378,7 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
 fn checked_only_cold_permute_surfaces_a_provider_algebra_failure() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -403,7 +403,7 @@ fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for n in [3, 4] {
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -471,7 +471,7 @@ fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(241));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -515,7 +515,7 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(242));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let vacuum = GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1)]).unwrap();
@@ -554,7 +554,7 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
 fn checked_unit_final_provider_guard_remains_structure_typed() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(243));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -588,7 +588,7 @@ fn checked_only_contract_and_compose_keep_left_authority() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let left_provider = Arc::new(CheckedOnlyToy::new(124));
     let right_provider = Arc::new(CheckedOnlyToy::new(124));
     let left_leg = GradedSpace::try_new(Arc::clone(&left_provider), [(Label::X, 1)]).unwrap();
@@ -635,7 +635,7 @@ fn checked_only_contract_and_compose_keep_left_authority() {
     }
     assert_eq!(left_provider.r_queries.load(Ordering::Relaxed), 0);
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let foreign_runtime_identity: TensorMap<_, f64> = TensorMap::from_subblock_fn(
         engine,
         &other_runtime,
@@ -718,7 +718,7 @@ fn checked_only_contract_and_compose_keep_left_authority() {
 fn checked_only_identity_transforms_make_no_provider_queries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -768,7 +768,7 @@ fn checked_only_identity_transforms_make_no_provider_queries() {
 fn checked_only_otimes_preserves_typed_late_f_failures() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -817,8 +817,8 @@ fn checked_only_otimes_preserves_typed_late_f_failures() {
 fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other_runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other_runtime = Runtime::new();
     let first = Arc::new(CheckedOnlyToy::new(0));
     let mismatched = Arc::new(CheckedOnlyToy::new(1));
     let first_leg = GradedSpace::try_new(Arc::clone(&first), [(Label::X, 1)]).unwrap();
@@ -887,7 +887,7 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let first = Arc::new(CheckedOnlyToy::new_product_probe(9));
     let second = Arc::new(CheckedOnlyToy::new_product_probe(9));
     let x2 = GradedSpace::try_new(Arc::clone(&first), [(Label::X, 2)]).unwrap();
@@ -1056,7 +1056,7 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let left_provider = Arc::new(CheckedOnlyToy::new(0));
     let right_provider = Arc::new(CheckedOnlyToy::new(0));
     let left_common = GradedSpace::try_new(Arc::clone(&left_provider), [(Label::X, 1)]).unwrap();
@@ -1162,8 +1162,8 @@ fn checked_generic_cat_rule_check_and_admission_failure_are_typed_nonpublishing(
     // (even on a foreign runtime), and an output-admission failure is typed;
     // neither leaves a trace in the admitted input payloads. The runtime and
     // argument checks are the shared `admission_modes::transform` cell.
-    let runtime = Runtime::builder().build().unwrap();
-    let other_runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other_runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(123));
     let equal = Arc::new(CheckedOnlyToy::new(123));
     let wrong = Arc::new(CheckedOnlyToy::new(1));
@@ -1310,7 +1310,7 @@ fn assert_sun_cat_case<D>(
 {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let left_provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -1442,7 +1442,7 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -1630,7 +1630,7 @@ fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
         return;
     }
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (n, adjoint) in [(3, su_irrep(&[1, 1])), (4, su_irrep(&[1, 0, 1]))] {
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
@@ -1778,7 +1778,7 @@ macro_rules! assert_checked_lazy_adjoint_matches_literal {
 fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     // The toy's F-symbols are the identity on `e == f` and zero otherwise, so
     // most recouplings are unrepresentable and fail identically for the lazy
@@ -1896,7 +1896,7 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
         lazy_close_c64,
         two_sided_ops
     );
-    let two_sided_real = two_sided.re(engine).unwrap();
+    let two_sided_real = two_sided.real(engine).unwrap();
     assert_checked_lazy_adjoint_matches_literal!(
         engine,
         two_sided_real,
@@ -1923,7 +1923,7 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
         lazy_close_c64,
         one_sided_ops
     );
-    let one_sided_real = one_sided.re(engine).unwrap();
+    let one_sided_real = one_sided.real(engine).unwrap();
     let real_succeeded = assert_checked_lazy_adjoint_matches_literal!(
         engine,
         one_sided_real,
@@ -1943,7 +1943,7 @@ fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -2036,7 +2036,7 @@ fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
         ops
     );
     assert_eq!(succeeded, 5);
-    let real = complex.re(engine).unwrap();
+    let real = complex.real(engine).unwrap();
     let succeeded =
         assert_checked_lazy_adjoint_matches_literal!(engine, real, |x: f64| x, lazy_close_f64, ops);
     assert_eq!(succeeded, 5);

@@ -16,7 +16,7 @@ use crate::numerics;
 #[test]
 fn truncated_svd_restores_dropped_sector_in_non_dual_closed_space() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -105,7 +105,7 @@ fn truncated_svd_restores_dropped_sector_in_non_dual_closed_space() {
 #[test]
 fn right_solve_composes_adjoints_around_left_solve_for_real_and_complex_u1() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],

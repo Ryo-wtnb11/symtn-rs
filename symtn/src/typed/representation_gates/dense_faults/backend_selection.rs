@@ -26,7 +26,7 @@ fn compact_diagonal_svd_submits_no_dense_svd() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let counts = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(SpyExecutor::counting(&counts)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_space([(-1, 2), (0, 3), (1, 1)]);
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -71,7 +71,7 @@ fn compact_diagonal_exp_drives_no_dense_kernel() {
     // `V exp(D) V^H`, not a solve.
     let counts = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(SpyExecutor::counting(&counts)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let v = u1_space([(-1, 3), (0, 4), (1, 3)]);
     let t =

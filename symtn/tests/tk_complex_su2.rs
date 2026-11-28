@@ -60,7 +60,7 @@ pub fn source(
 #[test]
 fn complex_su2_structural_invariants_match_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let source = source(engine, &runtime);
     let permuted = source.permute(engine, &[1, 0], &[3, 2]).unwrap();
     let gram = source

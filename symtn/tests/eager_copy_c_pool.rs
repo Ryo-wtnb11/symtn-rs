@@ -40,7 +40,7 @@ fn operands(runtime: &Runtime) -> (Map, Map) {
 fn split_moving_eager_contract_keeps_its_copy_c_temporary_in_the_engine() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (a, b) = operands(&runtime);
     let output_bytes = 13 * 17 * 23 * size_of::<f64>();
     // `r` joins the codomain and `q` moves to the domain: a split move, which

@@ -65,7 +65,6 @@ pub use symtn_core::U1Irrep
 pub use symtn_core::UncertifiedUnitAdmission
 pub use symtn_core::ZNFusionRule
 pub use symtn_core::ZNIrrep
-pub use symtn_core::product_sector
 pub mod symtn_core::axes
 pub enum symtn_core::axes::AxisError
 pub symtn_core::axes::AxisError::Duplicate

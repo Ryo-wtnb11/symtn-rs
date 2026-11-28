@@ -158,8 +158,8 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let dual = v.try_dual().unwrap();
+    let runtime = Runtime::new();
+    let dual = v.dual().unwrap();
     let a =
         TensorMap::<R, D>::from_subblock_fn(engine, &runtime, [v, &dual], [v], fill(11)).unwrap();
     let b =
@@ -204,7 +204,7 @@ where
         + SectorCodec,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let t = TensorMap::<R, f64>::from_subblock_fn(engine, &runtime, [v, v], [v], fill(21)).unwrap();
     let s = t.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
     // A mixed compact + dense sum yields dense storage (as `forced_dense` in
@@ -263,7 +263,7 @@ fn compact_diagonal_arms_match_contract_then_permute() {
 #[test]
 fn non_symmetric_braiding_is_unsupported_for_every_split() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(TableRule::fibonacci()),
         [(TableSector::new(1), 1), (TableSector::new(2), 1)],
@@ -313,7 +313,7 @@ fn checked_generic_split_matches_contract_then_permute() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

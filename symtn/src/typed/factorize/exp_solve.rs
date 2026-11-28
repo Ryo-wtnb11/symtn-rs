@@ -33,7 +33,7 @@ where
         let space = self.logical_space();
         let output = <R::Mode as symtn_matrixalgebra::seam::FactorMode<R>>::authority(space)
             .same_homspace_output(space)
-            .map_err(R::Mode::map_root_error)?;
+            .map_err(|error| R::Mode::map_root_error(EXEC, error))?;
         let local = matches!(&self.repr, TypedTensorRepr::Adjoint(_))
             .then(|| self.materialized_tensor_uncached(engine))
             .transpose()?;

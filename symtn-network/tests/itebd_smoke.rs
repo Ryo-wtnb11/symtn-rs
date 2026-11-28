@@ -141,7 +141,7 @@ fn bond_energy(
 
 /// Runs the schedule from a Neel state; returns the energy per bond.
 fn run_itebd(engine: &mut dyn Engine, chi: usize, schedule: &[(f64, usize)]) -> f64 {
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(U1FusionRule);
     let p = space(&rule, [(1, 1), (-1, 1)]);
     let h = heisenberg_two_site(engine, &rt, &p);
@@ -183,7 +183,7 @@ fn run_itebd(engine: &mut dyn Engine, chi: usize, schedule: &[(f64, usize)]) -> 
 #[test]
 fn neel_product_state_contracts_with_the_full_gate() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(U1FusionRule);
     let p = space(&rule, [(1, 1), (-1, 1)]);
     let h = heisenberg_two_site(engine, &rt, &p);

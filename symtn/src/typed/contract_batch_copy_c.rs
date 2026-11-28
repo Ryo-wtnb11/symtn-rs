@@ -73,7 +73,7 @@ mod tests {
         let cpu = &mut crate::typed::CpuEngine::serial();
         let cuda = &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0))
             .unwrap();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = GradedSpace::try_new(
             Arc::new(U1FusionRule),
             [
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn labeled_copy_c_routes_are_admitted_at_every_payload_precision() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         macro_rules! cases {
             ($v:expr, $c:expr, $dtype:ty) => {{
                 let v = $v;
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn su2_copy_c_orientations_are_unconjugated_scaled_single_tasks() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = GradedSpace::try_new(
             Arc::new(su2_rule()),
             [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],
@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn copy_c_core_and_transform_primitives_submit_member_expanded_batches() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = GradedSpace::try_new(
             Arc::new(su2_rule()),
             [(su2_irrep(0), 2), (su2_irrep(1), 2), (su2_irrep(2), 1)],

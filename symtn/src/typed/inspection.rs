@@ -31,7 +31,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
     ///     [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
@@ -234,7 +234,7 @@ where
     /// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
     /// assert_eq!(t.dense_data()?.len(), 4);
@@ -357,8 +357,11 @@ where
         let mut encoded = Vec::with_capacity(spectra.len());
         for entry in &spectra {
             encoded.push(
-                TypedSectorAdmission::try_encode_label(bond.provider(), &entry.sector)
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?,
+                TypedSectorAdmission::try_encode_label(bond.provider(), &entry.sector).map_err(
+                    |error| {
+                        <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                    },
+                )?,
             );
         }
         let mut by_id: Vec<_> = encoded.iter().enumerate().collect();
@@ -410,6 +413,7 @@ where
             FusionProductSpace::new([bond.leg().clone()]),
         );
         let space = <R::Mode as TypedTensorConstructionDispatch<R, D>>::build_construction_root(
+            EXEC,
             Arc::clone(bond.provider_arc()),
             homspace,
         )?;
@@ -549,7 +553,9 @@ where
                         self.logical_space().provider(),
                         entry.sector,
                     )
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?,
+                    .map_err(|error| {
+                        <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                    })?,
                     values: entry.values,
                 })
             })
@@ -579,7 +585,11 @@ where
                                 self.logical_space().provider(),
                                 entry.sector,
                             )
-                            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?,
+                            .map_err(|error| {
+                                <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(
+                                    EXEC, error,
+                                )
+                            })?,
                             values: entry.values.clone(),
                         })
                     })
@@ -751,8 +761,9 @@ where
     /// Returns the provider's error when it cannot encode `coupled`.
     pub fn block(&self, coupled: &R::Sector) -> Result<CoupledBlock<'_, R, D, S>, FacadeError<R>> {
         let provider = self.logical_space().provider();
-        let id = TypedSectorAdmission::try_encode_label(provider, coupled)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+        let id = TypedSectorAdmission::try_encode_label(provider, coupled).map_err(|error| {
+            <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+        })?;
         let regions = self.stored_sector_regions()?;
         match regions.binary_search_by_key(&id, CoupledSectorRegion::coupled) {
             Ok(index) => self
@@ -761,11 +772,13 @@ where
             Err(_) => {
                 let homspace = self.logical_space().space().homspace();
                 let rows = <R::Mode as TypedTensorModeDispatch<R>>::coupled_block_dimension(
+                    EXEC,
                     provider,
                     homspace.codomain(),
                     id,
                 )?;
                 let cols = <R::Mode as TypedTensorModeDispatch<R>>::coupled_block_dimension(
+                    EXEC,
                     provider,
                     homspace.domain(),
                     id,
@@ -823,7 +836,9 @@ where
             .map(|index| {
                 let sector =
                     TypedSectorAdmission::try_decode_label(provider, regions[index].coupled())
-                        .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+                        .map_err(|error| {
+                            <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                        })?;
                 let block = self
                     .coupled_block(Arc::clone(&regions), index)
                     .map_err(FacadeError::<R>::from)?;

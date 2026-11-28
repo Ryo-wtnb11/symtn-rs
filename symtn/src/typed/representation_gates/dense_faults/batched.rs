@@ -69,7 +69,7 @@ fn faulty_runtime(kernels: &'static [Kernel]) -> (Runtime, Arc<SpyCounts>, probe
     let counts = Arc::new(SpyCounts::default());
     let spy = SpyExecutor::counting(&counts).failing(kernels, Some(1), "injected backend fault");
     let dense = probe::inject_dense(Box::new(spy));
-    (Runtime::builder().build().unwrap(), counts, dense)
+    (Runtime::new(), counts, dense)
 }
 
 fn assert_members(label: &str, stack: &StackedTensorMap<U1FusionRule, f64>, expected: &[Vec<f64>]) {
@@ -102,7 +102,7 @@ fn an_executor_numerical_failure_is_not_a_member_fault() {
         "injected numerical fault",
     );
     let _dense = probe::inject_dense(Box::new(spy));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let stack = StackedTensorMap::pack(&hermitian_members(&runtime, &[&v], COUNT, 7)).unwrap();
     let plan = EighFullPlan::new(engine, &stack, &[0], &[1], HermitianTol::DEFAULT).unwrap();
     let mut workspace = plan.workspace().unwrap();
@@ -122,7 +122,7 @@ fn an_executor_numerical_failure_is_not_a_member_fault() {
 fn eigh_failures_leave_no_output_and_the_next_call_recovers() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let (v, _) = u1_legs();
-    let oracle_runtime = Runtime::builder().build().unwrap();
+    let oracle_runtime = Runtime::new();
     let expected: Vec<_> = hermitian_members(&oracle_runtime, &[&v], COUNT, 7)
         .iter()
         .map(|input| {

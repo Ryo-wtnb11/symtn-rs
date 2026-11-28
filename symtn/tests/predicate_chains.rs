@@ -178,7 +178,7 @@ fn su2_leg() -> GradedSpace<Su2Rule> {
 #[test]
 fn u1_chains_decide_constructed_cases_and_project_by_formula() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     check_family!(engine, &rt, u1_leg(), f64, 1e-10, fill);
     check_family!(engine, &rt, u1_leg(), Complex64, 1e-10, |ij: &[usize]| {
         Complex64::new(fill(ij), fill(&[ij[0] + 1, ij[1]]))
@@ -188,7 +188,7 @@ fn u1_chains_decide_constructed_cases_and_project_by_formula() {
 #[test]
 fn su2_chains_decide_constructed_cases_and_project_by_formula() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     check_family!(engine, &rt, su2_leg(), f64, 1e-10, fill);
     check_family!(engine, &rt, su2_leg(), Complex32, 1e-4, |ij: &[usize]| {
         Complex32::new(fill(ij) as f32, fill(&[ij[0] + 1, ij[1]]) as f32)
@@ -208,7 +208,7 @@ fn checked_generic_su3_chains_decide_true_and_false_cases() {
 
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

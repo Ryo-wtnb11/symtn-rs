@@ -52,6 +52,12 @@ scripts/api-snapshot.sh --check   # what CI runs (lint job)
 Commit the regenerated files in the same change as the code. A pull request
 that changes the public API without updating `api/` fails the `lint` job.
 
+Both modes also check that every type named by a public `symtn` signature, or
+by the declaration or a public member of a type `symtn` re-exports, is itself
+exported by `symtn` (the sealing items audited in the script are exempt), so no caller needs an internal crate to name a returned value or
+match an error. Names that already violate this are listed in the script;
+the list may only shrink.
+
 The tool needs `cargo-public-api` 0.52.0 and the nightly pinned in the script
 (`nightly-2026-09-19`), for rustdoc JSON; CI installs both. If a nightly update
 changes the rendering without an API change, re-pin the script and CI together

@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn_core::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 
 use super::probe::{self, Event};
@@ -22,7 +22,7 @@ use crate::error::{Alternative, Error};
 use crate::runtime::Runtime;
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// Runs `f` and returns its value with the number of entries into adjoint
@@ -287,7 +287,7 @@ const CX: (Complex64, Complex64) = (Complex64::new(0.5, 0.25), Complex64::new(-1
 fn u1_view_matches_owned_lazy_adjoint() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let v = || u1(&[(-1, 2), (0, 1), (1, 3)]);
-    let w = || u1(&[(0, 2), (1, 1)]).try_dual().unwrap();
+    let w = || u1(&[(0, 2), (1, 1)]).dual().unwrap();
     mf_case!(engine, v(), w(), f64, RE.0, RE.1, "U1 f64");
     mf_case!(engine, v(), w(), Complex64, CX.0, CX.1, "U1 c64");
 }
@@ -319,13 +319,13 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
                 } else {
                     FermionParityIrrep::EVEN
                 };
-                (product_sector(parity, U1Irrep::new(q).unwrap()), d)
+                (ProductSector::new(parity, U1Irrep::new(q).unwrap()), d)
             }),
         )
         .unwrap()
     };
     let v = || leg(&[(false, 0, 2), (true, 1, 1), (true, -1, 2), (false, 2, 1)]);
-    let w = || leg(&[(true, 1, 2), (false, 0, 1)]).try_dual().unwrap();
+    let w = || leg(&[(true, 1, 2), (false, 0, 1)]).dual().unwrap();
     mf_case!(engine, v(), w(), f64, RE.0, RE.1, "fZ2xU1 f64");
     mf_case!(engine, v(), w(), Complex64, CX.0, CX.1, "fZ2xU1 c64");
 }
@@ -442,7 +442,7 @@ mod cuda {
                 &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0))
                     .unwrap();
             let what = $what;
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let (v, w) = ($v, $w);
             let mut host = |seed| {
                 TensorMap::<_, $dtype>::rand_with_seed(&mut *cpu, &runtime, [&v], [&v, &w], seed)
@@ -581,7 +581,7 @@ mod cuda {
     #[ignore = "requires a real CUDA device"]
     fn cuda_view_matches_owned_lazy_adjoint() {
         let v = || u1(&[(-1, 2), (0, 1), (1, 3)]);
-        let w = || u1(&[(0, 2), (1, 1)]).try_dual().unwrap();
+        let w = || u1(&[(0, 2), (1, 1)]).dual().unwrap();
         cuda_case!(v(), w(), f64, RE.0, RE.1, "CUDA U1 f64");
         cuda_case!(v(), w(), Complex64, CX.0, CX.1, "CUDA U1 c64");
         let v = || su2(&[(0, 2), (1, 1), (2, 2)]);
@@ -603,13 +603,13 @@ mod cuda {
                     } else {
                         FermionParityIrrep::EVEN
                     };
-                    (product_sector(parity, U1Irrep::new(q).unwrap()), d)
+                    (ProductSector::new(parity, U1Irrep::new(q).unwrap()), d)
                 }),
             )
             .unwrap()
         };
         let v = || leg(&[(false, 0, 2), (true, 1, 1), (true, -1, 2), (false, 2, 1)]);
-        let w = || leg(&[(true, 1, 2), (false, 0, 1)]).try_dual().unwrap();
+        let w = || leg(&[(true, 1, 2), (false, 0, 1)]).dual().unwrap();
         cuda_case!(v(), w(), f64, RE.0, RE.1, "CUDA fZ2xU1 f64");
         cuda_case!(v(), w(), Complex64, CX.0, CX.1, "CUDA fZ2xU1 c64");
     }

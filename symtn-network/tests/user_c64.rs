@@ -33,7 +33,7 @@ where
         + Send,
 {
     let l = p.clone();
-    let r = p.try_dual().unwrap();
+    let r = p.dual().unwrap();
     let psi =
         TensorMap::<R, Complex64>::rand_with_seed(engine, runtime, [p], [&l, &r], 71).unwrap();
     let h0 = TensorMap::<R, Complex64>::rand_with_seed(engine, runtime, [p], [p], 72).unwrap();
@@ -78,7 +78,7 @@ where
 #[test]
 fn network_conj_expectation_value_is_real() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [

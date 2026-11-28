@@ -227,7 +227,7 @@ fn eager_routes<D: DevicePayload>(
     cuda: &mut dyn symtn::typed::Engine,
     engine: &mut dyn symtn::typed::Engine,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_non_self_dual();
     for (case, _) in candidate_core_probes::<_, D>(engine, &runtime, &v) {
         eager(engine, cuda, &runtime, &case, "core");
@@ -445,7 +445,7 @@ fn member_routes<D: DevicePayload>(
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let [_, identity_output, output_transform] = u1_inactive_cases::<D>(engine, &runtime);
     members(engine, cuda, "member", &identity_output);
     // `ContractPlan` resolves this geometry to CopyC (an output transform
@@ -482,7 +482,7 @@ fn signed_cases<D: DevicePayload>(
     runtime: &Runtime,
 ) -> [Case<FermionU1, D>; 4] {
     let v = fermion_u1();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let map = |engine: &mut dyn symtn::typed::Engine,
                codomain: &GradedSpace<FermionU1>,
                domain: &GradedSpace<FermionU1>,
@@ -514,7 +514,7 @@ fn direct_member_routes<D: DevicePayload>(
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_non_self_dual();
     for (case, _) in candidate_core_probes::<_, D>(engine, &runtime, &v) {
         if matches!(case.name, "C0" | "C1" | "C2") {

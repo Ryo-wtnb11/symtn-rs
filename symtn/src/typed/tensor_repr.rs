@@ -137,7 +137,7 @@ impl<R, D, S> TypedAdjointView<R, D, S> {
 /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
 ///
 /// let engine = &mut symtn::typed::CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
 /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
 /// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 2)?;
@@ -1087,7 +1087,7 @@ impl<R, D: Copy> TypedTensorBody<R, D> {
 /// Sealed: the pairs above are the whole contract.
 pub trait PayloadConversion<To>: Copy + typed_payload_conversion_private::Sealed<To> {
     #[doc(hidden)]
-    fn convert_value(self) -> To;
+    fn convert_value(self, _: ExecToken) -> To;
 }
 
 mod typed_payload_conversion_private {
@@ -1098,7 +1098,7 @@ macro_rules! payload_conversion {
     ($($from:ty => $to:ty, |$value:ident| $body:expr;)*) => {$(
         impl typed_payload_conversion_private::Sealed<$to> for $from {}
         impl PayloadConversion<$to> for $from {
-            fn convert_value(self) -> $to {
+            fn convert_value(self, _: ExecToken) -> $to {
                 let $value = self;
                 $body
             }
@@ -1141,7 +1141,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
     ///     [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
@@ -1152,8 +1152,8 @@ where
     ///
     /// let widened = double.convert::<Complex64>(engine)?;
     /// // The real part round-trips exactly; the imaginary part is zero.
-    /// assert_eq!(widened.re(engine)?.dense_data()?, double.dense_data()?);
-    /// assert_eq!(widened.im(engine)?.norm(engine, 2.0)?, 0.0);
+    /// assert_eq!(widened.real(engine)?.dense_data()?, double.dense_data()?);
+    /// assert_eq!(widened.imag(engine)?.norm(engine, 2.0)?, 0.0);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -1225,6 +1225,6 @@ where
     where
         D: PayloadConversion<To>,
     {
-        self.convert_payload(engine, PayloadConversion::convert_value)
+        self.convert_payload(engine, |value| value.convert_value(EXEC))
     }
 }

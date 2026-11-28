@@ -16,7 +16,7 @@
 //! Each `filter` must equal one field of `symmetry,dtype,case,op` for a row
 //! to run (`U1 c64 qr_compact`). `LEDGER_THREADS` selects the thread layout:
 //!
-//! - `one` (default): `Runtime::builder()`, a runtime CPU
+//! - `one` (default): `Runtime::new()`, a runtime CPU
 //!   pool of one worker for all of its Host work;
 //! - `default`: no thread configuration at all (the pool uses the process's
 //!   available parallelism).
@@ -374,12 +374,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Serial: these rows time per-call overhead and single-thread kernels.
     let engine = &mut symtn::typed::CpuEngine::serial();
     let threads = std::env::var("LEDGER_THREADS").unwrap_or_else(|_| "one".to_string());
-    let builder = match threads.as_str() {
-        "one" => Runtime::builder(),
-        "default" => Runtime::builder(),
+    match threads.as_str() {
+        "one" | "default" => {}
         other => return Err(format!("unknown LEDGER_THREADS={other}").into()),
-    };
-    let runtime = builder.build()?;
+    }
+    let runtime = Runtime::new();
     let filters: Vec<String> = std::env::args()
         .skip(1)
         .filter(|arg| arg != "--bench")

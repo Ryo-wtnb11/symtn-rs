@@ -12,7 +12,7 @@ fn assert_sun_checked_generic_inverse_outer_multiplicity<D>(
 {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -87,7 +87,7 @@ fn checked_generic_inv_sun_outer_multiplicity_satisfies_inverse_laws() {
 fn assert_sun_checked_generic_left_solve(engine: &mut dyn Engine, n: usize, label: LieIrrep) {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -248,7 +248,7 @@ fn sun_checked_generic_inv_preflight_counts_outer_multiplicity() {
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -325,7 +325,7 @@ fn assert_sun_checked_generic_exp_outer_multiplicity(
 ) {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -457,12 +457,12 @@ fn checked_generic_exp_sun_outer_multiplicity_preserves_layout() {
 fn checked_generic_inv_isomorphism_preflight_failure_is_typed_and_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     // Unequal sides, so the isomorphism is a provider question: equal sides
     // are isomorphic without one.
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&dual], |_, _| 2.0).unwrap();
     let before = source.dense_data().unwrap().to_vec();
@@ -480,7 +480,7 @@ fn checked_generic_inv_isomorphism_preflight_failure_is_typed_and_nonpublishing(
 fn checked_generic_inv_destination_admission_failure_is_typed_and_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -503,7 +503,7 @@ fn checked_generic_inv_destination_admission_failure_is_typed_and_nonpublishing(
 fn checked_generic_left_solve_accepts_distinct_provider_arcs_and_rectangular_rhs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let lhs_provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let rhs_provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let lhs_codomain = GradedSpace::try_new(Arc::clone(&lhs_provider), [(Label::X, 2)]).unwrap();
@@ -577,7 +577,7 @@ fn checked_generic_left_solve_accepts_distinct_provider_arcs_and_rectangular_rhs
 fn checked_generic_left_solve_preflight_failures_are_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let narrow = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
@@ -591,7 +591,7 @@ fn checked_generic_left_solve_preflight_failures_are_nonpublishing() {
     );
     assert_eq!(lhs.dense_data().unwrap(), before.as_slice());
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let runtime_rhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &other_runtime, [&x], [&x], |_, _| 1.0).unwrap();
     reset_provider_queries(&provider);
@@ -635,7 +635,7 @@ fn checked_generic_left_solve_preflight_failures_are_nonpublishing() {
 fn checked_generic_left_solve_singular_sectors_are_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 1)]).unwrap();
@@ -660,7 +660,7 @@ fn checked_generic_left_solve_covers_all_lazy_input_pairs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let divisor: TensorMap<_, f64> =
@@ -728,7 +728,7 @@ fn sun_checked_generic_map_diagonal_keeps_svd_bond_and_principal_branch() {
     // Checked compact SVD publishes `s` as a compact diagonal on its bond.
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for n in [3, 4] {
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(

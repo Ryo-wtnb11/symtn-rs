@@ -34,7 +34,7 @@ fn pair(
 #[test]
 fn typed_static_cache_preserves_hit_clear_and_workspace_stats() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let space = space(provider, 3);
     let (a, b) = pair(engine, &runtime, &space, 10);
@@ -71,7 +71,7 @@ fn typed_static_cache_preserves_hit_clear_and_workspace_stats() {
 #[test]
 fn parked_host_workspace_releases_provider_and_rebinds_exact_current_arc() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let first_provider = Arc::new(U1FusionRule);
     let first_weak = Arc::downgrade(&first_provider);
     let first_space = space(Arc::clone(&first_provider), 2);
@@ -97,7 +97,7 @@ fn parked_host_workspace_releases_provider_and_rebinds_exact_current_arc() {
 #[test]
 fn dimension_drift_replans_into_the_same_cache_entry() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -127,7 +127,7 @@ fn dimension_drift_replans_into_the_same_cache_entry() {
 #[test]
 fn disabled_cache_keeps_entries_and_counters_empty() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -150,7 +150,7 @@ fn disabled_cache_keeps_entries_and_counters_empty() {
 #[test]
 fn lru_hit_touches_entry_before_capacity_eviction() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -200,7 +200,7 @@ fn lru_hit_touches_entry_before_capacity_eviction() {
 #[test]
 fn clear_plan_cache_drops_persisted_orders_and_turns_persistence_off() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let first = Runtime::builder().build().unwrap();
+    let first = Runtime::new();
     assert_eq!(load_plan_cache(&first, ""), 0);
     let first_space = space(Arc::new(U1FusionRule), 2);
     let (a, b) = pair(engine, &first, &first_space, 82);
@@ -211,7 +211,7 @@ fn clear_plan_cache_drops_persisted_orders_and_turns_persistence_off() {
     );
     let saved = save_plan_cache(&first);
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_eq!(load_plan_cache(&runtime, &saved), 1);
     assert_eq!(plan_cache_stats(&runtime).persisted_orders, 1);
     clear_plan_cache(&runtime);
@@ -234,7 +234,7 @@ fn clear_plan_cache_drops_persisted_orders_and_turns_persistence_off() {
 #[test]
 fn persisted_orders_are_bounded_by_the_plan_cache_capacity() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -265,7 +265,7 @@ fn persisted_orders_are_bounded_by_the_plan_cache_capacity() {
     assert_eq!(saved.matches("TOPO ").count(), 2);
 
     // A loaded file larger than the bound keeps only the bound.
-    let fresh = Runtime::builder().build().unwrap();
+    let fresh = Runtime::new();
     configure_plan_cache(
         &fresh,
         PlanCacheConfig {
@@ -280,7 +280,7 @@ fn persisted_orders_are_bounded_by_the_plan_cache_capacity() {
 #[test]
 fn concurrent_cached_calls_share_one_plan_and_bound_idle_pool() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = space(Arc::new(U1FusionRule), 8);
     let (a, b) = pair(engine, &runtime, &space, 90);
     let expected = a
@@ -336,8 +336,8 @@ fn concurrent_cached_calls_share_one_plan_and_bound_idle_pool() {
 #[test]
 fn a_metadata_rejection_leases_no_workspace_and_the_next_call_reuses_the_idle_one() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other = Runtime::new();
     let local_space = space(Arc::new(U1FusionRule), 2);
     let other_space = space(Arc::new(U1FusionRule), 2);
     let (a, b) = pair(engine, &runtime, &local_space, 100);
@@ -369,7 +369,7 @@ fn a_metadata_rejection_leases_no_workspace_and_the_next_call_reuses_the_idle_on
 #[test]
 fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = space(Arc::new(U1FusionRule), 8);
     let (a, b) = pair(engine, &runtime, &space, 130);
     let (c, _) = pair(engine, &runtime, &space, 132);
@@ -459,7 +459,7 @@ fn workspace_budget_admits_or_rejects_the_complete_idle_workspace() {
 #[test]
 fn configuration_flushes_and_capacity_shrink_release_synchronously() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -563,7 +563,7 @@ fn configuration_flushes_and_capacity_shrink_release_synchronously() {
 #[test]
 fn enabled_reconfiguration_retains_plans_and_workspaces() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = space(Arc::new(U1FusionRule), 3);
     let (a, b) = pair(engine, &runtime, &space, 150);
     let cold = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
@@ -618,7 +618,7 @@ fn a_foreign_extension_value_coexists_with_the_plan_cache() {
     // type"). Each type has its own entry: the plan cache works and the
     // foreign value is neither read as a cache nor dropped.
     use symtn::typed::__network::with_extension_slot;
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     with_extension_slot(&runtime, |slot| {
         slot.get_or_insert_with(|| 7u8);
     });
@@ -642,7 +642,7 @@ fn a_foreign_extension_value_coexists_with_the_plan_cache() {
 #[test]
 fn dropping_warm_runtime_breaks_the_cache_workspace_cycle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let identity = symtn::typed::__network::runtime_identity(&runtime);
     let space = space(Arc::new(U1FusionRule), 2);
     let (a, b) = pair(engine, &runtime, &space, 120);
@@ -660,7 +660,7 @@ fn output_order_and_split_key_separate_cached_step_specs() {
     // ContractSpec, so that spec is part of the cached plan. Networks that
     // differ only in output order or split must neither share an entry nor
     // replay each other's spec.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let (p, q, c, r) = (
         space(Arc::clone(&provider), 2),

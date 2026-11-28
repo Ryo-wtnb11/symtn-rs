@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use crate::typed::GradedSpace;
 #[cfg(feature = "cuda")]
@@ -56,7 +56,7 @@ fn composition_resolves_to_the_unswapped_unit_core() {
     // `signed_direct_can_leave_inactive_destination_blocks`, the composition
     // is the unit core while the contraction over the same legs is the
     // signed one: the kind, not the axes, decides the twist.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 1).unwrap();
     let rhs = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 2).unwrap();
@@ -75,13 +75,13 @@ fn composition_resolves_to_the_unswapped_unit_core() {
         )
         .unwrap(),
     );
-    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
-    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
+    let even = |charge| ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+    let odd = |charge| ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
     let v =
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 2), (odd(-1), 1)]).unwrap();
     let wd = GradedSpace::try_new(rule, [(even(0), 2), (odd(1), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let lhs =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&wd], |_, _| 1.0).unwrap();
@@ -116,7 +116,7 @@ fn corrupted_stack_errors_are_typed() {
     // What: a stack whose payload disagrees with its structure (reachable
     // only through these private fields) is rejected with a typed error, and
     // a destination likewise.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
@@ -329,7 +329,7 @@ fn regions_match_hand_derivation<R>(
 #[cfg(feature = "cuda")]
 #[test]
 fn cuda_zero_regions_match_the_hand_derivation() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     regions_match_hand_derivation(&runtime, "U1", u1_legs());
     regions_match_hand_derivation(&runtime, "SU2", su2_legs());
     let rule = Arc::new(
@@ -339,8 +339,8 @@ fn cuda_zero_regions_match_the_hand_derivation() {
         )
         .unwrap(),
     );
-    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
-    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
+    let even = |charge| ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+    let odd = |charge| ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
     let fz2u1 = (
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 1), (odd(-1), 2)]).unwrap(),
         GradedSpace::try_new(rule, [(even(0), 1), (odd(1), 2)]).unwrap(),

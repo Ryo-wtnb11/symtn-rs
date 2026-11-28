@@ -39,7 +39,7 @@ where
             FusionProductSpace::new(domain.iter().map(|leg| leg.leg().clone())),
         );
         <R::Mode as TypedTensorConstructionDispatch<R, D>>::build_construction_root(
-            provider, homspace,
+            EXEC, provider, homspace,
         )
     }
 
@@ -93,7 +93,7 @@ where
     /// use std::sync::Arc;
     /// use symtn::sector::{TableRule, TableSector};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
-    /// let runtime = Runtime::builder().build().unwrap();
+    /// let runtime = Runtime::new();
     /// # let engine = &mut symtn::typed::CpuEngine::serial();
     /// let tau = GradedSpace::try_new(
     ///     Arc::new(TableRule::fibonacci()),
@@ -290,7 +290,7 @@ where
         for leg in rest {
             let pairs: Vec<(symtn_core::SectorId, usize)> = leg.leg().iter().collect();
             fused = <R::Mode as TypedTensorModeDispatch<R>>::fuse_sector_content(
-                provider, &fused, &pairs,
+                EXEC, provider, &fused, &pairs,
             )?;
         }
         Ok(fused)
@@ -349,14 +349,14 @@ where
         // TensorKit's tree order.
         write_identity_blocks_generic(&mut tensor, |sector, dual| {
             let sector = if dual {
-                provider
-                    .try_dual_id(sector)
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?
+                provider.try_dual_id(sector).map_err(|error| {
+                    <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                })?
             } else {
                 sector
             };
             Ok::<_, FacadeError<R>>(<R::Mode as TypedTensorModeDispatch<R>>::sector_order_key(
-                &provider, sector,
+                EXEC, &provider, sector,
             ))
         })?;
         Ok(tensor)

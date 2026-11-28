@@ -27,7 +27,7 @@ fn leg(rule: &Arc<U1FusionRule>, degeneracy: usize) -> GradedSpace<U1FusionRule>
 fn typed_otimes_allocates_one_output_payload_and_no_dense_kron_temporary() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(U1FusionRule);
     let lhs_codomain = leg(&rule, 24);
     let lhs_domain = leg(&rule, 20);

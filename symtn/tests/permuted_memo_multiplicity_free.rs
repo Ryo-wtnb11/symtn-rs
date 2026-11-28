@@ -20,7 +20,7 @@ fn sector_lookups() -> u64 {
 macro_rules! assert_memoized {
     ($engine:ident, $label:literal, $runtime:expr, $leg:expr) => {{
         let (label, runtime, leg) = ($label, $runtime, $leg);
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         // Dual legs on both sides; each permutation also moves the
         // codomain/domain split.
         let splits: [(&[usize], &[usize]); 2] = [(&[1, 2], &[3, 0, 4]), (&[4, 0, 3, 1], &[2])];
@@ -74,7 +74,7 @@ macro_rules! assert_memoized {
 fn warm_multiplicity_free_permute_reuses_the_memoized_destination() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         (-1..=1).map(|q| (U1Irrep::new(q).unwrap(), 2)),

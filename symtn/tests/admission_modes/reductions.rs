@@ -21,7 +21,7 @@ in_both_modes! {
     /// TensorKit's domain is an invalid argument. Oracle: hand sums.
     fn inner_tr_and_norm_are_dimension_weighted<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
             .unwrap();
@@ -82,7 +82,7 @@ in_both_modes! {
     /// propagate, also for `axpby_into` and `scale_assign`.
     fn axpby_and_scale_are_entrywise_and_drop_zero_scaled_operands<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
             .unwrap();
@@ -161,8 +161,8 @@ in_both_modes! {
     /// and leaves the receiver's payload and trees untouched.
     fn binary_reductions_reject_runtime_then_space_and_tr_needs_an_endomorphism<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
-        let foreign_runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
+        let foreign_runtime = Runtime::new();
         let provider = M::provider();
         let narrow = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 1)]).unwrap();
         let wide = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 2)]).unwrap();
@@ -215,7 +215,7 @@ in_both_modes! {
     /// conjugates the trace.
     fn adjoint_swaps_spaces_conjugates_and_keeps_reductions<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
             .unwrap();

@@ -8,7 +8,7 @@ use crate::legs::{su2_leg, u1_leg};
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Eigh, GradedSpace, HermitianTol, OperationError, Qr, Runtime, Svd};
 
@@ -117,9 +117,9 @@ on_each_engine! {
     fn leg_roles_equal_the_permute_composition<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
-        let u1 = || (u1_leg(&[(-1, 1), (0, 2), (1, 2)]), u1_leg(&[(0, 1), (1, 2), (2, 1)]).try_dual().unwrap());
-        let su2 = || (su2_leg(&[(0, 2), (1, 2), (2, 1)]), su2_leg(&[(1, 1), (2, 2)]).try_dual().unwrap());
+        let runtime = Runtime::new();
+        let u1 = || (u1_leg(&[(-1, 1), (0, 2), (1, 2)]), u1_leg(&[(0, 1), (1, 2), (2, 1)]).dual().unwrap());
+        let su2 = || (su2_leg(&[(0, 2), (1, 2), (2, 1)]), su2_leg(&[(1, 1), (2, 2)]).dual().unwrap());
         let rule = Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap(),
@@ -129,7 +129,7 @@ on_each_engine! {
                 Arc::clone(&rule),
                 sectors.iter().map(|&(odd, q, n)| {
                     let parity = if odd { FermionParityIrrep::ODD } else { FermionParityIrrep::EVEN };
-                    (product_sector(parity, U1Irrep::new(q).unwrap()), n)
+                    (ProductSector::new(parity, U1Irrep::new(q).unwrap()), n)
                 }),
             )
             .unwrap()
@@ -137,7 +137,7 @@ on_each_engine! {
         let fermionic = || {
             (
                 fz2u1(&[(false, 0, 2), (true, 1, 2), (true, -1, 1)]),
-                fz2u1(&[(false, 1, 1), (true, 0, 2)]).try_dual().unwrap(),
+                fz2u1(&[(false, 1, 1), (true, 0, 2)]).dual().unwrap(),
             )
         };
         let (v, w) = u1();

@@ -227,7 +227,7 @@ fn checked_construction_failure_publishes_no_cache_state() {
         healthy,
         [(Z3Charge(0), 2), (Z3Charge(2), 3), (Z3Charge(1), 1)],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let runtime = runtime();
     let before = (
@@ -294,7 +294,7 @@ fn tensor_map_inspection_round_trips_the_spaces_and_blocks() {
     // view consistent with the buffer.
     let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let runtime = runtime();
 
     let tensor: TensorMap<ExternalZ3Rule, f64> =
@@ -432,12 +432,9 @@ fn subblock_fusion_trees_reports_a_non_self_dual_domain_label() {
     // A dual constructor interprets its key through the orientation, so key
     // charge 1 is stored and reported as the external charge 2.
     let domain = GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(1), 1)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
-    assert_eq!(
-        domain.try_dual().unwrap().sectors().unwrap(),
-        vec![Z3Charge(1)]
-    );
+    assert_eq!(domain.dual().unwrap().sectors().unwrap(), vec![Z3Charge(1)]);
     let runtime = runtime();
 
     let tensor: TensorMap<ExternalZ3Rule, f64> =
@@ -563,7 +560,7 @@ fn rand_and_isomorphism_build_on_an_external_provider() {
     let runtime = runtime();
     let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
 
     let random: TensorMap<ExternalZ3Rule, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 0x9E37_79B9_7F4A_7C15).unwrap();
@@ -652,7 +649,7 @@ fn typed_isomorphism_is_unitary_on_the_norm_fuser_shape() {
         ],
     )
     .unwrap();
-    let typed_dual = typed_v.try_dual().unwrap();
+    let typed_dual = typed_v.dual().unwrap();
     // fuse(dual(v) ⊗ v) by hand: charges -1, 0 (twice), 1.
     let typed_fused = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -691,7 +688,7 @@ fn typed_c64_unitary_satisfies_the_identity_law() {
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let leg = fz2_typed_leg();
-    let leg_dual = leg.try_dual().unwrap();
+    let leg_dual = leg.dual().unwrap();
     let typed: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
         TensorMap::isomorphism(engine, &runtime, [&leg, &leg_dual], [&leg_dual, &leg]).unwrap();
     let identity: TensorMap<symtn::sector::FermionParityFusionRule, Complex64> =
@@ -848,8 +845,10 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
     let runtime = runtime();
     let complex_typed = z2_complex_tensor(&runtime);
 
-    let real_part: TensorMap<symtn::sector::ZNFusionRule, f64> = complex_typed.re(engine).unwrap();
-    let imag_part: TensorMap<symtn::sector::ZNFusionRule, f64> = complex_typed.im(engine).unwrap();
+    let real_part: TensorMap<symtn::sector::ZNFusionRule, f64> =
+        complex_typed.real(engine).unwrap();
+    let imag_part: TensorMap<symtn::sector::ZNFusionRule, f64> =
+        complex_typed.imag(engine).unwrap();
     let operand = Complex64::new(0.0, 1.0);
     let imag_part_c64 = imag_part.convert::<Complex64>(engine).unwrap();
     let rebuilt: TensorMap<symtn::sector::ZNFusionRule, Complex64> = real_part
@@ -866,7 +865,7 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
     let round_trip: TensorMap<symtn::sector::ZNFusionRule, f64> = real_typed
         .convert::<Complex64>(engine)
         .unwrap()
-        .re(engine)
+        .real(engine)
         .unwrap();
     assert_eq!(
         round_trip.dense_data().unwrap(),
@@ -875,7 +874,7 @@ fn typed_re_im_reconstruct_the_complex_tensor_byte_exactly() {
     let vanished: TensorMap<symtn::sector::ZNFusionRule, f64> = real_typed
         .convert::<Complex64>(engine)
         .unwrap()
-        .im(engine)
+        .imag(engine)
         .unwrap();
     assert_eq!(
         vanished.dense_data().unwrap(),
@@ -895,8 +894,8 @@ fn typed_re_im_keep_a_compact_spectrum_on_its_bond_space() {
     let s: TensorMap<symtn::sector::ZNFusionRule, Complex64> =
         complex_typed.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
 
-    let real_part: TensorMap<symtn::sector::ZNFusionRule, f64> = s.re(engine).unwrap();
-    let imag_part: TensorMap<symtn::sector::ZNFusionRule, f64> = s.im(engine).unwrap();
+    let real_part: TensorMap<symtn::sector::ZNFusionRule, f64> = s.real(engine).unwrap();
+    let imag_part: TensorMap<symtn::sector::ZNFusionRule, f64> = s.imag(engine).unwrap();
     assert_same_legs(&real_part.codomain(), &s.codomain());
     let operand = Complex64::new(0.0, 1.0);
     let imag_part_c64 = imag_part.convert::<Complex64>(engine).unwrap();
@@ -943,7 +942,7 @@ fn tensor_map_zeros_builds_a_multi_block_checked_layout() {
     // checked path and returns a zero buffer of exactly the layout's length.
     let provider = Arc::new(external_z3());
     let leg = z3_leg(&provider, false);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let runtime = runtime();
 
     let tensor: TensorMap<ExternalZ3Rule, f64> =

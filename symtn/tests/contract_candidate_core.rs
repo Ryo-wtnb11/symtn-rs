@@ -103,7 +103,7 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let probes = probes::<R, f64>(engine, &runtime, v);
     let measured: Vec<_> = probes
         .iter()
@@ -141,7 +141,7 @@ fn zero_copy_candidates_run_no_transform_and_allocate_like_literal_core() {
 }
 
 fn bosonic_values<D: Payload>(engine: &mut dyn Engine) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     check::<_, D>(
         engine,
         &runtime,
@@ -165,7 +165,7 @@ fn zero_copy_candidates_match_the_tensorkit_blas_contract_sequence() {
 
 fn fermionic_values<D: Payload>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let twist = |engine: &mut dyn Engine, t: &TensorMap<FermionU1, D>, legs: &[usize]| {
         t.twist(engine, legs, Direction::Forward).unwrap()
     };
@@ -187,7 +187,7 @@ fn fermionic_values<D: Payload>() {
     // candidate. TensorKit copies an operand to twist it, and the result
     // must match TensorKit's B-role twist, not the untwisted sequence.
     let v = fermion_u1();
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let a = TensorMap::<_, D>::from_subblock_fn(
         engine,
         &runtime,
@@ -279,8 +279,8 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let w_dual = w.try_dual().unwrap();
-    let v_dual = v.try_dual().unwrap();
+    let w_dual = w.dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let tensor = |engine: &mut dyn Engine,
                   codomain: &[&GradedSpace<R>],
                   domain: &[&GradedSpace<R>],
@@ -358,7 +358,7 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for case in mixed_cases::<R, D>(&runtime, v, w) {
         let what = format!("{symmetry} {} [{}]", case.name, D::NAME);
         let host = case.host(engine);
@@ -387,7 +387,7 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for case in mixed_cases::<R, f64>(&runtime, v, w) {
         let (_, _, lookups) = warm(&runtime, &case);
         // What: the selected candidate transforms neither source nor output.
@@ -528,7 +528,7 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (case, swapped) in copy_c_probes::<R, f64>(engine, &runtime, v) {
         let (calls, bytes, lookups) = warm(&runtime, &case);
         contract_then_permute(&case, swapped);
@@ -586,7 +586,7 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let w_dual = w.try_dual().unwrap();
+    let w_dual = w.dual().unwrap();
     Case {
         name: "S3",
         lhs: TensorMap::from_subblock_fn(engine, runtime, [v, &w_dual], [w], fill(84))
@@ -614,7 +614,7 @@ where
     D: Payload,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let cases = copy_c_probes::<R, D>(engine, &runtime, v)
         .into_iter()
         .map(|(case, _)| case)
@@ -671,7 +671,7 @@ fn output_permute_bits<R, D>(
         + SectorCodec,
     D: Payload + PartialEq,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let cases = copy_c_probes::<R, D>(engine, &runtime, v)
         .into_iter()
         .chain([(uneven_swap::<R, D>(&runtime, v, w), true)]);
@@ -708,7 +708,7 @@ where
     D: Payload + PartialEq,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let cases = copy_c_probes::<R, D>(engine, &runtime, v)
         .into_iter()
         .chain([(uneven_swap::<R, D>(&runtime, v, w), true)]);
@@ -793,7 +793,7 @@ fn zero_copy_candidates_with_an_output_permute_equal_contract_then_permute_bitwi
 #[test]
 fn uneven_swapped_candidate_with_an_output_permute_runs_one_transform() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let case = uneven_swap::<_, f64>(&runtime, &u1_non_self_dual(), &u1_second());
     let (_, _, lookups) = warm(&runtime, &case);
     contract_then_permute(&case, true);
@@ -809,7 +809,7 @@ fn uneven_swapped_candidate_with_an_output_permute_runs_one_transform() {
 
 fn fermionic_output_permute_values<D: Payload>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let twist = |engine: &mut dyn Engine, t: &TensorMap<FermionU1, D>, legs: &[usize]| {
         t.twist(engine, legs, Direction::Forward).unwrap()
     };
@@ -832,7 +832,7 @@ fn fermionic_output_permute_values<D: Payload>() {
     // sorted candidate, under a permuted output. The candidate is declined,
     // and the result must carry TensorKit's B-role twist.
     let v = fermion_u1();
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let a = TensorMap::<_, D>::from_subblock_fn(
         engine,
         &runtime,
@@ -990,7 +990,7 @@ fn inactive_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionR
 fn large_output_from_small_operands_copies_the_operands_not_c() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for case in large_output_cases(&runtime)
         .into_iter()
         .chain(inactive_output_cases(&runtime))
@@ -1055,7 +1055,7 @@ fn inactive_sort_case(runtime: &Runtime, reach: i32) -> Case<symtn::sector::U1Fu
 #[test]
 fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let [small, large] = [2, 4].map(|reach| warm(&runtime, &inactive_sort_case(&runtime, reach)).0);
     counting_alloc::assert_same_calls("charge reach 2 -> 4", small, large);
 }
@@ -1081,7 +1081,7 @@ fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
 fn small_output_copy_c_shapes_match_tensorkit_with_one_output_transform() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1(&[(-1, 8), (0, 8), (1, 8)]);
     let c = u1(&[(0, 2), (1, 1)]);
     let mut tensor = |codomain: [&GradedSpace<_>; 2], domain: [&GradedSpace<_>; 2], salt| {
@@ -1140,7 +1140,7 @@ fn swapped_tie_with_an_identity_output_matches_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_non_self_dual();
     let mut tensor = |salt| {
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], fill(salt))

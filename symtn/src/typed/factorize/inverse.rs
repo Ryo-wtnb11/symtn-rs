@@ -127,7 +127,7 @@ where
         if homspace.codomain() == homspace.domain()
             || <R::Mode as symtn_matrixalgebra::seam::FactorMode<R>>::authority(space)
                 .isomorphic(space)
-                .map_err(R::Mode::map_factor_error)?
+                .map_err(|error| R::Mode::map_factor_error(EXEC, error))?
         {
             return Ok(());
         }
@@ -142,7 +142,7 @@ where
     ) -> Result<BoundDynamicFusionMapSpace<R>, FacadeError<R>> {
         <R::Mode as symtn_matrixalgebra::seam::FactorMode<R>>::authority(self.logical_space())
             .output_space(homspace)
-            .map_err(R::Mode::map_root_error)
+            .map_err(|error| R::Mode::map_root_error(EXEC, error))
     }
 
     /// `domain <- codomain`: the output of the inverse and pseudo-inverse.
@@ -165,6 +165,6 @@ where
             self.logical_space(),
             spectrum,
         )
-        .map_err(R::Mode::map_factor_error)
+        .map_err(|error| R::Mode::map_factor_error(EXEC, error))
     }
 }

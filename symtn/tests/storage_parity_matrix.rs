@@ -382,7 +382,7 @@ fn su2_coupled(c: &symtn_core::LieIrrep) -> usize {
 #[test]
 fn host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let real = |x: Complex64| x.re;
     let complex = |x: Complex64| x;
     let one = |_: usize| 1.0;
@@ -670,7 +670,7 @@ fn cuda_rows_match_host() {
         );
     }
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let real = |x: Complex64| x.re;
     let complex = |x: Complex64| x;
     let one = |_: usize| 1.0;
@@ -735,7 +735,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fz2_leg();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     // Per written entry: |x|² and the oddness of each leg's uncoupled sector.
     let mut entries: Vec<(f64, [bool; 3])> = Vec::new();
     let a =
@@ -838,7 +838,7 @@ where
 
 #[test]
 fn twist_host_rows_match_the_hand_oracle() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     twist_rows::<f64>(&runtime, |x| x.re);
     twist_rows::<Complex64>(&runtime, |x| x);
 }
@@ -858,7 +858,7 @@ fn twist_cuda_rows_match_host() {
         D: symtn::typed::CudaPayload + Into<Complex64> + std::fmt::Debug,
     {
         let leg = fz2_leg();
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let a =
             TensorMap::<_, D>::from_subblock_fn(engine, runtime, [&leg, &dual], [&leg], |_, ix| {
                 conv(entry(0.7, ix[0] + 2 * ix[1], ix[1], ix[2]))
@@ -896,7 +896,7 @@ fn twist_cuda_rows_match_host() {
             Err(Error::InvalidArgument(_))
         ));
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     rows::<f64>(engine, cuda, &runtime, |x| x.re);
     rows::<Complex64>(engine, cuda, &runtime, |x| x);
 }
@@ -909,7 +909,7 @@ macro_rules! materialize_rows {
     ($engine:ident, $runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr) => {{
         let runtime: &Runtime = $runtime;
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let dim = $dim;
         let conv = $conv;
         let mut build = |seed: f64| {
@@ -1026,7 +1026,7 @@ fn one<S>(_: &symtn::typed::BlockFusionTrees<S>) -> f64 {
 #[test]
 fn materialize_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
         (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
@@ -1074,7 +1074,7 @@ macro_rules! transform_rows {
     ($engine:ident, $runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr, $cuda:expr) => {{
         let runtime: &Runtime = $runtime;
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let dim = $dim;
         let conv = $conv;
         let build = |engine: &mut dyn Engine, seed: f64| {
@@ -1231,7 +1231,7 @@ fn no_cuda_transform<T, D>(_: &T, _: &T, _: D, _: D) {}
 #[test]
 fn transform_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
         (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
@@ -1455,7 +1455,7 @@ fn transform_cuda_rows_match_host() {
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
         (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
@@ -1620,7 +1620,7 @@ fn mixed_lazy_axpby_cuda_rows_match_host() {
         }
     }
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     /// A value fixed by the block's trees and the local index, distinct
     /// across blocks, so a wrong parent block cannot pass.
     fn fill<S: std::fmt::Debug>(
@@ -1684,12 +1684,12 @@ fn mixed_lazy_axpby_cuda_rows_match_host() {
         }};
     }
     let u1 = u1_leg_2_3_1();
-    let u1_dual = u1.try_dual().unwrap();
+    let u1_dual = u1.dual().unwrap();
     both_dtypes!([&u1, &u1_dual], [&u1]);
     let su2 = su2_leg_2_3_1();
     both_dtypes!([&su2, &su2], [&su2]);
     let fz2 = fz2_leg();
-    let fz2_dual = fz2.try_dual().unwrap();
+    let fz2_dual = fz2.dual().unwrap();
     both_dtypes!([&fz2, &fz2_dual], [&fz2]);
 }
 
@@ -1707,7 +1707,7 @@ macro_rules! contract_rows {
     ($engine:ident, $runtime:expr, $leg:expr, $dim:expr, $D:ty, $conv:expr, $cuda:expr) => {{
         let runtime: &Runtime = $runtime;
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let dim = $dim;
         let conv = $conv;
         let mut build = |seed: f64| {
@@ -1852,7 +1852,7 @@ fn no_cuda_contract<T, D>(_: &T, _: &T, _: D, _: D) {}
 #[test]
 fn contract_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
         (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
@@ -2026,7 +2026,7 @@ fn contract_cuda_rows_match_host() {
             Err(Error::Operation(op)) if matches!(*op, OperationError::SpaceMismatch { .. })
         ));
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
         (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
@@ -2233,7 +2233,7 @@ fn odd_twist(s: &FermionParityIrrep) -> f64 {
 #[test]
 fn trace_host_rows_match_the_hand_oracle() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
         (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };
@@ -2402,7 +2402,7 @@ fn trace_cuda_rows_match_host() {
             "a rejected destination is untouched",
         );
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let su2_dim = |trees: &symtn::typed::BlockFusionTrees<symtn_core::LieIrrep>| {
         (usize::try_from(trees.coupled().dynkin().next().unwrap()).unwrap() + 1) as f64
     };

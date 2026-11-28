@@ -78,6 +78,80 @@ for combo in "${COMBOS[@]}"; do
         cargo public-api "${args[@]}" >"$file"
 done
 
+# A type named by a public symtn signature, or by the declaration or a public
+# member of a type symtn re-exports, must itself be exported by symtn;
+# otherwise a caller has to depend on an internal crate to name it. Ratchet:
+# the names below were already unnameable at d72c610c (the check's base) and
+# still are. Remove a name once it is exported or no longer named.
+UNEXPORTED_ALLOWED="
+    AdjointBlockMap BlockStructure BoundDynamicFusionMapSpace
+    CheckedGenericFactorPlanError CoefficientAlgebra
+    ContractDestinationInit CudaScalarOperands DenseBlockScalar
+    DenseRecouplingScalar FactorMode FactorOutput FactorSpaceAuthority
+    FusionProductSpace FusionTreeGroupRef FusionTreeHomSpace
+    FusionTreePairRef FusionTreeRef LazyAdjointSpace
+    PhysicalConversionError PlanarContractOrders Provider
+    RigidCoefficientAlgebra SectorSpectrum TensorTraceAxisSpec
+    TensorTraceFusionStructure TreeTransformOperationView
+    TreeTransformStructure TruncationDecision UnitLegInsertion ZeroBytes
+"
+python3 - "$out_dir" "$UNEXPORTED_ALLOWED" <<'PY' || exit 1
+import re, sys, pathlib
+d = pathlib.Path(sys.argv[1]); allowed = set(sys.argv[2].split())
+# The first capitalised segment of an internal-crate path is the type it names.
+# Sealing items are unnameable on purpose, but sealing alone does not stop
+# calls, so each one is audited and listed by full path: a marker trait with no
+# methods, an unconstructible token, or a trait whose every method takes one.
+SEALED = {
+    "symtn_dense::cuda_adapter::cuda_scalar_sealed::Sealed",  # no methods
+    "symtn_sectors::product_rule::sealed::Token",  # unnameable, so unconstructible
+    "symtn_matrixalgebra::factorize::scalar::sealed::DenseIo",  # token-gated
+}
+PATH = re.compile(r"\bsymtn_[a-z_]+(?:::[a-z_0-9]+)*::([A-Z][A-Za-z0-9_]*)")
+ATTRS = re.compile(r"^(?:#\[[^\]]*\] )*")
+def names(line):
+    return {m.group(1) for m in PATH.finditer(line) if m.group(0) not in SEALED}
+def unexported(facade, deps):
+    exported = {l.rsplit("::", 1)[1] for l in facade if l.startswith("pub use ")}
+    deps = [ATTRS.sub("", l) for l in deps]
+    # Roots: every public symtn signature and every re-exported type.
+    todo = set(exported).union(*(names(l) for l in facade if not l.startswith("pub use ")))
+    seen = set()
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        if name not in exported:
+            continue
+        # The declaration (tuple fields and supertraits included) and every member.
+        item = re.compile(r"^pub (?:[a-z]+ )*symtn_[a-z_]+(?:::[a-z_0-9]+)*::" + name + r"\b")
+        todo |= set().union(*(names(l) for l in deps if item.match(l)))
+    return seen - exported
+
+# Self-test: a tuple field of a re-exported type, a type reached only through
+# a re-export, and a sealing trait that has not been audited.
+assert unexported(
+    ["pub use symtn::expert::Storage"],
+    ["pub struct symtn_ops::cuda::Storage<D>(pub symtn_dense::buf::Buffer, _)"],
+) == {"Buffer"}
+assert unexported(
+    ["pub use symtn::sector::Rule"],
+    ["pub fn symtn_sectors::Rule::by_uuid(&str) -> core::result::Result<Self, symtn_sectors::RuleError>",
+     "pub trait symtn_sectors::Rule: symtn_sectors::seal::Sealed"],
+) == {"RuleError", "Sealed"}
+
+status = 0
+for suffix in ("", "+all"):
+    facade = (d / f"symtn{suffix}.txt").read_text().splitlines()
+    deps = [l for f in sorted(d.glob(f"symtn-*{suffix}.txt"))
+            if suffix or "+" not in f.name for l in f.read_text().splitlines()]
+    for name in sorted(unexported(facade, deps) - allowed):
+        print(f"api-snapshot: symtn{suffix} names {name} in a public signature but does not export it", file=sys.stderr)
+        status = 1
+sys.exit(status)
+PY
+
 if [ "$mode" = --check ]; then
     status=0
     for file in "$out_dir"/*.txt; do

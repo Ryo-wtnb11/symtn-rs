@@ -12,7 +12,7 @@ use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{MultiplicityFreeRigidSymbols, SectorCodec};
@@ -398,11 +398,11 @@ fn public_multiplicity_free_linalg_conformance() {
         Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         [
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2
             ),
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2
             ),
         ]
@@ -416,8 +416,8 @@ fn public_multiplicity_free_linalg_conformance() {
         )
         .unwrap(),
         [(
-            product_sector(
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+            ProductSector::new(
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 su2_irrep(1),
             ),
             2,

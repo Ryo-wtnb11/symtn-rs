@@ -409,8 +409,8 @@ fn shape_based_null_spaces_on_dual_legs_annihilate_the_dense_blocks() {
         ],
     )
     .unwrap();
-    let w_dual = w.try_dual().unwrap();
-    let v_dual = v.try_dual().unwrap();
+    let w_dual = w.dual().unwrap();
+    let v_dual = v.dual().unwrap();
     // Dual codomain: `w* <- v` couples 0 (3 x 2) and -1 (3 x 1); -2 is
     // codomain-only. Dual domain: `w <- v*` couples 0 (3 x 2) and 1 (3 x 1);
     // 2 is codomain-only.

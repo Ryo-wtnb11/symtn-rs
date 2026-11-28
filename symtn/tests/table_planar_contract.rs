@@ -101,7 +101,7 @@ impl Case {
         )
         .unwrap();
         Self {
-            runtime: Runtime::builder().build().unwrap(),
+            runtime: Runtime::new(),
             v,
         }
     }
@@ -390,7 +390,7 @@ fn ordinary_contract_still_rejects_anyonic_rules() {
 #[test]
 fn malformed_specs_report_the_contract_errors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
@@ -452,7 +452,7 @@ macro_rules! bosonic_planar_is_contract {
 #[test]
 fn bosonic_planar_contract_is_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -519,7 +519,7 @@ fn parity_entry(
 #[test]
 fn fermionic_planar_contract_is_twist_free_and_matches_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule::new()),
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
@@ -632,7 +632,7 @@ fn max_distance(lhs: &[f64], rhs: &[f64]) -> f64 {
 #[test]
 fn fermionic_u1_planar_contract_is_the_explicit_steps() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = fermionic_u1_space();
     let x = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 21).unwrap();
     let y = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 22).unwrap();
@@ -687,7 +687,7 @@ fn fermionic_u1_planar_contract_is_the_explicit_steps() {
 #[test]
 fn fermionic_planar_contract_into_is_alpha_steps_plus_beta() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule::new()),
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
@@ -775,7 +775,7 @@ mod checked_fermionic {
         D: TensorScalar + numerics::Numeric,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let a = filled(engine, &runtime, &[v, v], &[v, v], 23, value);
         let b = filled(engine, &runtime, &[v, v], &[v, v], 31, value);
         // Every output entry is bilinear in these original source entries.
@@ -826,7 +826,7 @@ mod checked_fermionic {
         let v = su3_space();
         rows(&v, value);
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let a = filled(engine, &runtime, &[&v, &v], &[&v, &v], 41, value);
         let b = filled(engine, &runtime, &[&v, &v], &[&v, &v], 43, value);
         // Independent closed loop: sum_c dim(c) tr(A_c B_c), using the

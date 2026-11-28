@@ -237,7 +237,9 @@ where
                 let tree = extent.tree();
                 let labels = FusionTreeLabels {
                     coupled: TypedSectorAdmission::try_decode_label(self.provider, tree.coupled())
-                        .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?,
+                        .map_err(|error| {
+                            <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                        })?,
                     uncoupled: decode_sectors(self.provider, tree.uncoupled())?,
                     innerlines: decode_sectors(self.provider, tree.innerlines())?,
                     vertices: tree.vertices().to_vec(),
@@ -289,8 +291,9 @@ where
 {
     ids.iter()
         .map(|&id| {
-            TypedSectorAdmission::try_decode_label(provider, id)
-                .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)
+            TypedSectorAdmission::try_decode_label(provider, id).map_err(|error| {
+                <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+            })
         })
         .collect()
 }
@@ -317,8 +320,9 @@ where
     let codomain = pair.codomain_tree();
     let domain = pair.domain_tree();
     Ok(BlockFusionTrees {
-        coupled: TypedSectorAdmission::try_decode_label(provider, codomain.coupled())
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?,
+        coupled: TypedSectorAdmission::try_decode_label(provider, codomain.coupled()).map_err(
+            |error| <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error),
+        )?,
         codomain_uncoupled: decode_sectors(provider, codomain.uncoupled())?,
         codomain_innerlines: decode_sectors(provider, codomain.innerlines())?,
         codomain_vertices: codomain.vertices().to_vec(),
@@ -395,7 +399,7 @@ where
                 )
                 .and_then(|space| {
                     if leg.is_dual() {
-                        space.try_dual()
+                        space.dual()
                     } else {
                         Ok(space)
                     }

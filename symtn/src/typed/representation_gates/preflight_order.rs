@@ -81,8 +81,8 @@ macro_rules! misuse {
     ($engine:ident, $v:expr, $w:expr, $dtype:ty, $value:expr) => {{
         let (v, w) = (&$v, &$w);
         let value: fn(f64) -> $dtype = $value;
-        let runtime = Runtime::builder().build().unwrap();
-        let other = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
+        let other = Runtime::new();
         let mut rand = |rt: &Runtime, cod: &GradedSpace<_>, dom: &GradedSpace<_>, seed| {
             TensorMap::<_, $dtype>::rand_with_seed($engine, rt, [cod], [dom], seed).unwrap()
         };
@@ -362,8 +362,8 @@ fn misuse_reports_one_first_error_in_both_modes() {
 macro_rules! rule_rows {
     ($engine:ident, $divisor_leg:expr, $rhs_leg:expr, $dtype:ty) => {{
         let (a, b) = (&$divisor_leg, &$rhs_leg);
-        let runtime = Runtime::builder().build().unwrap();
-        let other = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
+        let other = Runtime::new();
         let divisor =
             TensorMap::<_, $dtype>::rand_with_seed($engine, &runtime, [a], [a], 1).unwrap();
         let rhs = TensorMap::<_, $dtype>::rand_with_seed($engine, &runtime, [b], [b], 2).unwrap();
@@ -441,7 +441,7 @@ fn rule_mismatch_is_the_first_error_in_both_modes() {
 #[test]
 fn compact_divisor_solve_lands_on_the_documented_spaces() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&u1),
@@ -540,7 +540,7 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
 #[test]
 fn isomorphism_is_checked_per_coupled_sector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = Arc::new(U1FusionRule);
     let leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(

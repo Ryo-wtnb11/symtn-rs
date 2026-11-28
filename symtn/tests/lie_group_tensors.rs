@@ -131,7 +131,7 @@ fn host_round_trips<D>(
 ) where
     D: TensorScalar + numerics::Numeric,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(group).unwrap());
     let left = GradedSpace::try_new(
         Arc::clone(&provider),

@@ -656,8 +656,8 @@ fn cuda_transfer_counters_attribute_one_upload_download_and_gemm() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn warm_up_costs_one_gemm_one_solver_call_and_a_bounded_fixed_traffic() {
-    // A context built directly here has never submitted work: only
-    // `RuntimeBuilder::build` warms one, so this is a cold backend.
+    // A context built directly here has never submitted work, so this is a
+    // cold backend.
     let mut ctx_engine = cuda_engine(0);
     let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
 

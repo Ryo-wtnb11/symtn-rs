@@ -30,7 +30,7 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         .unwrap()
 }
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 use symtn::typed::Runtime;
@@ -68,7 +68,7 @@ macro_rules! check_fixture {
     ($engine:ident, $label:expr, $leg:expr) => {{
         let label: &str = $label;
         let leg = $leg;
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let mut build = |codomain: [_; 2], domain: [_; 1]| {
             TensorMap::<_, f64>::zeros($engine, &runtime, codomain, domain).unwrap()
         };
@@ -80,7 +80,7 @@ macro_rules! check_fixture {
             &format!("{label} independent"),
         );
 
-        let dual = a.try_dual().unwrap();
+        let dual = a.dual().unwrap();
         let (degeneracy, sector) = (leg(1), leg(2));
         for (other, name) in [
             (&dual, "dual"),
@@ -137,8 +137,10 @@ fn fixtures_are_equal_iff_structure_is_equal() {
     check_fixture!(engine, "fZ2xU1", |variant| {
         let rule =
             Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
-        let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
-        let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
+        let even =
+            |charge| ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+        let odd =
+            |charge| ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
         let pairs = match variant {
             0 => [(even(0), 2), (odd(1), 1), (odd(-1), 2)],
             1 => [(even(0), 2), (odd(1), 2), (odd(-1), 2)],
@@ -170,7 +172,7 @@ fn checked_generic_rule_instance_separates_signatures() {
     let _serial = crate::counting_alloc::serial();
     // What: SU(3) and SU(4) trivial legs share hom space and block structure
     // (the unit test checks the fields), so the rule alone separates them.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = |rank: usize| {
         Arc::new(
             symtn::sector::LieGroupFusionRule::<symtn::sector::CheckedGenericAdmissionMode>::new(
@@ -214,8 +216,8 @@ fn u1_signature(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) -> Structure
 fn runtime_identity_separates_signatures() {
     let _serial = crate::counting_alloc::serial();
     let leg = u1_leg(-1..=1, 2);
-    let first = Runtime::builder().build().unwrap();
-    let second = Runtime::builder().build().unwrap();
+    let first = Runtime::new();
+    let second = Runtime::new();
     let signature = u1_signature(&first, &leg);
     assert_same(
         &signature,
@@ -226,14 +228,14 @@ fn runtime_identity_separates_signatures() {
 
     // A dead Runtime's signature never matches a Runtime built afterwards.
     drop(first);
-    let third = Runtime::builder().build().unwrap();
+    let third = Runtime::new();
     assert_differ(&signature, &u1_signature(&third, &leg), "after drop");
 }
 
 #[test]
 fn equal_across_clear_structure_caches() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let before = u1_signature(&runtime, &u1_leg(-2..=2, 3));
     clear_structure_caches();
     let after = u1_signature(&runtime, &u1_leg(-2..=2, 3));
@@ -248,7 +250,7 @@ fn equal_across_clear_structure_caches() {
 #[test]
 fn equal_across_complete_owner_eviction() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let before = u1_signature(&runtime, &u1_leg(-3..=3, 5));
     let cache = StructureCacheKind::DegeneracyStructure;
     let before_info = structure_cache_info(cache);
@@ -272,7 +274,7 @@ fn equal_across_complete_owner_eviction() {
 fn equal_for_oversized_structures_above_the_complete_cache_budget() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // An explicit small budget rejects this otherwise ordinary complete layout.
     // Rejected layouts receive distinct process ids but remain semantically
     // equal while each signature owns its independently constructed content.
@@ -303,7 +305,7 @@ fn equal_for_oversized_structures_above_the_complete_cache_budget() {
 #[test]
 fn shared_structure_comparison_does_not_allocate() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = u1_leg(-2..=2, 2);
     let first = u1_signature(&runtime, &leg);
     let second = u1_signature(&runtime, &leg);

@@ -99,9 +99,9 @@ impl SectorCodec for CollapsingDual {
 
 /// The allocation-free leg comparison enforces the dual
 /// round trip, so a non-involutive provider is rejected with
-/// `GradedSpace::try_dual`'s own error rather than accepted.
+/// `GradedSpace::dual`'s own error rather than accepted.
 #[test]
-fn a_non_involutive_dual_is_rejected_like_try_dual() {
+fn a_non_involutive_dual_is_rejected_like_space_dual() {
     let leg = |sectors: [usize; 2], dual: bool| {
         SectorLeg::try_new(sectors.map(|sector| (SectorId::new(sector), 2)), dual).unwrap()
     };
@@ -110,7 +110,7 @@ fn a_non_involutive_dual_is_rejected_like_try_dual() {
     let (from, into) = (leg([0, 1], false), leg([2, 3], true));
     let oracle = GradedSpace::try_new(Arc::new(CollapsingDual), [(Label(0), 2), (Label(1), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap_err()
         .to_string();
     let error = super::legs_contract(&CollapsingDual, (&from, false), (&into, false))

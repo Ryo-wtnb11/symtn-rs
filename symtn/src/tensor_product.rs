@@ -1539,7 +1539,7 @@ mod tests {
         crate::typed::Runtime,
         crate::typed::TensorMap<ZNFusionRule, f64>,
     ) {
-        let runtime = crate::typed::Runtime::builder().build().unwrap();
+        let runtime = crate::typed::Runtime::new();
         let leg = crate::typed::GradedSpace::try_new(
             Arc::new(ZNFusionRule::new(2).unwrap()),
             [

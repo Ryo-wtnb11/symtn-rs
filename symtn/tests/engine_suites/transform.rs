@@ -82,7 +82,7 @@ on_each_engine! {
     fn permute_within_one_side_is_the_physical_axis_permutation<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let u1 = u1_leg_2_1_2();
         let su2 = su2_leg_2_2_1();
         let u1_tensor: TensorMap<_, f64> =
@@ -128,7 +128,7 @@ on_each_engine! {
     fn fermionic_transposes_bend_where_permutes_braid<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let tensor = fz2_rank_three(engine, &runtime);
         assert_eq!(tensor.dense_data().unwrap(), [1.0, 2.0, 3.0, 4.0]);
         let source = B::upload(device, &tensor);
@@ -155,7 +155,7 @@ on_each_engine! {
     fn fermionic_repartition_is_sign_free<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let tensor = fz2_rank_three(engine, &runtime);
         let source = B::upload(device, &tensor);
         macro_rules! values {
@@ -215,7 +215,7 @@ on_each_engine! {
     fn transform_laws_hold<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let host = u1_rank_four(engine, &runtime);
         let source = B::upload(device, &host);
         macro_rules! values {
@@ -273,7 +273,7 @@ on_each_engine! {
     fn repartition_reaches_every_split_and_round_trips<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let host = u1_rank_four(engine, &runtime);
         let source = B::upload(device, &host);
         for num_codomain in 0..=4 {
@@ -307,7 +307,7 @@ on_each_engine! {
     fn complex_su2_permute_has_the_tensorkit_norm<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let host = crate::tk_complex_su2::source(engine, &runtime);
         let source = B::upload(device, &host);
         let permuted = source.permute(device, &[1, 0], &[3, 2]).unwrap();
@@ -331,7 +331,7 @@ on_each_engine! {
     fn transforms_of_an_empty_tensor_are_empty<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let codomain = u1_leg(&[(1, 2)]);
         let domain = u1_leg(&[(0, 3)]);
         let host: TensorMap<_, f64> =

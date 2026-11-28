@@ -59,11 +59,15 @@ where
                 ))
                 .into());
             }
-            TypedSectorAdmission::try_decode_label(self.provider(), *authority_sector)
-                .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+            TypedSectorAdmission::try_decode_label(self.provider(), *authority_sector).map_err(
+                |error| <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error),
+            )?;
             let effective_sector = if *partner {
-                TypedSectorAdmission::try_dual_id(self.provider(), *authority_sector)
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?
+                TypedSectorAdmission::try_dual_id(self.provider(), *authority_sector).map_err(
+                    |error| {
+                        <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                    },
+                )?
             } else {
                 *authority_sector
             };
@@ -80,8 +84,11 @@ where
                 (*effective_axis, true)
             };
             let logical_sector = if dualized {
-                TypedSectorAdmission::try_dual_id(self.provider(), effective_sector)
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?
+                TypedSectorAdmission::try_dual_id(self.provider(), effective_sector).map_err(
+                    |error| {
+                        <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                    },
+                )?
             } else {
                 effective_sector
             };
@@ -136,6 +143,7 @@ where
             restricted_product(homspace.domain(), codomain_rank)?,
         );
         let destination = <R::Mode as TypedTensorRootDispatch<R>>::build_root(
+            EXEC,
             Arc::clone(self.logical_space().provider_arc()),
             restricted_homspace,
         )?;
@@ -191,11 +199,12 @@ where
             return Err(Error::RuleMismatch.into());
         }
         let space = <R::Mode as TypedTensorRootDispatch<R>>::build_root_with(
+            EXEC,
             Arc::clone(self.logical_space().provider_arc()),
             || {
                 let raw_domain = domain
                     .iter()
-                    .map(GradedSpace::try_dual)
+                    .map(GradedSpace::dual)
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(FusionTreeHomSpace::new(
                     FusionProductSpace::new(

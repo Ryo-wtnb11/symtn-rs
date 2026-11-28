@@ -10,6 +10,7 @@ where
     D: TensorScalar,
 {
     fn trace<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -39,6 +40,7 @@ where
     }
 
     fn trace_into<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -82,6 +84,7 @@ where
     D: TensorScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
     fn trace<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -111,6 +114,7 @@ where
     }
 
     fn trace_into<S: TraceExec<R, D>>(
+        _: ExecToken,
         engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
@@ -451,7 +455,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
     /// assert_eq!(id.trace_pairs(engine, &[(0, 1)])?.scalar(engine)?, 2.0);
@@ -471,11 +475,13 @@ where
         engine: &mut dyn Engine,
         pairs: &[(usize, usize)],
     ) -> Result<Self, FacadeError<R>> {
-        let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider());
+        let braiding =
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider());
         let Some(source) = trace_source(self, braiding, pairs)? else {
             return Ok(self.clone());
         };
         let (space, data) = <R::Mode as TypedTensorTraceDispatch<R, D>>::trace(
+            EXEC,
             engine,
             self,
             |structure| self.compact_full_trace(structure),
@@ -565,13 +571,15 @@ where
         {
             return Err(Error::RuleMismatch.into());
         }
-        let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider());
+        let braiding =
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider());
         let Some(source) = trace_source(self, braiding, pairs)? else {
             return Ok(axpby_into_checked(engine, self, destination, alpha, beta)?);
         };
         // Why the storage body: a lazy adjoint is read through its parent.
         destination_precheck(destination, &source.body.data)?;
         <R::Mode as TypedTensorTraceDispatch<R, D>>::trace_into(
+            EXEC,
             engine,
             self,
             |structure| self.compact_full_trace(structure),
@@ -914,7 +922,7 @@ mod copy_c_scratch_tests {
     #[test]
     fn copy_c_route_equals_contract_then_permute() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let (a, b) = partial_copy_c_fixture(engine, &runtime);
         let expected = a
             .contract(
@@ -974,7 +982,7 @@ mod copy_c_scratch_tests {
     #[test]
     fn copy_c_contract_into_writes_unreached_elements_through_the_transform() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let (a, b) = partial_copy_c_fixture(engine, &runtime);
         let result = a.contract(engine, &b, &MOVED).unwrap();
         let unreached: Vec<usize> = result
@@ -1041,7 +1049,7 @@ mod copy_c_scratch_tests {
     #[test]
     fn reordered_compact_contract_into_scales_without_densifying() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(U1FusionRule);
         let space = |n| {
             GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), n)]).unwrap()

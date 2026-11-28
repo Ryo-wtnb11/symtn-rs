@@ -44,11 +44,11 @@ mod device {
 
     use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
     use symtn::sector::{
-        product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
-    };
-    use symtn::sector::{
         CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols,
         SectorCodec, TypedSectorAdmission,
+    };
+    use symtn::sector::{
+        FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
     };
     use symtn::typed::FusionAlgebraError;
     use symtn::typed::{Complex32, Complex64};
@@ -621,9 +621,7 @@ mod device {
             + 'static,
         D: HarnessScalar,
     {
-        let runtime = Runtime::builder()
-            .build()
-            .expect("Runtime for the measured row");
+        let runtime = Runtime::new();
         let mut cpu = CpuEngine::serial();
         let mut cuda = cuda_engine(config);
         symtn::expert::CudaDenseContext::new(&mut cuda)
@@ -1683,7 +1681,7 @@ mod device {
                 ),
                 (0..blocks).map(|index| {
                     (
-                        product_sector(
+                        ProductSector::new(
                             if index % 2 == 0 {
                                 FermionParityIrrep::EVEN
                             } else {

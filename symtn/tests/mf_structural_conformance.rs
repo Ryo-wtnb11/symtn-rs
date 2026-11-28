@@ -8,7 +8,7 @@ use std::sync::Arc;
 use symtn::typed::{ContractSpec, Direction, Duality, Side};
 
 use symtn::sector::{
-    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
+    CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep, ProductSector,
     U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::typed::{Complex64, GradedSpace, TensorMap};
@@ -160,7 +160,7 @@ fn fermionic_product_contract_otimes_and_reductions_keep_provider_and_signs() {
         )
         .unwrap(),
     );
-    let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
+    let odd = ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(odd, 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
@@ -208,8 +208,8 @@ fn nested_fermionic_su2_product_and_complex_adjoint_are_publicly_conformant() {
         )
         .unwrap(),
     );
-    let spin_half = product_sector(
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+    let spin_half = ProductSector::new(
+        ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
         su2_irrep(1),
     );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(spin_half.clone(), 1)]).unwrap();
@@ -429,7 +429,7 @@ fn su2_and_exact_products_keep_their_provider_through_flip_and_units() {
             U1FusionRule
         )
         .unwrap(),
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap())
+        ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap())
     );
     check!(
         engine,
@@ -442,8 +442,8 @@ fn su2_and_exact_products_keep_their_provider_through_flip_and_units() {
             su2_rule()
         )
         .unwrap(),
-        product_sector(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+        ProductSector::new(
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             su2_irrep(1)
         )
     );
@@ -457,7 +457,7 @@ fn dual_nonabelian_flip_pins_the_pivotal_phase() {
         ($engine:ident, $provider:expr, $label:expr, $axis:expr, $codomain_dual:expr, $domain_dual:expr) => {{
             let provider = Arc::new($provider);
             let plain = GradedSpace::try_new(Arc::clone(&provider), [($label, 1)]).unwrap();
-            let dual = plain.try_dual().unwrap();
+            let dual = plain.dual().unwrap();
             let source: TensorMap<_, f64> =
                 TensorMap::from_subblock_fn($engine, &runtime, [&dual], [&plain], |_, _| 1.0)
                     .unwrap();
@@ -489,8 +489,8 @@ fn dual_nonabelian_flip_pins_the_pivotal_phase() {
             su2_rule()
         )
         .unwrap(),
-        product_sector(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+        ProductSector::new(
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             su2_irrep(1)
         ),
         // Plain nested domain: its forward factor is θ=-1.
@@ -557,7 +557,7 @@ fn covered_builtin_multiplicity_free_providers_have_cat_and_absorb_execution() {
             U1FusionRule
         )
         .unwrap(),
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap())
+        ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap())
     );
     check!(engine, su2_rule(), su2_irrep(1));
     check!(
@@ -571,8 +571,8 @@ fn covered_builtin_multiplicity_free_providers_have_cat_and_absorb_execution() {
             su2_rule()
         )
         .unwrap(),
-        product_sector(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+        ProductSector::new(
+            ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
             su2_irrep(1)
         )
     );

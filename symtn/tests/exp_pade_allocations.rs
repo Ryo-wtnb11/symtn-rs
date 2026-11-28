@@ -63,7 +63,7 @@ fn u1_space(sectors: i32, order: usize) -> GradedSpace<U1FusionRule> {
 
 fn fixture_f64(sectors: i32, order: usize, scale: f64) -> TensorMap<U1FusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = u1_space(sectors, order);
     TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {
         scale * (1.0 + indices[0] as f64 - 0.5 * indices[1] as f64)
@@ -73,7 +73,7 @@ fn fixture_f64(sectors: i32, order: usize, scale: f64) -> TensorMap<U1FusionRule
 
 fn fixture_c64(sectors: i32, order: usize, scale: f64) -> TensorMap<U1FusionRule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = u1_space(sectors, order);
     TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {
         scale
@@ -180,7 +180,7 @@ fn general_exp_workspace_is_largest_sector_sized_and_reused() {
 fn typed_u1_general_exp_matches_the_upper_triangular_oracle() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(
         Arc::clone(&provider),

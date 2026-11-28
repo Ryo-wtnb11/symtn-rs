@@ -5,10 +5,10 @@ use std::collections::BTreeSet;
 use crate::product_codec::ParityProductCodec;
 
 use symtn_sectors::{
-    product_sector, BraidingStyleKind, CU1FusionRule, CU1Irrep, CheckedFusionAlgebra,
-    FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError, FusionRule, FusionStyleKind,
-    ProductFusionRule, ProductSector, ProductSectorCodecError, RuleIdentity, SectorCodec, SectorId,
-    SectorVec, TableRule, TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
+    BraidingStyleKind, CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule,
+    FermionParityIrrep, FusionAlgebraError, FusionRule, FusionStyleKind, ProductFusionRule,
+    ProductSector, ProductSectorCodecError, RuleIdentity, SectorCodec, SectorId, SectorVec,
+    TableRule, TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 #[test]
@@ -16,11 +16,11 @@ fn product_sector_is_usable_as_a_btree_key() {
     // What: the label order is the left component first, the right component
     // only as a tie-break, and equal labels deduplicate in ordered containers.
     let labels: BTreeSet<ProductSector<U1Irrep, FermionParityIrrep>> = [
-        product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
-        product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::ODD),
-        product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
-        product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::EVEN),
-        product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+        ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+        ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::ODD),
+        ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+        ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::EVEN),
+        ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
     ]
     .into_iter()
     .collect();
@@ -28,10 +28,10 @@ fn product_sector_is_usable_as_a_btree_key() {
     assert_eq!(
         labels.into_iter().collect::<Vec<_>>(),
         vec![
-            product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::ODD),
-            product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+            ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+            ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::ODD),
+            ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::EVEN),
+            ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
         ]
     );
 }
@@ -161,10 +161,10 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
     assert_decode_total(
         &U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap(),
         [
-            product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
-            product_sector(U1Irrep::new(-2).unwrap(), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(i32::MAX - 1).unwrap(), FermionParityIrrep::ODD),
-            product_sector(
+            ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+            ProductSector::new(U1Irrep::new(-2).unwrap(), FermionParityIrrep::EVEN),
+            ProductSector::new(U1Irrep::new(i32::MAX - 1).unwrap(), FermionParityIrrep::ODD),
+            ProductSector::new(
                 U1Irrep::new(i32::MIN + 1).unwrap(),
                 FermionParityIrrep::EVEN,
             ),
@@ -302,9 +302,9 @@ fn product_codec_round_trips_component_labels() {
     assert_round_trip(
         &rule,
         [
-            product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(-5).unwrap(), FermionParityIrrep::ODD),
-            product_sector(U1Irrep::new(i32::MAX).unwrap(), FermionParityIrrep::ODD),
+            ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+            ProductSector::new(U1Irrep::new(-5).unwrap(), FermionParityIrrep::ODD),
+            ProductSector::new(U1Irrep::new(i32::MAX).unwrap(), FermionParityIrrep::ODD),
         ],
     );
 }

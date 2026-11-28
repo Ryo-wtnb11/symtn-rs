@@ -21,7 +21,7 @@ fn assert_sun_checked_generic_eigh<D>(
 
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -216,7 +216,7 @@ where
 {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -368,7 +368,7 @@ fn sun_checked_generic_eig_nonnormal_cross_mu_projectors_for_both_dtypes() {
 fn checked_generic_compact_eigh_vals_surfaces_a_decode_failure() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let compact: TensorMap<_, f64> = TensorMap::diagonal(
@@ -395,7 +395,7 @@ fn checked_generic_compact_eigh_vals_surfaces_a_decode_failure() {
 fn checked_generic_eigh_lazy_success_and_failure_leave_the_view_lazy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let hermitian: TensorMap<_, f64> =
@@ -438,7 +438,7 @@ fn checked_generic_eigh_lazy_success_and_failure_leave_the_view_lazy() {
 fn checked_generic_eigh_qdim_and_decode_failures_publish_no_pair() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -480,7 +480,7 @@ fn checked_generic_eigh_qdim_and_decode_failures_publish_no_pair() {
 fn checked_generic_eig_qdim_and_decode_failures_publish_no_pair() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -522,7 +522,7 @@ fn checked_generic_eigh_signed_ties_are_stable_and_degenerate_projectors_are_inv
     let _serial = crate::counting_alloc::serial();
     use std::cell::Cell;
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 3)]).unwrap();
     let tied: TensorMap<_, f64> =
@@ -601,7 +601,7 @@ fn checked_generic_eigh_signed_ties_are_stable_and_degenerate_projectors_are_inv
 fn checked_generic_eig_vals_preserves_spectrum_and_dtype() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -656,7 +656,7 @@ fn checked_generic_eig_vals_preserves_spectrum_and_dtype() {
 fn checked_generic_eig_ties_are_stable_and_degenerate_projectors_are_invariant() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 3)]).unwrap();
     let tied: TensorMap<_, f64> =
@@ -769,7 +769,7 @@ fn eig_full_publishes_unit_norm_phase_gauged_columns_in_both_modes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // `lambda I + N` (a single Jordan chain: defective, and on base the dense
     // backend returned a column like `[9.007e14, -1]`), and an upper
     // triangular block with distinct eigenvalues `lambda + k` whose
@@ -895,7 +895,7 @@ fn eig_full_never_returns_nonfinite_eigenvectors_of_finite_input_in_both_modes()
     // Either outcome is allowed, but never `Ok` with a nonfinite column: a
     // failure is a `NumericalFailure` (the provider's, or symtn's eigenvalue
     // or eigenvector check).
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let jordan = |row: usize, col: usize| {
         if row == col {
             2.0
@@ -961,7 +961,7 @@ fn eig_full_never_returns_nonfinite_eigenvectors_of_finite_input_in_both_modes()
 fn checked_generic_eig_rejects_nonfinite_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let nonfinite: TensorMap<_, f64> =
@@ -987,7 +987,7 @@ fn checked_generic_eig_rejects_nonfinite_input() {
 fn checked_generic_eig_lazy_calls_leave_the_source_view_lazy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> =
@@ -1014,7 +1014,7 @@ fn checked_generic_eig_lazy_calls_leave_the_source_view_lazy() {
 fn checked_nondual_compact_diagonal_eigh_full_makes_no_provider_query() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for fault in ["fail_algebra", "invalid_style"] {
         let provider = Arc::new(CheckedOnlyToy::new_product_probe(1));
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
@@ -1049,7 +1049,7 @@ fn checked_nondual_compact_diagonal_eigh_full_makes_no_provider_query() {
 fn checked_generic_eigh_admits_at_the_given_hermitian_tolerance() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     for (tol, hermitian_tol) in [
@@ -1117,7 +1117,7 @@ fn checked_generic_eig_order_matches_the_lexicographic_oracle_and_the_mf_route()
     use std::cmp::Ordering::{Equal, Greater, Less};
     use symtn::sector::{U1FusionRule, U1Irrep};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 4)]).unwrap();
     let c = Complex64::new;

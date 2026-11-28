@@ -124,7 +124,7 @@ macro_rules! network_suite {
             #[test]
             fn u1_chain_matches_the_widened_oracle() {
                 let engine = &mut symtn::typed::CpuEngine::serial();
-                let runtime = Runtime::builder().build().unwrap();
+                let runtime = Runtime::new();
                 let leg = GradedSpace::try_new(
                     Arc::new(U1FusionRule),
                     [
@@ -198,7 +198,7 @@ macro_rules! network_suite {
             #[test]
             fn su2_two_tensor_network_matches_the_widened_oracle() {
                 let engine = &mut symtn::typed::CpuEngine::serial();
-                let runtime = Runtime::builder().build().unwrap();
+                let runtime = Runtime::new();
                 let leg = GradedSpace::try_new(
                     Arc::new(su2_rule()),
                     [(su2_irrep(0), 2), (su2_irrep(1), 2)],

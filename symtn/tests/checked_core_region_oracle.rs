@@ -193,13 +193,13 @@ where
 
 #[test]
 fn generic_toy_core_composition_matches_block_products() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(GenericToy),
         [(GenericLabel::Vacuum, 2), (GenericLabel::X, 3)],
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     let (a, b) = operands(&runtime, &v, &w, label_value);
     // GenericToy's identity F-symbols with non-unit quantum dimensions are
     // not a consistent category, so equivalent bend/braid sequences differ
@@ -215,7 +215,7 @@ mod racah {
 
     #[test]
     fn su3_staged_contraction_matches_block_products() {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let rule = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -234,7 +234,7 @@ mod racah {
         .unwrap();
         let w = GradedSpace::try_new(rule, [(su_irrep(&[1i64, 1]), 1), (su_irrep(&[0, 1]), 2)])
             .unwrap()
-            .try_dual()
+            .dual()
             .unwrap();
         let (a, b) = operands(&runtime, &v, &w, label_value);
         assert!(block_product_case("SU(3)", &a, &b, true) >= 2);
@@ -306,7 +306,7 @@ mod racah {
     #[test]
     fn checked_su2_staged_contraction_matches_multiplicity_free_and_dense() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let degeneracies = [(0usize, 2usize), (1, 2), (2, 1)];
 
         let mf_v = GradedSpace::try_new(
@@ -314,7 +314,7 @@ mod racah {
             degeneracies.map(|(s, n)| (su2_irrep(s), n)),
         )
         .unwrap();
-        let mf_w = mf_v.try_dual().unwrap();
+        let mf_w = mf_v.dual().unwrap();
         let (a, b) = operands(&runtime, &mf_v, &mf_w, su2_value);
         let mf = a.contract(engine, &b, &spec()).unwrap();
 
@@ -364,7 +364,7 @@ mod racah {
             degeneracies.map(|(s, n)| (su_irrep(&[s as i64]), n)),
         )
         .unwrap();
-        let w = v.try_dual().unwrap();
+        let w = v.dual().unwrap();
         let (a, b) = operands(&runtime, &v, &w, sun_value);
         assert!(block_product_case("SU(2)", &a, &b, true) >= 2);
         let checked = a.contract(engine, &b, &spec()).unwrap();
@@ -399,8 +399,8 @@ pub(crate) mod fermionic {
     use super::*;
     use crate::numerics;
     use symtn::sector::{
-        product_sector, CheckedGenericAdmissionMode, FermionParityFusionRule, FermionParityIrrep,
-        LieGroupFusionRule, MultiplicityFreeAdmissionMode, ProductFusionRule,
+        CheckedGenericAdmissionMode, FermionParityFusionRule, FermionParityIrrep,
+        LieGroupFusionRule, MultiplicityFreeAdmissionMode, ProductFusionRule, ProductSector,
     };
     use symtn::typed::{Complex64, Direction, TensorScalar, TypedTensorTwistDispatch};
 
@@ -425,23 +425,23 @@ pub(crate) mod fermionic {
             Arc::new(ProductFusionRule::try_new(su3, FermionParityFusionRule::new()).unwrap()),
             [
                 (
-                    product_sector(su_irrep(&[0, 0]), FermionParityIrrep::EVEN),
+                    ProductSector::new(su_irrep(&[0, 0]), FermionParityIrrep::EVEN),
                     1,
                 ),
                 (
-                    product_sector(su_irrep(&[1, 1]), FermionParityIrrep::ODD),
+                    ProductSector::new(su_irrep(&[1, 1]), FermionParityIrrep::ODD),
                     2,
                 ),
                 (
-                    product_sector(su_irrep(&[1, 1]), FermionParityIrrep::EVEN),
+                    ProductSector::new(su_irrep(&[1, 1]), FermionParityIrrep::EVEN),
                     1,
                 ),
                 (
-                    product_sector(su_irrep(&[1, 0]), FermionParityIrrep::ODD),
+                    ProductSector::new(su_irrep(&[1, 0]), FermionParityIrrep::ODD),
                     1,
                 ),
                 (
-                    product_sector(su_irrep(&[0, 1]), FermionParityIrrep::ODD),
+                    ProductSector::new(su_irrep(&[0, 1]), FermionParityIrrep::ODD),
                     2,
                 ),
             ],
@@ -498,9 +498,9 @@ pub(crate) mod fermionic {
         D: TensorScalar + numerics::Numeric + std::ops::AddAssign,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = su3_space();
-        let dual = v.try_dual().unwrap();
+        let dual = v.dual().unwrap();
         for uniform in [false, true] {
             let middle = if uniform { [&dual, &dual] } else { [&v, &dual] };
             let a = filled(engine, &runtime, &[&v, &v], &middle, 3, value);
@@ -589,8 +589,8 @@ pub(crate) mod fermionic {
         D: TensorScalar + numerics::Numeric,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
-        let dual = v.try_dual().unwrap();
+        let runtime = Runtime::new();
+        let dual = v.dual().unwrap();
         let spaces = [v, &dual];
         // TensorKit copyA/copyB cases followed by mixed-side, reordered contractions.
         #[allow(clippy::type_complexity)]
@@ -759,9 +759,15 @@ pub(crate) mod fermionic {
         >,
     ) {
         let labels = [
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 1),
-            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                1,
+            ),
+            (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                1,
+            ),
         ];
         let checked = LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(2).unwrap(),

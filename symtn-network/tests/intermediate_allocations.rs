@@ -30,14 +30,14 @@ use symtn_network::{
 fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 7)]).unwrap();
     let left =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 5)]).unwrap();
     let right = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 11)]).unwrap();
-    let left_dual = left.try_dual().unwrap();
+    let left_dual = left.dual().unwrap();
     let a = TypedTensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -497,7 +497,7 @@ fn temporary_order_fixture(engine: &mut dyn Engine, runtime: &Runtime) -> (Vec<U
         .unwrap()
     };
     let (va, vb, vc, vd, vi, vj) = (space(2), space(3), space(4), space(5), space(3), space(2));
-    let (vb_dual, vc_dual) = (vb.try_dual().unwrap(), vc.try_dual().unwrap());
+    let (vb_dual, vc_dual) = (vb.dual().unwrap(), vc.dual().unwrap());
     let legs: [(U1Legs, U1Legs); 6] = [
         (&[&va, &vb], &[&vi]),
         (&[&vi], &[&vc]),
@@ -534,8 +534,7 @@ fn temporary_order_fixture(engine: &mut dyn Engine, runtime: &Runtime) -> (Vec<U
 /// runtime and on an engine that keeps no contraction scratch (both are
 /// retained across calls), so it is a first execution.
 fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
-    let (oracle_inputs, terms) =
-        temporary_order_fixture(engine, &Runtime::builder().build().unwrap());
+    let (oracle_inputs, terms) = temporary_order_fixture(engine, &Runtime::new());
     let [x, y, z, w, p, q] = &oracle_inputs[..] else {
         unreachable!()
     };
@@ -647,7 +646,7 @@ fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
             t.dense_data().unwrap().len(),
             "{name}: ambiguous size"
         );
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let (inputs, _) = temporary_order_fixture(engine, &runtime);
         let refs = [0, 1]
             .into_iter()
@@ -667,7 +666,7 @@ fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
         .unwrap();
         let ir = NetworkIR::from_labels(input_labels, output).unwrap();
         let plan = ContractionPlan::from_steps(&ir, steps).unwrap();
-        let planned = network.plan_with(&refs, plan).unwrap();
+        let planned = network.plan(&refs, &plan).unwrap();
 
         symtn::scratch::trim(engine);
         reset_event_counters();
@@ -972,14 +971,14 @@ fn typed_overwrite_worker<D>(engine: &mut dyn Engine, chi: usize, reuse: bool)
 where
     D: AllocationScalar,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), chi)]).unwrap();
     let left =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), chi + 1)]).unwrap();
     let right = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), chi + 1)]).unwrap();
-    let left_dual = left.try_dual().unwrap();
+    let left_dual = left.dual().unwrap();
     let tensors: [TypedTensorMap<U1FusionRule, D>; 3] = std::array::from_fn(|index| {
         let (codomain, domain) = match index {
             0 => (&left, &bond),
@@ -997,7 +996,7 @@ where
     });
     let (network, plan) = overwrite_network();
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
-    let planned = network.plan_with(&refs, plan).unwrap();
+    let planned = network.plan(&refs, &plan).unwrap();
     let oracle = tensors[0]
         .contract(engine, &tensors[1], &OVERWRITE_FIRST_SPEC)
         .unwrap()
@@ -1027,14 +1026,14 @@ where
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let irrep = provider.category().irrep(&[1]).unwrap();
     let fundamental = || irrep.clone();
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi)]).unwrap();
     let left = GradedSpace::try_new(Arc::clone(&provider), [(fundamental(), chi + 1)]).unwrap();
     let right = GradedSpace::try_new(provider, [(fundamental(), chi + 1)]).unwrap();
-    let left_dual = left.try_dual().unwrap();
+    let left_dual = left.dual().unwrap();
     let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let (codomain, domain) = match index {
             0 => (&left, &bond),
@@ -1052,7 +1051,7 @@ where
     });
     let (network, plan) = overwrite_network();
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
-    let planned = network.plan_with(&refs, plan).unwrap();
+    let planned = network.plan(&refs, &plan).unwrap();
     let oracle = tensors[0]
         .contract(engine, &tensors[1], &OVERWRITE_FIRST_SPEC)
         .unwrap()
@@ -1082,7 +1081,7 @@ where
     use symtn::sector::LieGroupFusionRule;
     use symtn_network::{configure_plan_cache, PlanCacheConfig};
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -1093,7 +1092,7 @@ where
     let provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let fundamental = provider.category().irrep(&[1]).unwrap();
     let leg = GradedSpace::try_new(provider, [(fundamental, chi + 1)]).unwrap();
-    let leg_dual = leg.try_dual().unwrap();
+    let leg_dual = leg.dual().unwrap();
     let tensors: [TypedTensorMap<LieGroupFusionRule, D>; 3] = std::array::from_fn(|index| {
         let codomain = if index == 2 { &leg_dual } else { &leg };
         TypedTensorMap::rand_with_seed(
@@ -1188,7 +1187,7 @@ fn run_typed_overwrite_worker(
 }
 
 fn lazy_conj_worker(engine: &mut dyn Engine) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy| {
         GradedSpace::try_new(

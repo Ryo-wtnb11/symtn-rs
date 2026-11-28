@@ -61,7 +61,7 @@ struct Row {
 /// core's GEMM count grows with `reach`.
 fn row(codomain: &[usize], reach: i32) -> Row {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
@@ -191,7 +191,7 @@ fn eager_complex_copy_c_scratch_is_allocator_zeroed() {
     use num_complex::Complex64;
     let _serial = crate::counting_alloc::serial();
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),

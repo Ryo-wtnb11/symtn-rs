@@ -51,7 +51,7 @@ fn second_call<T>(mut factor: impl FnMut() -> T) -> (u64, u64) {
 /// degeneracy-3 fixture.
 fn second_factorizations() -> Vec<[(&'static str, (u64, u64)); 3]> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     [2, 3]
         .into_iter()
         .map(|degeneracy| {

@@ -124,7 +124,7 @@ fn typed_truncspace_follows_stored_sectors_not_the_dual_flag() {
     // so they must select mirrored bond spaces — the profile reads the dual's
     // rewritten ids, exactly as TensorKit's `dim(V', c)` does.
     let skewed = typed_u1_leg(&[(-1, 3), (0, 2), (1, 1)]);
-    let skewed_dual = skewed.try_dual().unwrap();
+    let skewed_dual = skewed.dual().unwrap();
     let skewed_bond = bond(&skewed);
     let skewed_dual_bond = bond(&skewed_dual);
     assert_eq!(skewed_bond.sectors().unwrap(), skewed.sectors().unwrap());
@@ -144,7 +144,7 @@ fn typed_truncspace_follows_stored_sectors_not_the_dual_flag() {
     // pairs as its dual and differs only in the flag, so the two profiles must
     // agree. This is the assertion that dies if the flag ever leaks in.
     let symmetric = typed_u1_leg(&[(-1, 2), (0, 3), (1, 2)]);
-    let symmetric_dual = symmetric.try_dual().unwrap();
+    let symmetric_dual = symmetric.dual().unwrap();
     assert!(symmetric_dual.is_dual() && !symmetric.is_dual());
     assert_eq!(
         symmetric.sectors().unwrap(),

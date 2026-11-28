@@ -26,22 +26,22 @@
 //!     EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
 //! )?;
 //! let v = GradedSpace::try_new(Arc::new(rule), [(tau, 2)])?;
-//! let runtime = Runtime::builder().build()?;
+//! let runtime = Runtime::new();
 //! let tensor: TensorMap<_, Complex64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
 //! assert_eq!(tensor.subblock_count(), 1);
 //! # Ok(())
 //! # }
 //! ```
 
-/// Built-in fusion rules, their sector labels, and product constructors.
-pub use symtn_core::{
-    product_sector, CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep,
-    ProductAdmission, ProductFusionRule, ProductFusionRuleError, ProductSector, SectorId,
-    TableRule, TableRuleError, TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
-};
 pub use symtn_core::{
     BraidingStyleKind, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
     SectorOrderKey, SectorVec,
+};
+/// Built-in fusion rules, their sector labels, and product constructors.
+pub use symtn_core::{
+    CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep, ProductAdmission,
+    ProductFusionRule, ProductFusionRuleError, ProductSector, SectorId, TableRule, TableRuleError,
+    TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 /// The fusion rule of a `fusion_symbols` category: the extension point for a
 /// category defined outside symtn, with its codec and admission vocabulary.

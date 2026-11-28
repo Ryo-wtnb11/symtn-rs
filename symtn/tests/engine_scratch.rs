@@ -103,7 +103,7 @@ macro_rules! cases {
 macro_rules! for_each_case {
     (|$name:ident, $a:ident, $b:ident, $spec:ident, $op:ident, $out:ident, $one:ident, $zero:ident| $body:block) => {{
         let setup = &mut CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         for_each_case!(@rule setup, &runtime, u1, f64, $name, $a, $b, $spec, $op, $out, $one, $zero, $body);
         for_each_case!(@rule setup, &runtime, u1, Complex64, $name, $a, $b, $spec, $op, $out, $one, $zero, $body);
         for_each_case!(@rule setup, &runtime, su2, f64, $name, $a, $b, $spec, $op, $out, $one, $zero, $body);
@@ -174,7 +174,7 @@ fn warm_plain_contract_allocates_no_operand_or_core_scratch() {
 #[test]
 fn warm_planar_contract_allocates_no_route_scratch() {
     let _serial = counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let setup = &mut CpuEngine::serial();
     let spec = ContractSpec {
         lhs: &[0, 2],
@@ -225,7 +225,7 @@ fn warm_planar_contract_allocates_no_route_scratch() {
 #[test]
 fn warm_checked_generic_contract_allocates_no_route_scratch() {
     let _serial = counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let setup = &mut CpuEngine::serial();
     let leg = |n| {
         GradedSpace::try_new(
@@ -261,7 +261,7 @@ fn warm_checked_generic_contract_allocates_no_route_scratch() {
 #[test]
 fn engine_scratch_is_bounded_across_route_switching_and_trim_releases_it() {
     let _serial = counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let engine = &mut CpuEngine::serial();
     // An output transform (the core writes a destination) and a copyC route
     // (a default-order temporary, then one permute), on one f64 U(1) lane.
@@ -360,7 +360,7 @@ fn set_byte_limit(engine: &mut CpuEngine, bytes: usize) {
 #[test]
 fn whole_lease_dropping_keeps_mixed_lanes_cold_until_the_limit_is_raised() {
     let _serial = counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let engine = &mut CpuEngine::serial();
     let (c, p, q, r, s) = (u1(2), u1(3), u1(4), u1(5), u1(6));
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&p, &q], [&c, &r], 1).unwrap();
@@ -504,7 +504,7 @@ fn dense_contract(
 #[test]
 fn stale_engine_scratch_never_reaches_the_output() {
     let _serial = counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let engine = &mut CpuEngine::serial();
     let leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(

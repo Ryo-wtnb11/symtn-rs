@@ -185,7 +185,7 @@ where
 fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1_provider = Arc::new(U1FusionRule);
     let u1_leg = GradedSpace::try_new(
@@ -305,11 +305,11 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         Arc::clone(&product_provider),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],
@@ -373,7 +373,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
             .unwrap()
     );
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let foreign =
         TensorMap::from_subblock_fn(engine, &other_runtime, [&u1_leg], [&u1_leg], |_, _| 1.0)
             .unwrap()
@@ -427,7 +427,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
 fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1 = Arc::new(U1FusionRule);
     let tall = GradedSpace::try_new(
@@ -503,11 +503,11 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         Arc::clone(&product),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],
@@ -855,7 +855,7 @@ fn assert_c64_eigh_trunc_composition_matches_host<R>(
 fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],

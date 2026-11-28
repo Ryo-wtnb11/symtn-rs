@@ -110,7 +110,7 @@ fn legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
         ],
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -155,7 +155,7 @@ macro_rules! u1_suite {
         let wrong = |e: &mut dyn symtn::typed::Engine, like: &TensorMap<_, f64>| {
             let dual = |legs: Vec<GradedSpace<_>>| {
                 legs.iter()
-                    .map(|leg| leg.try_dual().unwrap())
+                    .map(|leg| leg.dual().unwrap())
                     .collect::<Vec<_>>()
             };
             let (codomain, domain) = (dual(like.codomain()), dual(like.domain()));
@@ -688,8 +688,8 @@ macro_rules! rule_suite {
 #[test]
 fn every_host_into_leaves_a_rejected_destination_bit_identical() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
-    let other = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
+    let other = Runtime::new();
     let lift = |e: &mut dyn symtn::typed::Engine, x: &TensorMap<U1FusionRule, f64>| {
         x.materialize(e).unwrap()
     };
@@ -708,7 +708,7 @@ fn every_host_into_leaves_a_rejected_destination_bit_identical() {
 #[test]
 fn host_capability_and_representation_rejections_leave_the_destination_bit_identical() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let (v, _) = legs();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&v], 1).unwrap();
     // Inspection and fixture construction run on their own engine, so the
@@ -929,8 +929,8 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GenericTensorError;
 
-    let rt = Runtime::builder().build().unwrap();
-    let other_rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
+    let other_rt = Runtime::new();
     let su2 = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(2).unwrap(),
@@ -939,7 +939,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
     );
     let v =
         GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 2), (su_irrep(&[1]), 1)]).unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&v], 1).unwrap();
     let permuted = t.permute(engine, &[1], &[2, 0]).unwrap();
     let fresh = |rt: &Runtime| sentinel!(rt, permuted);
@@ -957,7 +957,7 @@ fn checked_transform_into_leaves_a_rejected_destination_bit_identical() {
         )
         .unwrap();
         if dual {
-            leg.try_dual().unwrap()
+            leg.dual().unwrap()
         } else {
             leg
         }
@@ -1108,8 +1108,8 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::{ContractSpec, GenericTensorError};
 
-    let rt = Runtime::builder().build().unwrap();
-    let other_rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
+    let other_rt = Runtime::new();
     let su2 = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(2).unwrap(),
@@ -1118,7 +1118,7 @@ fn checked_contract_into_leaves_a_rejected_destination_bit_identical() {
     );
     let v =
         GradedSpace::try_new(Arc::clone(&su2), [(su_irrep(&[0]), 2), (su_irrep(&[1]), 1)]).unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &w], [&v], 1).unwrap();
     let r = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&w], 2).unwrap();
     let undual = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&w], [&w], 4).unwrap();
@@ -1256,8 +1256,8 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     use symtn::typed::GenericTensorError;
 
-    let rt = Runtime::builder().build().unwrap();
-    let other_rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
+    let other_rt = Runtime::new();
     let su2 = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(2).unwrap(),
@@ -1407,7 +1407,7 @@ fn checked_trace_pairs_into_leaves_a_rejected_destination_bit_identical() {
 #[test]
 fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let (v, w) = legs();
     let factor = Complex64::new(0.5, -2.0);
 
@@ -1539,8 +1539,8 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
     let cuda = &mut crate::common::cuda_engine();
     use symtn::typed::CudaStorage;
 
-    let rt = Runtime::builder().build().unwrap();
-    let other = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
+    let other = Runtime::new();
     fn device_snap<R>(
         cuda: &mut dyn symtn::typed::Engine,
         t: &TensorMap<R, f64, CudaStorage<f64>>,

@@ -808,7 +808,7 @@ impl<Scalar> GenericFArray<Scalar> {
         Self::try_new(data, shape).unwrap_or_else(|error| panic!("{error}"))
     }
 
-    pub fn try_new(
+    fn try_new(
         data: Vec<Scalar>,
         shape: (usize, usize, usize, usize),
     ) -> Result<Self, SymbolShapeError> {
@@ -862,7 +862,7 @@ impl<Scalar> GenericRMatrix<Scalar> {
         Self::try_new(data, rows, cols).unwrap_or_else(|error| panic!("{error}"))
     }
 
-    pub fn try_new(data: Vec<Scalar>, rows: usize, cols: usize) -> Result<Self, SymbolShapeError> {
+    fn try_new(data: Vec<Scalar>, rows: usize, cols: usize) -> Result<Self, SymbolShapeError> {
         let expected_len = rows.checked_mul(cols);
         if expected_len != Some(data.len()) {
             return Err(SymbolShapeError {
@@ -1433,10 +1433,6 @@ impl<Left, Right> ProductSector<Left, Right> {
     {
         C::encode(self.left.into(), self.right.into())
     }
-}
-
-pub const fn product_sector<Left, Right>(left: Left, right: Right) -> ProductSector<Left, Right> {
-    ProductSector::new(left, right)
 }
 
 /// Reversible encoding for product-sector IDs.

@@ -112,7 +112,7 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
         [(spin(0), 2), (spin(1), 2), (spin(2), 1)],
     )
     .unwrap();
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let w = GradedSpace::try_new(rule, [(spin(0), 1), (spin(1), 2), (spin(2), 3)]).unwrap();
     let expected = [
         (spin(0), 50),
@@ -168,7 +168,7 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
         [(su_irrep(&[1i64, 1]), 2), (su_irrep(&[0, 0]), 1)],
     )
     .unwrap();
-    let a_dual = a.try_dual().unwrap();
+    let a_dual = a.dual().unwrap();
     let b = GradedSpace::try_new(
         provider,
         [(su_irrep(&[0i64, 0]), 2), (su_irrep(&[1, 1]), 3)],

@@ -179,7 +179,7 @@ fn cantor_product_ids_nest_through_both_factors() {
         U1FusionRule,
     )
     .unwrap();
-    let odd_one = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
+    let odd_one = ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
     // (1, 2) -> 3 * 4 / 2 + 1.
     assert_eq!(fz2_u1.encode_sector(&odd_one), Ok(s(7)));
     assert_eq!(fz2_u1.decode_sector(s(7)), Ok(odd_one));
@@ -193,8 +193,8 @@ fn cantor_product_ids_nest_through_both_factors() {
         su2_rule(),
     )
     .unwrap();
-    let label = product_sector(
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+    let label = ProductSector::new(
+        ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
         su2_irrep(1),
     );
     // inner (1, 1) -> 4; outer (4, 1) -> 5 * 6 / 2 + 4.
@@ -207,7 +207,7 @@ fn cantor_product_ids_nest_through_both_factors() {
 fn cantor_product_rejects_the_first_unpairable_ids() {
     let u1_u1 =
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
-    let widest = product_sector(
+    let widest = ProductSector::new(
         U1Irrep::new(i32::MAX).unwrap(),
         U1Irrep::new(i32::MAX).unwrap(),
     );
@@ -218,7 +218,7 @@ fn cantor_product_rejects_the_first_unpairable_ids() {
         ))
     );
     // Zigzag ids (2^32 - 2, 3) still pair: 9223372047592194047.
-    let pairable = product_sector(U1Irrep::new(i32::MAX).unwrap(), U1Irrep::new(-2).unwrap());
+    let pairable = ProductSector::new(U1Irrep::new(i32::MAX).unwrap(), U1Irrep::new(-2).unwrap());
     assert_eq!(
         u1_u1.encode_sector(&pairable),
         Ok(s(9_223_372_047_592_194_047))
@@ -229,7 +229,7 @@ fn cantor_product_rejects_the_first_unpairable_ids() {
     // s = 6074000999: T = 18446744070963499500, + l = 18446744075258466794 > 2^64 - 1.
     // So r = 1779033704 (zigzag of charge 889516852) is the last right id and
     // r = 1779033705 (zigzag of charge -889516853) the first unpairable one.
-    let last = product_sector(
+    let last = ProductSector::new(
         U1Irrep::new(i32::MAX).unwrap(),
         U1Irrep::new(889_516_852).unwrap(),
     );
@@ -241,7 +241,7 @@ fn cantor_product_rejects_the_first_unpairable_ids() {
         u1_u1.encode_sector(&last),
         Ok(s(18_446_744_069_184_465_795))
     );
-    let first = product_sector(
+    let first = ProductSector::new(
         U1Irrep::new(i32::MAX).unwrap(),
         U1Irrep::new(-889_516_853).unwrap(),
     );

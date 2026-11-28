@@ -6,11 +6,11 @@ use std::sync::Arc;
 use symtn::typed::ContractSpec;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
-};
-use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
+};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, TensorScalar};
@@ -216,7 +216,7 @@ fn assert_reordered_overwrite<R, D>(
 
 #[test]
 fn contract_overwrite_reorders_non_self_dual_unequal_blocks() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1_provider = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
         Arc::clone(&u1_provider),
@@ -239,11 +239,11 @@ fn contract_overwrite_reorders_non_self_dual_unequal_blocks() {
         product_provider,
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
         ],

@@ -5,7 +5,7 @@ fn checked_compact_null_is_direct_and_agrees_with_dense() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(SpyExecutor::counting(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x50));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::diagonal(
@@ -46,7 +46,7 @@ fn checked_generic_lazy_polar_second_svd_failure_keeps_parent_unchanged() {
         let svd_calls = Arc::new(SpyCounts::default());
         let gemm_calls = Arc::clone(&svd_calls);
         let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, Some(2), None)));
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(CheckedOnlyToy::new(0x51));
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 1)])
             .unwrap();
@@ -91,7 +91,7 @@ fn checked_generic_null_dense_failure_is_typed_and_nonpublishing() {
         Some(2),
         "injected null QR failure",
     )));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0x52));
     let long =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 2), (Label::X, 2)]).unwrap();
@@ -118,7 +118,7 @@ fn checked_generic_polar_provider_error_precedes_dense_work() {
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, None, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new(0x53));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&leg], [&leg]).unwrap();
@@ -167,7 +167,7 @@ fn checked_only_compact_diagonal_polar_is_direct_and_refuses_nonfinite_values() 
     let svd_calls = Arc::new(SpyCounts::default());
     let gemm_calls = Arc::clone(&svd_calls);
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, None, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x54));
     let bond =
         GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 2), (Label::X, 1)]).unwrap();
@@ -286,7 +286,7 @@ fn checked_only_compact_diagonal_polar_is_direct_and_refuses_nonfinite_values() 
     );
     let dual_bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual_sector = dual_bond.sectors().unwrap().remove(0);
     let dual: TensorMap<_, f64> = TensorMap::diagonal(
@@ -383,7 +383,7 @@ fn checked_generic_polar_stages_svd_and_both_gemms_without_publication() {
         let svd_calls = Arc::new(SpyCounts::default());
         let gemm_calls = Arc::clone(&svd_calls);
         let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, fail_svd, fail_gemm)));
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(CheckedOnlyToy::new(0x55));
         let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1), (Label::X, 1)])
             .unwrap();

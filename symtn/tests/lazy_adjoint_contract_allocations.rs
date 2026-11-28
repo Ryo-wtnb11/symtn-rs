@@ -34,7 +34,7 @@ const LAZY_ADJOINT_CEILING: u64 = 64;
 /// row). The Runtime transform store must see no miss on a warm call.
 macro_rules! assert_warm_lazy_adjoint {
     ($engine:ident, $provider:expr, $sectors:expr $(,)?) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = GradedSpace::try_new(
             std::sync::Arc::new($provider),
             $sectors.into_iter().map(|s| (s, 4)),

@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime};
@@ -32,7 +32,7 @@ use symtn::typed::{GradedSpace, Runtime};
 pub const K: f64 = 32.0;
 
 pub fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 /// Payload values that a single-precision tensor and its double-precision twin
@@ -281,8 +281,8 @@ pub fn fermion_su2_leg() -> GradedSpace<FermionSu2Rule> {
 /// [`fermion_su2_leg`] with chosen per-sector degeneracies.
 pub fn fermion_su2_leg_with(degeneracies: [usize; 3]) -> GradedSpace<FermionSu2Rule> {
     let label = |parity, charge, twice_spin| {
-        product_sector(
-            product_sector(parity, U1Irrep::new(charge).unwrap()),
+        ProductSector::new(
+            ProductSector::new(parity, U1Irrep::new(charge).unwrap()),
             su2_irrep(twice_spin),
         )
     };

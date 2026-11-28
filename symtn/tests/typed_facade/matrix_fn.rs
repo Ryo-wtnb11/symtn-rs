@@ -26,7 +26,7 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
         ],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     assert!(bond.is_dual());
     let q = |charge| symtn::sector::U1Irrep::new(charge).unwrap();

@@ -32,7 +32,7 @@ use num_complex::Complex64;
 
 use crate::numerics;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -230,7 +230,7 @@ fn assert_update_close<D: Exact>(what: &str, got: &[D], want: &[D]) {
 
 macro_rules! assert_exact_adjoint {
     ($engine:ident, $dtype:ty, [$($codomain:expr),+], [$($domain:expr),+]) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let codomain = vec![$($codomain),+];
         let domain = vec![$($domain),+];
         let parent = |$engine: &mut dyn Engine, salt| {
@@ -350,7 +350,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_u1_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
     let mut real = assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
     let mut complex = assert_exact_adjoint!(engine, Complex64, [&leg, &dual], [&other]);
@@ -401,7 +401,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {
@@ -419,7 +419,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [
@@ -454,7 +454,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_su3_multiplicity_legs() {
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2), (trivial, 1)]).unwrap();
     let other = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 3)]).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let probe =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg, &other], [&leg], |_, _| 0.0)
             .unwrap();
@@ -744,7 +744,7 @@ mod factorizations {
                         TensorMap::<_, $d>::rand_with_seed(engine, runtime, [a], [a, b], $seed + 1)
                             .unwrap();
                     assert_rectangular_ops!(engine, format!("{label} wide"), wide);
-                    let dual = a.try_dual().unwrap();
+                    let dual = a.dual().unwrap();
                     let dual_legs = TensorMap::<_, $d>::rand_with_seed(
                         engine,
                         runtime,
@@ -776,7 +776,7 @@ mod factorizations {
     #[test]
     fn u1_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(U1FusionRule);
         let leg = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
@@ -795,7 +795,7 @@ mod factorizations {
     #[test]
     fn fermionic_u1_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(
             ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
                 FermionParityFusionRule::new(),
@@ -825,7 +825,7 @@ mod factorizations {
     #[test]
     fn multiplicity_free_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(crate::su2::su2_rule());
         let su2 = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
@@ -847,7 +847,7 @@ mod factorizations {
         let engine = &mut symtn::typed::CpuEngine::serial();
         use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(2).unwrap(),
@@ -880,7 +880,7 @@ mod factorizations {
         let engine = &mut symtn::typed::CpuEngine::serial();
         use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -927,7 +927,7 @@ mod factorizations {
         let engine = &mut symtn::typed::CpuEngine::serial();
         use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -944,7 +944,7 @@ mod factorizations {
             [(su_irrep(&[0i64, 1]), 3), (su_irrep(&[1, 0]), 1)],
         )
         .unwrap();
-        let dual = three.try_dual().unwrap();
+        let dual = three.dual().unwrap();
         assert!(dual.is_dual() && !three.is_dual());
 
         macro_rules! seams {

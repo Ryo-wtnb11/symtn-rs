@@ -55,7 +55,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
     /// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
@@ -254,7 +254,7 @@ where
     /// use symtn::typed::{GradedSpace, Qr, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 3)?;
     /// let Qr { q, r } = a.qr_compact(engine, &[0], &[1])?;
@@ -340,7 +340,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 4)?;
     /// let Svd { u, s, vh } = a.svd_compact(engine, &[0], &[1])?;
@@ -459,7 +459,7 @@ where
     /// use symtn::typed::{Eigh, GradedSpace, HermitianTol, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?.scale(engine, 2.0)?;
     /// let Eigh { d, v: eigenvectors } = a.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)?;
@@ -576,7 +576,7 @@ where
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, Svd, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(
     ///     Arc::new(TableRule::fibonacci()),
     ///     [(TableSector::new(1), 1), (TableSector::new(2), 2)],
@@ -647,7 +647,7 @@ where
     /// use symtn::typed::{GradedSpace, Lq, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 5)?;
     /// let Lq { l, q } = a.lq_compact(engine, &[0], &[1])?;
@@ -726,7 +726,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let values = SectorSpectrum { sector: U1Irrep::new(0).unwrap(), values: vec![4.0, 9.0] };
     /// let s: TensorMap<_, f64> = TensorMap::diagonal(engine, &runtime, &v, [values])?;
@@ -1082,7 +1082,7 @@ where
     /// use symtn::typed::{Eig, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?.scale(engine, 2.0)?;
     /// let Eig { d, v: eigenvectors } = a.eig_full(engine, &[0], &[1])?;
@@ -1156,7 +1156,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let zero: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
     /// let n = zero.left_null(engine, &[0], &[1])?;
@@ -1189,7 +1189,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap, Truncation};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let rule = Arc::new(U1FusionRule);
     /// let tall = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 3)])?;
     /// let short = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), 2)])?;
@@ -1283,7 +1283,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap, Truncation};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let rule = Arc::new(U1FusionRule);
     /// let short = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let wide = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), 3)])?;
@@ -1387,7 +1387,7 @@ where
     /// use symtn::typed::{GradedSpace, LeftPolar, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?.scale(engine, 2.0)?;
     /// let LeftPolar { w, p } = a.left_polar(engine, &[0], &[1])?;
@@ -1599,7 +1599,7 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)])?;
     /// let zero: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
     /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;

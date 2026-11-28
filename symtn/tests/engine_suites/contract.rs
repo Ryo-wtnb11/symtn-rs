@@ -152,7 +152,7 @@ on_each_engine! {
     fn contract_matches_the_blas_contract_sequence_at_every_dtype<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         blas_at!(B, device, engine, &runtime, f64);
         blas_at!(B, device, engine, &runtime, Complex64);
         blas_at!(B, device, engine, &runtime, f32);
@@ -166,7 +166,7 @@ on_each_engine! {
     fn contract_matches_the_physical_basis_contraction<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         macro_rules! dense {
             ($case:expr) => {{
                 let case = $case;
@@ -219,7 +219,7 @@ on_each_engine! {
     fn fermionic_contract_matches_both_tensorkit_twist_roles_at_every_dtype<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         fermionic_at!(B, device, engine, &runtime, f64);
         fermionic_at!(B, device, engine, &runtime, Complex64);
         fermionic_at!(B, device, engine, &runtime, f32);
@@ -233,7 +233,7 @@ on_each_engine! {
         // The helper's closures are `Fn`; each borrows the one engine in turn.
         let device = std::cell::RefCell::new(B::engine());
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let loops = fz2_tensorkit_loops(
             engine,
             &runtime,
@@ -275,7 +275,7 @@ on_each_engine! {
     fn contract_into_a_poisoned_destination_matches_the_oracles_at_every_dtype<B>() {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         overwrite_at!(B, device, engine, &runtime, f64);
         overwrite_at!(B, device, engine, &runtime, Complex64);
         overwrite_at!(B, device, engine, &runtime, f32);

@@ -1,37 +1,15 @@
 use super::*;
 
-/// Scalar contract for the factorization layer: dense-executor I/O plus the
-/// adjoint and real-embedding used by the factor builders, and allocator
-/// zeroing of its outputs ([`ZeroBytes`]). Implemented for the single- and
-/// double-precision real and complex scalars.
-pub trait FactorScalar: DenseRecouplingScalar + ZeroBytes {
+/// Scalar contract for the factorization layer: the adjoint and
+/// real-embedding used by the factor builders, and allocator zeroing of its
+/// outputs ([`ZeroBytes`]). Implemented for the single- and double-precision
+/// real and complex scalars, and sealed by its dense-executor I/O.
+pub trait FactorScalar: DenseRecouplingScalar + ZeroBytes + sealed::DenseIo {
     /// Output scalar of the general (non-Hermitian) eigendecomposition.
     type Eig: FactorScalar;
     /// Real scalar used by singular-value/eigenvalue outputs.
     type Real: DenseRecouplingScalar + Into<f64>;
 
-    fn dense_slice(tensor: &DenseTensor) -> Result<&[Self], DenseError>;
-    /// Consuming implementations may transfer backend-owned host storage.
-    /// The default implementation copies from the borrowed slice.
-    fn dense_into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
-        Self::dense_slice(&tensor).map(ToOwned::to_owned)
-    }
-    /// Converts a sector payload into the dense executor's owned full-SVD
-    /// input. Custom scalar implementations retain the payload for the
-    /// compatibility route.
-    fn dense_into_owned(input: Vec<Self>) -> Result<DenseOwned, Vec<Self>> {
-        Err(input)
-    }
-    /// Real spectrum output (singular values, Hermitian eigenvalues) widened
-    /// to `f64` for the host-side truncation policies.
-    fn real_spectrum(tensor: &DenseTensor) -> Result<Vec<f64>, DenseError>;
-    /// [`Self::real_spectrum`] into `out` (cleared first), reusing its
-    /// capacity. Custom scalar implementations keep the allocating route.
-    fn real_spectrum_into(tensor: &DenseTensor, out: &mut Vec<f64>) -> Result<(), DenseError> {
-        out.clear();
-        out.extend(Self::real_spectrum(tensor)?);
-        Ok(())
-    }
     fn from_real(value: f64) -> Self;
     /// Widens to `Complex64` (general eigenvalue bookkeeping).
     fn widen_complex(self) -> Complex64;
@@ -56,33 +34,6 @@ pub trait FactorScalar: DenseRecouplingScalar + ZeroBytes {
 impl FactorScalar for f32 {
     type Eig = num_complex::Complex32;
     type Real = f32;
-
-    fn dense_slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
-        tensor.as_f32_slice()
-    }
-
-    fn dense_into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
-        tensor.into_f32_vec()
-    }
-
-    fn dense_into_owned(input: Vec<Self>) -> Result<DenseOwned, Vec<Self>> {
-        Ok(DenseOwned::F32(input))
-    }
-
-    fn real_spectrum(tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
-        Ok(tensor
-            .as_f32_slice()?
-            .iter()
-            .map(|&value| value as f64)
-            .collect())
-    }
-
-    fn real_spectrum_into(tensor: &DenseTensor, out: &mut Vec<f64>) -> Result<(), DenseError> {
-        let values = tensor.as_f32_slice()?;
-        out.clear();
-        out.extend(values.iter().map(|&value| value as f64));
-        Ok(())
-    }
 
     fn from_real(value: f64) -> Self {
         value as f32
@@ -116,29 +67,6 @@ impl FactorScalar for f64 {
     type Eig = Complex64;
     type Real = f64;
 
-    fn dense_slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
-        tensor.as_f64_slice()
-    }
-
-    fn dense_into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
-        tensor.into_f64_vec()
-    }
-
-    fn dense_into_owned(input: Vec<Self>) -> Result<DenseOwned, Vec<Self>> {
-        Ok(DenseOwned::F64(input))
-    }
-
-    fn real_spectrum(tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
-        Ok(tensor.as_f64_slice()?.to_vec())
-    }
-
-    fn real_spectrum_into(tensor: &DenseTensor, out: &mut Vec<f64>) -> Result<(), DenseError> {
-        let values = tensor.as_f64_slice()?;
-        out.clear();
-        out.extend_from_slice(values);
-        Ok(())
-    }
-
     fn from_real(value: f64) -> Self {
         value
     }
@@ -171,33 +99,6 @@ impl FactorScalar for num_complex::Complex32 {
     type Eig = num_complex::Complex32;
     type Real = f32;
 
-    fn dense_slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
-        tensor.as_c32_slice()
-    }
-
-    fn dense_into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
-        tensor.into_c32_vec()
-    }
-
-    fn dense_into_owned(input: Vec<Self>) -> Result<DenseOwned, Vec<Self>> {
-        Ok(DenseOwned::C32(input))
-    }
-
-    fn real_spectrum(tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
-        Ok(tensor
-            .as_f32_slice()?
-            .iter()
-            .map(|&value| value as f64)
-            .collect())
-    }
-
-    fn real_spectrum_into(tensor: &DenseTensor, out: &mut Vec<f64>) -> Result<(), DenseError> {
-        let values = tensor.as_f32_slice()?;
-        out.clear();
-        out.extend(values.iter().map(|&value| value as f64));
-        Ok(())
-    }
-
     fn from_real(value: f64) -> Self {
         num_complex::Complex32::new(value as f32, 0.0)
     }
@@ -229,29 +130,6 @@ impl FactorScalar for num_complex::Complex32 {
 impl FactorScalar for Complex64 {
     type Eig = Complex64;
     type Real = f64;
-
-    fn dense_slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
-        tensor.as_c64_slice()
-    }
-
-    fn dense_into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
-        tensor.into_c64_vec()
-    }
-
-    fn dense_into_owned(input: Vec<Self>) -> Result<DenseOwned, Vec<Self>> {
-        Ok(DenseOwned::C64(input))
-    }
-
-    fn real_spectrum(tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
-        Ok(tensor.as_f64_slice()?.to_vec())
-    }
-
-    fn real_spectrum_into(tensor: &DenseTensor, out: &mut Vec<f64>) -> Result<(), DenseError> {
-        let values = tensor.as_f64_slice()?;
-        out.clear();
-        out.extend_from_slice(values);
-        Ok(())
-    }
 
     fn from_real(value: f64) -> Self {
         Complex64::new(value, 0.0)
@@ -378,3 +256,144 @@ pub fn nonfinite_factor_input(family: FactorFamily) -> OperationError {
         },
     }
 }
+
+/// Why a hidden supertrait rather than `FactorScalar` methods: the dense
+/// executor's buffer types are not part of symtn's public contract, so only
+/// this crate may name or call the conversions between them and a payload.
+mod sealed {
+    use super::*;
+
+    /// The proof that a [`DenseIo`] conversion is called from inside this
+    /// crate: the supertrait is unnameable, but a generic `D: FactorScalar`
+    /// still resolves its methods, so sealing alone would leave them callable.
+    pub struct Token(());
+
+    /// The only [`Token`].
+    pub(crate) const DENSE_IO: Token = Token(());
+
+    pub trait DenseIo: Sized {
+        fn dense_slice(_: Token, tensor: &DenseTensor) -> Result<&[Self], DenseError>;
+        /// Consuming conversions may transfer backend-owned host storage.
+        fn dense_into_vec(_: Token, tensor: DenseTensor) -> Result<Vec<Self>, DenseError>;
+        /// Real spectrum output (singular values, Hermitian eigenvalues)
+        /// widened to `f64` for the host-side truncation policies.
+        fn real_spectrum(_: Token, tensor: &DenseTensor) -> Result<Vec<f64>, DenseError>;
+        /// [`Self::real_spectrum`] into `out` (cleared first), reusing its
+        /// capacity.
+        fn real_spectrum_into(
+            _: Token,
+            tensor: &DenseTensor,
+            out: &mut Vec<f64>,
+        ) -> Result<(), DenseError>;
+    }
+
+    impl DenseIo for f32 {
+        fn dense_slice(_: Token, tensor: &DenseTensor) -> Result<&[Self], DenseError> {
+            tensor.as_f32_slice()
+        }
+
+        fn dense_into_vec(_: Token, tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
+            tensor.into_f32_vec()
+        }
+
+        fn real_spectrum(_: Token, tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
+            Ok(tensor
+                .as_f32_slice()?
+                .iter()
+                .map(|&value| value as f64)
+                .collect())
+        }
+
+        fn real_spectrum_into(
+            _: Token,
+            tensor: &DenseTensor,
+            out: &mut Vec<f64>,
+        ) -> Result<(), DenseError> {
+            let values = tensor.as_f32_slice()?;
+            out.clear();
+            out.extend(values.iter().map(|&value| value as f64));
+            Ok(())
+        }
+    }
+
+    impl DenseIo for f64 {
+        fn dense_slice(_: Token, tensor: &DenseTensor) -> Result<&[Self], DenseError> {
+            tensor.as_f64_slice()
+        }
+
+        fn dense_into_vec(_: Token, tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
+            tensor.into_f64_vec()
+        }
+
+        fn real_spectrum(_: Token, tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
+            Ok(tensor.as_f64_slice()?.to_vec())
+        }
+
+        fn real_spectrum_into(
+            _: Token,
+            tensor: &DenseTensor,
+            out: &mut Vec<f64>,
+        ) -> Result<(), DenseError> {
+            let values = tensor.as_f64_slice()?;
+            out.clear();
+            out.extend_from_slice(values);
+            Ok(())
+        }
+    }
+
+    impl DenseIo for num_complex::Complex32 {
+        fn dense_slice(_: Token, tensor: &DenseTensor) -> Result<&[Self], DenseError> {
+            tensor.as_c32_slice()
+        }
+
+        fn dense_into_vec(_: Token, tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
+            tensor.into_c32_vec()
+        }
+
+        fn real_spectrum(_: Token, tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
+            Ok(tensor
+                .as_f32_slice()?
+                .iter()
+                .map(|&value| value as f64)
+                .collect())
+        }
+
+        fn real_spectrum_into(
+            _: Token,
+            tensor: &DenseTensor,
+            out: &mut Vec<f64>,
+        ) -> Result<(), DenseError> {
+            let values = tensor.as_f32_slice()?;
+            out.clear();
+            out.extend(values.iter().map(|&value| value as f64));
+            Ok(())
+        }
+    }
+
+    impl DenseIo for Complex64 {
+        fn dense_slice(_: Token, tensor: &DenseTensor) -> Result<&[Self], DenseError> {
+            tensor.as_c64_slice()
+        }
+
+        fn dense_into_vec(_: Token, tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
+            tensor.into_c64_vec()
+        }
+
+        fn real_spectrum(_: Token, tensor: &DenseTensor) -> Result<Vec<f64>, DenseError> {
+            Ok(tensor.as_f64_slice()?.to_vec())
+        }
+
+        fn real_spectrum_into(
+            _: Token,
+            tensor: &DenseTensor,
+            out: &mut Vec<f64>,
+        ) -> Result<(), DenseError> {
+            let values = tensor.as_f64_slice()?;
+            out.clear();
+            out.extend_from_slice(values);
+            Ok(())
+        }
+    }
+}
+
+pub(crate) use sealed::{DenseIo, DENSE_IO};

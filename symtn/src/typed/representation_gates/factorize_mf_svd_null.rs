@@ -7,10 +7,10 @@ fn compact_diagonal_svd_full_preserves_spaces_without_materialization_or_solver(
     let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(polar_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(2).unwrap(), 3)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -117,7 +117,7 @@ fn full_svd_compact_bond_requires_complete_exact_nondual_sector_legs() {
 #[test]
 fn dense_multisector_full_svd_publishes_compact_s_for_real_and_complex() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
@@ -213,7 +213,7 @@ fn compact_diagonal_null_is_empty_by_shape_without_dense_work() {
     // and nonzero entries, SU(2), a fermionic product rule, and a dual leg.
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(polar_spy(&calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
@@ -279,8 +279,8 @@ fn compact_diagonal_null_is_empty_by_shape_without_dense_work() {
     let provider = Arc::new(
         ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap(),
     );
-    let even = product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
-    let odd = product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
+    let even = ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
+    let odd = ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
     let product = GradedSpace::try_new(Arc::clone(&provider), [(even, 2), (odd, 2)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -305,7 +305,7 @@ fn compact_diagonal_null_is_empty_by_shape_without_dense_work() {
 
     let dual = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
@@ -332,7 +332,7 @@ fn compact_diagonal_null_refuses_nonfinite_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an empty result does not skip the shared finite-input stage, so
     // dense and diagonal input refuse a NaN alike (#1986).
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let nonfinite: TensorMap<_, f64> = TensorMap::diagonal(
@@ -358,7 +358,7 @@ fn compact_diagonal_null_refuses_nonfinite_input() {
 #[test]
 fn compact_diagonal_svd_full_sorted_hand_oracle_all_scalars() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
     macro_rules! check {
@@ -432,7 +432,7 @@ fn compact_diagonal_svd_full_sorted_hand_oracle_all_scalars() {
 #[test]
 fn compact_diagonal_svd_full_subnormal_phase_and_nonfinite_refusal() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     macro_rules! check {
@@ -543,7 +543,7 @@ fn compact_diagonal_svd_full_subnormal_phase_and_nonfinite_refusal() {
 fn compact_diagonal_svd_uses_spectrum_without_dense_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     for full in [false, true] {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = GradedSpace::try_new(
             Arc::new(U1FusionRule),
             [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
@@ -606,7 +606,7 @@ fn compact_diagonal_svd_vals_uses_only_the_stored_spectrum() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let solver_calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(fail_second_svd(&solver_calls)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
@@ -648,7 +648,7 @@ fn compact_diagonal_svd_vals_uses_only_the_stored_spectrum() {
 
     let dual_bond = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let dual: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
@@ -672,7 +672,7 @@ fn compact_diagonal_svd_vals_uses_only_the_stored_spectrum() {
 #[test]
 fn compact_diagonal_svd_vals_rounds_at_payload_precision() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let real: TensorMap<_, f32> = TensorMap::diagonal(
@@ -712,7 +712,7 @@ fn compact_diagonal_svd_vals_rounds_at_payload_precision() {
 #[test]
 fn compact_diagonal_svd_vals_refuses_nonfinite_and_overflows_at_range_edges() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     for value in [
@@ -749,7 +749,7 @@ fn compact_diagonal_svd_vals_refuses_nonfinite_and_overflows_at_range_edges() {
 fn compact_diagonal_svd_complex_permutation_and_phase() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     for full in [false, true] {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg = GradedSpace::try_new(
             Arc::new(U1FusionRule),
             [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
@@ -842,7 +842,7 @@ fn compact_diagonal_svd_complex_permutation_and_phase() {
 fn compact_diagonal_svd_other_host_scalars_and_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     for full in [false, true] {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         macro_rules! check {
             ($engine:ident, $rule:expr, $legs:expr, $spectra:expr, $dtype:ty, $tol:expr) => {{
                 let leg = GradedSpace::try_new(Arc::new($rule), $legs).unwrap();
@@ -937,8 +937,8 @@ fn compact_diagonal_svd_other_host_scalars_and_sectors() {
             f64,
             1e-12
         );
-        let even = product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
-        let odd = product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
+        let even = ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
+        let odd = ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
         check!(
             engine,
             ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())
@@ -998,7 +998,7 @@ fn compact_diagonal_svd_other_host_scalars_and_sectors() {
 fn compact_diagonal_svd_at_c32_range_edge_overflows_like_mak() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     for full in [false, true] {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg =
             GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
         let large = f32::MAX * 0.75;
@@ -1034,7 +1034,7 @@ fn compact_diagonal_svd_at_c32_range_edge_overflows_like_mak() {
 fn compact_diagonal_svd_subnormal_complex_phase_is_unit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     for full in [false, true] {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let leg =
             GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
         let tiny = f64::from_bits(1);

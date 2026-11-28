@@ -18,13 +18,13 @@ use symtn::typed::HermitianTol;
 use num_complex::Complex64;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, SectorId, U1FusionRule, U1Irrep,
-    ZNFusionRule,
-};
-use symtn::sector::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionRule, FusionStyleKind,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
     RuleIdentity, SectorCodec, SectorVec,
+};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, SectorId, U1FusionRule, U1Irrep,
+    ZNFusionRule,
 };
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::TensorScalar;

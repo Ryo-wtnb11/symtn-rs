@@ -34,7 +34,7 @@ fn assert_real_close(actual: &[f64], expected: &[f64]) {
 #[test]
 fn physical_dense_roundtrips_real_and_complex_su2_multitree_data() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let real = su2_multitree(&runtime, |inner| {
         if usize::try_from(inner[0].dynkin().next().unwrap()).unwrap() == 0 {
             1.25
@@ -72,7 +72,7 @@ fn physical_dense_roundtrips_real_and_complex_su2_multitree_data() {
 #[test]
 fn projection_validates_shape_and_length_without_changing_target() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let target = su2_multitree(&runtime, |_| 9.0);
     let before = target.dense_data().unwrap().to_vec();
 
@@ -106,7 +106,7 @@ fn projection_validates_shape_and_length_without_changing_target() {
 #[test]
 fn physical_entries_match_tensorkit_su2_values() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let real = su2_multitree(&runtime, |inner| {
         f64::from(usize::try_from(inner[0].dynkin().next().unwrap()).unwrap() == 2)
     });
@@ -173,7 +173,7 @@ fn permute_each_axis<D: Copy>(physical: &PhysicalDense<D>, target_to_source: &[u
 #[test]
 fn su2_spin_one_singlet_projects_to_explicit_doubled_u1_charges() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let spin_one = su2_irrep(2);
     let su2_leg = GradedSpace::try_new(std::sync::Arc::new(su2_rule()), [(spin_one, 1)]).unwrap();
     let singlet: TensorMap<_, f64> =
@@ -453,7 +453,7 @@ fn u1_expected(complex: bool) -> Vec<Complex64> {
 #[test]
 fn u1_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [
@@ -463,7 +463,7 @@ fn u1_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
         ],
     )
     .unwrap();
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let label = |q: &U1Irrep| f64::from(q.charge());
     let real = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
         engine,
@@ -533,7 +533,7 @@ fn su2_non_dual_expected(complex: bool) -> Vec<Complex64> {
 #[test]
 fn su2_dense_matches_clebsch_gordan_expansion_without_dual_legs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let w = su2_space([1, 2, 1]);
     let label =
         |j: &symtn_core::LieIrrep| usize::try_from(j.dynkin().next().unwrap()).unwrap() as f64;
@@ -587,9 +587,9 @@ fn assert_su2_dual_samples(actual: &[Complex64], complex: bool) {
 #[test]
 fn su2_dense_order_matches_tensorkit_for_dual_and_bent_legs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let w = su2_space([2, 1, 1]);
-    let dual = w.try_dual().unwrap();
+    let dual = w.dual().unwrap();
     let label =
         |j: &symtn_core::LieIrrep| usize::try_from(j.dynkin().next().unwrap()).unwrap() as f64;
     let real = TensorMap::<Su2Rule, f64>::from_subblock_fn(

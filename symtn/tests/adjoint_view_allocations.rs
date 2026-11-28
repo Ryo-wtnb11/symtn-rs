@@ -53,7 +53,7 @@ fn adjoint_creation_allocates_metadata_not_a_receiver_sized_payload() {
     // What: the fallible typed constructor transactionally admits the logical
     // adjoint layout, so metadata may scale with rank and tree count. It must
     // not scale with degeneracy: that would mean copying the parent payload.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (rank, radius) in [(2, 0), (2, 2), (2, 6), (2, 12), (4, 4), (6, 1), (8, 0)] {
         let large_degeneracy = if rank == 2 { 16 } else { 2 };
         let small = tensor(&runtime, (-radius..=radius).map(|charge| (charge, 1)), rank);
@@ -83,7 +83,7 @@ fn adjoint_involution_does_not_allocate() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the second dagger restores the parent body without allocating.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let source = tensor(&runtime, (-4..=4).map(|charge| (charge, 2)), 4);
     let adjoint = source.adjoint(engine).unwrap();
 
@@ -98,7 +98,7 @@ fn adjoint_involution_does_not_allocate() {
 fn labelled_block_inspection_refuses_a_lazy_adjoint_without_copying() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let parent = tensor(&runtime, [(0, 64)], 2);
     let parent_block = parent.subblock(0).unwrap();
     let adjoint = parent.adjoint(engine).unwrap();
@@ -138,7 +138,7 @@ fn rectangular_multisector_adjoint_svd_keeps_total_and_peak_below_materializatio
     let _serial = crate::counting_alloc::serial();
     // What: compact and full SVD of a lazy adjoint factor the parent directly
     // and never hide a receiver-sized logical-adjoint allocation around it.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let left = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -193,7 +193,7 @@ fn rectangular_multisector_adjoint_svd_keeps_total_and_peak_below_materializatio
 fn lazy_scale_and_add_allocate_only_one_input_sized_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(
         provider,
@@ -250,7 +250,7 @@ fn lazy_add_allocation_count_does_not_depend_on_the_block_count() {
     // bounds-checked strided call and allocates only its output and
     // the tensor wrapping it, the same count as the per-element kernel it
     // replaced, for one block or many.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let alpha = num_complex::Complex64::new(0.5, 0.0);
     let beta = num_complex::Complex64::new(-0.25, 0.0);
     let mut counts = Vec::new();
@@ -290,7 +290,7 @@ fn block_stride_buffers_spill_only_past_rank_sixteen() {
     // to 16 non-unit axes inline, so at rank 10 lazy `add` and lazy-adjoint
     // materialization allocate as at rank 2, for one block or many. Past 16
     // axes its four stride buffers spill at most once per op.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let alpha = num_complex::Complex64::new(0.5, 0.0);
     let beta = num_complex::Complex64::new(-0.25, 0.0);
     let mut counts = Vec::new();
@@ -350,7 +350,7 @@ fn identity_adjoint_transform_cost_is_independent_of_rank_and_block_count() {
     let _serial = crate::counting_alloc::serial();
     // What: identity permute, braid, and repartition share the lazy view with
     // zero allocations across increasing rank and U1 sector counts.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (rank, radius) in [(2, 0), (2, 6), (4, 4), (6, 1), (8, 0), (10, 0)] {
         let source = tensor(&runtime, (-radius..=radius).map(|charge| (charge, 2)), rank);
         let adjoint = source.adjoint(engine).unwrap();
@@ -387,7 +387,7 @@ fn identity_adjoint_transform_cost_is_independent_of_rank_and_block_count() {
 fn ordinary_tensor_clone_does_not_allocate() {
     let _serial = crate::counting_alloc::serial();
     // What: the representation split keeps an owned tensor's value-like Arc clone cost.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let source = tensor(&runtime, (-4..=4).map(|charge| (charge, 2)), 4);
 
     let cost = measure(|| {
@@ -404,7 +404,7 @@ fn measure_eager_lazy_core_compose(
     seed: u64,
 ) -> u64 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let make_space = |sectors: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -454,7 +454,7 @@ fn materialize_allocates_one_fresh_payload_per_call() {
     // costs one payload allocation plus fixed body wrappers, whatever the
     // block count, on every call: the result never shares a payload, so a
     // repeated call cannot be free.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut counts = Vec::new();
     for (rank, radius, degeneracy) in [(2, 0, 8), (2, 6, 2), (4, 3, 2), (6, 1, 2)] {
         let source = tensor(
@@ -494,7 +494,7 @@ fn warm_checked_generic_adjoint_does_not_scale_with_fusion_trees() {
     // trees the HomSpace enumerates. Re-enumerating the adjoint trees with
     // provider queries cost 810 and 1407 calls for the two spaces below.
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

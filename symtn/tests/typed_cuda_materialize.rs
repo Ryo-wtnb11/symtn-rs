@@ -19,7 +19,7 @@ use std::sync::Arc;
 use num_complex::{Complex32, Complex64};
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{GradedSpace, TensorMap};
@@ -258,7 +258,7 @@ fn fixtures<R, D>(
         + symtn::typed::TypedTensorModeDispatch<R, FacadeError = symtn::typed::Error>,
     D: Bits + symtn::typed::CudaPayload,
 {
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let square: TensorMap<R, D> =
         TensorMap::rand_with_seed(engine, runtime, [leg, &dual], [&dual, leg], 1545).unwrap();
     check(engine, cuda, &square, &format!("{what} 2<-2"));
@@ -273,7 +273,7 @@ fn fixtures<R, D>(
 fn device_materialize_matches_host_with_one_fresh_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -298,15 +298,15 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
         ),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                 2,
             ),
         ],
@@ -334,7 +334,7 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
         Complex64::new(f64::INFINITY, f64::INFINITY),
         Complex64::new(-3.5, 0.25),
     ];
-    let dual = u1.try_dual().unwrap();
+    let dual = u1.dual().unwrap();
     let mut next = 0;
     let special: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1, &dual], [&dual, &u1], |_, _| {

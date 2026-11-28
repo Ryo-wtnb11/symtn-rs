@@ -15,7 +15,7 @@ use symtn::typed::{GradedSpace, OperationError, Runtime, TensorMap};
 #[test]
 fn checked_generic_trace_rejects_legs_that_are_not_mutually_dual() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

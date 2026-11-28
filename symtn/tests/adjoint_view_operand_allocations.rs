@@ -34,7 +34,7 @@ fn tensor(runtime: &Runtime, degeneracy: usize, seed: u64) -> TensorMap<U1Fusion
 fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut view_costs = Vec::new();
     for degeneracy in [1, 8] {
         let b = tensor(&runtime, degeneracy, 1);
@@ -114,7 +114,7 @@ fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
 fn plain_view_operand_allocates_nothing_extra() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let a = tensor(&runtime, 4, 3);
     black_box(a.inner(engine, &a).unwrap());
     let cost = measure(|| {

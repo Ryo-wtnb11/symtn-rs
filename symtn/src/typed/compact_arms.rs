@@ -331,8 +331,9 @@ where
         }
         // Why the provider rather than a stored flag: `braiding_style` is the
         // rule's own answer.
-        let fermionic = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider())
-            == symtn_core::BraidingStyleKind::Fermionic;
+        let fermionic =
+            <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(EXEC, self.provider())
+                == symtn_core::BraidingStyleKind::Fermionic;
         if fermionic
             && other
                 .logical_space()
@@ -581,7 +582,7 @@ where
         destination,
         output,
     } = <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_bond_spectrum(
-        engine, tensor, spectrum, operation, braid,
+        EXEC, engine, tensor, spectrum, operation, braid,
     )?;
     let data = match (output, braid) {
         (BondOutput::Spectrum(spectrum), false) => {

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Instant;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep,
+    ProductSector, FermionParityFusionRule, U1FusionRule, U1Irrep,
     FermionParityIrrep,
 };
 use symtn::typed::{GradedSpace, LinalgBackend, Runtime, SectorSpectrum, TensorMap};
@@ -154,7 +154,7 @@ fn main() {
                     FermionParityFusionRule::new()
                 )
                 .unwrap(),
-                |c: i32, dual| product_sector(
+                |c: i32, dual| ProductSector::new(
                     U1Irrep::new(if dual { -c } else { c }).unwrap(),
                     if c % 2 == 0 {
                         FermionParityIrrep::EVEN

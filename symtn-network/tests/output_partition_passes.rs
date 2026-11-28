@@ -33,7 +33,7 @@ type Map = TensorMap<U1FusionRule, f64>;
 /// `a: p ⊗ q ← c`, `b: c ← r` on a fresh runtime (cold plan cache and pool).
 /// Distinct prime degeneracies keep the output payload size unique.
 fn operands(engine: &mut dyn Engine) -> (Map, Map) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = |n| {
         GradedSpace::try_new(
             std::sync::Arc::new(U1FusionRule),

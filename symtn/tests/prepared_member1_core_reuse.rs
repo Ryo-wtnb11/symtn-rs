@@ -277,7 +277,7 @@ where
     D: Payload,
 {
     let mut engine = CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = (&legs.0, &legs.1);
     let lhs = StackedTensorMap::pack(&members::<R, D>(&runtime, &[v, v], &[w], 1, 0)).unwrap();
     let rhs = StackedTensorMap::pack(&members::<R, D>(&runtime, &[w], &[v], 1, 1)).unwrap();
@@ -306,7 +306,7 @@ fn warmed_member1_workspace_builds_no_grouped_core_plan() {
 
     // A ContractPlan whose core replays the operands in place.
     let mut engine = CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let legs = u1_legs();
     let (v, w) = (&legs.0, &legs.1);
     let spec = ContractSpec {

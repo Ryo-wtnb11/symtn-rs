@@ -20,24 +20,24 @@
 //! A product symmetry needs no new constructor here, and no new type in the
 //! engine. A product of providers *is* a provider — build it with
 //! [`crate::sector::ProductFusionRule::try_new`] and label it with
-//! [`crate::sector::product_sector`] — so this facade drives `fZ2 ⊠ U(1)`, or any
+//! [`crate::sector::ProductSector`] — so this facade drives `fZ2 ⊠ U(1)`, or any
 //! other ordered product of admitted components, through the same
 //! [`GradedSpace::try_new`] and [`TensorMap::zeros`] as a single symmetry:
 //!
 //! ```
 //! use std::sync::Arc;
 //! use symtn::sector::{
-//!     product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, FermionParityIrrep,
+//!     ProductSector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, FermionParityIrrep,
 //! };
 //! use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 //!
 //! # fn main() -> Result<(), Error> {
 //! let engine = &mut symtn::typed::CpuEngine::serial();
-//! let runtime = Runtime::builder().build()?;
+//! let runtime = Runtime::new();
 //! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
 //!
-//! let even = product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap());
-//! let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
+//! let even = ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap());
+//! let odd = ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
 //! let v = GradedSpace::try_new(Arc::new(rule), [(even, 2), (odd, 1)])?;
 //!
 //! let t: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
@@ -55,7 +55,7 @@
 //! ```
 //!
 //! is the left-associated `(fZ2 ⊠ U(1)) ⊠ SU(2)`, whose labels are
-//! `product_sector(product_sector(parity, charge), spin)` — the label nests in
+//! `ProductSector::new(ProductSector::new(parity, charge), spin)` — the label nests in
 //! step with the provider. **Factor order and association are structure, not
 //! an equivalence.** `U(1) ⊠ fZ2` and `fZ2 ⊠ U(1)` are both legal, are
 //! different Rust types with different [`crate::sector::RuleIdentity`]s, and
@@ -110,8 +110,8 @@
 //! [`TensorMap::restrict_leg`] with a [`LegSelection`] of kept degeneracy
 //! positions per sector, contiguous or not), concatenation ([`TensorMap::cat`],
 //! [`TensorMap::absorb`]) and explicit payload conversion
-//! ([`TensorMap::convert`], [`TensorMap::zeros_like`], [`TensorMap::re`],
-//! [`TensorMap::im`]; exact widenings and the two lossy narrowings, never
+//! ([`TensorMap::convert`], [`TensorMap::zeros_like`], [`TensorMap::real`],
+//! [`TensorMap::imag`]; exact widenings and the two lossy narrowings, never
 //! implicit).
 //!
 //! **Device execution** is a storage type, not a runtime switch:
@@ -135,7 +135,8 @@
 //!   `TypedTensorTraceDispatch`, `TypedTruncationDispatch`, and the other
 //!   `Typed*Dispatch` traits of `dispatch.rs`) supplies the mode-specific
 //!   admission, layout and error type (`FacadeError<R>`). The mode impls live
-//!   in `mode_dispatch.rs`.
+//!   in `mode_dispatch.rs`. Code generic over the rule names the one public
+//!   bound [`TensorRule`], which implies all of them.
 //! - **Storage**, from the third parameter of [`TensorMap`]: `S` is `Vec<D>`
 //!   (Host) or `CudaStorage<D>`, and the sealed family traits
 //!   `TransformExec`, `ContractExec`, `PreparedExec`, `TraceExec`,
@@ -144,9 +145,10 @@
 //!   except `StackExec`, which is payload-only) supply only the storage kernels
 //!   the shared body calls.
 //!
-//! Each kernel takes an `ExecToken` (`storage.rs`), a value only this crate can
-//! construct, so a caller outside the crate can name a kernel but not skip the
-//! admission its body performs.
+//! Each kernel and each `Typed*Dispatch` method takes an `ExecToken`
+//! (`storage.rs`), a value only this crate can construct, so a caller outside
+//! the crate can name a kernel or a mode method but not call it and skip the
+//! admission the typed body performs.
 //!
 //! **CUDA bounds** are stated per impl, not once: each rule-generic `CudaStorage`
 //! impl of a family trait (and each inherent CUDA
@@ -213,6 +215,7 @@
     not(feature = "cuda"),
     doc = "```compile_fail\nuse symtn::typed::TensorMap;\nfn no_cuda<R>(tensor: &TensorMap<R, f64>) { let _ = tensor.to_cuda(); }\n```"
 )]
+#![doc = "```compile_fail\nfn leak<D: symtn::typed::FactorScalar>(_: Vec<D>) { let _ = D::dense_into_vec(todo!()); }\n```"]
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -265,9 +268,8 @@ pub type PhysicalDenseError<E> = symtn_tensors::PhysicalConversionError<E>;
 
 /// Every fallible method here returns this error.
 pub use crate::error::{Alternative, Error};
-/// The runtime every constructor here takes (prepared structural state) and
-/// its builder.
-pub use crate::runtime::{Runtime, RuntimeBuilder};
+/// The runtime every constructor here takes (prepared structural state).
+pub use crate::runtime::Runtime;
 /// The complex payload scalars.
 pub use num_complex::{Complex32, Complex64};
 /// Block and fusion-tree keys and vertex labels read from a [`TensorMap`],
@@ -406,7 +408,7 @@ mod generic_error;
 pub use generic_error::GenericTensorError;
 mod dispatch;
 pub use dispatch::{
-    BondOutput, BondTransform, FacadeError, TypedAdjointSpace, TypedSpaceModeDispatch,
+    BondOutput, BondTransform, FacadeError, TensorRule, TypedAdjointSpace, TypedSpaceModeDispatch,
     TypedTensorConstructionDispatch, TypedTensorContractDispatch, TypedTensorFlipDispatch,
     TypedTensorModeDispatch, TypedTensorProductDispatch, TypedTensorRootDispatch,
     TypedTensorTraceDispatch, TypedTensorTransformDispatch, TypedTensorTwistDispatch,

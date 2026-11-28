@@ -26,11 +26,11 @@ use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
-    U1Irrep,
+    CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SectorCodec,
 };
 use symtn::sector::{
-    CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, PhysicalFusionBasis, SectorCodec,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -73,9 +73,18 @@ pub fn u1_su2() -> GradedSpace<U1Su2> {
             symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
         ),
         [
-            (product_sector(U1Irrep::new(0).unwrap(), su2_irrep(0)), 2),
-            (product_sector(U1Irrep::new(1).unwrap(), su2_irrep(1)), 1),
-            (product_sector(U1Irrep::new(-1).unwrap(), su2_irrep(1)), 2),
+            (
+                ProductSector::new(U1Irrep::new(0).unwrap(), su2_irrep(0)),
+                2,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(1).unwrap(), su2_irrep(1)),
+                1,
+            ),
+            (
+                ProductSector::new(U1Irrep::new(-1).unwrap(), su2_irrep(1)),
+                2,
+            ),
         ],
     )
     .unwrap()
@@ -96,19 +105,19 @@ pub fn fermion_u1() -> GradedSpace<FermionU1> {
         ),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
                 1,
             ),
         ],
@@ -127,9 +136,15 @@ pub fn fermion_su2() -> GradedSpace<FermionSu2> {
             .unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 2),
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                2,
+            ),
+            (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 2),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                1,
+            ),
         ],
     )
     .unwrap()
@@ -321,7 +336,7 @@ pub fn u1_rhs_identity<D: Payload>(
 ) -> Case<U1FusionRule, D> {
     let v = u1(&[(-1, 2), (0, 1), (1, 2)]);
     let w = u1(&[(0, 2), (1, 1)]);
-    let w_dual = w.try_dual().unwrap();
+    let w_dual = w.dual().unwrap();
     Case {
         name: "U(1) identity rhs transform",
         lhs: tensor(engine, runtime, &[&v, &w], &[&v], 13),
@@ -694,7 +709,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     let u = if u_dual { v_dual.clone() } else { v.clone() };
     Case {
         name,
@@ -728,7 +743,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     Case {
         name,
         lhs: tensor(engine, runtime, &[v, v], &[v, &v_dual], salt),
@@ -762,7 +777,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     Case {
         name,
         lhs: tensor(engine, runtime, &[v, v], &[&v_dual, &v_dual], salt),
@@ -803,7 +818,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let v_dual = v.try_dual().unwrap();
+    let v_dual = v.dual().unwrap();
     [
         Case {
             name: names[0],

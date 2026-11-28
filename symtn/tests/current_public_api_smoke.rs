@@ -3,7 +3,7 @@
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::ContractSpec;
 use symtn::typed::{GradedSpace, Runtime, TensorMap, Truncation};
@@ -42,7 +42,7 @@ where
 #[test]
 fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1 = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
@@ -81,11 +81,11 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
         ),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 1,
             ),
         ],
@@ -99,7 +99,7 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
 #[test]
 fn u1_index_contraction_trace_and_decomposition_paths_are_executable() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2)],

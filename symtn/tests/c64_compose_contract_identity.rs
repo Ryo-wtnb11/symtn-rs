@@ -118,7 +118,7 @@ where
 /// composition and arbitrary-axis contraction.
 #[test]
 fn c64_contract_matches_real_imag_decomposition() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [

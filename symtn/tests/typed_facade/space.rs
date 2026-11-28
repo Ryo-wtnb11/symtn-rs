@@ -286,7 +286,7 @@ fn fibonacci_otimes_matches_the_nontrivial_tensorkit_fixture() {
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let tau = GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(TAU, 1)]).unwrap();
-    let dual_tau = tau.try_dual().unwrap();
+    let dual_tau = tau.dual().unwrap();
     let alpha = Complex64::new(2.0, 3.0);
     let beta = Complex64::new(-1.0, 2.0);
     let gamma = alpha * beta;
@@ -461,7 +461,7 @@ fn fibonacci_compose_is_complex_coupled_sector_matrix_multiplication() {
     ));
     assert_eq!(crate::typed_facade::completed_transformers(), before);
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let other: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
         engine,
         &other_runtime,
@@ -563,7 +563,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         Arc::clone(&provider),
         [(symtn::sector::U1Irrep::new(1).unwrap(), 2)],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     assert!(std::ptr::eq(dual.provider(), provider.as_ref()));
     assert_eq!(
@@ -580,14 +580,14 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
             .unwrap(),
         0
     );
-    let back = dual.try_dual().unwrap();
+    let back = dual.dual().unwrap();
     assert!(!back.is_dual());
     assert_eq!(
         back.sectors().unwrap(),
         [symtn::sector::U1Irrep::new(1).unwrap()]
     );
     assert_eq!(
-        back.try_dual().unwrap().sectors().unwrap(),
+        back.dual().unwrap().sectors().unwrap(),
         dual.sectors().unwrap()
     );
 
@@ -649,7 +649,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         2
     );
     assert!(left
-        .oplus(&right.try_dual().unwrap())
+        .oplus(&right.dual().unwrap())
         .err()
         .unwrap()
         .report()
@@ -675,7 +675,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let su2_provider = Arc::new(su2_rule());
     let half = su2_irrep(1);
     let su2_left = GradedSpace::try_new(Arc::clone(&su2_provider), [(half.clone(), 2)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let su2_right = GradedSpace::try_new(Arc::clone(&su2_provider), [(half.clone(), 3)]).unwrap();
     assert_eq!(su2_left.sectors().unwrap(), [half]);
@@ -690,7 +690,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         z2_provider,
         [(symtn::sector::ZNIrrep::new(1, 2).unwrap(), 1)],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     assert_eq!(
         z2_dual.sectors().unwrap(),
@@ -708,7 +708,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let product_left = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [(
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(1).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD,
             ),
@@ -719,7 +719,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let product_right = GradedSpace::try_new(
         product_provider,
         [(
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(-1).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD,
             ),
@@ -730,7 +730,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let product_fused = product_left.fuse(&product_right).unwrap();
     assert_eq!(
         product_fused
-            .degeneracy(&symtn::sector::product_sector(
+            .degeneracy(&symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(0).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN,
             ))
@@ -787,11 +787,11 @@ fn graded_space_reports_an_unrepresentable_label() {
 #[test]
 fn graded_space_dual_flips_the_leg_and_dualizes_non_self_dual_labels() {
     let _serial = crate::counting_alloc::serial();
-    // What: `try_dual` uses the provider's checked dual, so Z3's charge 1 and
+    // What: `dual` uses the provider's checked dual, so Z3's charge 1 and
     // charge 2 swap (with their degeneracies) and the dual flag flips.
     let provider = Arc::new(external_z3());
     let space = z3_leg(&provider, false);
-    let dual = space.try_dual().unwrap();
+    let dual = space.dual().unwrap();
 
     assert!(dual.is_dual());
     assert_eq!(
@@ -800,10 +800,7 @@ fn graded_space_dual_flips_the_leg_and_dualizes_non_self_dual_labels() {
     );
     // Charge 1 (degeneracy 3) became charge 2 and vice versa.
     assert_eq!(dual.degeneracies(), &[2, 1, 3]);
-    assert_eq!(
-        dual.try_dual().unwrap().degeneracies(),
-        space.degeneracies()
-    );
+    assert_eq!(dual.dual().unwrap().degeneracies(), space.degeneracies());
 }
 
 #[test]
@@ -815,7 +812,7 @@ fn graded_space_dual_surfaces_a_failing_checked_dual() {
     let space = z3_leg(&provider, false);
 
     assert!(matches!(
-        space.try_dual(),
+        space.dual(),
         Err(symtn::typed::Error::FusionAlgebra(error))
             if matches!(*error, FusionAlgebraError::InvalidSector { .. })
     ));
@@ -831,12 +828,12 @@ fn graded_space_dual_reports_a_non_injective_dual_instead_of_panicking() {
     let provider = Arc::new(external_z3_with(Quirk::CollapsingDual));
     let space = z3_leg(&provider, false);
 
-    let error = space.try_dual().unwrap_err();
+    let error = space.dual().unwrap_err();
 
     assert!(error.to_string().contains("not injective"), "{error}");
     assert!(
         GradedSpace::try_new(provider, [(Z3Charge(0), 1), (Z3Charge(1), 1)])
-            .and_then(|space| space.try_dual())
+            .and_then(|space| space.dual())
             .err()
             .unwrap()
             .report()

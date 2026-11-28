@@ -59,7 +59,7 @@ fn check_members(
     codomain: &[usize],
     copy_c: bool,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),

@@ -181,7 +181,7 @@ where
     D: AdvancedLinalgScalar + FactorizationScalar,
     <D as FactorScalar>::Eig: TensorScalar,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut all: Vec<(&str, Rows)> = Vec::new();
 
     let u1 = Arc::new(U1FusionRule);
@@ -190,7 +190,7 @@ where
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
-    for (name, bond) in [("u1", bond.clone()), ("u1 dual", bond.try_dual().unwrap())] {
+    for (name, bond) in [("u1", bond.clone()), ("u1 dual", bond.dual().unwrap())] {
         let t: TensorMap<_, D> =
             TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
         all.push((name, matrix!(engine, t, rcond)));
@@ -214,10 +214,7 @@ where
         [(su_irrep(&[0, 0]), 2), (su_irrep(&[1, 0]), 3)],
     )
     .unwrap();
-    for (name, bond) in [
-        ("su3", bond.clone()),
-        ("su3 dual", bond.try_dual().unwrap()),
-    ] {
+    for (name, bond) in [("su3", bond.clone()), ("su3 dual", bond.dual().unwrap())] {
         let t: TensorMap<_, D> =
             TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
         all.push((name, matrix!(engine, t, rcond)));

@@ -31,7 +31,7 @@ use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().expect("runtime builds")
+    Runtime::new()
 }
 
 fn leg(dim: usize) -> GradedSpace<U1FusionRule> {

@@ -131,7 +131,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(
     n: usize,
     dynkin: Vec<i64>,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let lhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
     let label = lhs_provider.category().irrep(&dynkin).unwrap();
     let rhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
@@ -351,7 +351,7 @@ fn sun_checked_generic_network_matches_manual_explicit_greedy_cached_and_replay(
 fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(3));
     let label = provider.category().irrep(&[1, 1]).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
@@ -573,7 +573,7 @@ fn assert_optimizer_does_not_retry_provider_failure(
     failure: PlanningFailure,
 ) {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -814,7 +814,7 @@ fn injected_plan_case(
     Vec<TensorMap<InjectedGeneric, f64>>,
     PlannedNetwork,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(InjectedGeneric::new());
     let tensors = injected_chain(engine, &runtime, &provider);
     let refs = tensors.iter().take(operands).collect::<Vec<_>>();
@@ -853,7 +853,7 @@ fn checked_generic_fermionic_network_forwards_to_facade_contract() {
     // operands to the facade. Bosonic is the unchanged admission control;
     // the inner SU(3) rule has unit twists, so this is not a sign oracle.
     for fermionic in [false, true] {
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(InjectedGeneric::new());
         provider.fermionic.store(fermionic, Ordering::SeqCst);
         let tensors = injected_chain(engine, &runtime, &provider);
@@ -920,7 +920,7 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
         return;
     }
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(InjectedGeneric::new());
 
     provider.fail_encode.store(true, Ordering::SeqCst);
@@ -964,7 +964,7 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
 fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 2)]).unwrap();
     let lhs: TensorMap<_, f64> =
@@ -1074,7 +1074,7 @@ fn checked_generic_trace_provider_failure_stays_typed_and_recovers() {
     // What: a provider error inside `trace_pairs`, the first step of the
     // two-step trace-then-network form, returns the typed provider error,
     // and the same trace succeeds once the provider recovers.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 1)]).unwrap();
     let tensor: TensorMap<_, f64> =
@@ -1098,7 +1098,7 @@ fn checked_generic_trace_provider_failure_stays_typed_and_recovers() {
 fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary_ops() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
@@ -1209,7 +1209,7 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
 fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_authority() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 1)]).unwrap();
     let a64: TensorMap<_, f64> =
@@ -1346,7 +1346,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
     fn fill(seed: usize) -> impl Fn(&[usize]) -> f64 {
         move |indices| (1 + seed + 7 * indices[0] + 3 * indices[1]) as f64 / 16.0
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let network = net(
         &[op(&["a"], &["b"]), op(&["b"], &["c"]), op(&["a"], &["d"])],
         &["c"],
@@ -1384,7 +1384,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
                 &runtime,
                 // The third operand's `a` leg pairs with the first one's.
                 [&if seed == 2 {
-                    checked_space(rows).try_dual().unwrap()
+                    checked_space(rows).dual().unwrap()
                 } else {
                     checked_space(rows)
                 }],
@@ -1427,7 +1427,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
                 &runtime,
                 // The third operand's `a` leg pairs with the first one's.
                 [&if seed == 2 {
-                    mf_space(rows).try_dual().unwrap()
+                    mf_space(rows).dual().unwrap()
                 } else {
                     mf_space(rows)
                 }],
@@ -1562,7 +1562,7 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
     use symtn::typed::{__network, Error};
     use symtn_network::plan_cache_stats;
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let chain = |engine: &mut dyn Engine, provider: &Arc<LieGroupFusionRule>, seed: u64| {
         let leg = GradedSpace::try_new(
             Arc::clone(provider),
@@ -1623,7 +1623,7 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
         .unwrap();
     assert_same(&output, &expected);
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let parked = __network::detach_runtime(output.clone()).map(|_| ());
     assert!(parked.is_none(), "a shared destination is never parked");
     let authority = current[0].clone();

@@ -5,7 +5,7 @@
 use num_complex::Complex64;
 
 pub use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
     U1Irrep,
 };
 
@@ -106,8 +106,8 @@ macro_rules! for_each_symmetry {
         });
         $check!($($extra,)* $engine, "fZ2xU1", |variant: usize| {
             let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
-            let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
-            let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
+            let even = |charge| ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+            let odd = |charge| ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
             GradedSpace::try_new(rule, [(even(0), 3), (odd(1), 1 + variant), (odd(-1), 2)]).unwrap()
         });
         #[cfg(feature = "cgc-gen")]

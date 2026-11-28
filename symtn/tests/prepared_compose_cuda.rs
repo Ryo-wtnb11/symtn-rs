@@ -51,7 +51,7 @@ fn device_gate<R, D>(
     D: DevicePayload,
 {
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let mut fills_per_b = BTreeSet::new();
     for count in [1, 2, 17] {
         let label = format!("{label} {} B={count}", D::NAME);
@@ -236,7 +236,7 @@ fn record_counters<R, D>(
     <R as symtn::sector::SectorCodec>::Sector: Debug,
     D: DevicePayload,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let stacks = |cuda: &mut dyn symtn::typed::Engine, count, salt| {
         let a = members::<R, D>(&runtime, &[&v, &v], &[&w], count, salt);
         let b = members::<R, D>(&runtime, &[&w], &[&v], count, salt + 1);

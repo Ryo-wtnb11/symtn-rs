@@ -48,7 +48,7 @@ fn fz2_index(runtime: &Runtime) -> TensorMap<symtn::sector::FermionParityFusionR
         .unwrap()
     };
     let l1 = leg(&[(0, 1), (1, 2)]);
-    let l2 = leg(&[(0, 2), (1, 1)]).try_dual().unwrap();
+    let l2 = leg(&[(0, 2), (1, 1)]).dual().unwrap();
     let lv = leg(&[(0, 1), (1, 1)]);
     TensorMap::from_subblock_fn(engine, runtime, [&l1, &l2], [&lv], fz2_typed_fill).unwrap()
 }
@@ -89,7 +89,7 @@ fn typed_fz2_two_block(
         ],
     )
     .unwrap();
-    let leg = if dual { leg.try_dual().unwrap() } else { leg };
+    let leg = if dual { leg.dual().unwrap() } else { leg };
     TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |sectors, _| {
         if sectors.coupled() == &symtn::sector::FermionParityIrrep::EVEN {
             2.0
@@ -221,7 +221,7 @@ fn typed_inverse_index_ops_pin_values_and_preserve_structure() {
 
     let su2_provider = Arc::new(su2_rule());
     let spin_half = GradedSpace::try_new(su2_provider, [(su2_irrep(1), 1)]).unwrap();
-    let spin_half_dual = spin_half.try_dual().unwrap();
+    let spin_half_dual = spin_half.dual().unwrap();
     let su2: TensorMap<Su2Rule, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&spin_half_dual], [&spin_half], |_, _| {
             5.0

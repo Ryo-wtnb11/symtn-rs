@@ -354,10 +354,10 @@ pub(super) fn compact_factor_output_owned<D: FactorScalar>(
     expected_shape: &[usize],
     op: &'static str,
 ) -> Result<Vec<D>, OperationError> {
-    let source = D::dense_slice(&tensor).map_err(OperationError::Dense)?;
+    let source = D::dense_slice(DENSE_IO, &tensor).map_err(OperationError::Dense)?;
     check_contiguous_output(op, source.len(), tensor.shape(), expected_shape)
         .map_err(OperationError::Dense)?;
-    D::dense_into_vec(tensor).map_err(OperationError::Dense)
+    D::dense_into_vec(DENSE_IO, tensor).map_err(OperationError::Dense)
 }
 
 pub(super) fn compact_real_spectrum_owned<D: FactorScalar>(
@@ -365,7 +365,7 @@ pub(super) fn compact_real_spectrum_owned<D: FactorScalar>(
     expected_shape: &[usize],
     op: &'static str,
 ) -> Result<Vec<f64>, OperationError> {
-    let spectrum = D::real_spectrum(&tensor).map_err(OperationError::Dense)?;
+    let spectrum = D::real_spectrum(DENSE_IO, &tensor).map_err(OperationError::Dense)?;
     check_contiguous_output(op, spectrum.len(), tensor.shape(), expected_shape)
         .map_err(OperationError::Dense)?;
     Ok(spectrum)

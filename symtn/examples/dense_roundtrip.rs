@@ -7,7 +7,7 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build()?;
+    let rt = Runtime::new();
     let rule = Arc::new(LieGroupFusionRule::<MultiplicityFreeAdmissionMode>::new(
         GroupId::su(2)?,
     )?);

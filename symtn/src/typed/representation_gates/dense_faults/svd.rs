@@ -5,7 +5,7 @@ fn checked_compact_diagonal_svd_full_is_its_compact_svd_under_a_provider_bond_mi
     let engine = &mut crate::typed::CpuEngine::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, None, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x70));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let on = |engine: &mut dyn Engine, bond: &GradedSpace<_>| -> TensorMap<_, f64> {
@@ -21,7 +21,7 @@ fn checked_compact_diagonal_svd_full_is_its_compact_svd_under_a_provider_bond_mi
         .unwrap()
     };
     let nondual = on(engine, &bond);
-    let dual = on(engine, &bond.try_dual().unwrap());
+    let dual = on(engine, &bond.dual().unwrap());
     provider.extra_vacuum_channel.store(true, Ordering::Relaxed);
 
     // A nondual one-leg bond is its own SVD bond (`fuse(V) = V`, no fusion),
@@ -60,7 +60,7 @@ fn checked_compact_diagonal_svd_is_direct_for_subnormal_and_overflowing_values()
     let engine = &mut crate::typed::CpuEngine::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, None, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x71));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
 
@@ -148,7 +148,7 @@ fn checked_compact_diagonal_svd_rejects_nonfinite_and_skips_the_provider_when_fi
     let engine = &mut crate::typed::CpuEngine::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, Some(1), None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x72));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let nonfinite: TensorMap<_, f64> = TensorMap::diagonal(
@@ -222,11 +222,11 @@ fn checked_dual_compact_diagonal_svd_compact_propagates_provider_errors() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let svd_calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(pinv_spy(&svd_calls, None, None)));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0x73));
     let bond = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
         engine,

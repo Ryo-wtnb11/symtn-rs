@@ -208,7 +208,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let dual = v.try_dual().unwrap();
+    let dual = v.dual().unwrap();
     let codomain = tensor(runtime, &[w, v, &dual], &[w], salt);
     let domain = tensor(runtime, &[w], &[&dual, w, v], salt + 1);
     [
@@ -316,7 +316,7 @@ where
         + SectorCodec,
     D: Payload,
 {
-    let dual = f.try_dual().unwrap();
+    let dual = f.dual().unwrap();
     let t = tensor(runtime, &[f, &dual, f], &[f, &dual], salt);
     let bent = tensor(runtime, &[&dual, f, f], &[f], salt + 1);
     [

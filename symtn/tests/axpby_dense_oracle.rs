@@ -106,7 +106,7 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
         [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -116,7 +116,7 @@ fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
         [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (su2_irrep(s), n)),
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -136,7 +136,7 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         [(-1, 2), (0, 1), (1, 2), (2, 1)].map(|(q, n)| (sector(q), n)),
     )
     .unwrap();
-    let w = v.try_dual().unwrap();
+    let w = v.dual().unwrap();
     (v, w)
 }
 
@@ -173,7 +173,7 @@ macro_rules! host {
 #[test]
 fn axpby_matches_dense_expansion_on_host() {
     let engine = &mut CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     symmetry!(engine, &rt, u1_legs(), physical_case, host!(engine));
     symmetry!(engine, &rt, su2_legs(), physical_case, host!(engine));
     symmetry!(engine, &rt, fz2u1_legs(), block_case, host!(engine));
@@ -195,7 +195,7 @@ macro_rules! device {
 fn axpby_matches_dense_expansion_on_cuda() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     symmetry!(engine, &rt, u1_legs(), physical_case, device!(cuda));
     symmetry!(engine, &rt, su2_legs(), physical_case, device!(cuda));
     symmetry!(engine, &rt, fz2u1_legs(), block_case, device!(cuda));

@@ -34,7 +34,7 @@ fn the_semantic_clear_empties_the_host_transform_caches() {
     }
     // The semantic clear empties the Host-side caches, including when the
     // `cuda` feature is compiled in.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let v = u1_leg_2_1_2();
     let tensor: TensorMap<_, f64> =
@@ -72,7 +72,7 @@ fn nan_positions(data: &[f64]) -> Vec<usize> {
 fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_leg_2_1_2();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], real_fill).unwrap();
@@ -90,7 +90,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     };
 
     // Runtime mismatch precedes a rule mismatch.
-    let other = Runtime::builder().build().unwrap();
+    let other = Runtime::new();
     let z2 = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(symtn::sector::ZNFusionRule::new(3).unwrap());
     let z2_leg = GradedSpace::try_new(
@@ -205,7 +205,7 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
     // destination held, `alpha == 0` writes zeros whatever the source holds,
     // and an identity axis list is still written rather than short
     // circuited.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = u1_leg_2_1_2();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], real_fill).unwrap();

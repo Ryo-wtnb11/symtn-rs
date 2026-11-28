@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn network_degeneracy_restriction_copies_nonprefix_rectangles_and_lazy_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0).unwrap();
     let rows = GradedSpace::try_new(Arc::clone(&provider), [(zero, 3)]).unwrap();
@@ -69,7 +69,7 @@ fn network_degeneracy_restriction_keeps_its_validation_order_after_the_shared_ke
     // The shared per-sector kernel must not move any of this path's own
     // checks: axis/duplicate, then empty range, then sector presence, then
     // the degeneracy bound, all before a destination exists.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(zero, 3)]).unwrap();
@@ -128,7 +128,7 @@ fn network_degeneracy_restriction_keeps_its_validation_order_after_the_shared_ke
 #[test]
 fn network_degeneracy_restriction_maps_effective_nonselfdual_domain_sector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let plus = U1Irrep::new(1).unwrap();
     let space = GradedSpace::try_new(Arc::clone(&provider), [(plus, 3)]).unwrap();
@@ -162,7 +162,7 @@ fn network_degeneracy_restriction_maps_effective_nonselfdual_domain_sector() {
 #[test]
 fn network_degeneracy_restriction_conjugates_complex_lazy_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0).unwrap();
     let rows = GradedSpace::try_new(Arc::clone(&provider), [(zero, 2)]).unwrap();
@@ -210,7 +210,7 @@ fn network_degeneracy_restriction_conjugates_complex_lazy_adjoint() {
 #[test]
 fn network_scatter_seals_authority_split_and_zero_block_legs_before_mutation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0).unwrap();
     let full = GradedSpace::try_new(Arc::clone(&provider), [(zero, 2)]).unwrap();
@@ -268,7 +268,7 @@ fn network_scatter_seals_authority_split_and_zero_block_legs_before_mutation() {
 fn network_scatter_reads_complex_lazy_adjoint_parent_without_materializing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let plus = U1Irrep::new(1).unwrap();
     let rows = GradedSpace::try_new(Arc::clone(&provider), [(plus, 2)]).unwrap();

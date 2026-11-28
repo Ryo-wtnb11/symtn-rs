@@ -291,10 +291,10 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
     let provider = Arc::new(planar_trivial());
     let lhs_cod = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
     let lhs_dom = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 3)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let rhs_cod = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 4)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let rhs_dom = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
     let lhs: TensorMap<PlanarTrivialRule, f64> =
@@ -453,14 +453,14 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
     let codomain = result.codomain();
     assert_eq!(
         codomain[0].sectors().unwrap(),
-        [symtn::sector::product_sector(
+        [symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(1).unwrap(),
             symtn::sector::FermionParityIrrep::EVEN
         )]
     );
     assert_eq!(
         codomain[1].sectors().unwrap(),
-        [symtn::sector::product_sector(
+        [symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(0).unwrap(),
             symtn::sector::FermionParityIrrep::ODD
         )]
@@ -574,7 +574,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
             (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let parity_cod = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
@@ -583,7 +583,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
             (symtn::sector::FermionParityIrrep::ODD, 1),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let parity_dom = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
@@ -696,7 +696,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
     assert_eq!(result.dense_data().unwrap(), [10.0]);
     assert_eq!(
         result.codomain()[0].sectors().unwrap(),
-        [symtn::sector::product_sector(
+        [symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(2).unwrap(),
             symtn::sector::FermionParityIrrep::EVEN
         )]
@@ -749,19 +749,19 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
     assert_eq!(
         block.codomain_innerlines(),
         [
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(3).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD
             ),
-            symtn::sector::product_sector(
+            symtn::sector::ProductSector::new(
                 symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
@@ -900,7 +900,7 @@ fn typed_contract_parallel_su2_replay_matches_serial() {
         .to_vec()
     }
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let serial = run(&mut symtn::typed::CpuEngine::serial(), &runtime);
     let pool = symtn::typed::Pool::builder().threads(2).build().unwrap();
     let parallel = run(&mut symtn::typed::CpuEngine::new(pool), &runtime);
@@ -1294,7 +1294,7 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
 ) {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let host_lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
     let host_rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
     let lhs = host_lhs.to_cuda(cuda).unwrap();

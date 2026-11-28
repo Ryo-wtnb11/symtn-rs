@@ -116,7 +116,7 @@ fn assert_compact_late_rejection<D>(engine: &mut dyn Engine)
 where
     D: TensorScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(RejectingTraceTwist {
         inner: LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),

@@ -395,6 +395,7 @@ pub struct symtn_network::ContractionPlan
 impl symtn_network::ContractionPlan
 pub fn symtn_network::ContractionPlan::active_pair_path(&self) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ActivePair>>
 pub fn symtn_network::ContractionPlan::dense_cost_report(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<symtn_network::DensePlanCostReport>
+pub fn symtn_network::ContractionPlan::from_active_pair_path(&symtn_network::NetworkIR, &[symtn_network::ActivePair], &symtn_network::DenseCostModel) -> symtn_network::Result<Self>
 pub fn symtn_network::ContractionPlan::from_steps(&symtn_network::NetworkIR, alloc::vec::Vec<symtn_network::ContractionStep>) -> symtn_network::Result<Self>
 pub fn symtn_network::ContractionPlan::from_text(&str) -> symtn_network::Result<Self>
 pub fn symtn_network::ContractionPlan::output_labels(&self) -> &[symtn_network::TemporaryLabel]
@@ -413,6 +414,8 @@ pub fn symtn_network::ContractionPlan::eq(&self, &symtn_network::ContractionPlan
 impl core::fmt::Debug for symtn_network::ContractionPlan
 pub fn symtn_network::ContractionPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for symtn_network::ContractionPlan
+impl symtn_network::DenseContractionOptimizer for symtn_network::ContractionPlan
+pub fn symtn_network::ContractionPlan::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
 pub struct symtn_network::ContractionStep
 impl symtn_network::ContractionStep
 pub fn symtn_network::ContractionStep::cost(&self) -> usize
@@ -615,7 +618,6 @@ pub fn symtn_network::Network::execute_symmetric_sliced<R, D>(&self, &mut impl s
 pub fn symtn_network::Network::lower_symmetric_sliced_plan<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], symtn_network::SlicedPlan) -> core::result::Result<symtn_network::SymmetricSlicedPlan, symtn_network::SymmetricSliceLowerError<symtn::typed::dispatch::FacadeError<R>>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
 pub fn symtn_network::Network::new<I, L>(I, impl core::iter::traits::collect::IntoIterator<Item = bool>, impl core::iter::traits::collect::IntoIterator<Item = usize>, impl core::iter::traits::collect::IntoIterator<Item = L>, core::option::Option<usize>) -> core::result::Result<Self, symtn_network::ContractError> where I: core::iter::traits::collect::IntoIterator, <I as core::iter::traits::collect::IntoIterator>::Item: core::iter::traits::collect::IntoIterator<Item = L>, L: core::convert::Into<symtn_network::TemporaryLabel>
 pub fn symtn_network::Network::plan<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], &impl symtn_network::DenseContractionOptimizer + ?core::marker::Sized) -> core::result::Result<symtn_network::PlannedNetwork, symtn::typed::dispatch::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
-pub fn symtn_network::Network::plan_with<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], symtn_network::ContractionPlan) -> core::result::Result<symtn_network::PlannedNetwork, symtn::typed::dispatch::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
 pub struct symtn_network::NetworkExecutionWorkspace<R, D, S> where S: symtn::typed::tensor_repr::NetworkPayloadStorage<D>
 impl<R, D, S> core::default::Default for symtn_network::NetworkExecutionWorkspace<R, D, S> where S: symtn::typed::tensor_repr::NetworkPayloadStorage<D>
 pub fn symtn_network::NetworkExecutionWorkspace<R, D, S>::default() -> Self
@@ -927,6 +929,8 @@ pub const symtn_network::DEFAULT_REPLAN_DRIFT_FACTOR: f64
 pub const symtn_network::DEFAULT_WORKSPACE_BUDGET_BYTES: usize
 pub trait symtn_network::DenseContractionOptimizer
 pub fn symtn_network::DenseContractionOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+impl symtn_network::DenseContractionOptimizer for symtn_network::ContractionPlan
+pub fn symtn_network::ContractionPlan::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
 impl symtn_network::DenseContractionOptimizer for symtn_network::CotengraPythonOptimizer
 pub fn symtn_network::CotengraPythonOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
 impl symtn_network::DenseContractionOptimizer for symtn_network::GreedyDenseOptimizer
@@ -943,14 +947,8 @@ impl<R, D, S> symtn_network::NetworkOperand for symtn::typed::tensor_repr::Tenso
 pub type symtn::typed::tensor_repr::TensorMap<R, D, S>::Error = <<R as symtn_sectors::algebra::TypedSectorAdmission>::Mode as symtn::typed::dispatch::TypedTensorModeDispatch<R>>::FacadeError
 pub fn symtn::typed::tensor_repr::TensorMap<R, D, S>::__contract_operand(&self) -> &Self
 pub fn symtn::typed::tensor_repr::TensorMap<R, D, S>::contract_network(&mut dyn tenferro_tensor::backend::Engine, &symtn_network::Network, &[&Self]) -> core::result::Result<Self, Self::Error>
-pub fn symtn_network::active_pair_path_from_steps(usize, &[symtn_network::ContractionStep]) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ActivePair>>
-pub fn symtn_network::active_pair_path_from_tree(usize, &symtn_network::ContractionTree) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ActivePair>>
-pub fn symtn_network::best_next_internal_index(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel) -> core::option::Option<symtn_network::TemporaryLabel>
-pub fn symtn_network::best_next_slice_index(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel, bool) -> core::option::Option<symtn_network::TemporaryLabel>
 pub fn symtn_network::clear_plan_cache(&symtn::runtime::Runtime)
 pub fn symtn_network::configure_plan_cache(&symtn::runtime::Runtime, symtn_network::PlanCacheConfig)
-pub fn symtn_network::contraction_width(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel) -> usize
-pub fn symtn_network::dense_steps_from_active_pair_path(&symtn_network::NetworkIR, &[symtn_network::ActivePair], &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
 pub fn symtn_network::greedy_slice(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel, usize, symtn_network::SliceLabels) -> symtn_network::SlicePlan
 pub fn symtn_network::load_plan_cache(&symtn::runtime::Runtime, &str) -> usize
 pub fn symtn_network::plan_cache_config(&symtn::runtime::Runtime) -> symtn_network::PlanCacheConfig

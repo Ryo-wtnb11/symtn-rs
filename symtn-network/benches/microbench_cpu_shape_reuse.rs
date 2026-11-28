@@ -10,12 +10,12 @@ use std::time::Instant;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
-    U1Irrep,
-};
-use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
+};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, TensorScalar};
@@ -461,7 +461,7 @@ fn run_case<R, D>(
     <R as TypedSectorAdmission>::Sector: Clone + Eq,
     D: BenchScalar,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let cold_pattern = patterns[0].clone();
     let mut cold_workspace = NetworkExecutionWorkspace::default();
     let cold = measure(
@@ -600,7 +600,7 @@ fn fermion_u1_patterns() -> Vec<
         usize,
     )>,
 > {
-    let sector = product_sector;
+    let sector = ProductSector::new;
     vec![
         vec![
             (

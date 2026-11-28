@@ -30,7 +30,7 @@ fn network_destination_dual_stays_inside_complete_publication_epoch() {
         );
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(NetworkResetU1 {
         reset_on_dual: std::sync::atomic::AtomicBool::new(false),
     });
@@ -491,7 +491,7 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().expect("runtime");
+    let runtime = Runtime::new();
     let rule = Arc::new(CountingFibonacci {
         malformed_channels: true,
         ..CountingFibonacci::new()
@@ -565,8 +565,8 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
     ) {
         return;
     }
-    let runtime_a = Runtime::builder().build().unwrap();
-    let runtime_b = Runtime::builder().build().unwrap();
+    let runtime_a = Runtime::new();
+    let runtime_b = Runtime::new();
     let provider = Arc::new(su2_rule());
     let space = GradedSpace::try_new(
         provider,
@@ -644,7 +644,7 @@ fn unique_planning_scratch_is_charged_and_released() {
         return;
     }
     use symtn_core::{U1FusionRule, U1Irrep};
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // (planning bytes, the whole lease's ledger)
     let ledger = |engine: &mut symtn_dense::CpuEngine| {
         let mut lease = ContextLease::checkout(engine);
@@ -720,7 +720,7 @@ fn repeated_permute_reuses_movement_decisions() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         Arc::new(su2_rule()),
         (0..=4).map(|spin| (su2_irrep(spin), 2)),
@@ -763,7 +763,7 @@ fn movement_decisions_evict_the_least_recently_used_structure() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let setup = &mut symtn_dense::CpuEngine::serial();
     let sources: Vec<TensorMap<symtn_core::U1FusionRule, f64>> = (1..=17)
         .map(|charge| {

@@ -96,7 +96,7 @@ fn device_transform_short_circuits_do_no_device_work() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let device = fixture(engine, &runtime).to_cuda(cuda).unwrap();
     let expected = fixture(engine, &runtime).dense_data().unwrap().to_vec();
 
@@ -147,7 +147,7 @@ fn device_transform_rejections_happen_before_any_device_work() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let device = fixture(engine, &runtime).to_cuda(cuda).unwrap();
     // Warm the structures first, so a rejection cannot be confused with the
     // cold-path uploads of a neighbouring call.
@@ -242,7 +242,7 @@ fn device_into_admits_the_exact_layout_on_the_shared_runtime_store() {
     // pair after a successful replay, so a second call resolves the operation
     // out of the store instead of deriving it. The store is the Runtime's own
     // Host store — the device path must feed and reuse exactly that one.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let host = fixture(engine, &runtime);
     let expected = host.permute(engine, &[2, 0], &[1, 3]).unwrap();
     let source = host.to_cuda(cuda).unwrap();
@@ -295,7 +295,7 @@ fn device_into_rejections_happen_before_any_device_work() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let host = fixture(engine, &runtime);
     let expected = host.permute(engine, &[2, 0], &[1, 3]).unwrap();
     let source = host.to_cuda(cuda).unwrap();
@@ -363,7 +363,7 @@ fn device_into_rejections_happen_before_any_device_work() {
 
     // 1. Runtime mismatch wins over a rule mismatch: a Z3 destination on
     //    another Runtime.
-    let other = Runtime::builder().build().unwrap();
+    let other = Runtime::new();
     let mut host_foreign =
         TensorMap::from_subblock_fn(engine, &other, [&z3_leg], [&z3_leg], |_, _| f64::NAN).unwrap();
     let mut foreign = host_foreign.to_cuda(cuda).unwrap();
@@ -596,7 +596,7 @@ fn device_twist_short_circuits_do_no_device_work() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let bosonic = fixture(engine, &runtime).to_cuda(cuda).unwrap();
     let fermionic_host = fermionic_fixture(engine, &runtime);
     let fermionic = fermionic_host.to_cuda(cuda).unwrap();
@@ -651,7 +651,7 @@ fn device_twist_rejections_happen_before_any_device_work() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let host = fermionic_fixture(engine, &runtime);
     let device = host.to_cuda(cuda).unwrap();
     // Warm the shared coefficient operand first, so a rejection cannot be

@@ -51,7 +51,7 @@ in_both_modes! {
     /// sets) is a space mismatch.
     fn structural_constructors_are_identities_and_isometries<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let space = |unit: usize, charged: usize| {
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), unit), (M::charged(), charged)])
@@ -83,12 +83,12 @@ in_both_modes! {
         assert_eq!(left.compose(engine, &t).unwrap().dense_data().unwrap(), t.dense_data().unwrap());
         assert_eq!(t.compose(engine, &right).unwrap().dense_data().unwrap(), t.dense_data().unwrap());
 
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let f: TensorMap<_, f64> =
             TensorMap::isomorphism(engine, &runtime, [&dual, &leg], [&leg, &dual]).unwrap();
         assert_exact_isometry!(engine, &runtime, &f);
         let (small, big) = (space(1, 2), space(2, 3));
-        for domain in [small.clone(), small.try_dual().unwrap()] {
+        for domain in [small.clone(), small.dual().unwrap()] {
             let w: TensorMap<_, f64> =
                 TensorMap::isometry(engine, &runtime, [&big], [&domain]).unwrap();
             assert_exact_isometry!(engine, &runtime, &w);
@@ -115,7 +115,7 @@ in_both_modes! {
     /// nonzero imaginary part in the real one's layout.
     fn rand_with_seed_is_a_function_of_the_seed<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
             .unwrap();

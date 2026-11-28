@@ -93,11 +93,11 @@ fn rep_s3_reports_no_braiding_and_products_inherit_it() {
 #[test]
 fn crossing_free_operations_work_without_braiding() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = rep_s3();
     let x = leg(&rule, &[(3, 1)]);
     let mixed = leg(&rule, &[(1, 2), (3, 1)]);
-    let dual_x = x.try_dual().unwrap();
+    let dual_x = x.dual().unwrap();
 
     // transpose and repartition round trips.
     let t = seeded(&runtime, &[&x, &x, &x], &[&x], 7);
@@ -215,7 +215,7 @@ fn is_no_braiding_sector_braid(error: &Error) -> bool {
 #[test]
 fn braiding_operations_are_rejected_without_touching_the_destination() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = rep_s3();
     // Mixed blocks: the unit-unit and unit-x crossings are structural, the
     // x-x crossing needs R. The whole operation fails.
@@ -282,8 +282,8 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
 #[test]
 fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    use symtn_sectors::{product_sector, ZNIrrep};
-    let runtime = Runtime::builder().build().unwrap();
+    use symtn_sectors::{ProductSector, ZNIrrep};
+    let runtime = Runtime::new();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             TableRule::by_uuid(REP_S3).unwrap(),
@@ -296,11 +296,11 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
         product,
         [
             (
-                product_sector(TableSector::new(1), ZNIrrep::new(0, 2).unwrap()),
+                ProductSector::new(TableSector::new(1), ZNIrrep::new(0, 2).unwrap()),
                 1,
             ),
             (
-                product_sector(TableSector::new(3), ZNIrrep::new(1, 2).unwrap()),
+                ProductSector::new(TableSector::new(3), ZNIrrep::new(1, 2).unwrap()),
                 1,
             ),
         ],

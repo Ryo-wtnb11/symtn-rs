@@ -443,7 +443,7 @@ where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(1, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, value);
     let before = source.dense_data().unwrap().to_vec();
@@ -544,7 +544,7 @@ fn checked_generic_twist_precedence_and_late_failure_are_typed_and_nonpublishing
     // What: index and empty requests precede every provider query; NoBraiding
     // rejection is an early facade error, while a staged pivotal failure keeps
     // its provider type and leaves the source payload unchanged.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(2, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, |marker| marker as f64);
     let before = source.dense_data().unwrap().to_vec();
@@ -589,7 +589,7 @@ fn checked_generic_twist_handles_nobraiding_bosonic_and_staged_identity_sharing(
     // What: TensorKit's NoBraiding unit carve-out and bosonic short circuit
     // share storage without pivotal queries; an anyonic all-one provider stages
     // values once and then takes the same identity-sharing path.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let no_braiding = Arc::new(CheckedPivotalToy::new(
         3,
@@ -658,7 +658,7 @@ where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(6, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, value);
     let before = source.dense_data().unwrap().to_vec();
@@ -758,7 +758,7 @@ fn checked_generic_flip_scales_full_keys_and_lazy_duality_for_real_and_complex_p
 fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(
         7,
         BraidingStyleKind::NoBraiding,
@@ -790,7 +790,7 @@ fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
 fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(8, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, |marker| marker as f64);
     let before = source.dense_data().unwrap().to_vec();
@@ -839,7 +839,7 @@ fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
 fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::with_fs(
         9,
         BraidingStyleKind::Anyonic,
@@ -847,7 +847,7 @@ fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
         1.0,
     ));
     let x_dual = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)])
-        .and_then(|space| space.try_dual())
+        .and_then(|space| space.dual())
         .unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&x_dual], [&x_dual], |_, _| 3.0).unwrap();
@@ -876,7 +876,7 @@ fn assert_sun_identity_case<D>(
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -946,7 +946,7 @@ fn assert_sun_flip_case<D>(
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(n).unwrap(),
@@ -1116,7 +1116,7 @@ fn assert_compose_any_braiding<D>(
     D: TensorScalar + symtn::typed::AdvancedLinalgScalar + Into<Complex64>,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, -1.0));
     let v = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 1), (Label::X, 2)]).unwrap();
     let w = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2), (Label::X, 3)]).unwrap();
@@ -1147,7 +1147,7 @@ fn assert_compose_any_braiding<D>(
     let a = filled(0, &[&v, &w], &[&v]);
     let b = filled(3, &[&v], &[&v, &w]);
     // Dual legs in both middles: A': V ⊗ W* ← V* and B': V* ← V ⊗ W*.
-    let (v_dual, w_dual) = (v.try_dual().unwrap(), w.try_dual().unwrap());
+    let (v_dual, w_dual) = (v.dual().unwrap(), w.dual().unwrap());
     let a_dual = filled(5, &[&v, &w_dual], &[&v_dual]);
     let b_dual = filled(7, &[&v_dual], &[&v, &w_dual]);
     // Empty middle (outer product through the unit): V ← () and () ← W.
@@ -1220,7 +1220,7 @@ where
     D: TensorScalar + numerics::Numeric + PartialEq,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let spec = ContractSpec {
         lhs: &[1],
         rhs: &[0],
@@ -1248,7 +1248,7 @@ where
         let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, -1.0));
         let label = if rotated { Label::Unit } else { Label::X };
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let mut matrix = |offset: f64| -> TensorMap<_, D> {
             TensorMap::from_subblock_fn(engine, &runtime, [&dual], [&dual], |_, index| {
                 value(offset + (2 * index[0] + index[1]) as f64)
@@ -1380,7 +1380,7 @@ fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
     // factorizes. A braiding-style refusal is a facade capability boundary,
     // so a non-identity `permute` and a moved split both report it in
     // `GenericTensorError::Facade`, as the multiplicity-free mode does.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(40, BraidingStyleKind::Anyonic, 1.0));
     let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 3)]).unwrap();
@@ -1449,7 +1449,7 @@ fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
     // What: as TensorKit `trace_permute!`, the braiding gate comes before any
     // index handling, so a non-symmetric provider's trace fails even with an
     // empty or malformed pair list.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for braiding in [
         BraidingStyleKind::NoBraiding,
         BraidingStyleKind::Anyonic,
@@ -1515,7 +1515,7 @@ fn checked_trace_pivotal_failure_does_not_publish_destination() {
         return;
     }
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(CheckedPivotalToy::new(51, BraidingStyleKind::Bosonic, 1.0));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let source =
@@ -1602,7 +1602,7 @@ fn checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublishe
     };
     for late in [false, true] {
         symtn_core::clear_structure_caches();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(CheckedPivotalToy::new(
             70 + u8::from(late),
             BraidingStyleKind::Fermionic,
@@ -1617,7 +1617,7 @@ fn checked_contract_twist_failure_keeps_destination_and_staged_owners_unpublishe
             },
         )
         .unwrap();
-        let dual = v.try_dual().unwrap();
+        let dual = v.dual().unwrap();
         let mut filled = |codomain: &[&GradedSpace<_>], domain: &[&GradedSpace<_>], seed: f64| {
             TensorMap::from_subblock_fn(
                 engine,

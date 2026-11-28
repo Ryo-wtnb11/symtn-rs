@@ -60,7 +60,7 @@ fn assert_direct_contract_and_compose<R>(
 fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1_rule = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
@@ -113,11 +113,11 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
         Arc::clone(&product_rule),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],
@@ -139,16 +139,16 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
         Arc::clone(&product_rule),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let product_multileg_lhs = TensorMap::from_subblock_fn(
         engine,
@@ -174,8 +174,8 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
 fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mutation() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
-    let other_runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other_runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let host = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -464,7 +464,7 @@ fn assert_c64_contract_and_compose<R>(
 fn typed_cuda_c64_contract_and_compose_match_host() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -520,7 +520,7 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
         Arc::new(FermionParityFusionRule::new()),
         [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
     let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
         engine,
@@ -610,7 +610,7 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
 fn typed_cuda_contract_into_matches_the_returning_contraction() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     // `k` carries only charge 0, so the destination's charge-1 block has no
     // contributing GEMM and must come out as exactly `+0.0` from the zeroing
     // of the plan's inactive blocks.

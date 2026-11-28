@@ -51,7 +51,7 @@ macro_rules! multiplicity_free_matrix {
         let rt = $rt;
         let lift = $lift;
         let (v, w) = su2_legs();
-        let vd = v.try_dual().unwrap();
+        let vd = v.dual().unwrap();
         let t =
             TensorMap::<_, $d>::rand_with_seed($engine, rt, [&v, &vd, &v], [&v, &vd], 5).unwrap();
         let t = lift($ops, &t);
@@ -145,7 +145,7 @@ fn multiplicity_free_host_trace_reports_one_error_per_misuse() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     // The operations' engine, apart from the fixtures' one.
     let ops = &mut symtn::typed::CpuEngine::serial();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free_matrix!(
         engine,
         ops,
@@ -166,7 +166,7 @@ fn multiplicity_free_host_trace_reports_one_error_per_misuse() {
 fn multiplicity_free_device_trace_reports_the_host_error_per_misuse() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     multiplicity_free_matrix!(
         engine,
         cuda,
@@ -187,7 +187,7 @@ fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
 
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let rule = Arc::new(
         LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
             fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -208,7 +208,7 @@ fn checked_generic_trace_reports_the_multiplicity_free_error_per_misuse() {
         [(su_irrep(&[0i64, 0]), 2), (su_irrep(&[2, 1]), 1)],
     )
     .unwrap();
-    let vd = v.try_dual().unwrap();
+    let vd = v.dual().unwrap();
     macro_rules! generic {
         ($d:ty) => {{
             let t = TensorMap::<_, $d>::rand_with_seed(engine, &rt, [&v, &vd, &v], [&v, &vd], 5)

@@ -87,10 +87,7 @@ pub use optimizer::{
 pub use pathopt::{
     BranchLevel, DpObjective, OptEinsumPathOptimizer, PathMemoryLimit, PathStrategy,
 };
-pub use plan::{
-    active_pair_path_from_steps, active_pair_path_from_tree, dense_steps_from_active_pair_path,
-    ActivePair, ContractionPlan,
-};
+pub use plan::{ActivePair, ContractionPlan};
 pub use plancache::{
     clear_plan_cache, configure_plan_cache, load_plan_cache, plan_cache_config, plan_cache_stats,
     save_plan_cache, Optimizer, PlanCacheConfig, PlanCacheStats, ReplanPolicy,
@@ -101,9 +98,8 @@ pub use plancache::{
     CotengraMinimize, CotengraPythonConfig, CotengraPythonMethod, CotengraSlicingConfig,
 };
 pub use slice::{
-    best_next_internal_index, best_next_slice_index, contraction_width, greedy_slice,
-    slice_plan_for, DegeneracyRange, SectorSlice, SliceKind, SliceLabels, SlicePlan, SlicedPlan,
-    SymmetricIndexSlice, SymmetricSlicePlan, SymmetricSliceSpec, SymmetricSlicedPlan,
+    greedy_slice, slice_plan_for, DegeneracyRange, SectorSlice, SliceKind, SliceLabels, SlicePlan,
+    SlicedPlan, SymmetricIndexSlice, SymmetricSlicePlan, SymmetricSliceSpec, SymmetricSlicedPlan,
 };
 pub use tree::ContractionTree;
 
@@ -155,7 +151,7 @@ pub use tree::ContractionTree;
 ///
 /// # fn main() -> Result<(), Error> {
 /// let mut engine = CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let v = GradedSpace::try_new(
 ///     Arc::new(U1FusionRule),
 ///     [(U1Irrep::new(-1).unwrap(), 1), (U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],

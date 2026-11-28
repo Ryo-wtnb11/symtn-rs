@@ -23,7 +23,7 @@ fn typed_diagonal_preserves_canonical_positions_and_dual_leg() {
         ],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     let values: Vec<SectorSpectrum<U1Irrep, Complex64>> = bond
         .sectors()

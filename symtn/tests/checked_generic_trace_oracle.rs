@@ -136,9 +136,9 @@ fn cases<D>(engine: &mut dyn Engine, n: usize)
 where
     D: TensorScalar + numerics::Numeric,
 {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = spaces(n);
-    let vd = v.try_dual().unwrap();
+    let vd = v.dual().unwrap();
     let mixed =
         TensorMap::<_, D>::rand_with_seed(engine, &runtime, [&v, &w, &v], [&v, &w], 11).unwrap();
     let mixed_len = mixed.dense_data().unwrap().len();

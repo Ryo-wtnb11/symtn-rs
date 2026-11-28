@@ -220,7 +220,7 @@ fn invalid_exponents_are_typed_errors() {
 fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let (uv, uw) = u1_norm_legs();
     let (sv, sw) = su2_norm_legs();
     let u1_f64: TensorMap<U1FusionRule, f64> =
@@ -280,7 +280,7 @@ fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
 fn compact_host_reductions_match_the_device_frobenius_arm() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let (bond, _) = su2_norm_legs();
     let value = |twice: usize, k: usize, shift: f64| {
         Complex64::new(

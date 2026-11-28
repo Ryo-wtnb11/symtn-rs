@@ -15,7 +15,7 @@ fn label(name: &str) -> TemporaryLabel {
 #[test]
 fn common_lowering_is_unchanged_by_a_dense_plan_text_roundtrip() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let two = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -73,7 +73,7 @@ fn common_lowering_is_unchanged_by_a_dense_plan_text_roundtrip() {
 #[test]
 fn reconstruction_preserves_two_step_order_and_output_metadata() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let tensors = (0..3)

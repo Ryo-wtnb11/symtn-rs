@@ -164,7 +164,7 @@ where
 
 /// Whether two lowered legs, each a stored leg and whether it is read as that
 /// leg's dual, may be contracted: the second must be the dual of the first,
-/// as `GradedSpace::try_dual` would build it. Only the parity of the two
+/// as `GradedSpace::dual` would build it. Only the parity of the two
 /// dualisations matters: when exactly one side is dualised the stored legs
 /// must be equal, which is TensorKit's `space(A, i) == space(B, j)'` with a
 /// structural dual.
@@ -188,7 +188,7 @@ where
 /// with the same degeneracy. The round trip `dual(dual(s)) == s` proves the
 /// dual injective on `from`, so its image fills `into` exactly; a provider
 /// whose dual is not an involution is rejected with the error
-/// `GradedSpace::try_dual` raises for a non-injective dual, not accepted.
+/// `GradedSpace::dual` raises for a non-injective dual, not accepted.
 fn is_dual_of<R>(provider: &R, from: &SectorLeg, into: &SectorLeg) -> Result<bool, FacadeError<R>>
 where
     R: TypedSectorAdmission,
@@ -197,10 +197,7 @@ where
     if from.is_dual() == into.is_dual() || from.sectors().len() != into.sectors().len() {
         return Ok(false);
     }
-    let dual_of = |sector| {
-        TypedSectorAdmission::try_dual_id(provider, sector)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)
-    };
+    let dual_of = |sector| __network::network_dual_sector(provider, sector);
     for (&sector, &degeneracy) in from.sectors().iter().zip(from.degeneracies()) {
         let dual = dual_of(sector)?;
         if dual_of(dual)? != sector {
@@ -256,7 +253,7 @@ where
         .map(typed_flat_spaces)
         .collect::<Result<Vec<_>, _>>()?;
     for &((lhs_slot, lhs_axis), (rhs_slot, rhs_axis)) in pairs {
-        if spaces[rhs_slot][rhs_axis] != spaces[lhs_slot][lhs_axis].try_dual()? {
+        if spaces[rhs_slot][rhs_axis] != spaces[lhs_slot][lhs_axis].dual()? {
             return Err(invalid(format!(
                 "contracted input spaces mismatch between operand {lhs_slot} leg {lhs_axis} and operand {rhs_slot} leg {rhs_axis}"
             ))
@@ -280,7 +277,7 @@ where
         tensor
             .domain()
             .iter()
-            .map(GradedSpace::try_dual)
+            .map(GradedSpace::dual)
             .collect::<Result<Vec<_>, _>>()?,
     );
     Ok(spaces)
@@ -304,7 +301,7 @@ where
         tensor
             .codomain()
             .iter()
-            .map(GradedSpace::try_dual)
+            .map(GradedSpace::dual)
             .collect::<Result<Vec<_>, _>>()?,
     );
     Ok(spaces)

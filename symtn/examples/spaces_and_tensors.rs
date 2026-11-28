@@ -8,15 +8,15 @@ use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 
 fn main() -> Result<(), Error> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rt = Runtime::builder().build()?;
+    let rt = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )?;
-    let dual = v.try_dual()?;
+    let dual = v.dual()?;
     assert!(dual.is_dual());
     assert_eq!(dual.degeneracy(&U1Irrep::new(-1).unwrap())?, 1);
-    assert_eq!(dual.try_dual()?, v);
+    assert_eq!(dual.dual()?, v);
     let zero = TensorMap::<_, f64>::zeros(engine, &rt, [&v], [&v])?;
     assert!(zero.norm(engine, 2.0)? < 1e-12);
     let id = TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v], [&v], |_, ij| {

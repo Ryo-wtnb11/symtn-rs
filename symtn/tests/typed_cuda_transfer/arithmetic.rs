@@ -7,7 +7,7 @@ use symtn::sector::ZNIrrep;
 fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -394,7 +394,7 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
         .unwrap()
         .is_empty());
 
-    let other_runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::new();
     let other_leg =
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let foreign = TensorMap::from_subblock_fn(

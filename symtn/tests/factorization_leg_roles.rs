@@ -15,7 +15,7 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::OperationError;
 use symtn::typed::{
@@ -55,7 +55,7 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
         [(0, 1), (1, 2), (2, 1)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
-    (v, w.try_dual().unwrap())
+    (v, w.dual().unwrap())
 }
 
 fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
@@ -69,7 +69,7 @@ fn su2_legs() -> (GradedSpace<Su2Rule>, GradedSpace<Su2Rule>) {
         [(1, 1), (2, 2)].map(|(twice, n)| (su2_irrep(twice), n)),
     )
     .unwrap();
-    (v, w.try_dual().unwrap())
+    (v, w.dual().unwrap())
 }
 
 type Fz2U1 = symtn::sector::ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
@@ -86,15 +86,15 @@ fn fz2_u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         Arc::clone(&rule),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                 1,
             ),
         ],
@@ -104,17 +104,17 @@ fn fz2_u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         rule,
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
                 2,
             ),
         ],
     )
     .unwrap();
-    (v, w.try_dual().unwrap())
+    (v, w.dual().unwrap())
 }
 
 /// Space, storage and every stored value of a result, bit for bit.
@@ -408,7 +408,7 @@ fn checked_generic_leg_roles_equal_the_permute_composition() {
     .unwrap();
     let w = GradedSpace::try_new(provider, [(su_irrep(&[1, 0]), 1), (su_irrep(&[1, 1]), 1)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     check_fixture!(
         engine,

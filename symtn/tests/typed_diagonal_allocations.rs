@@ -40,7 +40,7 @@ fn dense_payload_bytes() -> u64 {
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
 fn runtime() -> &'static Runtime {
-    RUNTIME.get_or_init(|| Runtime::builder().build().unwrap())
+    RUNTIME.get_or_init(Runtime::new)
 }
 
 fn leg() -> GradedSpace<ZNFusionRule> {
@@ -608,8 +608,8 @@ fn diagonal_conversions_allocate_one_output_and_stay_compact_on_a_spectrum() {
             "to_c64",
             warmed_bytes(|| d.convert::<Complex64>(engine).unwrap()),
         ),
-        ("re", warmed_bytes(|| complex_d.re(engine).unwrap())),
-        ("im", warmed_bytes(|| complex_d.im(engine).unwrap())),
+        ("re", warmed_bytes(|| complex_d.real(engine).unwrap())),
+        ("im", warmed_bytes(|| complex_d.imag(engine).unwrap())),
     ] {
         assert!(
             bytes < ceiling,
@@ -636,8 +636,8 @@ fn dense_conversions_allocate_only_their_own_output() {
         "dense to_c64 did not allocate exactly its own c64 output: {widen} bytes"
     );
     for (name, bytes) in [
-        ("re", warmed_bytes(|| complex_tensor.re(engine).unwrap())),
-        ("im", warmed_bytes(|| complex_tensor.im(engine).unwrap())),
+        ("re", warmed_bytes(|| complex_tensor.real(engine).unwrap())),
+        ("im", warmed_bytes(|| complex_tensor.imag(engine).unwrap())),
     ] {
         assert!(
             (ceiling..2 * ceiling).contains(&bytes),

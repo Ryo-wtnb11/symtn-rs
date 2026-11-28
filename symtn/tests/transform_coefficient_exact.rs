@@ -20,7 +20,7 @@ use symtn::typed::Engine;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -74,7 +74,7 @@ macro_rules! assert_componentwise {
     };
     ($engine:ident, $complex:ty, $real:ty, [$($codomain:expr),* $(,)?], [$($domain:expr),* $(,)?],
      |$t:ident| $body:expr) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let codomain = vec![$($codomain),*];
         let domain = vec![$($domain),*];
         let build = |$engine: &mut dyn Engine, f: &dyn Fn(&BlockFusionTrees<_>, &[usize]) -> $real| {
@@ -181,7 +181,7 @@ fn u1_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
 
     assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
@@ -231,7 +231,7 @@ fn su2_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
 
     assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
@@ -256,14 +256,14 @@ fn u1_times_su2_transforms_scale_componentwise() {
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, su2_rule()).unwrap(),
     );
     let label = |charge: i32, twice_spin: usize| {
-        product_sector(U1Irrep::new(charge).unwrap(), su2_irrep(twice_spin))
+        ProductSector::new(U1Irrep::new(charge).unwrap(), su2_irrep(twice_spin))
     };
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [(label(0, 0), 2), (label(1, 1), 3), (label(-1, 1), 2)],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [(label(0, 0), 1), (label(1, 1), 2), (label(0, 2), 2)],
@@ -297,7 +297,7 @@ fn fermionic_transforms_scale_componentwise() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {
@@ -315,7 +315,7 @@ fn fermionic_transforms_scale_componentwise() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = GradedSpace::try_new(
         Arc::clone(&provider),
         [
@@ -362,7 +362,7 @@ fn traces_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
         .trace_pairs(engine, &[(0, 2)]));
@@ -379,7 +379,7 @@ fn traces_scale_componentwise() {
 
     let provider = Arc::new(su2_rule());
     let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
         .trace_pairs(engine, &[(1, 3)]));
@@ -402,7 +402,7 @@ fn traces_scale_componentwise() {
         .unwrap(),
     );
     let label = |odd: bool, charge: i32| {
-        product_sector(
+        ProductSector::new(
             if odd {
                 FermionParityIrrep::ODD
             } else {
@@ -420,7 +420,7 @@ fn traces_scale_componentwise() {
         ],
     )
     .unwrap();
-    let dual = leg.try_dual().unwrap();
+    let dual = leg.dual().unwrap();
     assert_componentwise!(engine, [&leg, &dual], [&leg, &dual], |t| t
         .trace_pairs(engine, &[(1, 3)]));
     assert_componentwise!(engine, [&leg, &dual], [&leg, &dual], |t| t

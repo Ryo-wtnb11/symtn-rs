@@ -94,7 +94,7 @@ macro_rules! for_dtypes {
 fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let space = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
@@ -135,7 +135,7 @@ fn u1_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
 fn su2_isomorphism_and_isometry_are_block_identities_between_different_spaces() {
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
                 Arc::new(su2_rule()),
@@ -174,7 +174,7 @@ fn su2_isomorphism_and_isometry_are_block_identities_between_different_spaces() 
 fn u1_negative_charge_isometry_and_isomorphism_match_tensorkit_dense() {
     fn run<D: TensorScalar + Into<Complex64>>(what: &str) {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let space = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
@@ -196,7 +196,7 @@ fn u1_negative_charge_isometry_and_isomorphism_match_tensorkit_dense() {
 
         // TensorKit trees of V ⊗ V' at charge 0: (0,0), (1,-1), (-1,1).
         let t: TensorMap<_, D> =
-            TensorMap::isometry(engine, &rt, [&v, &v.try_dual().unwrap()], [&w]).unwrap();
+            TensorMap::isometry(engine, &rt, [&v, &v.dual().unwrap()], [&w]).unwrap();
         assert_dense(
             &format!("{what} isometry V⊗V' ← U1(0=>2)"),
             &t.to_physical_dense(engine).unwrap(),
@@ -238,7 +238,7 @@ fn su2_three_leg_isometry_matches_tensorkit_dense() {
     use std::f64::consts::FRAC_1_SQRT_2;
     fn run<D: TensorScalar + Into<Complex64>>(what: &str) {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
                 Arc::new(su2_rule()),
@@ -283,7 +283,7 @@ fn su2_three_leg_isometry_matches_tensorkit_dense() {
 fn su2_three_leg_isometry_follows_tensorkit_inner_line_order() {
     fn run<D: TensorScalar + Into<Complex64>>(what: &str) {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let space = |pairs: &[(usize, usize)]| {
             GradedSpace::try_new(
                 Arc::new(su2_rule()),
@@ -337,7 +337,7 @@ fn su2_three_leg_isometry_follows_tensorkit_inner_line_order() {
 fn su2_product_isometry_follows_tensorkit_inner_line_order() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     type Su2Su2 = ProductFusionRule<Su2Rule, Su2Rule>;
-    let rt = Runtime::builder().build().unwrap();
+    let rt = Runtime::new();
     let p = |a: usize, b: usize| ProductSector::new(su2_irrep(a), su2_irrep(b));
     let space = |pairs: &[((usize, usize), usize)]| {
         GradedSpace::try_new(
@@ -381,7 +381,7 @@ fn su3_isometry_is_the_block_identity_across_multiplicity_vertices() {
     use symtn::sector::{CheckedGenericAdmissionMode, LieGroupFusionRule};
     fn run<D: TensorScalar + PartialEq + Debug>(what: &str) {
         let engine = &mut symtn::typed::CpuEngine::serial();
-        let rt = Runtime::builder().build().unwrap();
+        let rt = Runtime::new();
         let provider = Arc::new(
             LieGroupFusionRule::<CheckedGenericAdmissionMode>::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),

@@ -169,7 +169,7 @@ where
             Side::Domain => UnitLegInsertion::Left { position, dual },
             Side::Codomain => UnitLegInsertion::Right { position, dual },
         };
-        <R::Mode as TypedTensorUnitDispatch<R, D>>::insert_unit(engine, self, insertion)
+        <R::Mode as TypedTensorUnitDispatch<R, D>>::insert_unit(EXEC, engine, self, insertion)
     }
 
     /// TensorKit `removeunit(t, i)`: removes the canonical unit leg at flat
@@ -199,7 +199,7 @@ where
         engine: &mut dyn Engine,
         axis: usize,
     ) -> Result<Self, FacadeError<R>> {
-        <R::Mode as TypedTensorUnitDispatch<R, D>>::remove_unit(engine, self, axis)
+        <R::Mode as TypedTensorUnitDispatch<R, D>>::remove_unit(EXEC, engine, self, axis)
     }
 }
 

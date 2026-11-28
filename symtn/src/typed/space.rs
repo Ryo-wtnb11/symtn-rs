@@ -24,7 +24,7 @@ use super::*;
 /// let fused = v.fuse(&w)?;
 /// assert_eq!(fused.degeneracy(&U1Irrep::new(-1).unwrap())?, 2);
 /// assert_eq!(fused.degeneracy(&U1Irrep::new(0).unwrap())?, 1);
-/// assert_eq!(v.try_dual()?.degeneracy(&U1Irrep::new(-1).unwrap())?, 1);
+/// assert_eq!(v.dual()?.degeneracy(&U1Irrep::new(-1).unwrap())?, 1);
 /// # Ok(())
 /// # }
 /// ```
@@ -77,12 +77,12 @@ where
     ///
     /// Input order does not affect the result: sectors are stored in the
     /// provider's [`crate::sector::SectorId`] order, and zero-degeneracy entries
-    /// are omitted. Call [`Self::try_dual`] to construct the dual space.
+    /// are omitted. Call [`Self::dual`] to construct the dual space.
     ///
     /// The space retains `provider`. Clone one [`Arc`] into several
     /// independently constructed spaces to share one allocation (and its
     /// performance cache); spaces derived from an existing space
-    /// ([`Self::try_dual`], [`Self::fuse`], [`Self::unitspace`]) already share
+    /// ([`Self::dual`], [`Self::fuse`], [`Self::unitspace`]) already share
     /// its provider.
     ///
     /// ```
@@ -130,8 +130,11 @@ where
         let mut encoded = Vec::with_capacity(pairs.len());
         for (label, degeneracy) in &pairs {
             encoded.push((
-                TypedSectorAdmission::try_encode_label(provider.as_ref(), label)
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?,
+                TypedSectorAdmission::try_encode_label(provider.as_ref(), label).map_err(
+                    |error| {
+                        <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                    },
+                )?,
                 label,
                 *degeneracy,
             ));
@@ -161,8 +164,11 @@ where
             .sectors()
             .iter()
             .map(|&id| {
-                TypedSectorAdmission::try_decode_label(self.provider.as_ref(), id)
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)
+                TypedSectorAdmission::try_decode_label(self.provider.as_ref(), id).map_err(
+                    |error| {
+                        <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                    },
+                )
             })
             .collect()
     }
@@ -170,8 +176,9 @@ where
     /// Returns a sector's degeneracy, or zero when the provider can encode the
     /// label but the space does not contain it.
     pub fn degeneracy(&self, sector: &R::Sector) -> Result<usize, FacadeError<R>> {
-        let id = TypedSectorAdmission::try_encode_label(self.provider.as_ref(), sector)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+        let id = TypedSectorAdmission::try_encode_label(self.provider.as_ref(), sector).map_err(
+            |error| <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error),
+        )?;
         Ok(self.leg.degeneracy(id).unwrap_or(0))
     }
 
@@ -185,7 +192,7 @@ where
     /// # Errors
     ///
     /// Returns [`Error::InvalidArgument`] when two sectors have the same dual.
-    pub fn try_dual(&self) -> Result<Self, FacadeError<R>> {
+    pub fn dual(&self) -> Result<Self, FacadeError<R>> {
         let sectors = self
             .leg
             .sectors()
@@ -194,7 +201,9 @@ where
             .zip(self.leg.degeneracies().iter().copied())
             .map(|(sector, degeneracy)| {
                 TypedSectorAdmission::try_dual_id(self.provider.as_ref(), sector)
-                    .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)
+                    .map_err(|error| {
+                        <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                    })
                     .map(|dual| (dual, degeneracy))
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -262,7 +271,7 @@ where
         let mut total = 0.0;
         for (&sector, &degeneracy) in self.leg.sectors().iter().zip(self.leg.degeneracies()) {
             total += degeneracy as f64
-                * <R::Mode as TypedSpaceModeDispatch<R>>::dim(self.provider(), sector)?;
+                * <R::Mode as TypedSpaceModeDispatch<R>>::dim(EXEC, self.provider(), sector)?;
         }
         Ok(total)
     }
@@ -270,9 +279,10 @@ where
     /// Returns the non-dual unit space: the provider's vacuum sector with
     /// degeneracy one and the same provider instance as this space.
     pub fn unitspace(&self) -> Result<Self, FacadeError<R>> {
-        let vacuum = <R::Mode as TypedSpaceModeDispatch<R>>::vacuum(self.provider());
-        TypedSectorAdmission::try_decode_label(self.provider(), vacuum)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+        let vacuum = <R::Mode as TypedSpaceModeDispatch<R>>::vacuum(EXEC, self.provider());
+        TypedSectorAdmission::try_decode_label(self.provider(), vacuum).map_err(|error| {
+            <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+        })?;
         let leg = SectorLeg::try_new([(vacuum, 1)], false)
             .map_err(|error| FacadeError::<R>::from(Error::InvalidArgument(error.to_string())))?;
         Ok(Self {
@@ -302,11 +312,13 @@ where
                     ))
                 })?;
                 for coupled in <R::Mode as TypedSpaceModeDispatch<R>>::fusion_channels(
+                    EXEC,
                     self.provider(),
                     left,
                     right,
                 )? {
                     let multiplicity = <R::Mode as TypedSpaceModeDispatch<R>>::nsymbol(
+                        EXEC,
                         self.provider(),
                         left,
                         right,
@@ -328,8 +340,9 @@ where
         }
         fused.retain(|_, degeneracy| *degeneracy != 0);
         for &sector in fused.keys() {
-            TypedSectorAdmission::try_decode_label(self.provider(), sector)
-                .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+            TypedSectorAdmission::try_decode_label(self.provider(), sector).map_err(|error| {
+                <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+            })?;
         }
         let leg = SectorLeg::try_new(fused, false)
             .map_err(|error| FacadeError::<R>::from(Error::InvalidArgument(error.to_string())))?;
@@ -410,7 +423,9 @@ where
         let mut given = std::collections::BTreeMap::new();
         for entry in spectra {
             let sector = TypedSectorAdmission::try_encode_label(self.provider(), &entry.sector)
-                .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+                .map_err(|error| {
+                    <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                })?;
             let degeneracy = self.leg.degeneracy(sector).ok_or_else(|| {
                 FacadeError::<R>::from(Error::InvalidArgument(format!(
                     "sector {:?} is absent from the extended leg",
@@ -469,7 +484,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap, Truncation};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(std::sync::Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)])?;
     /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 6)?;
     ///
@@ -557,7 +572,9 @@ where
         let mut encoded = Vec::with_capacity(spectra.len());
         for entry in spectra {
             let sector = TypedSectorAdmission::try_encode_label(self.provider(), &entry.sector)
-                .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+                .map_err(|error| {
+                    <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error)
+                })?;
             let degeneracy = self.leg.degeneracy(sector).ok_or_else(|| {
                 FacadeError::<R>::from(Error::InvalidArgument(format!(
                     "sector {:?} is absent from the truncated leg",
@@ -589,6 +606,7 @@ where
             .into());
         }
         let decision = <R::Mode as TypedTruncationDispatch<R>>::decide_bond_truncation(
+            EXEC,
             self.provider(),
             &encoded,
             truncation,
@@ -787,8 +805,9 @@ where
 
         let mut entries = Vec::with_capacity(pairs.len());
         for (label, positions) in pairs {
-            let id = TypedSectorAdmission::try_encode_label(parent.provider(), &label)
-                .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+            let id = TypedSectorAdmission::try_encode_label(parent.provider(), &label).map_err(
+                |error| <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error),
+            )?;
             let degeneracy = parent.leg().degeneracy(id).ok_or_else(|| {
                 FacadeError::<R>::from(Error::InvalidArgument(format!(
                     "sector {label:?} is absent from the selected leg"
@@ -849,7 +868,7 @@ where
         entries: Vec<(SectorId, symtn_tensors::SelectedRuns)>,
     ) -> Result<Self, FacadeError<R>> {
         // The subspace is built on the parent's own dual flag and stored ids:
-        // going through `GradedSpace::try_new` + `try_dual` would dualise the
+        // going through `GradedSpace::try_new` + `dual` would dualise the
         // labels and name a different leg.
         let leg = SectorLeg::try_new(
             entries
@@ -885,8 +904,9 @@ where
     /// [`Error::InvalidArgument`] when `sector` is absent from the parent
     /// leg; provider label-encoding failures are returned unchanged.
     pub fn positions(&self, sector: &R::Sector) -> Result<Vec<usize>, FacadeError<R>> {
-        let id = TypedSectorAdmission::try_encode_label(self.parent.provider(), sector)
-            .map_err(<R::Mode as TypedTensorModeDispatch<R>>::map_provider_error)?;
+        let id = TypedSectorAdmission::try_encode_label(self.parent.provider(), sector).map_err(
+            |error| <R::Mode as TypedTensorModeDispatch<R>>::map_provider_error(EXEC, error),
+        )?;
         if self.parent.leg().degeneracy(id).is_none() {
             return Err(Error::InvalidArgument(format!(
                 "sector {sector:?} is absent from the selection's parent leg"
@@ -968,7 +988,11 @@ where
         replaced(homspace.codomain(), 0),
         replaced(homspace.domain(), codomain_rank),
     );
-    <R::Mode as TypedTensorRootDispatch<R>>::build_root(Arc::clone(space.provider_arc()), homspace)
+    <R::Mode as TypedTensorRootDispatch<R>>::build_root(
+        EXEC,
+        Arc::clone(space.provider_arc()),
+        homspace,
+    )
 }
 
 /// The kernel's per-axis run tables for a restriction set on a tensor of

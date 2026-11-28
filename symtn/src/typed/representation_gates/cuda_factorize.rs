@@ -111,7 +111,7 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
     // The device method itself, on a device-typed compact diagonal (a valid
     // device tensor that needs no allocation) over a multi-sector bond; its
     // dense Host twin has the same space.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -238,7 +238,7 @@ fn typed_cuda_factorizations_reject_lazy_adjoint_before_runtime_work() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
@@ -271,7 +271,7 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -423,7 +423,7 @@ fn typed_cuda_eigh_ascending_order_assembles_by_one_copy_per_sector() {
     // copies its eigenvectors once, with no selector upload and no GEMM,
     // over multi-tree sectors, and every column pairs with its value
     // (`t v = v d`).
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -489,7 +489,7 @@ fn typed_cuda_eigh_selector_assembly_applies_a_non_identity_order() {
     // but `total_cmp` still orders `-0.0` before `+0.0`) publishes column
     // `c` of the sector's `v` as raw eigenvector `order[c]`. The selector is
     // packed and read at a nonzero offset as `eigh_full` packs one per route.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let device =
@@ -542,7 +542,7 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -613,7 +613,7 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
         CudaStorage::upload(&call, source.dense_data().unwrap()).unwrap()
     };
     let stranded = TensorMap {
-        runtime: Runtime::builder().build().unwrap(),
+        runtime: Runtime::new(),
         repr: owned_repr(TypedTensorBody::dense(
             source.logical_space().clone(),
             stranded_storage,
@@ -655,7 +655,7 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(su2_rule());
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -729,7 +729,7 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
         CudaStorage::upload(&call, source.dense_data().unwrap()).unwrap()
     };
     let stranded = TensorMap {
-        runtime: Runtime::builder().build().unwrap(),
+        runtime: Runtime::new(),
         repr: owned_repr(TypedTensorBody::dense(
             source.logical_space().clone(),
             stranded_storage,
@@ -969,7 +969,7 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
     // What: #1552's three-part consistency contract against the Host SVD
     // over U(1) and SU(2), f64 and c64, generic and exactly degenerate
     // spectra.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -1022,7 +1022,7 @@ fn typed_cuda_svd_of_a_near_tie_follows_the_first_largest_entry() {
     // be zeroed (a tie-break that summed tied entries would do that).
     // The exact-tie contract (first row wins) is pinned on hand-built
     // factors in `symtn-dense/tests/cuda_svd_gauge.rs`.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg =
         GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let host = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
@@ -1087,7 +1087,7 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
     // the phases, 2 per side (broadcast, mul), and 1 conj for a complex
     // left side. Per call, one gauge-weight upload (no per-route identity
     // selectors); nothing is downloaded.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -1347,7 +1347,7 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
     // spectrum; it must equal, bit for bit, the host-filled `s` built from
     // the same solver's downloaded spectra, across symmetries, dtypes,
     // multi-tree sectors and an empty coupled sector.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1 = Arc::new(U1FusionRule);
     let u1_leg = |charges: &[(i32, usize)]| {
@@ -1377,15 +1377,15 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
         Arc::clone(&fermion),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
                 1,
             ),
         ],
@@ -1580,7 +1580,7 @@ fn typed_cuda_factorizations_refuse_nonfinite_input_with_the_host_error() {
     // What: eager device QR, SVD and EIGH refuse a NaN or infinite real or
     // imaginary component with the Host's error (#1986, #2038), before any
     // solver call or output upload; EIGH reports it ahead of Hermiticity.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_device_refuses_nonfinite_input_like_the_host::<f32>(&runtime);
     assert_device_refuses_nonfinite_input_like_the_host::<f64>(&runtime);
     assert_device_refuses_nonfinite_input_like_the_host::<num_complex::Complex32>(&runtime);

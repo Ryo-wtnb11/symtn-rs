@@ -16,7 +16,7 @@ fn u1_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<symtn::sector::U1
         ],
     )
     .unwrap();
-    // Built through `try_dual` because the dual flips the sector labels too.
+    // Built through `dual` because the dual flips the sector labels too.
     let typed_q = GradedSpace::try_new(
         Arc::clone(&rule),
         [
@@ -25,7 +25,7 @@ fn u1_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<symtn::sector::U1
         ],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     counter_oracle(runtime, (&typed_p, &typed_q), first_value)
 }
@@ -59,7 +59,7 @@ fn u1_fz2_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<U1Fz2Rule, f6
         [(label(-1, 1), 1), (label(0, 0), 2), (label(1, 1), 1)],
     )
     .unwrap()
-    .try_dual()
+    .dual()
     .unwrap();
     counter_oracle(runtime, (&typed_p, &typed_q), first_value)
 }
@@ -642,7 +642,7 @@ fn reductions_and_factorizations_hold_on_fz2_u1_su2() {
 // The generic product provider as the canonical public route.
 //
 // Everything below is written the way a downstream user would have to write
-// it: `ProductFusionRule::try_new` for the provider, `product_sector` for
+// it: `ProductFusionRule::try_new` for the provider, `ProductSector::new` for
 // the label, `symtn::typed` for the space and the tensor. No
 // fixed product-space constructor appears, so the tests fail — they do not
 // silently reroute — if a group-specific constructor is the only working path.
@@ -667,7 +667,7 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
         .unwrap(),
     );
     let label = |parity: symtn::sector::FermionParityIrrep, charge: i32| {
-        symtn::sector::product_sector(parity, symtn::sector::U1Irrep::new(charge).unwrap())
+        symtn::sector::ProductSector::new(parity, symtn::sector::U1Irrep::new(charge).unwrap())
     };
 
     let p = GradedSpace::try_new(
@@ -689,7 +689,7 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
             (label(symtn::sector::FermionParityIrrep::EVEN, 0), 2),
         ],
     )
-    .and_then(|space| space.try_dual())
+    .and_then(|space| space.dual())
     .unwrap();
 
     // A distinct value per element, so multiple blocks are exercised
@@ -742,8 +742,8 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
         .unwrap(),
     );
     let label = |parity: symtn::sector::FermionParityIrrep, charge: i32, twice_spin: usize| {
-        symtn::sector::product_sector(
-            symtn::sector::product_sector(parity, symtn::sector::U1Irrep::new(charge).unwrap()),
+        symtn::sector::ProductSector::new(
+            symtn::sector::ProductSector::new(parity, symtn::sector::U1Irrep::new(charge).unwrap()),
             su2_irrep(twice_spin),
         )
     };
@@ -787,9 +787,9 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
             .unwrap(),
     )
     .unwrap();
-    let right_label = symtn::sector::product_sector(
+    let right_label = symtn::sector::ProductSector::new(
         symtn::sector::FermionParityIrrep::ODD,
-        symtn::sector::product_sector(symtn::sector::U1Irrep::new(1).unwrap(), su2_irrep(1)),
+        symtn::sector::ProductSector::new(symtn::sector::U1Irrep::new(1).unwrap(), su2_irrep(1)),
     );
     assert_ne!(
         left_assoc.rule_identity(),

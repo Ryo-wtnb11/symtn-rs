@@ -9,8 +9,8 @@ use crate::prepared;
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
 use std::hint::black_box;
-use symtn::expert::{DefaultDenseExecutor, DenseExecutor, DenseRead, DenseView};
 use symtn::typed::{EighFullPlan, HermitianTol, Runtime, StackedTensorMap};
+use symtn_dense::{DefaultDenseExecutor, DenseExecutor, DenseRead, DenseView};
 
 use prepared::eigh::hermitian_members;
 use prepared::u1_legs;
@@ -67,7 +67,7 @@ fn solver_calls(orders: &[usize]) -> u64 {
 #[test]
 fn warm_execute_allocates_per_member_only_the_dense_solver_outputs() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (small, orders) = warm_calls(&runtime, 4);
     let (large, _) = warm_calls(&runtime, 12);
     let solver = solver_calls(&orders);

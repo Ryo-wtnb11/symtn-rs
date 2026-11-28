@@ -128,6 +128,15 @@ impl Network {
 
     /// Plans from storage-independent metadata of homogeneous typed Host
     /// tensors; payload storage is never read or transferred.
+    ///
+    /// `optimizer` searches the order; a [`ContractionPlan`] passed here is
+    /// an already chosen order and is checked against the network instead.
+    ///
+    /// # Errors
+    ///
+    /// An invalid-argument error when a given [`ContractionPlan`] does not
+    /// describe this network: its tensor count, output labels, or step
+    /// result labels differ from the lowered inputs.
     pub fn plan<R, D, S>(
         &self,
         tensors: &[&TensorMap<R, D, S>],
@@ -172,8 +181,10 @@ impl Network {
         })
     }
 
-    /// Lowers `tensors` and runs `search` for a multi-operand network; a
-    /// single operand has the empty order and is not searched.
+    /// Lowers `tensors` and runs `search`. A single operand has the empty
+    /// order, but `search` still runs so a supplied [`ContractionPlan`] is
+    /// checked against the network; searching optimizers answer
+    /// [`ContractError::NotEnoughTensors`] for it.
     fn plan_searched<R, D, S>(
         &self,
         tensors: &[&TensorMap<R, D, S>],
@@ -186,24 +197,18 @@ impl Network {
         S: TensorStorage<D>,
     {
         let LoweredTypedNetwork { ir, infos, .. } = self.lower_typed(tensors)?;
-        let plan = if ir.tensors().len() == 1 {
-            ContractionPlan::from_steps(&ir, Vec::new()).map_err(invalid)?
-        } else {
-            let cost = DenseCostModel::from_network(&ir, &infos).map_err(invalid)?;
-            search(&ir, &cost).map_err(invalid)?
+        let cost = DenseCostModel::from_network(&ir, &infos).map_err(invalid)?;
+        let plan = match search(&ir, &cost) {
+            Err(ContractError::NotEnoughTensors) if ir.tensors().len() == 1 => {
+                ContractionPlan::from_steps(&ir, Vec::new()).map_err(invalid)?
+            }
+            plan => plan.map_err(invalid)?,
         };
         self.finish_typed_plan(tensors, ir, plan)
     }
 
     /// Wraps an already searched structural order for typed execution.
-    ///
-    /// # Errors
-    ///
-    /// Returns an invalid-argument error when `plan` does not describe this
-    /// network: its tensor count, output labels, or step result labels differ
-    /// from the lowered inputs. This is the step-label check
-    /// [`ContractionPlan::from_steps`] runs, repeated once per call.
-    pub fn plan_with<R, D, S>(
+    pub(crate) fn plan_with<R, D, S>(
         &self,
         tensors: &[&TensorMap<R, D, S>],
         plan: ContractionPlan,

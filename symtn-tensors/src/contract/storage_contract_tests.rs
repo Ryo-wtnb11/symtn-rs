@@ -1050,7 +1050,7 @@ const EVEN: SectorId = SectorId::new(0);
 const ODD: SectorId = SectorId::new(1);
 
 /// fZ2 x U(1), degeneracy > 1, odd sectors of both charge signs. A dual leg
-/// stores the conjugate charges (the typed `GradedSpace::try_dual`).
+/// stores the conjugate charges (the typed `GradedSpace::dual`).
 fn fermion_u1_leg(rule: &FermionU1, dual: bool) -> SectorLeg {
     let charge = |q: i32| SectorId::from(U1Irrep::new(if dual { -q } else { q }).unwrap());
     SectorLeg::new(

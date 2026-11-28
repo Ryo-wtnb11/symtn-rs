@@ -32,7 +32,7 @@ where
 fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1_rule = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
@@ -90,11 +90,11 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
         Arc::clone(&product_rule),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 1,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 2,
             ),
         ],
@@ -143,7 +143,7 @@ where
 fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
 
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -206,11 +206,11 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
         ),
         [
             (
-                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                ProductSector::new(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
                 1,
             ),
             (
-                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                ProductSector::new(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
                 2,
             ),
         ],

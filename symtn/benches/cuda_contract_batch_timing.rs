@@ -164,7 +164,7 @@ fn dynamic_tree_release_measurement() {
     }
     let cpu = &mut CpuEngine::serial();
     let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let case = &u1_inactive_cases::<f64>(cpu, &runtime)[1];
     run(cpu, cuda, case);
     let case = u1_reordered::<f64>(cpu, &runtime);
@@ -188,7 +188,7 @@ fn dynamic_tree_release_measurement() {
 fn direct_core_release_measurement() {
     let cpu = &mut CpuEngine::serial();
     let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for (case, _) in candidate_core_probes::<_, f64>(cpu, &runtime, &su2()) {
         if !matches!(case.name, "C1" | "C2") {
             continue;
@@ -292,9 +292,9 @@ fn direct_core_release_measurement() {
 fn signed_core_release_measurement() {
     let cpu = &mut CpuEngine::serial();
     let cuda = &mut CudaEngine::open(CudaDeviceId::from_ordinal(0)).unwrap();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let space = fermion_u1();
-    let dual = space.try_dual().unwrap();
+    let dual = space.dual().unwrap();
     let a =
         TensorMap::<_, f64>::from_subblock_fn(&mut *cpu, &runtime, [&space], [&dual], fill(201))
             .unwrap();

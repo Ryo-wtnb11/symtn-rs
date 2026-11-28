@@ -30,7 +30,7 @@ use symtn::typed::Direction;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{GradedSpace, TensorMap};
 use symtn::typed::{Runtime, TensorScalar};
@@ -111,7 +111,7 @@ fn assert_signs_only<D: Payload>(source: &[D], twisted: &[D], what: &str) {
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder().build().unwrap()
+    Runtime::new()
 }
 
 fn real_fill(_trees: &symtn::typed::BlockFusionTrees<impl std::fmt::Debug>, idx: &[usize]) -> f64 {
@@ -137,7 +137,7 @@ fn fz2_leg(dual: bool) -> GradedSpace<FermionParityFusionRule> {
     )
     .unwrap();
     if dual {
-        space.try_dual().unwrap()
+        space.dual().unwrap()
     } else {
         space
     }
@@ -235,15 +235,15 @@ fn device_twist_matches_the_host_for_product_providers() {
         Arc::clone(&rule),
         [
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 1,
             ),
             (
-                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                 1,
             ),
         ],
@@ -277,9 +277,15 @@ fn device_twist_matches_the_host_for_product_providers() {
     let leg = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, su2_irrep(1)), 1),
-            (product_sector(FermionParityIrrep::EVEN, su2_irrep(2)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(0)),
+                2,
+            ),
+            (ProductSector::new(FermionParityIrrep::ODD, su2_irrep(1)), 1),
+            (
+                ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
+                1,
+            ),
         ],
     )
     .unwrap();

@@ -52,7 +52,7 @@ fn check(label: &str, [cold, warm, recovered]: [(u64, u64); 3]) {
 fn the_first_call_after_a_failure_allocates_no_more_than_a_warm_call() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], COUNT, 1)).unwrap();

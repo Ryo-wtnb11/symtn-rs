@@ -56,7 +56,7 @@ in_both_modes! {
     /// (unit) and `[[2,1],[3,4]]` (charged), real and times `1 + i`.
     fn inv_and_integer_powers_match_hand_oracles<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 2)])
@@ -116,7 +116,7 @@ in_both_modes! {
     /// refused without touching the source.
     fn inv_accepts_isomorphic_unequal_spaces_and_rejects_nonisomorphic<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let x = GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
             .unwrap();
@@ -161,7 +161,7 @@ in_both_modes! {
     /// (zero-entry) arm, and the source is left untouched.
     fn inv_of_a_singular_sector_fails_on_both_storages_and_keeps_the_source<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
@@ -203,7 +203,7 @@ in_both_modes! {
     /// compact receivers alike, and the receiver is untouched.
     fn pinv_rejects_a_bad_rcond_first_on_every_storage<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
@@ -259,7 +259,7 @@ in_both_modes! {
     /// a per-sector, first-sector-only or `>=` cutoff would keep it.
     fn pinv_cuts_strictly_at_one_global_sigma_max_on_both_storages<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 2)])
@@ -309,7 +309,7 @@ in_both_modes! {
     /// `pinv` is the adjoint of the parent's.
     fn pinv_satisfies_the_moore_penrose_identities<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let narrow =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 2)])
@@ -384,7 +384,7 @@ in_both_modes! {
     /// orders the same formula differently).
     fn compact_inv_and_pinv_are_elementwise_reciprocals<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 2)])
@@ -470,7 +470,7 @@ in_both_modes! {
     /// squaring.
     fn exp_matches_closed_forms_for_non_hermitian_blocks<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 2)])
@@ -531,7 +531,7 @@ in_both_modes! {
     /// provider work, with the source untouched.
     fn exp_rejects_a_non_endomorphism_before_provider_work<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let wide = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 2)]).unwrap();
         let narrow = GradedSpace::try_new(Arc::clone(&provider), [(M::charged(), 1)]).unwrap();
@@ -551,7 +551,7 @@ in_both_modes! {
     /// invalid argument and nothing is published into the source.
     fn exp_rejects_a_nonfinite_sector_without_publication<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let leg =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 1), (M::charged(), 1)])
@@ -592,7 +592,7 @@ in_both_modes! {
     /// and agrees with it.
     fn compact_exp_is_elementwise_and_agrees_with_the_dense_arm<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 1)])
@@ -656,7 +656,7 @@ in_both_modes! {
     /// even when its blocks happen to be diagonal, and the source is untouched.
     fn map_diagonal_maps_compact_values_and_refuses_dense_storage<M>() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = M::provider();
         let bond =
             GradedSpace::try_new(Arc::clone(&provider), [(M::unit(), 2), (M::charged(), 1)])

@@ -97,13 +97,13 @@ macro_rules! assert_no_costlier_than_permute {
 /// change the split's size.
 macro_rules! assert_output_axes_cost {
     ($engine:ident, $provider:expr, $sectors:expr $(,)?) => {{
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let v = GradedSpace::try_new(
             std::sync::Arc::new($provider),
             $sectors.into_iter().map(|s| (s, 3)),
         )
         .unwrap();
-        for w in [v.clone(), v.try_dual().unwrap()] {
+        for w in [v.clone(), v.dual().unwrap()] {
             let a = TensorMap::<_, f64>::rand_with_seed($engine, &runtime, [&v, &v], [&w, &w], 1)
                 .unwrap();
             let b =

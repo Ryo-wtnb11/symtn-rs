@@ -37,7 +37,7 @@ macro_rules! device_select {
     ($cuda:ident, $engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let a = leg(0);
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         device_select!($cuda, $engine, @dtype $label, &runtime, &a, f64);
         device_select!($cuda, $engine, @dtype $label, &runtime, &a, Complex64);
     }};
@@ -97,7 +97,7 @@ fn device_select_is_bit_exact_with_one_gather_per_call() {
     let cuda = &mut crate::common::cuda_engine();
     for_each_symmetry!(engine, device_select, cuda);
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let q = |charge| fixtures::U1Irrep::new(charge).unwrap();
     let charged =
         GradedSpace::try_new(std::sync::Arc::new(fixtures::U1FusionRule), [(q(1), 2)]).unwrap();

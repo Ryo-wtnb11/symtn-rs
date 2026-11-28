@@ -27,9 +27,9 @@ use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 pub use symtn_sectors::CheckedGenericAdmissionMode;
 pub use symtn_sectors::{
-    product_sector, BraidingStyleKind, CU1FusionRule, CU1Irrep, CanonicalUnitAdmission,
-    CanonicalUnitFusionRule, CategoricalScalar, CategoryAdapterError, CategoryAdmissionError,
-    CategoryCodec, CategoryFailure, CategoryOperation, CategoryProvider, CategoryRule,
+    BraidingStyleKind, CU1FusionRule, CU1Irrep, CanonicalUnitAdmission, CanonicalUnitFusionRule,
+    CategoricalScalar, CategoryAdapterError, CategoryAdmissionError, CategoryCodec,
+    CategoryFailure, CategoryOperation, CategoryProvider, CategoryRule,
     CheckedCanonicalUnitFusionRule, CheckedFusionAlgebra, CheckedGenericFusion,
     CheckedGenericPivotal, CheckedGenericRigidSymbols, CoupledSectorFold, CoupledSectorFoldBuilder,
     EnumeratedCodec, FermionParityFusionRule, FermionParityIrrep, FusionAlgebraError, FusionRule,

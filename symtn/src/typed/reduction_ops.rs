@@ -137,7 +137,7 @@ where
     move |sector| match last {
         Some((cached, weight)) if cached == sector => Ok(weight),
         _ => {
-            let weight = <R::Mode as TypedSpaceModeDispatch<R>>::dim(provider, sector)?;
+            let weight = <R::Mode as TypedSpaceModeDispatch<R>>::dim(EXEC, provider, sector)?;
             last = Some((sector, weight));
             Ok(weight)
         }
@@ -217,7 +217,7 @@ where
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
     /// let twice = id.axpby(engine, 1.0, &id, 1.0)?;
@@ -410,7 +410,7 @@ where
         let structure = t.logical_space().space().structure();
         let nout = t.logical_space().space().nout();
         let sum = if p == 2.0 {
-            let unique = <R::Mode as TypedTensorModeDispatch<R>>::fusion_style(provider)
+            let unique = <R::Mode as TypedTensorModeDispatch<R>>::fusion_style(EXEC, provider)
                 == symtn_core::FusionStyleKind::Unique;
             // Why not `t.inner(t)`: it narrows the wide sum to `D`, which
             // for `f32`/`Complex32` rounds `|t|²` to single precision and can
@@ -479,7 +479,7 @@ where
                 ),
             };
         }
-        let unique = <R::Mode as TypedTensorModeDispatch<R>>::fusion_style(provider)
+        let unique = <R::Mode as TypedTensorModeDispatch<R>>::fusion_style(EXEC, provider)
             == symtn_core::FusionStyleKind::Unique;
         // `D::from_complex64` is `.re` for the real scalar and the identity for
         // the complex one, so one static conversion covers both scalar types.
@@ -601,7 +601,7 @@ where
                     };
             }
             total += partial.widen_complex()
-                * <R::Mode as TypedSpaceModeDispatch<R>>::dim(provider, entry.sector)?;
+                * <R::Mode as TypedSpaceModeDispatch<R>>::dim(EXEC, provider, entry.sector)?;
         }
         Ok(total)
     }
@@ -636,7 +636,7 @@ where
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
-    /// let runtime = Runtime::builder().build()?;
+    /// let runtime = Runtime::new();
     /// let tau = GradedSpace::try_new(
     ///     Arc::new(TableRule::fibonacci()),
     ///     [(TableSector::new(2), 1)],

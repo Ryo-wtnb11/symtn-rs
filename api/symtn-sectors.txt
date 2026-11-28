@@ -428,7 +428,6 @@ pub fn symtn_sectors::GenericFArray<Scalar>::data(&self) -> &[Scalar]
 pub fn symtn_sectors::GenericFArray<Scalar>::get(&self, usize, usize, usize, usize) -> &Scalar
 pub fn symtn_sectors::GenericFArray<Scalar>::new(alloc::vec::Vec<Scalar>, (usize, usize, usize, usize)) -> Self
 pub fn symtn_sectors::GenericFArray<Scalar>::shape(&self) -> (usize, usize, usize, usize)
-pub fn symtn_sectors::GenericFArray<Scalar>::try_new(alloc::vec::Vec<Scalar>, (usize, usize, usize, usize)) -> core::result::Result<Self, symtn_sectors::SymbolShapeError>
 impl<Scalar: core::clone::Clone> core::clone::Clone for symtn_sectors::GenericFArray<Scalar>
 pub fn symtn_sectors::GenericFArray<Scalar>::clone(&self) -> symtn_sectors::GenericFArray<Scalar>
 impl<Scalar: core::fmt::Debug> core::fmt::Debug for symtn_sectors::GenericFArray<Scalar>
@@ -439,7 +438,6 @@ pub fn symtn_sectors::GenericRMatrix<Scalar>::data(&self) -> &[Scalar]
 pub fn symtn_sectors::GenericRMatrix<Scalar>::get(&self, usize, usize) -> &Scalar
 pub fn symtn_sectors::GenericRMatrix<Scalar>::new(alloc::vec::Vec<Scalar>, usize, usize) -> Self
 pub fn symtn_sectors::GenericRMatrix<Scalar>::shape(&self) -> (usize, usize)
-pub fn symtn_sectors::GenericRMatrix<Scalar>::try_new(alloc::vec::Vec<Scalar>, usize, usize) -> core::result::Result<Self, symtn_sectors::SymbolShapeError>
 impl<Scalar: core::clone::Clone> core::clone::Clone for symtn_sectors::GenericRMatrix<Scalar>
 pub fn symtn_sectors::GenericRMatrix<Scalar>::clone(&self) -> symtn_sectors::GenericRMatrix<Scalar>
 impl<Scalar: core::fmt::Debug> core::fmt::Debug for symtn_sectors::GenericRMatrix<Scalar>
@@ -1522,7 +1520,6 @@ pub fn symtn_sectors::ProductFusionRule<L, R, P>::try_decode_label(&self, symtn_
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::try_dual_id(&self, symtn_sectors::SectorId) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::try_encode_label(&self, &Self::Sector) -> core::result::Result<symtn_sectors::SectorId, Self::Error>
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::typed_rule_identity(&self) -> symtn_sectors::RuleIdentity
-pub const fn symtn_sectors::product_sector<Left, Right>(Left, Right) -> symtn_sectors::ProductSector<Left, Right>
 pub type symtn_sectors::CU1FusionRule = symtn_sectors::CategoryRule<fusion_symbols::lie::cu1::CU1, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>
 pub type symtn_sectors::FermionParityFusionRule = symtn_sectors::CategoryRule<fusion_symbols::fermion::FermionParity, symtn_sectors::EnumeratedCodec<symtn_sectors::MultiplicityFreeAdmissionMode>>
 pub type symtn_sectors::SectorVec = smallvec::SmallVec<[symtn_sectors::SectorId; 8]>

@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 use symtn::sector::{
-    product_sector, CheckedFusionAlgebra, FermionParityIrrep, MultiplicityFreeRigidSymbols,
+    CheckedFusionAlgebra, FermionParityIrrep, MultiplicityFreeRigidSymbols, ProductSector,
     SectorCodec, U1Irrep,
 };
 use symtn::typed::Error;
@@ -45,7 +45,7 @@ const MEMBER_COUNTS: [usize; 3] = [1, 2, 17];
 #[test]
 fn one_plan_has_isolated_workspaces_across_member_counts() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let stacks = |count, seed| {
         (
@@ -92,7 +92,7 @@ fn one_plan_has_isolated_workspaces_across_member_counts() {
 #[test]
 fn one_plan_supports_concurrent_independent_workspaces() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 2, 30)).unwrap();
@@ -125,7 +125,7 @@ fn one_plan_supports_concurrent_independent_workspaces() {
 #[test]
 fn foreign_workspace_is_rejected_before_destination_write() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 2, 50)).unwrap();
@@ -161,7 +161,7 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for count in MEMBER_COUNTS {
         let label = format!("{label} {} B={count}", D::NAME);
         let a = members::<R, D>(&runtime, &[&v, &v], &[&w], count, 1);
@@ -240,7 +240,7 @@ fn prepared_compose_equals_eager_and_the_tree_oracle_per_member() {
 #[test]
 fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let stacks = |count| {
         (
@@ -310,8 +310,8 @@ fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
 #[test]
 fn mismatched_stacks_are_typed_errors_before_any_work() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let other_runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
+    let other_runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 3, 1)).unwrap();
     let rhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 3, 2)).unwrap();
@@ -414,7 +414,7 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
     // `mul!` (no twist); `ContractPlan` over the same legs and output is
     // eager `contract`, which carries the supertrace sign: every block is
     // the composition's up to a sign, and the odd blocks flip.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(
         Fz2U1Rule::try_new(
             symtn::sector::FermionParityFusionRule::new(),
@@ -422,13 +422,13 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
         )
         .unwrap(),
     );
-    let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
-    let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
+    let even = |charge| ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+    let odd = |charge| ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
     let v =
         GradedSpace::try_new(Arc::clone(&rule), [(even(0), 2), (odd(1), 2), (odd(-1), 1)]).unwrap();
     let wd = GradedSpace::try_new(rule, [(even(0), 2), (odd(1), 2)])
         .unwrap()
-        .try_dual()
+        .dual()
         .unwrap();
     let spec = ContractSpec {
         lhs: &[1],
@@ -488,7 +488,7 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
 
 fn non_symmetric_composition<const ANYONIC: bool>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(RealBraidingProbe::<ANYONIC>);
     let v = GradedSpace::try_new(Arc::clone(&rule), [(ProbeSector, 2)]).unwrap();
     let w = GradedSpace::try_new(rule, [(ProbeSector, 3)]).unwrap();

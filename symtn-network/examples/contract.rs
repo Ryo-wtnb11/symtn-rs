@@ -6,7 +6,7 @@ use symtn_network::{contract, Network};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build()?;
+    let runtime = Runtime::new();
     let space = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [

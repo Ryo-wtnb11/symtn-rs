@@ -13,7 +13,7 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 #[test]
 fn spin_half_vector_operator_norm_matches_qspace() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let rule = Arc::new(su2_rule());
     let half = GradedSpace::try_new(Arc::clone(&rule), [(su2_irrep(1), 1)]).unwrap();
     let vector = GradedSpace::try_new(Arc::clone(&rule), [(su2_irrep(2), 1)]).unwrap();

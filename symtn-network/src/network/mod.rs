@@ -83,7 +83,7 @@ pub use execute::{NetworkExecutionWorkspace, PlannedNetwork};
 /// public einsum-string parser. Build with
 /// [`Network::new`], then either contract eagerly through the Runtime's plan
 /// cache with [`Network::contract`], or plan explicitly with
-/// [`Network::plan`] / [`Network::plan_with`] and run
+/// [`Network::plan`] (a searched or a given order) and run
 /// [`PlannedNetwork::execute`] (Host or device) with a caller-owned
 /// [`NetworkExecutionWorkspace`].
 ///
@@ -104,7 +104,7 @@ pub use execute::{NetworkExecutionWorkspace, PlannedNetwork};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut engine = CpuEngine::serial();
-/// let runtime = Runtime::builder().build()?;
+/// let runtime = Runtime::new();
 /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)])?;
 /// // a[i, k; i, l] traced over its first codomain and domain legs, then
 /// // contracted with b[l; m] over `l`.

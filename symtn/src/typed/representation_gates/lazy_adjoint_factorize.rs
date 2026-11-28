@@ -258,7 +258,7 @@ fn full_svd_adjoint_multitree_matches_materialized_oracle() {
 fn full_svd_late_failure_does_not_publish_the_adjoint_cache() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _dense = probe::inject_dense(Box::new(fail_second_svd(&Arc::default())));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -396,7 +396,7 @@ fn null_spaces_redirect_through_the_parent_without_materializing_the_adjoint() {
 
 fn assert_null_late_failure(engine: &mut dyn Engine, left: bool) {
     let _dense = probe::inject_dense(Box::new(fail_second_qr()));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let short = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -552,7 +552,7 @@ fn polar_redirects_through_parent_with_owned_psd_factors_and_a_cold_receiver() {
     let half = GradedSpace::try_new(provider, [(su2_irrep(1), 1)]).unwrap();
     let multitree = TensorMap::from_subblock_fn(
         engine,
-        &Runtime::builder().build().unwrap(),
+        &Runtime::new(),
         [&half, &half, &half],
         [&half],
         |_, indices| (indices.iter().sum::<usize>() + 1) as f64,
@@ -565,7 +565,7 @@ fn polar_redirects_through_parent_with_owned_psd_factors_and_a_cold_receiver() {
     let multitree = genuinely_complex(&multitree);
     assert_polar_redirect(engine, &multitree, false);
 
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let rank_deficient =
@@ -664,7 +664,7 @@ fn polar_redirect_late_failure_leaves_parent_and_receiver_unchanged() {
             Some(2),
             "injected second-sector failure",
         )));
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let provider = Arc::new(U1FusionRule);
         let leg = GradedSpace::try_new(
             provider,
@@ -929,7 +929,7 @@ fn qr_lq_uncached_owned_outputs_repeat_clone_and_run_concurrently() {
 
 fn assert_full_qr_lq_late_failure(engine: &mut dyn Engine, qr: bool) {
     let _dense = probe::inject_dense(Box::new(fail_second_qr()));
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,

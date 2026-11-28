@@ -77,7 +77,7 @@ fn assert_shortcuts_refused(engine: &mut dyn Engine, tensor: &Device) {
 fn a_cpu_engine_is_refused_on_device_tensors_before_any_transfer() {
     let engine = &mut CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let lhs = fixture(engine, &runtime, 1.0).to_cuda(cuda).unwrap();
     let rhs = fixture(engine, &runtime, 2.0).to_cuda(cuda).unwrap();
     let mut destination = fixture(engine, &runtime, 3.0).to_cuda(cuda).unwrap();
@@ -101,7 +101,7 @@ fn a_tensor_of_another_engine_on_the_same_device_is_refused_before_any_transfer(
     let engine = &mut CpuEngine::serial();
     let first = &mut crate::common::cuda_engine();
     let second = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let lhs = fixture(engine, &runtime, 1.0).to_cuda(first).unwrap();
     let rhs = fixture(engine, &runtime, 2.0).to_cuda(first).unwrap();
     let mut destination = fixture(engine, &runtime, 3.0).to_cuda(first).unwrap();
@@ -139,7 +139,7 @@ fn a_tensor_of_another_engine_on_the_same_device_is_refused_before_any_transfer(
 fn a_cuda_engine_is_refused_on_host_contractions() {
     let engine = &mut CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let lhs = fixture(engine, &runtime, 1.0);
     let rhs = fixture(engine, &runtime, 2.0);
     let mut destination = fixture(engine, &runtime, 3.0);
@@ -156,7 +156,7 @@ fn a_cuda_engine_is_refused_on_host_contractions() {
 fn a_cuda_engine_is_refused_on_host_permutations_and_value_operations() {
     let engine = &mut CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let host = fixture(engine, &runtime, 1.0);
     let mut destination = fixture(engine, &runtime, 3.0);
     let before = destination.dense_data().unwrap().to_vec();
@@ -206,7 +206,7 @@ fn a_prepared_contraction_follows_the_engine_of_each_call() {
     let engine = &mut CpuEngine::serial();
     let first = &mut crate::common::cuda_engine();
     let second = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], MEMBERS, 1)).unwrap();
@@ -282,7 +282,7 @@ fn a_prepared_eigh_follows_the_engine_of_each_call() {
     let engine = &mut CpuEngine::serial();
     let first = &mut crate::common::cuda_engine();
     let second = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, _) = u1_legs();
     let source = StackedTensorMap::pack(&hermitian_members(&runtime, &[&v], MEMBERS, 7)).unwrap();
     let (source_a, source_b) = (
@@ -325,7 +325,7 @@ fn a_failed_call_on_another_engine_keeps_no_device_state() {
     let engine = &mut CpuEngine::serial();
     let first = &mut crate::common::cuda_engine();
     let second = &mut crate::common::cuda_engine();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, w) = u1_legs();
     let lhs =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], MEMBERS, 1)).unwrap();

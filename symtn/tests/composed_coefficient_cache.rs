@@ -51,7 +51,7 @@ fn bits(data: &[f64]) -> Vec<u64> {
 macro_rules! tensor {
     ($engine:ident, $runtime:expr, $leg:expr) => {{
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         TensorMap::<_, f64>::rand_with_seed($engine, $runtime, [leg, &dual], [leg, &dual], 17)
             .unwrap()
     }};
@@ -89,7 +89,7 @@ macro_rules! check_rule {
         for (name, operation) in operations {
             let what = format!("{} {name}", $label);
             symtn::cache::clear();
-            let warm = Runtime::builder().build().unwrap();
+            let warm = Runtime::new();
             let _ = {
                 let tensor = tensor!($engine, &warm, &a);
                 operation($engine, &tensor)
@@ -117,7 +117,7 @@ macro_rules! check_rule {
 
             // Clear every cache so the cold Runtime composes from scratch.
             symtn::cache::clear();
-            let cold = Runtime::builder().build().unwrap();
+            let cold = Runtime::new();
             let expected = {
                 let tensor = tensor!($engine, &cold, &b);
                 operation($engine, &tensor)

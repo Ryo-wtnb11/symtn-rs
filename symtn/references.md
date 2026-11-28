@@ -140,8 +140,8 @@ upstream location (the note says why).
 | `typed::GradedSpace::find_truncated` | MatrixAlgebraKit | 0.6.9 | `implementations/truncation.jl:6-15`, `implementations/svd.jl:231-236` | `svd_trunc!` is `svd_compact!` + `truncate` (`findtruncated` on `diagview(S)`, then indexing) + `truncation_error!`, and `eigh_trunc!`/`eig_trunc!` are the same on `(D, V)`; symtn exposes only the steps (`diagview`, `find_truncated`, `restrict_leg`), #1534; `restrict_leg` on both legs of a compact `s`/`d` is TensorKit `truncate_diagonal!` (`factorizations/truncation.jl:59-66`), on one bond leg `truncate_domain!`/`truncate_codomain!` (41-58), #1561 |
 | `typed::GradedSpace::extend_spectrum` | TensorKit | cfaa073 | `src/factorizations/truncation.jl` `MAK.truncate(::typeof(left_null!), (U, S), strategy)` | `extended_S`: `diagview(S)` copied into a zero `SectorVector` over `fuse(codomain(U))`; symtn exposes the padding as a step so `find_truncated` keeps its complete-spectrum check, #1984 |
 | `typed::Truncation::below`, `typed::Truncation::rank_smallest` | MatrixAlgebraKit | 0.6.8 | `interface/truncation.jl` `null_truncation_strategy`, `trunctol(; keep_below = true)`, `truncrank(; rev = false)`; `implementations/truncation.jl` `findtruncated(::TruncationByValue)` | the rank-revealing null space `left_null(t; alg = :svd, trunc)` is `svd_full` + `extend_spectrum` + `find_truncated` + `restrict_leg`, #1984 |
-| `typed::GradedSpace::try_dual` | TensorKit | 0.17.0 | `spaces/gradedspace.jl:112` | divergence: TK flips the flag and dualizes lazily on read; symtn rewrites the stored sector table eagerly |
-| `typed::GradedSpace::try_dual` | TensorKit | 0.17.0 | `spaces/vectorspaces.jl:69-73` | the `dual(dual(V)) == V` contract |
+| `typed::GradedSpace::dual` | TensorKit | 0.17.0 | `spaces/gradedspace.jl:112` | divergence: TK flips the flag and dualizes lazily on read; symtn rewrites the stored sector table eagerly |
+| `typed::GradedSpace::dual` | TensorKit | 0.17.0 | `spaces/vectorspaces.jl:69-73` | the `dual(dual(V)) == V` contract |
 | `typed::GradedSpace::try_new` | TensorKit | 0.17.0 | `spaces/gradedspace.jl:70-85` | `GradedSpace` / `Vect[I]` constructor family |
 | `typed::TensorMap` | TensorKit | 0.17.0 | `tensors/tensor.jl:10-35` | convention: payload scalar `T` independent of the sector type, as TK's `TensorMap{T, S, ...}` parameters separate them |
 | `typed::TensorMap::absorb` | TensorKit | 0.17.0 | `tensors/linalg.jl:531-545` | `absorb` (531), `absorb!` (532-545); rank-check `DimensionError` at 533-534; shared-block `min` region copy at 538-543 |
@@ -161,7 +161,7 @@ upstream location (the note says why).
 | `typed::TensorMap::exp` | TensorKit | 0.17.0 | `tensors/linalg.jl:420-427` | `exp!`: `domain == codomain` check, per-block dense exponential |
 | `typed::TensorMap::flip` | TensorKit | 0.17.0 | `tensors/indexmanipulations.jl:21-29` | |
 | `typed::TensorMap::flip` | TensorKit | 0.17.0 | `fusiontrees/braiding_manipulations.jl:384-413` | per-leg Z-isomorphism phase (χ, θ) of the fusion-tree `flip` |
-| `typed::TensorMap::im` | TensorKit | 0.17.0 | `tensors/abstracttensor.jl:718-728` | `Base.imag` |
+| `typed::TensorMap::imag` | TensorKit | 0.17.0 | `tensors/abstracttensor.jl:718-728` | `Base.imag` |
 | `typed::TensorMap::insert_unit` | TensorKit | 0.17.0 | `tensors/indexmanipulations.jl:124-138` | `insertleftunit` (`seam = Side::Domain`) |
 | `typed::TensorMap::insert_unit` | TensorKit | 0.17.0 | `tensors/indexmanipulations.jl:129-130` | `TensorMap` arm: payload reused, space rewrapped |
 | `typed::TensorMap::insert_unit` | TensorKit | 0.17.0 | `tensors/indexmanipulations.jl:132-137` | non-`TensorMap` arm: `similar` + blockwise copy |
@@ -180,7 +180,7 @@ upstream location (the note says why).
 | `typed::TensorMap::qr_full` | TensorKit | 0.17.0 | `factorizations/diagonal.jl:16-28,61-66` | same non-adoption as `qr_compact` |
 | `typed::TensorMap::rand_with_seed` | TensorKit | 0.17.0 | `tensors/tensor.jl:320-408` | the generated `rand` family; divergence: TK threads a caller-supplied `rng` (overloads at 363-406 inside the generated block), the explicit seed is its counterpart; no seedless form |
 | `typed::TensorMap::rank` | TensorKit | 0.17.0 | `tensors/abstracttensor.jl:267` | `numind` |
-| `typed::TensorMap::re` | TensorKit | 0.17.0 | `tensors/abstracttensor.jl:707-717` | `Base.real` |
+| `typed::TensorMap::real` | TensorKit | 0.17.0 | `tensors/abstracttensor.jl:707-717` | `Base.real` |
 | `typed::TensorMap::remove_unit` | TensorKit | 0.17.0 | `tensors/indexmanipulations.jl:186-197` | |
 | `typed::TensorMap::right_polar` | TensorKit | 0.17.0 | `factorizations/matrixalgebrakit.jl:210-214` | factor spaces: `p` on `codomain ← codomain`, `wh` on the input's homspace |
 | `typed::TensorMap::scalar` | TensorKit | 0.17.0 | `tensors/tensoroperations.jl:446-451` | empty payload reads as zero |

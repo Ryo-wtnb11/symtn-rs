@@ -45,7 +45,7 @@ fn bits(data: &[f64]) -> Vec<u64> {
 macro_rules! source_groups {
     ($engine:ident, $runtime:expr, $leg:expr) => {{
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         let mut groups = HashSet::new();
         TensorMap::<_, f64>::from_subblock_fn(
             $engine,
@@ -68,7 +68,7 @@ macro_rules! source_groups {
 macro_rules! tensor {
     ($engine:ident, $runtime:expr, $leg:expr) => {{
         let leg = $leg;
-        let dual = leg.try_dual().unwrap();
+        let dual = leg.dual().unwrap();
         TensorMap::<_, f64>::rand_with_seed($engine, $runtime, [leg, &dual], [leg, &dual], 17)
             .unwrap()
     }};
@@ -80,7 +80,7 @@ macro_rules! tensor {
 macro_rules! check_rule {
     ($engine:ident, $label:literal, $a:expr, $c:expr, exact: $exact:expr) => {{
         let (a, c) = ($a, $c);
-        let probe = Runtime::builder().build().unwrap();
+        let probe = Runtime::new();
         let before = source_groups!($engine, &probe, &a);
         let after = source_groups!($engine, &probe, &c);
         assert!(
@@ -114,7 +114,7 @@ macro_rules! check_rule {
         for (name, operation) in operations {
             let what = format!("{} {name}", $label);
             symtn::cache::clear();
-            let warm = Runtime::builder().build().unwrap();
+            let warm = Runtime::new();
             let _ = {
                 let tensor = tensor!($engine, &warm, &a);
                 operation($engine, &tensor)
@@ -144,7 +144,7 @@ macro_rules! check_rule {
             assert_eq!(groups.evictions(), 0, "{what}: fixture exceeds the cache");
 
             symtn::cache::clear();
-            let cold = Runtime::builder().build().unwrap();
+            let cold = Runtime::new();
             let expected = {
                 let tensor = tensor!($engine, &cold, &c);
                 operation($engine, &tensor)
@@ -282,7 +282,7 @@ fn equal_lie_groups_share_structure_cache_entries() {
         ),
     );
     symtn::cache::clear();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let _ = tensor!(engine, &runtime, &leg(&first))
         .permute(engine, &[2, 0], &[3, 1])
         .unwrap();
@@ -319,7 +319,7 @@ fn clear_resets_the_coefficient_cache() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = su2_leg(&[(0, 1), (1, 1)]);
     let _ = tensor!(engine, &runtime, &leg)
         .permute(engine, &[2, 0], &[3, 1])
@@ -347,7 +347,7 @@ fn shared_runtime_keeps_every_unchanged_group_across_operations() {
         su2_leg(&[(0, 2), (1, 2), (2, 1)]),
         su2_leg(&[(0, 2), (1, 2), (2, 1), (3, 1)]),
     );
-    let probe = Runtime::builder().build().unwrap();
+    let probe = Runtime::new();
     let before = source_groups!(engine, &probe, &a).len();
     let after = source_groups!(engine, &probe, &c).len();
     let operations: [&Su2Operation; 5] = [
@@ -366,7 +366,7 @@ fn shared_runtime_keeps_every_unchanged_group_across_operations() {
         },
     ];
     symtn::cache::clear();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     for operation in operations {
         let _ = {
             let tensor = tensor!(engine, &runtime, &a);
@@ -428,14 +428,14 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
                 .unwrap()
         }),
     ];
-    let shared = Runtime::builder().build().unwrap();
+    let shared = Runtime::new();
     let warm_results = operations.map(|(_, operation)| {
         let tensor = tensor!(engine, &shared, &leg);
         operation(engine, &tensor)
     });
     for ((name, operation), warm) in operations.into_iter().zip(warm_results) {
         symtn::cache::clear();
-        let cold_runtime = Runtime::builder().build().unwrap();
+        let cold_runtime = Runtime::new();
         let cold = {
             let tensor = tensor!(engine, &cold_runtime, &leg);
             operation(engine, &tensor)
@@ -455,7 +455,7 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
     )
     .unwrap();
     let fib_tensor = |engine: &mut dyn Engine, runtime: &Runtime| {
-        let dual = fib.try_dual().unwrap();
+        let dual = fib.dual().unwrap();
         TensorMap::<_, Complex64>::rand_with_seed(engine, runtime, [&fib, &dual], [&fib, &dual], 5)
             .unwrap()
     };
@@ -469,7 +469,7 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
             .collect::<Vec<_>>()
     };
     symtn::cache::clear();
-    let shared = Runtime::builder().build().unwrap();
+    let shared = Runtime::new();
     let under = fib_tensor(engine, &shared)
         .braid(engine, &[1, 3], &[0, 2], &[0, 1, 2, 3])
         .unwrap();
@@ -482,7 +482,7 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
         "fixture: levels matter"
     );
     symtn::cache::clear();
-    let cold_runtime = Runtime::builder().build().unwrap();
+    let cold_runtime = Runtime::new();
     let cold_over = fib_tensor(engine, &cold_runtime)
         .braid(engine, &[1, 3], &[0, 2], &[3, 2, 1, 0])
         .unwrap();

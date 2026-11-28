@@ -114,7 +114,7 @@ impl Case {
         )
         .unwrap();
         Self {
-            runtime: Runtime::builder().build().unwrap(),
+            runtime: Runtime::new(),
             v,
             dim,
             pair_blocks,
@@ -1018,7 +1018,7 @@ fn golden_chain_spectra_match_the_fusion_path_hamiltonian() {
             ],
         ),
     ];
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let tau =
         GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(TableSector::new(2), 1)]).unwrap();
     for length in 4..=8 {
@@ -1088,7 +1088,7 @@ fn free_fermion_spectrum(length: usize) -> Vec<(u16, Vec<f64>)> {
 
 #[test]
 fn ising_sigma_chain_matches_free_fermions() {
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let sigma =
         GradedSpace::try_new(Arc::new(TableRule::ising()), [(TableSector::new(3), 1)]).unwrap();
     for length in 4..=8 {
@@ -1116,7 +1116,7 @@ fn a_real_complex_embedding_factorizes_exactly_as_the_real_symbol_rule() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // One path: the complex-symbol rule runs the real-symbol rule's
     // blockwise factorizations and dimension weights bit for bit.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (_, complex) = operands!(
         engine,
         &runtime,
@@ -1189,7 +1189,7 @@ fn a_non_real_quantum_dimension_is_refused_by_truncation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // SU(2) is `Simple`: a rank budget reads `dim(c)`. The SVD itself reads
     // no dimension and succeeds.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (_, t) = operands!(
         engine,
         &runtime,

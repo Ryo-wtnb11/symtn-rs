@@ -123,7 +123,7 @@ For a graded space, duality acts on both the degeneracy space and the sector:
 </math>
 </div>
 
-In symtn, [`crate::typed::GradedSpace::try_dual`] replaces every sector by its
+In symtn, [`crate::typed::GradedSpace::dual`] replaces every sector by its
 fusion-rule dual and flips the leg's dual flag. For U(1), charge `q` dualizes
 to `-q`; for Z2 and SU(2), the exposed sectors are self-dual, though SU(2)
 still has nontrivial fusion and Frobenius-Schur data internally. Degeneracy

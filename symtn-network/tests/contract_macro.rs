@@ -53,7 +53,7 @@ macro_rules! forms {
         #[test]
         fn $name() {
             let engine = &mut symtn::typed::CpuEngine::serial();
-            let runtime = Runtime::builder().build().unwrap();
+            let runtime = Runtime::new();
             let v = $space;
             let rand = |engine: &mut dyn Engine, codomain: &[&_], domain: &[&_], seed| {
                 TensorMap::<_, $d>::rand_with_seed(engine,

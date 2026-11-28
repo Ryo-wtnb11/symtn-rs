@@ -52,7 +52,7 @@ fn check_closed_forms(
     d: fn(u16) -> f64,
 ) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let v = GradedSpace::try_new(
         Arc::new(rule),
         sectors
@@ -200,7 +200,7 @@ fn graded_space_dimension_is_the_hand_weighted_sum() {
 fn a_non_real_quantum_dimension_is_refused_by_every_weighted_reduction() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // SU(2) is `Simple`: every reduction reads `dim(c)`.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, t) = operands!(
         engine,
         &runtime,
@@ -223,7 +223,7 @@ fn unique_fusion_norm_and_inner_never_read_the_dimension() {
     // TensorKit `inner` (`vectorinterface.jl:124`) and `norm` (`linalg.jl:281`) skip `dim(c)`
     // for `UniqueFusion`, where every quantum dimension is one; symtn's
     // Unique reductions do too, so only `tr` and `dim` meet the tilt.
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (v, t) = operands!(
         engine,
         &runtime,
@@ -268,7 +268,7 @@ macro_rules! assert_same_reductions {
 #[test]
 fn a_real_complex_embedding_reduces_exactly_as_the_real_symbol_rule() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     assert_same_reductions!(engine, &runtime, U1FusionRule, u1_sectors());
     assert_same_reductions!(engine, &runtime, su2_rule(), su2_sectors());
 }
@@ -277,7 +277,7 @@ fn a_real_complex_embedding_reduces_exactly_as_the_real_symbol_rule() {
 fn ising_unit_legs_restriction_and_diagonality_follow_the_hand_oracle() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::{Duality, LegSelection, Side};
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (unit, psi, sigma) = (
         TableSector::new(1),
         TableSector::new(2),
@@ -344,7 +344,7 @@ fn ising_unit_legs_restriction_and_diagonality_follow_the_hand_oracle() {
 fn ising_compact_diagonal_agrees_with_its_dense_twin() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::SectorSpectrum;
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (unit, psi, sigma) = (
         TableSector::new(1),
         TableSector::new(2),

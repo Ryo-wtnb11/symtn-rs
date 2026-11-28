@@ -147,11 +147,23 @@ pub trait DenseContractionOptimizer {
         -> Result<Vec<ContractionStep>>;
 }
 
+/// An already chosen order: its steps, checked against the network.
+impl DenseContractionOptimizer for crate::ContractionPlan {
+    fn optimize(&self, ir: &NetworkIR, _: &DenseCostModel) -> Result<Vec<ContractionStep>> {
+        // The schedule compiler trusts its plan: an order for fewer tensors
+        // would silently drop a closed scalar subnetwork.
+        crate::slice::validate_contraction_plan_for_ir(ir, self)?;
+        Ok(self.steps().to_vec())
+    }
+}
+
 /// Default dense greedy contraction optimizer.
 ///
 /// This is cheap to run and deterministic. For hard networks, import an
-/// external active-pair path (e.g. from the optional cotengra backend) and
-/// build a [`crate::ContractionPlan`] from that path.
+/// external active-pair path (e.g. from the optional cotengra backend), build
+/// a [`crate::ContractionPlan`] from it with
+/// [`crate::ContractionPlan::from_active_pair_path`], and pass that plan to
+/// [`crate::Network::plan`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GreedyDenseOptimizer;
 

@@ -11,13 +11,13 @@ use crate::prepared;
 #[allow(unused_imports)]
 use num_complex::{Complex32, Complex64};
 
-use symtn::expert::{
-    DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
-    DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite, MatrixOp,
-};
 use symtn::sector::U1FusionRule;
 use symtn::typed::{
     ComposePlan, ContractPlan, ContractSpec, Error, Runtime, StackedTensorMap, TensorMap,
+};
+use symtn_dense::{
+    DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
+    DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite, MatrixOp,
 };
 
 use prepared::{members, u1_legs};
@@ -82,7 +82,7 @@ fn eager_members(
     ) -> TensorMap<U1FusionRule, f64>,
 ) -> Vec<Vec<f64>> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (lhs, rhs) = operands(&runtime);
     (0..COUNT)
         .map(|i| {
@@ -101,7 +101,7 @@ fn eager_members(
 fn compose_failures_leave_no_output_and_the_next_call_recovers() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let expected = eager_members(|a, b| a.compose(engine, b).unwrap());
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (lhs, rhs) = operands(&runtime);
     let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut workspace = plan.workspace().unwrap();
@@ -134,7 +134,7 @@ fn compose_failures_leave_no_output_and_the_next_call_recovers() {
 fn contract_case(spec: &ContractSpec<'_>, label: &str) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let expected = eager_members(|a, b| a.contract(engine, b, spec).unwrap());
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let (lhs, rhs) = operands(&runtime);
     let plan = ContractPlan::new(engine, &lhs, &rhs, spec).unwrap();
     let mut workspace = plan.workspace().unwrap();
@@ -226,7 +226,7 @@ mod cuda {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let cuda = &mut crate::common::cuda_engine();
         let expected = eager_members(|a, b| a.compose(engine, b).unwrap());
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let (lhs, rhs) = operands(&runtime);
         let (lhs, rhs) = (lhs.to_cuda(cuda).unwrap(), rhs.to_cuda(cuda).unwrap());
 
@@ -278,7 +278,7 @@ mod cuda {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let cuda = &mut crate::common::cuda_engine();
         let (v, w) = u1_legs();
-        let runtime = Runtime::builder().build().unwrap();
+        let runtime = Runtime::new();
         let good = hermitian_members(&runtime, &[&v], COUNT, 7);
         let mut bad = good.clone();
         bad[1] = members::<_, f64>(&runtime, &[&v], &[&v], 1, 12).remove(0);

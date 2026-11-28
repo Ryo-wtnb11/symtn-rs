@@ -24,11 +24,10 @@ use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::ZNIrrep;
-use symtn::sector::{
-    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
-    ZNFusionRule,
-};
 use symtn::sector::{CheckedGenericFusion, FusionRule, SectorOrderKey};
+use symtn::sector::{
+    FermionParityFusionRule, FermionParityIrrep, ProductSector, U1FusionRule, U1Irrep, ZNFusionRule,
+};
 use symtn::typed::{Eigh, GradedSpace, SectorSpectrum, Svd};
 use symtn::typed::{Runtime, TensorMap, Truncation};
 use symtn_core::InfallibleGeneric;
@@ -143,7 +142,7 @@ fn u1_x_z2_opposite_charge_tie_follows_the_product_order() {
         )
         .unwrap()
     };
-    let sector = |charge| product_sector(u1(charge), ZNIrrep::new(0, 2).unwrap());
+    let sector = |charge| ProductSector::new(u1(charge), ZNIrrep::new(0, 2).unwrap());
     let rank = kept!(
         rule(),
         [(sector(0), [3.0]), (sector(1), [2.0]), (sector(-1), [2.0])],
@@ -167,8 +166,8 @@ fn u1_x_u1_tie_uses_tensorkit_positions_not_integer_ranks() {
     let kept = kept!(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap(),
         [
-            (product_sector(u1(1), u1(1)), [1.0]),
-            (product_sector(u1(-1), u1(0)), [1.0]),
+            (ProductSector::new(u1(1), u1(1)), [1.0]),
+            (ProductSector::new(u1(-1), u1(0)), [1.0]),
         ],
         Truncation::rank(1)
     );
@@ -195,15 +194,15 @@ fn nested_product_tie_follows_the_flattened_tensorkit_order() {
         rule,
         [
             (
-                product_sector(
-                    product_sector(FermionParityIrrep::EVEN, su2_irrep(2)),
+                ProductSector::new(
+                    ProductSector::new(FermionParityIrrep::EVEN, su2_irrep(2)),
                     FermionParityIrrep::EVEN
                 ),
                 [1.0]
             ),
             (
-                product_sector(
-                    product_sector(FermionParityIrrep::ODD, su2_irrep(0)),
+                ProductSector::new(
+                    ProductSector::new(FermionParityIrrep::ODD, su2_irrep(0)),
                     FermionParityIrrep::ODD
                 ),
                 [1.0]
@@ -260,7 +259,7 @@ fn svd_and_eigh_truncation_keep_tensorkits_sector_at_a_tie() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // TensorKit: svd_trunc/eigh_trunc(id(Rep[U1](0 => 1, 1 => 1, -1 => 1)),
     // truncrank(2)) both return Rep[U1](0 => 1, 1 => 1).
-    let runtime = Runtime::builder().build().unwrap();
+    let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(u1(0), 1), (u1(1), 1), (u1(-1), 1)],
