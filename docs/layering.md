@@ -36,7 +36,7 @@ into `lie-generated` for every other simple factor.
 | --- | --- |
 | Z_N, U(1), fermion parity, CU(1) | Built-in rules use the category adapter for every symbol, including A/B and U(1)'s CGC. Z_N, fermion parity and CU(1) are `CategoryRule`s with fusion-symbols labels; U(1) keeps its label, codec, identity and checked errors. |
 | Lie groups, including SU(2) | `LieGroupFusionRule` uses the adapter over `LieGroup` for fusion, N, F/R/A/B, dimensions, duals, twists and Frobenius–Schur phases. symtn keeps codecs, identities, ordering and checked admission. |
-| AnyonWiki categories | `TableRule` uses the category adapter over pinned tables in their own gauge. |
+| AnyonWiki categories | `CategoryRule<TableCategory, EnumeratedCodec<_>>` admits the pinned tables in their own gauge. |
 | An application category | `CategoryRule<C, K>` adapts `FusionCategory`; the codec owns labels and admission, not symbol formulas. |
 | Products | `ProductFusionRule` uses the category adapter over fusion-symbols' `Product` for all categorical data. symtn keeps factor admission, labels, codecs, identities and TensorKit sector order. |
 

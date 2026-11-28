@@ -19,7 +19,8 @@ use std::sync::Arc;
 use contract_cases::{fermion_u1, fill, su2, u1_non_self_dual, Payload};
 use num_complex::Complex64;
 use symtn::sector::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
-use symtn::sector::{TableRule, TableSector};
+
+use crate::tables::*;
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
 fn permutations(n: usize) -> Vec<Vec<usize>> {
@@ -261,8 +262,8 @@ fn non_symmetric_braiding_is_unsupported_for_every_split() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 1), (TableSector::new(2), 1)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 1), (fib_object(2), 1)],
     )
     .unwrap();
     // Fibonacci F-symbols are complex, so the payload is too.

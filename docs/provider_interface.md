@@ -66,9 +66,10 @@ unit the codec cannot encode or round-trip; an invalid mode, error, or marker
 combination does not compile.
 
 The provider traits are sealed: they are the bounds generic code names, not
-an extension point. Z_N, fermion parity and CU(1) are `CategoryRule`s
+an extension point. Z_N, fermion parity, CU(1) and the AnyonWiki tables are `CategoryRule`s
 (`ZNFusionRule`, `FermionParityFusionRule` and `CU1FusionRule` name the
-multiplicity-free `EnumeratedCodec` instantiations). U(1), `TableRule`, and
+multiplicity-free `EnumeratedCodec` instantiations; a table is
+`CategoryRule<TableCategory, EnumeratedCodec<_>>`). U(1) and
 `LieGroupFusionRule` implement the traits through the same
 category adapter, with private codecs that keep their labels, ids, identities
 and checked errors. `ProductFusionRule` uses the same adapter over
@@ -103,9 +104,10 @@ its own type over the shared adapter, with fusion-symbols' `U1Irrep` as the
 label (`U1Irrep::new(charge)`, `SectorId::from(label)`); a U(1) sum outside
 `i32` is `FusionNotRepresentable` for fusion and, stricter than TensorKit's
 `0`, for `N`. The other built-in rules keep their own types over the shared
-adapter. [`TableRule`](../symtn-sectors/src/table_rule.rs)
-serves every pinned AnyonWiki `TableCategory`, including Fibonacci, Ising and
-fusion-only Rep(S₃), with identity built from the table's AnyonWiki uuid.
+adapter. `CategoryRule` admits every pinned AnyonWiki `TableCategory`,
+including Fibonacci, Ising and fusion-only Rep(S₃), with labels
+fusion-symbols' `TableObject` and identity the category value (its
+AnyonWiki uuid).
 The [U(1)](../symtn-sectors/src/abelian.rs) rule forwards every symbol,
 including A/B; its physical entries also use the category's CGC.
 The [Lie-group](../symtn-sectors/src/lie.rs) rule uses `LieGroup` through the adapter.
@@ -244,7 +246,7 @@ non-symmetric ordinary contraction or trace, whatever the storage form.
 
 Checked contraction supports Host storage and real f64 categorical
 coefficients, with `TensorScalar` payloads (f32, f64, Complex32 or Complex64). Complex-coefficient providers
-(`TableRule` and products containing it) remain outside this contraction
+(table `CategoryRule`s and products containing one) remain outside this contraction
 lane. On this lane production Fermionic providers include SU(3) × fZ2 with
 outer multiplicity; Anyonic and NoBraiding planar admission currently has
 only synthetic-provider coverage. A provider twist failure is
@@ -285,7 +287,7 @@ but successful catalog entries from earlier queries may remain.
 
 `SectorCodec` maps public labels to `SectorId` and back. Typed spaces and
 tensors expose those labels; raw IDs remain an expert interface. For example,
-`TableSector` is a one-based object label checked against its table rank.
+a table rule's `TableObject` is checked to belong to its table.
 
 Four laws:
 
@@ -335,14 +337,14 @@ scalar and Generic, exist only for fixtures in unit tests or under `testing`.
 
 `has_trivial_associator_gauge()` selects direct permutation only when every
 allowed F coefficient is exactly the scalar unit. It defaults to false;
-`CategoryRule`, `TableRule` and products forward the category certificate.
-`TableRule` also forwards the category's braiding style. Symmetric braiding
+`CategoryRule` and products forward the category certificate and braiding
+style. Symmetric braiding
 alone does not prove a trivial associator.
 
 `CanonicalUnitFusionRule` asserts the vacuum is self-dual,
 that `1 ⊗ a -> a` and `a ⊗ 1 -> a` are the only channels involved, and that
-unitors and associators act as the identity there. `TableRule` shows `Simple`
-providers that still qualify (`symtn-sectors/src/table_rule.rs`).
+unitors and associators act as the identity there. Table `CategoryRule`s show `Simple`
+providers that still qualify.
 
 ## Outer multiplicity
 
@@ -449,7 +451,7 @@ on Host. Built-in and `CategoryRule` providers use the same public bounds.
   `Complex32` and `Complex64` payloads. Checked Generic execution remains
   Host-only and uses the checked fusion, rigid, pivotal and symbol traits
   named by each operation.
-- `TableRule` uses `Complex64` coefficients and payloads. Its Host scope
+- A table `CategoryRule` uses `Complex64` coefficients and payloads. Its Host scope
   includes transformations, composition, planar contraction, reductions,
   structural degeneracy operations and blockwise factorizations; see the
   [planar](../symtn/tests/table_planar_contract.rs) and
@@ -462,7 +464,7 @@ on Host. Built-in and `CategoryRule` providers use the same public bounds.
 - A fusion-only table reports `NoBraiding`. Operations needing R or twist
   return a typed error before querying the provider.
 - Uploading a complex-symbol payload with `to_cuda` provides storage only.
-  Device operation bounds require `Scalar = f64`, excluding `TableRule` and
+  Device operation bounds require `Scalar = f64`, excluding table rules and
   checked Generic execution. On Host, prepared batched `EighFullPlan`
   supports the same table rules as eager `eigh_full`.
 

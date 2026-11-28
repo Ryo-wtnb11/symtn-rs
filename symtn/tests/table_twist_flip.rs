@@ -1,5 +1,5 @@
 //! `twist` and `flip` of complex-symbol rules on Fibonacci and
-//! Ising through `TableRule`: twist against the closed-form θ entrywise,
+//! Ising through `TableCategoryRule`: twist against the closed-form θ entrywise,
 //! flip against a few values checked against TensorKit 0.17.1, TensorKit's
 //! inverse identities, and the lazy adjoint; and the unchanged `NoBraiding`
 //! refusals on Rep(S₃).
@@ -8,12 +8,13 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::typed::{Direction, Error, GradedSpace, Runtime, SectorSpectrum, TensorMap};
-use symtn_sectors::{TableRule, TableSector};
+
+use crate::tables::*;
 
 use crate::table_fixture;
 use table_fixture::*;
 
-type Table = TensorMap<TableRule, Complex64>;
+type Table = TensorMap<TableCategoryRule, Complex64>;
 
 /// Zero-based symtn legs and TensorKit's `inv`.
 const TWISTS: [(bool, &[usize]); 5] = [
@@ -43,7 +44,7 @@ fn direction(inverse: bool) -> Direction {
 
 struct Category {
     name: &'static str,
-    v: GradedSpace<TableRule>,
+    v: GradedSpace<TableCategoryRule>,
     /// Closed-form θ by AnyonWiki label.
     theta: fn(u16) -> Complex64,
 }
@@ -51,7 +52,7 @@ struct Category {
 fn fibonacci() -> Category {
     Category {
         name: "fibonacci",
-        v: space(TableRule::fibonacci(), &[(1, 2), (2, 2)]),
+        v: space(table_fibonacci(), &[(1, 2), (2, 2)]),
         theta: |label| match label {
             1 => Complex64::new(1.0, 0.0),
             // TensorKitSectors `twist_from_Rsymbol`:
@@ -64,7 +65,7 @@ fn fibonacci() -> Category {
 fn ising() -> Category {
     Category {
         name: "ising",
-        v: space(TableRule::ising(), &[(1, 1), (2, 2), (3, 2)]),
+        v: space(table_ising(), &[(1, 1), (2, 2), (3, 2)]),
         theta: |label| match label {
             1 => Complex64::new(1.0, 0.0),
             2 => Complex64::new(-1.0, 0.0),
@@ -74,12 +75,16 @@ fn ising() -> Category {
     }
 }
 
-fn space(rule: impl Into<Arc<TableRule>>, sectors: &[(u16, usize)]) -> GradedSpace<TableRule> {
+fn space(
+    rule: impl Into<Arc<TableCategoryRule>>,
+    sectors: &[(u16, usize)],
+) -> GradedSpace<TableCategoryRule> {
+    let rule = rule.into();
     GradedSpace::try_new(
-        rule.into(),
+        Arc::clone(&rule),
         sectors
             .iter()
-            .map(|&(label, degeneracy)| (TableSector::new(label), degeneracy)),
+            .map(|&(label, degeneracy)| (table_object(&rule, label), degeneracy)),
     )
     .unwrap()
 }
@@ -87,8 +92,8 @@ fn space(rule: impl Into<Arc<TableRule>>, sectors: &[(u16, usize)]) -> GradedSpa
 fn filled(
     runtime: &Runtime,
     tag: &'static str,
-    codomain: &[GradedSpace<TableRule>],
-    domain: &[GradedSpace<TableRule>],
+    codomain: &[GradedSpace<TableCategoryRule>],
+    domain: &[GradedSpace<TableCategoryRule>],
 ) -> Table {
     let engine = &mut symtn_dense::CpuEngine::serial();
     TensorMap::from_subblock_fn(engine, runtime, codomain, domain, |trees, index| {
@@ -202,7 +207,7 @@ fn twist_scales_every_block_by_the_closed_form_theta() {
                 let uncoupled = [trees.codomain_uncoupled(), trees.domain_uncoupled()].concat();
                 let theta: Complex64 = legs
                     .iter()
-                    .map(|&leg| (category.theta)(uncoupled[leg].label()))
+                    .map(|&leg| (category.theta)(uncoupled[leg].index()))
                     .product();
                 let factor = if inverse { theta.conj() } else { theta };
                 nontrivial |= factor.im.abs() > 0.1;
@@ -325,7 +330,7 @@ fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
             .map(|&sector| SectorSpectrum {
                 sector,
                 values: (0..category.v.degeneracy(&sector).unwrap())
-                    .map(|i| Complex64::new(1.0 + i as f64, 0.25 * f64::from(sector.label())))
+                    .map(|i| Complex64::new(1.0 + i as f64, 0.25 * f64::from(sector.index())))
                     .collect(),
             })
             .collect::<Vec<_>>();
@@ -338,7 +343,7 @@ fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
                 assert!(twisted.dense_data().is_err(), "{what}: stays compact");
                 for (got, source) in twisted.diagview(engine).unwrap().iter().zip(&spectrum) {
                     assert_eq!(got.sector, source.sector);
-                    let theta = (category.theta)(source.sector.label()).powi(legs.len() as i32);
+                    let theta = (category.theta)(source.sector.index()).powi(legs.len() as i32);
                     let factor = if inverse { theta.conj() } else { theta };
                     for (&x, &y) in got.values.iter().zip(&source.values) {
                         assert_close(&what, x, y * factor);
@@ -361,7 +366,7 @@ fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
 fn no_braiding_table_keeps_its_typed_refusals() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
-    let rule = Arc::new(TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap());
+    let rule = Arc::new(table_by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c"));
     let mixed = space(rule.clone(), &[(1, 2), (3, 1)]);
     let unit = space(rule, &[(1, 2)]);
     let t: Table =

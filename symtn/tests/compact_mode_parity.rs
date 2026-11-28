@@ -1033,13 +1033,14 @@ fn fibonacci_complex_symbol_compact_compose_takes_the_arms() {
     // compose stays compact for `D * D` and scales for
     // `t * D` / `D * t`. Fibonacci is anyonic, so `contract` keeps rejecting
     // it before any arm, compact or not.
-    use symtn::sector::{TableRule, TableSector};
+
+    use crate::tables::*;
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 3)],
     )
     .unwrap();
-    let tau = |sector: &TableSector| f64::from(u8::from(*sector == TableSector::new(2)));
+    let tau = |sector: &TableObject| f64::from(u8::from(*sector == fib_object(2)));
     let fixture = bond_fixture(&leg, tau, |x: f64| Complex64::new(x, 0.5 - x));
     bond_rows(&fixture, &COMPOSE_CASES);
     let dense = fixture.d.materialize(engine).unwrap();
@@ -1791,15 +1792,16 @@ fn fibonacci_complex_symbol_compact_transpose_and_braid_take_the_arm() {
     // transpose stays compact and the braid is read from the spectrum.
     // Fibonacci is anyonic, so `permute` is rejected alike for the compact
     // and the materialized input.
-    use symtn::sector::{TableRule, TableSector};
+
+    use crate::tables::*;
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 3)],
     )
     .unwrap();
     let d = bond_fixture(
         &leg,
-        |sector| f64::from(u8::from(*sector == TableSector::new(2))),
+        |sector| f64::from(u8::from(*sector == fib_object(2))),
         |x: f64| Complex64::new(x, 0.5 - x),
     )
     .d;

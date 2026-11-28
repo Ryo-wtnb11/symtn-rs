@@ -630,16 +630,24 @@ where
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use symtn::sector::{TableRule, TableSector};
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::new();
+    /// let category = TableCategory::fibonacci();
+    /// let tau_label = category.object(2).unwrap();
+    /// let rule = CategoryRule::try_new(
+    ///     category,
+    ///     EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
+    /// )
+    /// .unwrap();
     /// let tau = GradedSpace::try_new(
-    ///     Arc::new(TableRule::fibonacci()),
-    ///     [(TableSector::new(2), 1)],
+    ///     Arc::new(rule),
+    ///     [(tau_label, 1)],
     /// )?;
-    /// let id: TensorMap<TableRule, Complex64> =
+    /// let id: TensorMap<_, Complex64> =
     ///     TensorMap::isomorphism(engine, &runtime, [&tau], [&tau])?;
     /// let golden_ratio = (1.0 + 5.0_f64.sqrt()) / 2.0;
     /// assert!((id.tr(engine)? - Complex64::new(golden_ratio, 0.0)).norm() < 1e-15);

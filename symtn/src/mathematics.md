@@ -672,7 +672,7 @@ endomorphism `H`, an imaginary-time gate uses
 This page describes the model implemented by symtn today, not the full
 generality of category-theoretic tensor calculus. Host ordinary operations are
 multiplicity-free plus the checked Generic operations that state their own
-bounds. `TableRule` supports Host construction, transformations, tensor products,
+bounds. A table `CategoryRule` supports Host construction, transformations, tensor products,
 composition, planar contraction, reductions, structural degeneracy operations
 and blockwise factorizations over `Complex64`. Ordinary arbitrary-axis
 contraction requires symmetric braiding; general table-rule network execution

@@ -660,8 +660,8 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     /// is `0`; the SU(2) irrep does not gate and defers to `WignerSymbols.racahW`.
     /// Every shipped symtn provider returns `0` off-shell as well: the
     /// Abelian rules and `CU1FusionRule` return the `fusion-symbols` value,
-    /// the Lie rule too (`0` for an inadmissible 6j), and `TableRule`
-    /// its table entry (`0`). A label outside a provider's sector domain
+    /// the Lie rule too (`0` for an inadmissible 6j), and a table
+    /// `CategoryRule` its table entry (`0`). A label outside a provider's sector domain
     /// panics for every shipped provider.
     /// `ProductFusionRule` uses the `fusion-symbols` product value after
     /// admitting the factor ids; a rejected id panics.
@@ -687,7 +687,8 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     /// `Nsymbol(a, b, c)` (`irreps.jl` `Rsymbol`, `fermions.jl`, `cu1irrep.jl`,
     /// `su2irrep.jl`, `anyons.jl`), so its off-shell value is `0`. Every
     /// shipped symtn provider returns `0` as well (the Abelian, CU(1) and
-    /// SU(2) rules through `fusion-symbols`, `TableRule` from its table).
+    /// SU(2) rules through `fusion-symbols`, a table `CategoryRule` from its
+    /// table).
     /// Out-of-domain labels panic for every shipped provider.
     /// `ProductFusionRule` uses the `fusion-symbols` product value after
     /// admitting the factor ids; a rejected id panics.
@@ -697,7 +698,7 @@ pub trait MultiplicityFreeFusionSymbols: MultiplicityFreeFusionRule {
     /// Defined only when [`FusionRule::braiding_style`] has a braiding.
     /// Callers gate on it before asking (TensorKit's `artin_braid` and
     /// `braid` do the same); a `NoBraiding` provider may panic here
-    /// (`TableRule` does for a fusion-only category).
+    /// (a `CategoryRule` does for a fusion-only category).
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar;
 }
 

@@ -653,7 +653,7 @@ fn rank5_transpose_with_trailing_bend_matches_per_pair_by_key() {
     let su2_provider_rule = su2_rule();
     assert_rank5_transpose_matches_per_pair_by_key(&su2_provider_rule, &[su2(0), su2(1), su2(2)]);
     assert_rank5_transpose_matches_per_pair_by_key(
-        &TableRule::fibonacci(),
+        &table_fibonacci(),
         &[SectorId::new(0), SectorId::new(1)],
     );
 }
@@ -735,7 +735,7 @@ fn domainless_block_braid_matches_per_pair() {
     let su2_provider_rule = su2_rule();
     assert_domainless_block_braid_matches_per_pair(&su2_provider_rule, &[su2(0), su2(1), su2(2)]);
     assert_domainless_block_braid_matches_per_pair(
-        &TableRule::fibonacci(),
+        &table_fibonacci(),
         &[SectorId::new(0), SectorId::new(1)],
     );
 }

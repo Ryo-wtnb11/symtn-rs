@@ -1,15 +1,14 @@
-//! The public planar workflow through `TableRule`: Fibonacci against
+//! The public planar workflow through `TableCategoryRule`: Fibonacci against
 //! a TensorKit golden-chain oracle, and Ising against TensorKit's
 //! `IsingAnyon` on gauge-invariant quantities plus the exact vertex gauge
 //! between AnyonWiki's and TensorKit's Ising data.
 
 use std::sync::Arc;
 
+use crate::tables::*;
 use num_complex::Complex64;
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
-use symtn_sectors::{
-    CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec, TableRule, TableSector,
-};
+use symtn_sectors::{CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec};
 
 /// One fixed bound for the planar workflow. At most three unit-norm 2x2
 /// transforms and two 2x2 products contribute to any checked coordinate, so
@@ -268,9 +267,9 @@ where
 #[test]
 fn fibonacci_public_planar_workflow_matches_tensorkit() {
     let fibonacci = planar_workflow(
-        TableRule::fibonacci(),
-        TableSector::new(2),
-        [TableSector::new(1), TableSector::new(2)],
+        table_fibonacci(),
+        fib_object(2),
+        [fib_object(1), fib_object(2)],
         [1, 2, 3],
     );
 
@@ -368,9 +367,9 @@ fn ising_public_planar_workflow_matches_tensorkit_isinganyon() {
     // AnyonWiki order (𝟙, ψ, σ); the states of σσσ ← σ are the inner
     // channels (σσ) → 𝟙 and (σσ) → ψ, TensorKit's basis order too.
     let ising = planar_workflow(
-        TableRule::ising(),
-        TableSector::new(3),
-        [TableSector::new(1), TableSector::new(2)],
+        table_ising(),
+        ising_object(3),
+        [ising_object(1), ising_object(2)],
         [0, 2, 0],
     );
     let (sigma1, sigma2, f) = tensorkit_ising();
@@ -410,7 +409,7 @@ fn ising_public_planar_workflow_matches_tensorkit_isinganyon() {
     }
 }
 
-/// The semion `[2,1,0,1,1,1,1]` is pointed, so `TableRule` reports `Unique`
+/// The semion `[2,1,0,1,1,1,1]` is pointed, so `TableCategoryRule` reports `Unique`
 /// fusion with a nontrivial associator `F^{sss}_s = −1` and `R^{ss}_𝟙 = i`.
 /// Hand oracle on the one state of `s ⊗ s ⊗ s ← s`: the braid generators act
 /// by `R^{ss}_𝟙 = i` (σ₂ = F† R F = R, `|F| = 1`) and the inverses by `−i`;
@@ -425,21 +424,23 @@ fn ising_public_planar_workflow_matches_tensorkit_isinganyon() {
 fn semion_unique_fusion_uses_its_associator() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn_sectors::{FusionRule, FusionStyleKind};
-    let rule = TableRule::by_uuid("37fa4d16-97c6-11f1-9c13-c70bad3f9e94").unwrap();
+    let rule = table_by_uuid("37fa4d16-97c6-11f1-9c13-c70bad3f9e94");
     assert_eq!(rule.fusion_style(), FusionStyleKind::Unique);
     let runtime = Runtime::new();
-    let s = GradedSpace::try_new(Arc::new(rule), [(TableSector::new(2), 1)]).unwrap();
+    let s_label = table_object(&rule, 2);
+    let s = GradedSpace::try_new(Arc::new(rule), [(s_label, 1)]).unwrap();
     let dual_s = s.dual().unwrap();
-    let mut ones = |leg: &GradedSpace<TableRule>| -> TensorMap<TableRule, Complex64> {
-        TensorMap::from_subblock_fn(engine, &runtime, [leg, leg, leg], [leg], |_, _| {
-            Complex64::new(1.0, 0.0)
-        })
-        .unwrap()
-    };
+    let mut ones =
+        |leg: &GradedSpace<TableCategoryRule>| -> TensorMap<TableCategoryRule, Complex64> {
+            TensorMap::from_subblock_fn(engine, &runtime, [leg, leg, leg], [leg], |_, _| {
+                Complex64::new(1.0, 0.0)
+            })
+            .unwrap()
+        };
     let (state, dual_state) = (ones(&s), ones(&dual_s));
     assert_eq!(state.dense_data().unwrap().len(), 1);
 
-    let value = |t: &TensorMap<TableRule, Complex64>| t.dense_data().unwrap()[0];
+    let value = |t: &TensorMap<TableCategoryRule, Complex64>| t.dense_data().unwrap()[0];
     let close = |what: &str, actual: Complex64, hand: Complex64| {
         assert!(
             (actual - hand).norm() <= PLANAR_BOUND,

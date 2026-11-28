@@ -1,6 +1,6 @@
 //! Quantum-dimension-weighted reductions of complex-symbol rules:
 //! `tr`, `norm`, `inner`, `scalar` and `GradedSpace::dim` on Fibonacci and
-//! Ising through `TableRule`, against TensorKit's definitions written per
+//! Ising through `TableCategoryRule`, against TensorKit's definitions written per
 //! subblock; and the structural operations the same bounds admit (unit legs,
 //! `restrict_leg`, `is_diagonal`) against hand oracles.
 //!
@@ -16,7 +16,8 @@ use symtn::typed::Engine;
 use num_complex::Complex64;
 use symtn::sector::U1FusionRule;
 use symtn::typed::{BlockFusionTrees, GradedSpace, Runtime, TensorMap};
-use symtn_sectors::{TableRule, TableSector};
+
+use crate::tables::*;
 
 use crate::table_fixture;
 use table_fixture::*;
@@ -47,35 +48,36 @@ fn indices(shape: &[usize]) -> Vec<Vec<usize>> {
 /// `scalar(x y)` is the product of the two unit-sector entries.
 fn check_closed_forms(
     category: &str,
-    rule: TableRule,
+    rule: TableCategoryRule,
     sectors: &[(u16, usize)],
     d: fn(u16) -> f64,
 ) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::new();
     let v = GradedSpace::try_new(
-        Arc::new(rule),
+        Arc::new(rule.clone()),
         sectors
             .iter()
-            .map(|&(label, degeneracy)| (TableSector::new(label), degeneracy)),
+            .map(|&(label, degeneracy)| (table_object(&rule, label), degeneracy)),
     )
     .unwrap();
-    let mut filled = |tag: &'static str, codomain: Vec<&GradedSpace<TableRule>>, domain: Vec<_>| {
-        TensorMap::<_, Complex64>::from_subblock_fn(
-            engine,
-            &runtime,
-            codomain,
-            domain,
-            |trees, index| entry(tag, trees, index),
-        )
-        .unwrap()
-    };
+    let mut filled =
+        |tag: &'static str, codomain: Vec<&GradedSpace<TableCategoryRule>>, domain: Vec<_>| {
+            TensorMap::<_, Complex64>::from_subblock_fn(
+                engine,
+                &runtime,
+                codomain,
+                domain,
+                |trees, index| entry(tag, trees, index),
+            )
+            .unwrap()
+        };
     let t = filled("t", vec![&v, &v], vec![&v, &v]);
     let s = filled("s", vec![&v, &v], vec![&v, &v]);
     let x = filled("x", vec![], vec![&v]);
     let y = filled("y", vec![&v], vec![]);
 
-    let weight = |trees: &BlockFusionTrees<TableSector>| d(trees.coupled().label());
+    let weight = |trees: &BlockFusionTrees<TableObject>| d(trees.coupled().index());
     let (mut tr, mut inner) = (Complex64::new(0.0, 0.0), Complex64::new(0.0, 0.0));
     let (mut norm1, mut norm2, mut norminf) = (0.0_f64, 0.0_f64, 0.0_f64);
     let mut traced = 0;
@@ -101,7 +103,7 @@ fn check_closed_forms(
         }
     }
     assert!(traced > 0, "{category}: some trace entry");
-    let unit_entry = |m: &TensorMap<TableRule, Complex64>| {
+    let unit_entry = |m: &TensorMap<TableCategoryRule, Complex64>| {
         let mut blocks = m.subblocks().unwrap();
         assert_eq!(blocks.len(), 1, "only the unit sector couples to 1");
         *blocks.next().unwrap().1.get(&[0]).unwrap()
@@ -150,46 +152,42 @@ fn check_closed_forms(
 #[test]
 fn fibonacci_reductions_follow_the_weighted_block_formulas() {
     // AnyonWiki labels: 1 = I, 2 = τ (d_τ = φ).
-    check_closed_forms(
-        "fibonacci",
-        TableRule::fibonacci(),
-        &[(1, 1), (2, 2)],
-        |label| {
-            if label == 1 {
-                1.0
-            } else {
-                (1.0 + 5.0_f64.sqrt()) / 2.0
-            }
-        },
-    );
+    check_closed_forms("fibonacci", table_fibonacci(), &[(1, 1), (2, 2)], |label| {
+        if label == 1 {
+            1.0
+        } else {
+            (1.0 + 5.0_f64.sqrt()) / 2.0
+        }
+    });
 }
 
 #[test]
 fn ising_reductions_follow_the_weighted_block_formulas() {
     // AnyonWiki labels: 1 = I, 2 = ψ, 3 = σ (d_σ = √2).
-    check_closed_forms(
-        "ising",
-        TableRule::ising(),
-        &[(1, 1), (2, 1), (3, 2)],
-        |label| if label == 3 { 2.0_f64.sqrt() } else { 1.0 },
-    );
+    check_closed_forms("ising", table_ising(), &[(1, 1), (2, 1), (3, 2)], |label| {
+        if label == 3 {
+            2.0_f64.sqrt()
+        } else {
+            1.0
+        }
+    });
 }
 
 #[test]
 fn graded_space_dimension_is_the_hand_weighted_sum() {
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
     let fib = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 1), (TableSector::new(2), 2)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 1), (fib_object(2), 2)],
     )
     .unwrap();
     assert!((fib.dim().unwrap() - (1.0 + 2.0 * phi)).abs() <= 4.0 * f64::EPSILON);
     let ising = GradedSpace::try_new(
-        Arc::new(TableRule::ising()),
+        Arc::new(table_ising()),
         [
-            (TableSector::new(1), 1),
-            (TableSector::new(2), 1),
-            (TableSector::new(3), 2),
+            (ising_object(1), 1),
+            (ising_object(2), 1),
+            (ising_object(3), 2),
         ],
     )
     .unwrap();
@@ -278,16 +276,9 @@ fn ising_unit_legs_restriction_and_diagonality_follow_the_hand_oracle() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::{Duality, LegSelection, Side};
     let runtime = Runtime::new();
-    let (unit, psi, sigma) = (
-        TableSector::new(1),
-        TableSector::new(2),
-        TableSector::new(3),
-    );
-    let v = GradedSpace::try_new(
-        Arc::new(TableRule::ising()),
-        [(unit, 1), (psi, 1), (sigma, 2)],
-    )
-    .unwrap();
+    let (unit, psi, sigma) = (ising_object(1), ising_object(2), ising_object(3));
+    let v =
+        GradedSpace::try_new(Arc::new(table_ising()), [(unit, 1), (psi, 1), (sigma, 2)]).unwrap();
     let t: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], |trees, index| {
             entry("t", trees, index)
@@ -345,16 +336,9 @@ fn ising_compact_diagonal_agrees_with_its_dense_twin() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::SectorSpectrum;
     let runtime = Runtime::new();
-    let (unit, psi, sigma) = (
-        TableSector::new(1),
-        TableSector::new(2),
-        TableSector::new(3),
-    );
-    let v = GradedSpace::try_new(
-        Arc::new(TableRule::ising()),
-        [(unit, 1), (psi, 1), (sigma, 2)],
-    )
-    .unwrap();
+    let (unit, psi, sigma) = (ising_object(1), ising_object(2), ising_object(3));
+    let v =
+        GradedSpace::try_new(Arc::new(table_ising()), [(unit, 1), (psi, 1), (sigma, 2)]).unwrap();
     let compact: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
@@ -400,13 +384,14 @@ fn ising_compact_diagonal_agrees_with_its_dense_twin() {
         compact.inner(engine, &x).unwrap(),
         dense.inner(engine, &x).unwrap(),
     );
-    let flat = |engine: &mut dyn Engine, t: TensorMap<TableRule, Complex64>| -> Vec<Complex64> {
-        t.materialize(engine)
-            .unwrap()
-            .dense_data()
-            .unwrap()
-            .to_vec()
-    };
+    let flat =
+        |engine: &mut dyn Engine, t: TensorMap<TableCategoryRule, Complex64>| -> Vec<Complex64> {
+            t.materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .to_vec()
+        };
     for (what, got, want) in [
         (
             "compose D x",

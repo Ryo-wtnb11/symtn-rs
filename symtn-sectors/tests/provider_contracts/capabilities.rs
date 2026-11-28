@@ -2,11 +2,12 @@
 //! admission mode, and coefficient scalar.
 //!
 //! Already pinned elsewhere: table styles and the semion's uncertified
-//! associator gauge (`tests/table_rule.rs`
+//! associator gauge (`tests/table_categories.rs`
 //! `styles_follow_the_braiding_and_the_exact_fusion_table`); SU(3) styles
 //! (`src/lie.rs` `su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities`).
 
 use crate::su2::su2_rule;
+use crate::tables::*;
 
 use num_complex::Complex64;
 use symtn_sectors::*;
@@ -20,14 +21,14 @@ fn styles<R: FusionRule>(rule: &R) -> (FusionStyleKind, BraidingStyleKind) {
 
 #[test]
 fn multiplicity_free_rule_styles() {
-    let rep_s3 = TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap();
+    let rep_s3 = table_by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c");
     assert_eq!(styles(&ZNFusionRule::new(2).unwrap()), (Unique, Bosonic));
     assert_eq!(styles(&ZNFusionRule::new(7).unwrap()), (Unique, Bosonic));
     assert_eq!(styles(&FermionParityFusionRule::new()), (Unique, Fermionic));
     assert_eq!(styles(&U1FusionRule), (Unique, Bosonic));
     assert_eq!(styles(&CU1FusionRule::new()), (Simple, Bosonic));
     assert_eq!(styles(&su2_rule()), (Simple, Bosonic));
-    assert_eq!(styles(&TableRule::fibonacci()), (Simple, Anyonic));
+    assert_eq!(styles(&table_fibonacci()), (Simple, Anyonic));
     assert_eq!(styles(&rep_s3), (Simple, NoBraiding));
 
     assert_eq!(
@@ -53,7 +54,7 @@ fn multiplicity_free_rule_styles() {
     assert_eq!(
         styles(
             &symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                TableRule::fibonacci(),
+                table_fibonacci(),
                 FermionParityFusionRule::new()
             )
             .unwrap()
@@ -137,7 +138,7 @@ fn trivial_associator_gauge_is_certified_only_by_the_abelian_group_rules() {
     assert!(U1FusionRule.has_trivial_associator_gauge());
     assert!(!CU1FusionRule::new().has_trivial_associator_gauge());
     assert!(!su2_rule().has_trivial_associator_gauge());
-    assert!(!TableRule::fibonacci().has_trivial_associator_gauge());
+    assert!(!table_fibonacci().has_trivial_associator_gauge());
     // Products: conjunction of the factors.
     assert!(symtn_sectors::ProductFusionRule::<_, _>::try_new(
         ZNFusionRule::new(2).unwrap(),
@@ -188,9 +189,9 @@ fn multiplicity_free_providers_carry_their_markers() {
         symtn_sectors::ProductFusionRule::<_, _>::try_new(symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap(), su2_rule()).unwrap(),
     );
     mf!(Complex64:
-        TableRule::fibonacci(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(TableRule::fibonacci(), ZNFusionRule::new(2).unwrap()).unwrap(),
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), TableRule::ising()).unwrap(),
+        table_fibonacci(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(table_fibonacci(), ZNFusionRule::new(2).unwrap()).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(ZNFusionRule::new(2).unwrap(), table_ising()).unwrap(),
     );
     physical(&U1FusionRule);
     physical(&su2_rule());

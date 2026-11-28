@@ -56,9 +56,11 @@ where
     /// [`GenericTensorError::TensorProduct`].
     ///
     /// ```compile_fail
-    /// use symtn::sector::TableRule;
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::TensorMap;
-    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64>) {
+    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, f64>) {
     ///     let _ = tensor.otimes(engine, tensor);
     /// }
     /// ```
@@ -644,14 +646,20 @@ where
     /// use std::sync::Arc;
     ///
     /// use num_complex::Complex64;
-    /// use symtn::sector::{TableRule, TableSector};
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
     /// use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::new();
-    /// let fib = Arc::new(TableRule::fibonacci());
-    /// let v = GradedSpace::try_new(Arc::clone(&fib), [(TableSector::new(2), 1)])?;
-    /// let b = GradedSpace::try_new(fib, [(TableSector::new(1), 2), (TableSector::new(2), 3)])?;
+    /// let category = TableCategory::fibonacci();
+    /// let (one, tau) = (category.object(1).unwrap(), category.object(2).unwrap());
+    /// let fib = Arc::new(
+    ///     CategoryRule::try_new(category, EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new())
+    ///         .unwrap(),
+    /// );
+    /// let v = GradedSpace::try_new(Arc::clone(&fib), [(tau, 1)])?;
+    /// let b = GradedSpace::try_new(fib, [(one, 2), (tau, 3)])?;
     /// // Golden-chain two-site H_eff: θ′[l s1 s2; r] := H[s1 s2; t1 t2] θ[l t1 t2; r].
     /// let h: TensorMap<_, Complex64> = TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 1)?;
     /// let theta: TensorMap<_, Complex64> =
@@ -990,9 +998,11 @@ where
     /// [`Self::contract`].
     ///
     /// ```compile_fail
-    /// use symtn::sector::TableRule;
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::TensorMap;
-    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64>) {
+    /// fn unavailable(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, f64>) {
     ///     let _ = tensor.compose(engine, tensor);
     /// }
     /// ```

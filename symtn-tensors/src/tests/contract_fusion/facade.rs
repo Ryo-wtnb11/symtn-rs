@@ -14,13 +14,14 @@ fn fusion_context_accepts_explicit_backend_type_arguments() {
 
 #[test]
 fn fibonacci_complex_provider_replays_crossing_free_prepared_contraction() {
-    use symtn_core::{SectorCodec, TableRule, TableSector};
+    use crate::tables::*;
+    use symtn_core::SectorCodec;
 
     // What: the contraction lane carries the provider's Complex64 coefficient type through the
     // public prepare/replay contraction lane. Anyonic crossings are intentionally
     // absent: ordinary contraction must not infer them; explicit planar lowering owns them.
-    let rule = TableRule::fibonacci();
-    let tau = rule.encode_sector(&TableSector::new(2)).unwrap();
+    let rule = table_fibonacci();
+    let tau = rule.encode_sector(&fib_object(2)).unwrap();
     let leg = || SectorLeg::new([(tau, 1)], false);
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg()]),

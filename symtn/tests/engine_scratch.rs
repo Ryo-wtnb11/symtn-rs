@@ -12,8 +12,9 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use symtn::typed::Dest;
 
+use crate::tables::*;
 use num_complex::Complex64;
-use symtn::sector::{TableRule, TableSector, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, CpuEngine, GradedSpace, Runtime, TensorMap};
 use tenferro_runtime::ExecutionEngine;
 
@@ -213,8 +214,8 @@ fn warm_planar_contract_allocates_no_route_scratch() {
     check!("U(1)", u1(3), u1(4), f64);
     let fib = |a, b| {
         GradedSpace::try_new(
-            Arc::new(TableRule::fibonacci()),
-            [(TableSector::new(1), a), (TableSector::new(2), b)],
+            Arc::new(table_fibonacci()),
+            [(fib_object(1), a), (fib_object(2), b)],
         )
         .unwrap()
     };

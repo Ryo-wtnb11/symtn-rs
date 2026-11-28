@@ -8,7 +8,7 @@ fn fibonacci_multi_associator_counterexample() -> (FusionTreeKey, FusionTreeKey)
     let short = FusionTreeKey::try_from_sector_ids([1; 3], 1, [false; 3], [0], [1, 1]).unwrap();
     let tau = SectorId::new(1);
     assert!(collect_fusion_trees_for_coupled(
-        &TableRule::fibonacci(),
+        &table_fibonacci(),
         &[tau; 4],
         &[false; 4],
         &[tau; 4],
@@ -16,7 +16,7 @@ fn fibonacci_multi_associator_counterexample() -> (FusionTreeKey, FusionTreeKey)
     )
     .contains(&long));
     assert!(collect_fusion_trees_for_coupled(
-        &TableRule::fibonacci(),
+        &table_fibonacci(),
         &[tau; 3],
         &[false; 3],
         &[tau; 3],
@@ -170,7 +170,7 @@ fn fibonacci_braid_then_inverse_braid_is_identity() {
     // (reflected levels select the inverse-artin branch) must return the
     // exact original tree with total coefficient 1 — this only holds
     // because R^{ττ}_* is a genuine unit-modulus phase.
-    let rule = TableRule::fibonacci();
+    let rule = table_fibonacci();
     for coupled in [0usize, 1usize] {
         let tree =
             FusionTreeKey::try_from_sector_ids([1, 1], coupled, [false, false], [], [1]).unwrap();
@@ -441,8 +441,7 @@ fn empty_block_permute_preserves_braiding_style_error_precedence() {
     // What: an empty source block does not bypass the public permutation
     // API's symmetric-braiding capability check.
     assert_eq!(
-        multiplicity_free_permute_tree_pair_block(&TableRule::fibonacci(), &[], &[], &[],)
-            .unwrap_err(),
+        multiplicity_free_permute_tree_pair_block(&table_fibonacci(), &[], &[], &[],).unwrap_err(),
         CoreError::UnsupportedBraidingStyle {
             expected: "symmetric braiding",
             actual: BraidingStyleKind::Anyonic,

@@ -66,11 +66,11 @@ this page records intentional differences.
   ties and identity/isometry bases use the semantic ordering described in
   [sector compatibility](sector_id_compatibility.md), including its SU(N)
   inner-line exception.
-- **AnyonWiki gauge.** `TableRule` serves table values unconverted. Fibonacci
+- **AnyonWiki gauge.** A `CategoryRule` over a `TableCategory` serves table values unconverted. Fibonacci
   matches TensorKit; Ising differs by the vertex gauge `u^{σσ}_ψ = −1` and
   object order (`1, ψ, σ` versus `I, σ, ψ`). TensorKit is a
   gauge-equivalence oracle for those tables.
-- **Table certificates.** `TableRule` forwards fusion-symbols' braiding style
+- **Table certificates.** A table `CategoryRule` forwards fusion-symbols' braiding style
   and trivial-associator certificate. Anyonic tables require explicit braids
   or crossing-free `transpose`, `compose` and `planar_contract` where symmetric
   braiding is required; see
@@ -84,7 +84,7 @@ provider-owned θ to dual contracted legs, while `planar_contract` uses
 `transpose`, `compose`, and an optional output transpose, with no θ or R
 queries. Checked contraction requires `CheckedGenericPivotal<Scalar = f64>`;
 `TensorScalar` payloads (f32, f64, Complex32 or Complex64) are supported. Complex categorical coefficients
-remain unsupported on this checked lane, including `TableRule` products.
+remain unsupported on this checked lane, including products with a table factor.
 
 The checked planner replans every eager call, warm or cold. For `B_t`
 tree-pair blocks and `k_d` dual contracted core-right legs, transform scales

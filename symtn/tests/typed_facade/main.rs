@@ -46,7 +46,8 @@ use symtn::sector::{
     MultiplicityFreeAdmissionMode, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
     RuleIdentity, SectorCodec,
 };
-use symtn::sector::{TableRule, TableSector};
+
+use crate::tables::*;
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, LeftPolar, Lq, Qr, Svd, TensorMap};

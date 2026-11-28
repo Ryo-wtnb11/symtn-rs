@@ -1,4 +1,4 @@
-//! Fibonacci is `TableRule::fibonacci()`, symtn's one Fibonacci provider.
+//! Fibonacci is `table_fibonacci()`, symtn's one Fibonacci provider.
 //! These tests hold its values through symtn's traits against
 //! TensorKitSectors' closed forms and hand relations, the trait-default
 //! A/B symbols, the codec and the domain checks. The tables' own coherence
@@ -6,18 +6,19 @@
 
 use std::panic::{self, AssertUnwindSafe};
 
+use crate::tables::*;
 use num_complex::Complex64;
 use symtn_sectors::{
     CheckedFusionAlgebra, FusionAlgebraError, FusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, SectorId, TableRule,
+    MultiplicityFreeRigidSymbols, SectorId,
 };
 
 use crate::numerics;
 
 const SECTORS: [SectorId; 2] = [SectorId::new(0), SectorId::new(1)];
 
-fn table() -> TableRule {
-    TableRule::fibonacci()
+fn table() -> TableCategoryRule {
+    table_fibonacci()
 }
 
 fn bits(z: Complex64) -> String {

@@ -19,7 +19,8 @@ use std::sync::Arc;
 use symtn::sector::LieIrrep;
 
 use num_complex::Complex64;
-use symtn::sector::{TableRule, TableSector};
+
+use crate::tables::*;
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{Engine, GradedSpace, SectorSpectrum, TensorMap};
 
@@ -154,10 +155,10 @@ macro_rules! zeros_rows {
     }};
 }
 
-fn fibonacci_leg() -> GradedSpace<TableRule> {
+fn fibonacci_leg() -> GradedSpace<TableCategoryRule> {
     GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 3)],
     )
     .unwrap()
 }
@@ -185,8 +186,8 @@ fn complex_symbol_zeros_like_keeps_space_and_form() {
         fibonacci_leg(),
         Complex64,
         COMPLEX,
-        |_: &mut dyn Engine, _: &TensorMap<TableRule, Complex64>| {
-            None::<TensorMap<TableRule, Complex64>>
+        |_: &mut dyn Engine, _: &TensorMap<TableCategoryRule, Complex64>| {
+            None::<TensorMap<TableCategoryRule, Complex64>>
         }
     );
 }

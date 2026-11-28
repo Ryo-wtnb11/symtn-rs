@@ -1050,8 +1050,7 @@ macro_rules! category_provider_via_adapter {
     )+};
 }
 category_provider_via_adapter!(
-    crate::U1FusionRule => fusion_symbols::lie::U1,
-    crate::TableRule => fusion_symbols::table::TableCategory
+    crate::U1FusionRule => fusion_symbols::lie::U1
 );
 
 category_provider_via_adapter!(

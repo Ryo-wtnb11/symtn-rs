@@ -3,12 +3,12 @@ use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
+use crate::tables::*;
 use crate::typed::{GradedSpace, TensorMap};
 use symtn_core::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionAlgebraError, FusionProductSpace, FusionRule,
     FusionStyleKind, FusionTreeHomSpace, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, SectorCodec, SectorId, SectorLeg, SectorVec, TableRule,
-    TableSector,
+    MultiplicityFreeRigidSymbols, SectorCodec, SectorId, SectorLeg, SectorVec,
 };
 
 #[test]
@@ -208,7 +208,7 @@ impl CountingFibonacci {
 impl CheckedFusionAlgebra for CountingFibonacci {
     fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
         self.layout_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().try_dual_sector(sector)
+        table_fibonacci().try_dual_sector(sector)
     }
 
     fn try_fusion_channels(
@@ -220,7 +220,7 @@ impl CheckedFusionAlgebra for CountingFibonacci {
         if self.malformed_channels && left == SectorId::new(1) && right == SectorId::new(1) {
             return Ok([SectorId::new(0), SectorId::new(2)].into_iter().collect());
         }
-        TableRule::fibonacci().try_fusion_channels(left, right)
+        table_fibonacci().try_fusion_channels(left, right)
     }
 
     fn try_nsymbol(
@@ -230,19 +230,19 @@ impl CheckedFusionAlgebra for CountingFibonacci {
         coupled: SectorId,
     ) -> Result<usize, FusionAlgebraError> {
         self.layout_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().try_nsymbol(left, right, coupled)
+        table_fibonacci().try_nsymbol(left, right, coupled)
     }
 }
 
 impl SectorCodec for CountingFibonacci {
-    type Sector = TableSector;
+    type Sector = TableObject;
 
     fn encode_sector(&self, value: &Self::Sector) -> Result<SectorId, FusionAlgebraError> {
-        TableRule::fibonacci().encode_sector(value)
+        table_fibonacci().encode_sector(value)
     }
 
     fn decode_sector(&self, id: SectorId) -> Result<Self::Sector, FusionAlgebraError> {
-        TableRule::fibonacci().decode_sector(id)
+        table_fibonacci().decode_sector(id)
     }
 }
 
@@ -271,34 +271,34 @@ impl symtn_core::TypedSectorAdmission for CountingFibonacci {
 
 impl FusionRule for CountingFibonacci {
     fn rule_identity(&self) -> RuleIdentity {
-        TableRule::fibonacci().rule_identity()
+        table_fibonacci().rule_identity()
     }
 
     fn fusion_style(&self) -> FusionStyleKind {
-        TableRule::fibonacci().fusion_style()
+        table_fibonacci().fusion_style()
     }
 
     fn braiding_style(&self) -> BraidingStyleKind {
-        TableRule::fibonacci().braiding_style()
+        table_fibonacci().braiding_style()
     }
 
     fn vacuum(&self) -> SectorId {
-        TableRule::fibonacci().vacuum()
+        table_fibonacci().vacuum()
     }
 
     fn dual(&self, sector: SectorId) -> SectorId {
         self.layout_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().dual(sector)
+        table_fibonacci().dual(sector)
     }
 
     fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
         self.layout_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().fusion_channels(left, right)
+        table_fibonacci().fusion_channels(left, right)
     }
 
     fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
         self.layout_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().nsymbol(left, right, coupled)
+        table_fibonacci().nsymbol(left, right, coupled)
     }
 }
 
@@ -317,51 +317,44 @@ impl MultiplicityFreeFusionSymbols for CountingFibonacci {
         right_coupled: SectorId,
     ) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().f_symbol_scalar(
-            left,
-            middle,
-            right,
-            coupled,
-            left_coupled,
-            right_coupled,
-        )
+        table_fibonacci().f_symbol_scalar(left, middle, right, coupled, left_coupled, right_coupled)
     }
 
     fn r_symbol_scalar(&self, left: SectorId, right: SectorId, coupled: SectorId) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().r_symbol_scalar(left, right, coupled)
+        table_fibonacci().r_symbol_scalar(left, right, coupled)
     }
 }
 
 impl MultiplicityFreeRigidSymbols for CountingFibonacci {
     fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().dim_scalar(sector)
+        table_fibonacci().dim_scalar(sector)
     }
 
     fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().inv_dim_scalar(sector)
+        table_fibonacci().inv_dim_scalar(sector)
     }
 
     fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().sqrt_dim_scalar(sector)
+        table_fibonacci().sqrt_dim_scalar(sector)
     }
 
     fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().inv_sqrt_dim_scalar(sector)
+        table_fibonacci().inv_sqrt_dim_scalar(sector)
     }
 
     fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().twist_scalar(sector)
+        table_fibonacci().twist_scalar(sector)
     }
 
     fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
         self.structural_calls.fetch_add(1, Ordering::Relaxed);
-        TableRule::fibonacci().frobenius_schur_phase_scalar(sector)
+        table_fibonacci().frobenius_schur_phase_scalar(sector)
     }
 }
 
@@ -496,8 +489,8 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
         malformed_channels: true,
         ..CountingFibonacci::new()
     });
-    let tau = GradedSpace::try_new(Arc::clone(&rule), [(TableSector::new(2), 1)])
-        .expect("label admission");
+    let tau =
+        GradedSpace::try_new(Arc::clone(&rule), [(fib_object(2), 1)]).expect("label admission");
     crate::cache::clear();
     let cache_before = crate::test_cache::completed();
     let callbacks = AtomicUsize::new(0);

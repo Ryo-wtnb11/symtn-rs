@@ -14,18 +14,19 @@
 //! - SU(3) graded-lex ids 0..6 and the SU(2) `u32::MAX` Dynkin edge:
 //!   `src/lie.rs` `codec_is_graded_lexicographic_and_roundtrips`,
 //!   `checked_rigid_dimension_accepts_the_largest_su2_dynkin_label`.
-//! - Table one-based labels and out-of-rank rejection: `tests/table_rule.rs`
-//!   `codec_round_trips_and_rejects_labels_outside_the_rank`.
+//! - Table ids and foreign-object rejection: `tests/table_categories.rs`
+//!   `codec_round_trips_and_rejects_objects_of_another_table`.
 //! - Cantor pairing order:
 //!   `tests/builtin_rules.rs` `product_sector_codec_uses_tensorkit_diagonal_component_order`.
 //! - Custom product codec rejection: `tests/sector_labels.rs`
 //!   `product_codec_reports_the_codec_rejection_it_hit`.
 
 use crate::su2::{su2_irrep, su2_rule};
+use crate::tables::*;
 
 use symtn_sectors::*;
 
-use super::{s, table_identity};
+use super::s;
 
 #[test]
 fn parity_ids_are_the_parity() {
@@ -154,17 +155,15 @@ fn lie_group_ids_are_graded_then_lexicographic_through_the_typed_path() {
 }
 
 #[test]
-fn table_encode_rejection_names_the_label_and_rank() {
-    let fib = TableRule::fibonacci();
-    assert_eq!(fib.encode_sector(&TableSector::new(1)), Ok(s(0)));
-    assert_eq!(fib.encode_sector(&TableSector::new(2)), Ok(s(1)));
-    assert_eq!(
-        fib.encode_sector(&TableSector::new(3)),
-        Err(FusionAlgebraError::UnrepresentableSectorLabel {
-            rule: table_identity(&fusion_symbols::table::TableCategory::fibonacci()),
-            label: "table object 3 (rank 2)".into(),
-        })
-    );
+fn table_encode_rejection_names_the_rule() {
+    let fib = table_fibonacci();
+    assert_eq!(fib.encode_sector(&fib_object(1)), Ok(s(0)));
+    assert_eq!(fib.encode_sector(&fib_object(2)), Ok(s(1)));
+    assert!(matches!(
+        fib.encode_sector(&ising_object(3)),
+        Err(FusionAlgebraError::UnrepresentableSectorLabel { rule, .. })
+            if rule == fib.rule_identity()
+    ));
     assert_eq!(
         fib.decode_sector(s(2)),
         Err(FusionAlgebraError::InvalidSector { sector: s(2) })

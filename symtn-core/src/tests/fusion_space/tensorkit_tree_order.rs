@@ -287,7 +287,7 @@ fn fibonacci_three_leg_trees_follow_tensorkit_fusiontrees_order() {
     // the front), not grouped by tuple. TensorKit 0.17.1:
     // V = Vect[FibonacciAnyon](:I=>1, :τ=>1); fusiontrees(V ⊗ V ⊗ V', c),
     // with ids I = 0, τ = 1 (both orders list I first).
-    let rule = TableRule::fibonacci();
+    let rule = table_fibonacci();
     let space = product_space(&[0, 1], &[false, false, true]);
     let expected_vacuum: Vec<TreeRow> = vec![
         ([0, 0, 0], [0], [1, 1]),

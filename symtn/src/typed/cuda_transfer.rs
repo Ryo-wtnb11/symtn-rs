@@ -41,10 +41,12 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     ///
     /// ```compile_fail
     /// use num_complex::Complex64;
-    /// use symtn::sector::TableRule;
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::{Error, TensorMap};
     ///
-    /// fn no_table_device_svd(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
+    /// fn no_table_device_svd(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, Complex64>) -> Result<(), Error> {
     ///     let device = tensor.to_cuda(engine)?;
     ///     let _ = device.svd_compact(engine, &[0], &[1]);
     ///     Ok(())
@@ -56,10 +58,12 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     ///
     /// ```compile_fail
     /// use num_complex::Complex64;
-    /// use symtn::sector::TableRule;
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::{Direction, Error, TensorMap};
     ///
-    /// fn no_table_device_twist(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, Complex64>) -> Result<(), Error> {
+    /// fn no_table_device_twist(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, Complex64>) -> Result<(), Error> {
     ///     let device = tensor.to_cuda(engine)?;
     ///     let _ = device.twist(engine, &[0], Direction::Forward);
     ///     Ok(())

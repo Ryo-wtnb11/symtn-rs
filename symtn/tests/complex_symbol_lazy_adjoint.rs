@@ -1,5 +1,5 @@
 //! The lazy adjoint of a complex-symbol rule: Ising through
-//! `TableRule`, whose R-symbols are complex, so a transform of `t^H` read
+//! `TableCategoryRule`, whose R-symbols are complex, so a transform of `t^H` read
 //! through its parent must use the dagger (inverse, conjugated) operation.
 //!
 //! Oracles:
@@ -24,20 +24,21 @@ use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::typed::{BlockFusionTrees, GradedSpace, Runtime, TensorMap};
-use symtn_sectors::{TableRule, TableSector};
+
+use crate::tables::*;
 
 /// At most a few unit-modulus 2x2 recouplings and one dense pass touch any
 /// entry of the `O(1)`-magnitude payload.
 const BOUND: f64 = 256.0 * f64::EPSILON;
 
-type Ising = TensorMap<TableRule, Complex64>;
+type Ising = TensorMap<TableCategoryRule, Complex64>;
 type Transform<'a> = &'a dyn Fn(&mut dyn Engine, &Ising) -> Result<Ising, symtn::typed::Error>;
-type Entries = BTreeMap<(BlockFusionTrees<TableSector>, Vec<usize>), Complex64>;
+type Entries = BTreeMap<(BlockFusionTrees<TableObject>, Vec<usize>), Complex64>;
 
 fn hashed(
-    coupled: &TableSector,
-    codomain: (&[TableSector], &[TableSector]),
-    domain: (&[TableSector], &[TableSector]),
+    coupled: &TableObject,
+    codomain: (&[TableObject], &[TableObject]),
+    domain: (&[TableObject], &[TableObject]),
     indices: &[usize],
     salt: u8,
 ) -> f64 {
@@ -52,7 +53,7 @@ fn hashed(
     }
 }
 
-fn entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt: u8) -> Complex64 {
+fn entry(trees: &BlockFusionTrees<TableObject>, indices: &[usize], salt: u8) -> Complex64 {
     let side = |salt| {
         hashed(
             trees.coupled(),
@@ -66,7 +67,7 @@ fn entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt: u8) -> 
 }
 
 /// The parent entry the adjoint entry `(trees, indices)` reads, conjugated.
-fn adjoint_entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt: u8) -> Complex64 {
+fn adjoint_entry(trees: &BlockFusionTrees<TableObject>, indices: &[usize], salt: u8) -> Complex64 {
     let rank = trees.codomain_uncoupled().len();
     let mut parent = indices[rank..].to_vec();
     parent.extend_from_slice(&indices[..rank]);
@@ -82,7 +83,7 @@ fn adjoint_entry(trees: &BlockFusionTrees<TableSector>, indices: &[usize], salt:
     Complex64::new(side(2 * salt), side(2 * salt + 1)).conj()
 }
 
-fn entries(tensor: &TensorMap<TableRule, Complex64>) -> Entries {
+fn entries(tensor: &TensorMap<TableCategoryRule, Complex64>) -> Entries {
     let mut out = Entries::new();
     for (trees, block) in tensor.subblocks().unwrap() {
         let shape = block.shape().to_vec();
@@ -121,18 +122,18 @@ fn assert_close(what: &str, got: &Entries, want: &Entries) {
 
 struct Fixture {
     runtime: Runtime,
-    leg: GradedSpace<TableRule>,
+    leg: GradedSpace<TableCategoryRule>,
 }
 
 fn fixture() -> Fixture {
     // AnyonWiki Ising: 1 = unit, 2 = psi, 3 = sigma; nontrivial degeneracy on
     // sigma so every block is a genuine matrix.
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::ising()),
+        Arc::new(table_ising()),
         [
-            (TableSector::new(1), 1),
-            (TableSector::new(2), 1),
-            (TableSector::new(3), 2),
+            (ising_object(1), 1),
+            (ising_object(2), 1),
+            (ising_object(3), 2),
         ],
     )
     .unwrap();
@@ -142,7 +143,7 @@ fn fixture() -> Fixture {
     }
 }
 
-fn parent(fixture: &Fixture, salt: u8) -> TensorMap<TableRule, Complex64> {
+fn parent(fixture: &Fixture, salt: u8) -> TensorMap<TableCategoryRule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let v = &fixture.leg;
     TensorMap::from_subblock_fn(

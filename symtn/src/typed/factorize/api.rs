@@ -557,16 +557,24 @@ where
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use symtn::sector::{TableRule, TableSector};
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, Svd, TensorMap};
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::new();
+    /// let category = TableCategory::fibonacci();
+    /// let (one, tau) = (category.object(1).unwrap(), category.object(2).unwrap());
+    /// let rule = CategoryRule::try_new(
+    ///     category,
+    ///     EnumeratedCodec::<MultiplicityFreeAdmissionMode>::new(),
+    /// )
+    /// .unwrap();
     /// let v = GradedSpace::try_new(
-    ///     Arc::new(TableRule::fibonacci()),
-    ///     [(TableSector::new(1), 1), (TableSector::new(2), 2)],
+    ///     Arc::new(rule),
+    ///     [(one, 1), (tau, 2)],
     /// )?;
-    /// let t: TensorMap<TableRule, Complex64> =
+    /// let t: TensorMap<_, Complex64> =
     ///     TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 7)?;
     /// let Svd { u, s, vh } = t.svd_full(engine, &[0, 1], &[2])?;
     /// let rebuilt = u.compose(engine, &s)?.compose(engine, &vh)?;

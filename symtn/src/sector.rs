@@ -40,8 +40,8 @@ pub use symtn_core::{
 /// Built-in fusion rules, their sector labels, and product constructors.
 pub use symtn_core::{
     CU1FusionRule, CU1Irrep, FermionParityFusionRule, FermionParityIrrep, ProductAdmission,
-    ProductFusionRule, ProductFusionRuleError, ProductSector, SectorId, TableRule, TableRuleError,
-    TableSector, U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
+    ProductFusionRule, ProductFusionRuleError, ProductSector, SectorId, U1FusionRule, U1Irrep,
+    ZNFusionRule, ZNIrrep,
 };
 /// The fusion rule of a `fusion_symbols` category: the extension point for a
 /// category defined outside symtn, with its codec and admission vocabulary.

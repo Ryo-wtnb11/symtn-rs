@@ -17,7 +17,10 @@ use symtn::{
     typed::{Complex64, GradedSpace, Runtime, TensorMap},
 };
 use symtn_core as sector_types;
-use symtn_sectors::{TableRule, TableSector};
+#[path = "../../tests/support/tables.rs"]
+mod tables;
+
+use crate::tables::*;
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
@@ -286,8 +289,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &runtime,
         &filter,
         "Fibonacci",
-        TableRule::fibonacci(),
-        vec![TableSector::new(1), TableSector::new(2)],
+        table_fibonacci(),
+        vec![fib_object(1), fib_object(2)],
         [1.0, (1.0 + 5.0_f64.sqrt()) / 2.0],
         Complex64,
         "Complex64",

@@ -60,9 +60,6 @@ pub use fusion_symbols::{
     lie::{CU1Irrep, GroupId, LieIrrep, U1Irrep},
 };
 
-mod table_rule;
-pub use table_rule::{TableRule, TableRuleError, TableSector};
-
 mod lie;
 pub use lie::{LieGroupFusionRule, LieGroupFusionRuleError};
 

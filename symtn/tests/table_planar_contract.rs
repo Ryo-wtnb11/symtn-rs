@@ -24,10 +24,11 @@ use std::sync::Arc;
 use symtn::typed::Dest;
 use symtn::typed::Engine;
 
+use crate::tables::*;
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, TableRule,
-    TableSector, U1FusionRule, U1Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, U1FusionRule,
+    U1Irrep,
 };
 use symtn::typed::{
     BlockFusionTrees, ContractSpec, Error, GradedSpace, OperationError, Runtime, TensorMap,
@@ -36,7 +37,7 @@ use symtn::typed::{
 use crate::table_fixture;
 use table_fixture::*;
 
-type Table = TensorMap<TableRule, Complex64>;
+type Table = TensorMap<TableCategoryRule, Complex64>;
 
 fn spec<'a>(
     lhs: &'a [usize],
@@ -89,16 +90,16 @@ fn close(got: f64, want: f64) -> bool {
 
 struct Case {
     runtime: Runtime,
-    v: GradedSpace<TableRule>,
+    v: GradedSpace<TableCategoryRule>,
 }
 
 impl Case {
-    fn new(rule: TableRule, sectors: &[(u16, usize)]) -> Self {
+    fn new(rule: TableCategoryRule, sectors: &[(u16, usize)]) -> Self {
         let v = GradedSpace::try_new(
-            Arc::new(rule),
+            Arc::new(rule.clone()),
             sectors
                 .iter()
-                .map(|&(label, degeneracy)| (TableSector::new(label), degeneracy)),
+                .map(|&(label, degeneracy)| (table_object(&rule, label), degeneracy)),
         )
         .unwrap();
         Self {
@@ -108,11 +109,11 @@ impl Case {
     }
 
     fn fibonacci() -> Self {
-        Self::new(TableRule::fibonacci(), &[(1, 1), (2, 2)])
+        Self::new(table_fibonacci(), &[(1, 1), (2, 2)])
     }
 
     fn ising() -> Self {
-        Self::new(TableRule::ising(), &[(1, 1), (2, 1), (3, 2)])
+        Self::new(table_ising(), &[(1, 1), (2, 1), (3, 2)])
     }
 
     fn filled(&self, tag: &str, codomain: usize, domain: usize) -> Table {

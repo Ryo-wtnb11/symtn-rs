@@ -53,9 +53,6 @@ pub use symtn_core::SectorOrderKey
 pub use symtn_core::SectorVec
 pub use symtn_core::StructureCacheEquivalent
 pub use symtn_core::SymbolShapeError
-pub use symtn_core::TableRule
-pub use symtn_core::TableRuleError
-pub use symtn_core::TableSector
 pub use symtn_core::TensorKitProductCodec
 pub use symtn_core::TypedSectorAdmission
 pub use symtn_core::U1FusionRule

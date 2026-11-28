@@ -10,6 +10,7 @@
 //!   `su3_octet_self_fusion_has_dynkin_ordered_channels_and_multiplicities`.
 
 use crate::su2::{su2_irrep, su2_rule};
+use crate::tables::*;
 
 use symtn_sectors::*;
 
@@ -65,15 +66,15 @@ fn lie_group_channels_are_sorted_by_encoded_id() {
 
 #[test]
 fn table_channels_follow_the_object_order() {
-    let fib = TableRule::fibonacci();
+    let fib = table_fibonacci();
     assert_eq!(ids(fib.fusion_channels(s(1), s(1))), [0, 1]);
     // Ising: 1 = unit, 2 = psi, 3 = sigma.
-    let ising = TableRule::ising();
+    let ising = table_ising();
     assert_eq!(ids(ising.fusion_channels(s(2), s(2))), [0, 1]);
     assert_eq!(ids(ising.fusion_channels(s(1), s(2))), [2]);
     assert_eq!(ids(ising.fusion_channels(s(1), s(1))), [0]);
     // Rep(S3): the two-dimensional object fuses into all three objects.
-    let rep_s3 = TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap();
+    let rep_s3 = table_by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c");
     assert_eq!(ids(rep_s3.fusion_channels(s(2), s(2))), [0, 1, 2]);
     assert_eq!(ids(rep_s3.fusion_channels(s(1), s(2))), [2]);
 }

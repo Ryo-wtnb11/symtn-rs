@@ -130,14 +130,14 @@ fn fusion_tree_key_size_has_not_silently_grown() {
 fn checked_recursive_product_preserves_channel_order_and_valid_multiplicity() {
     // What: recursive checked products retain the established
     // right-outer/left-inner channel order and valid nsymbol products.
-    type Pair = ProductFusionRule<TableRule, TableRule>;
-    type Triple = ProductFusionRule<Pair, TableRule>;
+    type Pair = ProductFusionRule<TableCategoryRule, TableCategoryRule>;
+    type Triple = ProductFusionRule<Pair, TableCategoryRule>;
 
-    let pair = Pair::try_new(TableRule::fibonacci(), TableRule::fibonacci()).unwrap();
+    let pair = Pair::try_new(table_fibonacci(), table_fibonacci()).unwrap();
     let pair_tau = pair
         .try_encode_component_ids(SectorId::new(1), SectorId::new(1))
         .unwrap();
-    let triple = Triple::try_new(pair, TableRule::fibonacci()).unwrap();
+    let triple = Triple::try_new(pair, table_fibonacci()).unwrap();
     let input = triple
         .try_encode_component_ids(pair_tau, SectorId::new(1))
         .unwrap();

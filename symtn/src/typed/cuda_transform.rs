@@ -26,10 +26,12 @@ use super::*;
 /// ```
 ///
 /// ```compile_fail
-/// use symtn::sector::TableRule;
+/// use fusion_symbols::table::TableCategory;
+/// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+/// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///
-/// fn no_generic_cuda_permute(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64, CudaStorage>) {
+/// fn no_generic_cuda_permute(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Table, f64, CudaStorage>) {
 ///     let _ = tensor.permute(engine, &[1], &[0]);
 /// }
 /// ```

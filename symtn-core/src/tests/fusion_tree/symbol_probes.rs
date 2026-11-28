@@ -165,23 +165,23 @@ fn fibonacci_low_rank_multi_fmoves_query_no_f_except_one_admissible_inverse_step
     // rule and do not enter an F-symbol provider.
     assert_eq!(
         SimpleK(&rule).multi_fmove(&empty),
-        SimpleK(&TableRule::fibonacci()).multi_fmove(&empty)
+        SimpleK(&table_fibonacci()).multi_fmove(&empty)
     );
     assert_eq!(
         SimpleK(&rule).multi_fmove(&rank_one),
-        SimpleK(&TableRule::fibonacci()).multi_fmove(&rank_one)
+        SimpleK(&table_fibonacci()).multi_fmove(&rank_one)
     );
     assert_eq!(
         SimpleK(&rule).multi_fmove(&rank_two),
-        SimpleK(&TableRule::fibonacci()).multi_fmove(&rank_two)
+        SimpleK(&table_fibonacci()).multi_fmove(&rank_two)
     );
     assert_eq!(
         SimpleK(&rule).multi_fmove_inv(tau, tau, &empty, false),
-        SimpleK(&TableRule::fibonacci()).multi_fmove_inv(tau, tau, &empty, false,)
+        SimpleK(&table_fibonacci()).multi_fmove_inv(tau, tau, &empty, false,)
     );
     assert_eq!(
         SimpleK(&rule).multi_fmove_inv(tau, vacuum, &rank_one, false),
-        SimpleK(&TableRule::fibonacci()).multi_fmove_inv(tau, vacuum, &rank_one, false,)
+        SimpleK(&table_fibonacci()).multi_fmove_inv(tau, vacuum, &rank_one, false,)
     );
     assert!(rule.take_calls().is_empty());
 
@@ -189,7 +189,7 @@ fn fibonacci_low_rank_multi_fmoves_query_no_f_except_one_admissible_inverse_step
     // unchanged data and an admissible provider call.
     assert_eq!(
         SimpleK(&rule).multi_fmove_inv(tau, tau, &rank_two, false),
-        SimpleK(&TableRule::fibonacci()).multi_fmove_inv(tau, tau, &rank_two, false,)
+        SimpleK(&table_fibonacci()).multi_fmove_inv(tau, tau, &rank_two, false,)
     );
     let calls = rule.take_calls();
     assert!(!calls.is_empty());
@@ -434,7 +434,7 @@ fn fibonacci_braid_tree_end_to_end_matches_hand_derived_coefficients() {
     // R(c,d,e) * conj(F(d,a,b,e,c',c) * R(a,d,c')) formula
     // (`multiplicity_free_artin_braid_at_with_inverse`, index > 0
     // branch) substituting TensorKitSectors' F/R values directly.
-    let rule = TableRule::fibonacci();
+    let rule = table_fibonacci();
     let tree = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, false, false], [1], [1, 1])
         .unwrap();
 
@@ -462,7 +462,7 @@ fn fibonacci_elementary_artin_rows_match_tensorkit_coefficients() {
     // What: the private elementary Artin operation preserves TensorKit's
     // destination order and the independently substituted F/R coefficients
     // for both crossing orientations.
-    let rule = TableRule::fibonacci();
+    let rule = table_fibonacci();
     let tree = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, false, false], [1], [1, 1])
         .unwrap();
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;

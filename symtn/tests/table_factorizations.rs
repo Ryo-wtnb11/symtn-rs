@@ -1,7 +1,7 @@
 //! Factorizations and truncation of complex-symbol rules: SVD, QR/LQ,
 //! polar, eigh/eig, null spaces, matrix functions and the
 //! `svd_compact` → `find_truncated` → `restrict_leg` chain on Fibonacci and
-//! Ising through `TableRule`, plus a planar contraction, the golden chain and
+//! Ising through `TableCategoryRule`, plus a planar contraction, the golden chain and
 //! the Ising σ-chain.
 //!
 //! The oracles are readable in this file: reconstruction and isometry
@@ -30,12 +30,13 @@ use symtn::typed::{
     ContractSpec, EighFullPlan, GradedSpace, HermitianTol, LeftPolar, Lq, Qr, RightPolar, Runtime,
     SectorSpectrum, StackedTensorMap, Svd, TensorMap, Truncation,
 };
-use symtn_sectors::{TableRule, TableSector};
+
+use crate::tables::*;
 
 use crate::table_fixture;
 use table_fixture::*;
 
-type Table = TensorMap<TableRule, Complex64>;
+type Table = TensorMap<TableCategoryRule, Complex64>;
 
 /// Spectral values are backward stable to a few dozen ulps of the largest
 /// one; `64 · 64 · ε` leaves room for a few dozen accumulated terms.
@@ -62,7 +63,7 @@ fn assert_near(what: &str, x: &Table, y: &Table) {
     );
 }
 
-fn identity(runtime: &Runtime, legs: &[GradedSpace<TableRule>]) -> Table {
+fn identity(runtime: &Runtime, legs: &[GradedSpace<TableCategoryRule>]) -> Table {
     let engine = &mut symtn_dense::CpuEngine::serial();
     TensorMap::isomorphism(engine, runtime, legs, legs).unwrap()
 }
@@ -81,18 +82,18 @@ fn assert_isometry(what: &str, runtime: &Runtime, w: &Table) {
 }
 
 /// Nonzero degeneracies of a leg, by AnyonWiki label.
-fn degeneracies(leg: &GradedSpace<TableRule>) -> Vec<(u16, usize)> {
+fn degeneracies(leg: &GradedSpace<TableCategoryRule>) -> Vec<(u16, usize)> {
     leg.sectors()
         .unwrap()
         .into_iter()
-        .map(|sector| (sector.label(), leg.degeneracy(&sector).unwrap()))
+        .map(|sector| (sector.index(), leg.degeneracy(&sector).unwrap()))
         .filter(|&(_, n)| n > 0)
         .collect()
 }
 
 struct Case {
     runtime: Runtime,
-    v: GradedSpace<TableRule>,
+    v: GradedSpace<TableCategoryRule>,
     /// `d_c` by AnyonWiki label.
     dim: fn(u16) -> f64,
     /// `dim_c(V ⊗ V)` by coupled sector: the block sizes of `V⊗V ← V⊗V`.
@@ -101,16 +102,16 @@ struct Case {
 
 impl Case {
     fn new(
-        rule: TableRule,
+        rule: TableCategoryRule,
         sectors: &[(u16, usize)],
         dim: fn(u16) -> f64,
         pair_blocks: &'static [(u16, usize)],
     ) -> Self {
         let v = GradedSpace::try_new(
-            Arc::new(rule),
+            Arc::new(rule.clone()),
             sectors
                 .iter()
-                .map(|&(label, degeneracy)| (TableSector::new(label), degeneracy)),
+                .map(|&(label, degeneracy)| (table_object(&rule, label), degeneracy)),
         )
         .unwrap();
         Self {
@@ -125,7 +126,7 @@ impl Case {
     /// `2 + 2 + 2·2 = 8` in `τ`.
     fn fibonacci() -> Self {
         Self::new(
-            TableRule::fibonacci(),
+            table_fibonacci(),
             &[(1, 1), (2, 2)],
             |label| match label {
                 1 => 1.0,
@@ -139,7 +140,7 @@ impl Case {
     /// states in `𝟙` and in `ψ`, and `4 · 2 = 8` in `σ`.
     fn ising() -> Self {
         Self::new(
-            TableRule::ising(),
+            table_ising(),
             &[(1, 1), (2, 1), (3, 2)],
             |label| match label {
                 3 => SQRT_2,
@@ -165,22 +166,22 @@ impl Case {
     /// `Σ_c d_c Σ_i f(x_{c,i})` over a blockwise spectrum.
     fn weighted_sum<V: Copy, S: std::iter::Sum<S> + std::ops::Mul<f64, Output = S>>(
         &self,
-        spectra: &[SectorSpectrum<TableSector, V>],
+        spectra: &[SectorSpectrum<TableObject, V>],
         f: impl Fn(V) -> S,
     ) -> S {
         spectra
             .iter()
             .map(|entry| {
-                entry.values.iter().map(|&x| f(x)).sum::<S>() * (self.dim)(entry.sector.label())
+                entry.values.iter().map(|&x| f(x)).sum::<S>() * (self.dim)(entry.sector.index())
             })
             .sum()
     }
 
     /// One spectrum per coupled sector of `V ⊗ V`, each the block's size.
-    fn assert_pair_blocks<V>(&self, what: &str, spectra: &[SectorSpectrum<TableSector, V>]) {
+    fn assert_pair_blocks<V>(&self, what: &str, spectra: &[SectorSpectrum<TableObject, V>]) {
         let sizes: Vec<(u16, usize)> = spectra
             .iter()
-            .map(|entry| (entry.sector.label(), entry.values.len()))
+            .map(|entry| (entry.sector.index(), entry.values.len()))
             .collect();
         assert_eq!(sizes, self.pair_blocks, "{what}: block sizes");
     }
@@ -258,8 +259,8 @@ fn ising_spectra_satisfy_weighted_trace_identities() {
 /// Equal sector labels and, per sector, equal values in order.
 fn assert_same_spectra<U: Copy + Into<Complex64>, W: Copy + Into<Complex64>>(
     what: &str,
-    got: &[SectorSpectrum<TableSector, U>],
-    want: &[SectorSpectrum<TableSector, W>],
+    got: &[SectorSpectrum<TableObject, U>],
+    want: &[SectorSpectrum<TableObject, W>],
 ) {
     assert_eq!(got.len(), want.len(), "{what}: sectors");
     for (g, w) in got.iter().zip(want) {
@@ -285,8 +286,8 @@ fn assert_same_spectra<U: Copy + Into<Complex64>, W: Copy + Into<Complex64>>(
 fn assert_rank_nullity(
     what: &str,
     case: &Case,
-    spectra: &[SectorSpectrum<TableSector>],
-    null_leg: &GradedSpace<TableRule>,
+    spectra: &[SectorSpectrum<TableObject>],
+    null_leg: &GradedSpace<TableCategoryRule>,
 ) {
     let largest = spectra
         .iter()
@@ -298,7 +299,7 @@ fn assert_rank_nullity(
         .map(|&(label, states)| {
             let rank = spectra
                 .iter()
-                .filter(|entry| entry.sector.label() == label)
+                .filter(|entry| entry.sector.index() == label)
                 .flat_map(|entry| entry.values.iter())
                 .filter(|&&s| s > 1.0e-12 * largest)
                 .count();
@@ -544,12 +545,12 @@ enum ByHand {
 
 fn truncate_by_hand(
     case: &Case,
-    spectra: &[SectorSpectrum<TableSector>],
+    spectra: &[SectorSpectrum<TableObject>],
     policy: &ByHand,
 ) -> (Vec<(u16, usize)>, f64) {
     let mut flat: Vec<(f64, u16)> = spectra
         .iter()
-        .flat_map(|entry| entry.values.iter().map(|&s| (s, entry.sector.label())))
+        .flat_map(|entry| entry.values.iter().map(|&s| (s, entry.sector.index())))
         .collect();
     flat.sort_by(|x, y| y.0.total_cmp(&x.0));
     let d = |label: u16| (case.dim)(label);
@@ -604,7 +605,7 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
     // Why the rule by hand reads `s` and not `svd_vals`: the two are separate
     // SVD runs that agree only to rounding, so a threshold placed at one of
     // the values must be judged on the spectrum `find_truncated` selects from.
-    let spectrum: Vec<SectorSpectrum<TableSector>> = s
+    let spectrum: Vec<SectorSpectrum<TableObject>> = s
         .diagview(engine)
         .unwrap()
         .into_iter()
@@ -699,17 +700,18 @@ fn truncation_follows_the_weighted_rule(case: &Case, kept: [&[(u16, usize)]; 3])
 /// kept degeneracies and the discarded `Σ d_c σ²`, written out by hand.
 fn exact_cutoff_is_inclusive(
     case: &Case,
-    rule: TableRule,
+    rule: TableCategoryRule,
     values: &[(u16, &[Complex64])],
     at: (&[(u16, usize)], f64),
     above: (&[(u16, usize)], f64),
 ) {
     let engine = &mut symtn_dense::CpuEngine::serial();
+    let rule = Arc::new(rule);
     let bond = GradedSpace::try_new(
-        Arc::new(rule),
+        Arc::clone(&rule),
         values
             .iter()
-            .map(|&(label, values)| (TableSector::new(label), values.len())),
+            .map(|&(label, values)| (table_object(&rule, label), values.len())),
     )
     .unwrap();
     let t: Table = TensorMap::diagonal(
@@ -717,7 +719,7 @@ fn exact_cutoff_is_inclusive(
         &case.runtime,
         &bond,
         values.iter().map(|&(label, values)| SectorSpectrum {
-            sector: TableSector::new(label),
+            sector: table_object(&rule, label),
             values: values.to_vec(),
         }),
     )
@@ -763,7 +765,7 @@ fn fibonacci_exact_cutoff_is_inclusive() {
     let c = Complex64::new;
     exact_cutoff_is_inclusive(
         &Case::fibonacci(),
-        TableRule::fibonacci(),
+        table_fibonacci(),
         &[
             (1, &[c(-2.0, 0.0), c(0.0, 1.0), c(0.5, 0.0)]),
             (2, &[c(1.0, 0.0), c(-0.25, 0.0), c(0.0, -4.0)]),
@@ -781,7 +783,7 @@ fn ising_exact_cutoff_is_inclusive() {
     let c = Complex64::new;
     exact_cutoff_is_inclusive(
         &Case::ising(),
-        TableRule::ising(),
+        table_ising(),
         &[
             (1, &[c(-1.0, 0.0), c(0.5, 0.0)]),
             (2, &[c(0.0, 1.0)]),
@@ -894,12 +896,12 @@ fn ising_planar_contraction_then_factorization() {
 
 /// `H = −Σ_i P^{(1)}_{i,i+1}` on `w^{⊗L}`, built as TensorKit builds it: the
 /// two-site vacuum-channel projector, `otimes` with identities, and sums.
-fn projector_chain(runtime: &Runtime, w: &GradedSpace<TableRule>, length: usize) -> Table {
+fn projector_chain(runtime: &Runtime, w: &GradedSpace<TableCategoryRule>, length: usize) -> Table {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let vacuum = TableSector::new(1);
+    // AnyonWiki label 1 is every table's unit.
     let projector: Table =
         TensorMap::from_subblock_fn(engine, runtime, [w, w], [w, w], |trees, _| {
-            Complex64::new((*trees.coupled() == vacuum) as u8 as f64, 0.0)
+            Complex64::new((trees.coupled().index() == 1) as u8 as f64, 0.0)
         })
         .unwrap();
     let identity = |engine: &mut dyn Engine, n: usize| -> Table {
@@ -925,7 +927,7 @@ fn projector_chain(runtime: &Runtime, w: &GradedSpace<TableRule>, length: usize)
     hamiltonian.unwrap()
 }
 
-fn chain_spectra(h: &Table, length: usize) -> Vec<SectorSpectrum<TableSector>> {
+fn chain_spectra(h: &Table, length: usize) -> Vec<SectorSpectrum<TableObject>> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rows: Vec<usize> = (0..length).collect();
     let cols: Vec<usize> = (length..2 * length).collect();
@@ -938,18 +940,22 @@ fn chain_spectra(h: &Table, length: usize) -> Vec<SectorSpectrum<TableSector>> {
 /// through `F^{x_{i−1} τ τ}_{x_{i+1}}[x_i, 𝟙]`, which is `1` for
 /// `x_{i−1} = x_{i+1} = 𝟙`, the first column `(φ^{−1}, φ^{−1/2})` of
 /// `F^{τττ}_τ` for `x_{i−1} = x_{i+1} = τ`, and zero otherwise.
-fn golden_chain_by_hand(runtime: &Runtime, w: &GradedSpace<TableRule>, length: usize) -> Table {
+fn golden_chain_by_hand(
+    runtime: &Runtime,
+    w: &GradedSpace<TableCategoryRule>,
+    length: usize,
+) -> Table {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    let (unit, tau) = (TableSector::new(1), TableSector::new(2));
-    let f_column = |x: TableSector| {
+    let (unit, tau) = (fib_object(1), fib_object(2));
+    let f_column = |x: TableObject| {
         if x == unit {
             1.0 / phi
         } else {
             1.0 / phi.sqrt()
         }
     };
-    let path = |inner: &[TableSector], coupled: TableSector| -> Vec<TableSector> {
+    let path = |inner: &[TableObject], coupled: TableObject| -> Vec<TableObject> {
         let mut path = vec![unit, tau];
         path.extend_from_slice(inner);
         path.push(coupled);
@@ -1025,8 +1031,7 @@ fn golden_chain_spectra_match_the_fusion_path_hamiltonian() {
         ),
     ];
     let runtime = Runtime::new();
-    let tau =
-        GradedSpace::try_new(Arc::new(TableRule::fibonacci()), [(TableSector::new(2), 1)]).unwrap();
+    let tau = GradedSpace::try_new(Arc::new(table_fibonacci()), [(fib_object(2), 1)]).unwrap();
     for length in 4..=8 {
         let built = chain_spectra(&projector_chain(&runtime, &tau, length), length);
         let by_hand = chain_spectra(&golden_chain_by_hand(&runtime, &tau, length), length);
@@ -1045,7 +1050,7 @@ fn golden_chain_spectra_match_the_fusion_path_hamiltonian() {
         if let Some((_, want)) = tensorkit.iter().find(|(l, _)| *l == length) {
             let got: Vec<(u16, &[f64])> = built
                 .iter()
-                .map(|entry| (entry.sector.label(), entry.values.as_slice()))
+                .map(|entry| (entry.sector.index(), entry.values.as_slice()))
                 .collect();
             assert_eq!(got.len(), want.len(), "L = {length}");
             for ((label, values), (want_label, want)) in got.iter().zip(want.iter()) {
@@ -1095,15 +1100,14 @@ fn free_fermion_spectrum(length: usize) -> Vec<(u16, Vec<f64>)> {
 #[test]
 fn ising_sigma_chain_matches_free_fermions() {
     let runtime = Runtime::new();
-    let sigma =
-        GradedSpace::try_new(Arc::new(TableRule::ising()), [(TableSector::new(3), 1)]).unwrap();
+    let sigma = GradedSpace::try_new(Arc::new(table_ising()), [(ising_object(3), 1)]).unwrap();
     for length in 4..=8 {
         let quantity = format!("chain{length}");
         let built = chain_spectra(&projector_chain(&runtime, &sigma, length), length);
         let closed_form = free_fermion_spectrum(length);
         let got: Vec<(u16, &[f64])> = built
             .iter()
-            .map(|entry| (entry.sector.label(), entry.values.as_slice()))
+            .map(|entry| (entry.sector.index(), entry.values.as_slice()))
             .collect();
         assert_eq!(got.len(), closed_form.len(), "{quantity}");
         for ((label, values), (want_label, want)) in got.iter().zip(&closed_form) {
@@ -1213,7 +1217,7 @@ fn a_non_real_quantum_dimension_is_refused_by_truncation() {
 #[test]
 fn a_prepared_batched_eigh_equals_eager_on_table_rule_members() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // TableRule tensors are `Complex64`; on Host each member of the plan is
+    // TableCategoryRule tensors are `Complex64`; on Host each member of the plan is
     // the eager `eigh_full` of that member (IEEE `==` on every entry).
     let case = Case::ising();
     let members = ["t", "u"].map(|tag| {

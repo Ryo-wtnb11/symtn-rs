@@ -83,7 +83,7 @@ where
     /// One fusion-tree layout admission plus one `O(stored_len)` zeroed
     /// payload allocation.
     ///
-    /// A [`TableRule`](crate::sector::TableRule) payload is `Complex64` even
+    /// A table [`CategoryRule`](crate::sector::CategoryRule) payload is `Complex64` even
     /// where F is real (Fibonacci, Ising). This is stricter than TensorKit,
     /// which types real-F data by `fusionscalartype` and only braiding by
     /// `braidingscalartype`: a symtn provider has one `Scalar` for F, R and
@@ -91,16 +91,22 @@ where
     ///
     /// ```compile_fail
     /// use std::sync::Arc;
-    /// use symtn::sector::{TableRule, TableSector};
+    /// use fusion_symbols::table::TableCategory;
+    /// use symtn::sector::{CategoryRule, EnumeratedCodec, MultiplicityFreeAdmissionMode};
+    /// type Table = CategoryRule<TableCategory, EnumeratedCodec<MultiplicityFreeAdmissionMode>>;
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     /// let runtime = Runtime::new();
     /// # let engine = &mut symtn::typed::CpuEngine::serial();
+    /// let category = TableCategory::fibonacci();
+    /// let tau_label = category.object(2).unwrap();
+    /// let rule: Table =
+    ///     CategoryRule::try_new(category, EnumeratedCodec::new()).unwrap();
     /// let tau = GradedSpace::try_new(
-    ///     Arc::new(TableRule::fibonacci()),
-    ///     [(TableSector::new(2), 1)],
+    ///     Arc::new(rule),
+    ///     [(tau_label, 1)],
     /// ).unwrap();
     /// // A complex categorical coefficient cannot act on a real payload.
-    /// let _: TensorMap<TableRule, f64> =
+    /// let _: TensorMap<Table, f64> =
     ///     TensorMap::zeros(engine, &runtime, [&tau], [&tau]).unwrap();
     /// ```
     pub fn zeros<'a, Codomain, Domain>(

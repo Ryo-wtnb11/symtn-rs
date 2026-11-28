@@ -1471,6 +1471,7 @@ name = "symtn-core"
 version = "0.1.1"
 dependencies = [
  "criterion",
+ "fusion-symbols",
  "num-complex",
  "quick_cache",
  "rustc-hash",

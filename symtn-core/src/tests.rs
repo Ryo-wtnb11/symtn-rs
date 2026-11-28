@@ -1,4 +1,5 @@
 use super::*;
+use crate::tables::*;
 
 /// Test-only synchronization for symtn-core's process-global intern tables
 /// (block-structure content/arc tables, the hom-space intern table).

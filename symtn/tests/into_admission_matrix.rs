@@ -78,9 +78,8 @@ use symtn::sector::LieIrrep;
 use symtn::typed::Dest;
 use symtn::typed::Engine;
 
-use symtn::sector::{
-    FermionParityFusionRule, FermionParityIrrep, TableRule, TableSector, U1FusionRule, U1Irrep,
-};
+use crate::tables::*;
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
     BlockFusionTrees, Complex64, ContractSpec, GradedSpace, SectorSpectrum, TensorMap,
 };
@@ -723,11 +722,11 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 3)],
     )
     .unwrap();
-    let key = debug_key::<TableSector>;
+    let key = debug_key::<TableObject>;
     let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -799,8 +798,8 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         engine,
         &runtime,
         leg,
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
-        |s: &TableSector| format!("{s:?}"),
+        [(fib_object(1), 2), (fib_object(2), 3)],
+        |s: &TableObject| format!("{s:?}"),
         Complex64,
         |x: f64| Complex64::new(x, 0.5 - x)
     );
@@ -2767,11 +2766,11 @@ fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
     // with eager's error, before touching the destination.
     let runtime = host_runtime();
     let leg = GradedSpace::try_new(
-        Arc::new(TableRule::fibonacci()),
-        [(TableSector::new(1), 2), (TableSector::new(2), 3)],
+        Arc::new(table_fibonacci()),
+        [(fib_object(1), 2), (fib_object(2), 3)],
     )
     .unwrap();
-    let key = debug_key::<TableSector>;
+    let key = debug_key::<TableObject>;
     let a: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, index| {
             complex_value(&key(trees), index)

@@ -32,6 +32,8 @@ rustc-hash = "2"
 quick_cache = { version = "0.7", default-features = false, features = ["sharded-lock"] }
 
 [dev-dependencies]
+# The AnyonWiki table categories of the table-backed test fixtures.
+fusion-symbols = { version = "0.11.0", default-features = false }
 # Enables `testing` for this crate's own integration tests
 # (tests/identity_transform_allocations.rs).
 symtn-core = { path = ".", features = ["testing"] }

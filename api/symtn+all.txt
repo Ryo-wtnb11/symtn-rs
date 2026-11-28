@@ -83,9 +83,6 @@ pub use symtn::sector::SectorId
 pub use symtn::sector::SectorOrderKey
 pub use symtn::sector::SectorVec
 pub use symtn::sector::SymbolShapeError
-pub use symtn::sector::TableRule
-pub use symtn::sector::TableRuleError
-pub use symtn::sector::TableSector
 pub use symtn::sector::TensorKitProductCodec
 pub use symtn::sector::TypedSectorAdmission
 pub use symtn::sector::U1FusionRule
