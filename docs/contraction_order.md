@@ -6,7 +6,9 @@ cheap, and the order `Network::contract` and the plan cache use.
 
 ## omeco (feature `omeco`)
 
-`OmecoOptimizer::Optimal` (exact minimum total pair cost, small networks) and
+`OmecoOptimizer::Exhaustive` (exact search over trees without outer products
+inside a connected component, small networks; not always the global minimum)
+and
 `OmecoOptimizer::TreeSa(TreeSA)` (`TreeSA` and its config types are re-exported
 in `symtn_network::omeco`) wrap the
 [omeco](https://crates.io/crates/omeco) crate. Pass one to `Network::plan`;

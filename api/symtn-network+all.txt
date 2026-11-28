@@ -36,8 +36,6 @@ pub symtn_network::ContractError::TensorCountMismatch
 pub symtn_network::ContractError::TensorCountMismatch::actual: usize
 pub symtn_network::ContractError::TensorCountMismatch::expected: usize
 pub symtn_network::ContractError::UnknownOutputLabel(alloc::string::String)
-pub symtn_network::ContractError::UnknownPlannerSliceLabel
-pub symtn_network::ContractError::UnknownPlannerSliceLabel::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedBatchLabel
 pub symtn_network::ContractError::UnsupportedBatchLabel::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedBatchLabel::operand_count: usize
@@ -47,8 +45,6 @@ pub symtn_network::ContractError::UnsupportedDiagonal::tensor: usize
 pub symtn_network::ContractError::UnsupportedHyperedge
 pub symtn_network::ContractError::UnsupportedHyperedge::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedHyperedge::operand_count: usize
-pub symtn_network::ContractError::UnsupportedPlannerProjection
-pub symtn_network::ContractError::UnsupportedPlannerProjection::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedReduction
 pub symtn_network::ContractError::UnsupportedReduction::label: alloc::string::String
 impl core::clone::Clone for symtn_network::ContractError
@@ -93,7 +89,7 @@ impl core::fmt::Debug for symtn_network::ContractionTree
 pub fn symtn_network::ContractionTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for symtn_network::ContractionTree
 pub enum symtn_network::OmecoOptimizer
-pub symtn_network::OmecoOptimizer::Optimal
+pub symtn_network::OmecoOptimizer::Exhaustive
 pub symtn_network::OmecoOptimizer::TreeSa(omeco::treesa::TreeSA)
 impl core::clone::Clone for symtn_network::OmecoOptimizer
 pub fn symtn_network::OmecoOptimizer::clone(&self) -> symtn_network::OmecoOptimizer

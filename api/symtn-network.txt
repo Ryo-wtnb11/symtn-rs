@@ -31,8 +31,6 @@ pub symtn_network::ContractError::TensorCountMismatch
 pub symtn_network::ContractError::TensorCountMismatch::actual: usize
 pub symtn_network::ContractError::TensorCountMismatch::expected: usize
 pub symtn_network::ContractError::UnknownOutputLabel(alloc::string::String)
-pub symtn_network::ContractError::UnknownPlannerSliceLabel
-pub symtn_network::ContractError::UnknownPlannerSliceLabel::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedBatchLabel
 pub symtn_network::ContractError::UnsupportedBatchLabel::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedBatchLabel::operand_count: usize
@@ -42,8 +40,6 @@ pub symtn_network::ContractError::UnsupportedDiagonal::tensor: usize
 pub symtn_network::ContractError::UnsupportedHyperedge
 pub symtn_network::ContractError::UnsupportedHyperedge::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedHyperedge::operand_count: usize
-pub symtn_network::ContractError::UnsupportedPlannerProjection
-pub symtn_network::ContractError::UnsupportedPlannerProjection::label: alloc::string::String
 pub symtn_network::ContractError::UnsupportedReduction
 pub symtn_network::ContractError::UnsupportedReduction::label: alloc::string::String
 impl core::clone::Clone for symtn_network::ContractError

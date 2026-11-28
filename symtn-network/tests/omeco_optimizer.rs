@@ -1,5 +1,6 @@
-//! `OmecoOptimizer` returns valid pairwise orders: the exact search reaches
-//! the brute-force minimum of total pair cost, TreeSA's order passes plan
+//! `OmecoOptimizer` returns valid pairwise orders: the exhaustive search
+//! reaches the brute-force minimum of total pair cost when no outer product
+//! pays off, and stays above it when one does; TreeSA's order passes plan
 //! validation, and both execute to the greedy plan's values.
 
 use std::collections::HashMap;
@@ -151,22 +152,44 @@ fn plan_pair_cost(case: &Case, plan: &ContractionPlan) -> usize {
     total
 }
 
+/// Total pair cost of omeco's exhaustive order and of the brute-force minimum.
+fn exhaustive_and_minimum(case: &Case) -> (usize, usize) {
+    let (ir, cost) = case.ir_and_cost();
+    let steps = OmecoOptimizer::Exhaustive.optimize(&ir, &cost).unwrap();
+    let plan = ContractionPlan::from_steps(&ir, steps).unwrap();
+    let live = case
+        .tensors
+        .iter()
+        .map(|legs| legs.iter().map(|&(label, _)| label).collect())
+        .collect();
+    (
+        plan_pair_cost(case, &plan),
+        brute_force(&case.dims(), &case.output, live),
+    )
+}
+
 #[test]
-fn optimal_reaches_the_brute_force_minimum() {
+fn exhaustive_reaches_the_brute_force_minimum() {
     for case in cases() {
-        let (ir, cost) = case.ir_and_cost();
-        let steps = OmecoOptimizer::Optimal.optimize(&ir, &cost).unwrap();
-        let plan = ContractionPlan::from_steps(&ir, steps).unwrap();
-        let live = case
-            .tensors
-            .iter()
-            .map(|legs| legs.iter().map(|&(label, _)| label).collect())
-            .collect();
-        assert_eq!(
-            plan_pair_cost(&case, &plan),
-            brute_force(&case.dims(), &case.output, live)
-        );
+        let (exhaustive, minimum) = exhaustive_and_minimum(&case);
+        assert_eq!(exhaustive, minimum);
     }
+}
+
+/// `i,j,ijz->z`, i = j = 2, z = 10: `(i ijz) j` costs 2*2*10 + 2*10 = 60;
+/// the outer product first, `(i j) ijz`, costs 2*2 + 2*2*10 = 44. omeco's
+/// search never takes an outer product inside a connected component.
+#[test]
+fn exhaustive_skips_an_outer_product_that_would_pay_off() {
+    let case = Case {
+        tensors: vec![
+            vec![("i", 2)],
+            vec![("j", 2)],
+            vec![("i", 2), ("j", 2), ("z", 10)],
+        ],
+        output: vec!["z"],
+    };
+    assert_eq!(exhaustive_and_minimum(&case), (60, 44));
 }
 
 #[test]
@@ -222,7 +245,7 @@ fn omeco_plans_execute_to_the_greedy_values() {
     };
     let expected = run(&GreedyDenseOptimizer);
     for optimizer in [
-        OmecoOptimizer::Optimal,
+        OmecoOptimizer::Exhaustive,
         OmecoOptimizer::TreeSa(TreeSA::fast()),
     ] {
         let actual = run(&optimizer);

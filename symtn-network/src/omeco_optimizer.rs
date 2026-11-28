@@ -32,10 +32,15 @@ use crate::plan::{dense_steps_from_active_pair_path, orient_unordered_active_pai
 ///   [`crate::SlicedPlan`] over a fixed, validated order.
 #[derive(Debug, Clone)]
 pub enum OmecoOptimizer {
-    /// The order of least total pair cost (omeco `ExhaustiveSearch`, an
-    /// exact dynamic program exponential in the network size; at most 128
-    /// tensors and 128 labels).
-    Optimal,
+    /// omeco `ExhaustiveSearch`: a dynamic program, exponential in the
+    /// network size (at most 128 tensors and 128 labels), over the trees in
+    /// which every contraction within a connected component joins two
+    /// subtrees sharing an open label; disconnected components are then
+    /// joined by outer products. It returns the least total pair cost among
+    /// those trees, which is not always the global minimum: for `i,j,ijz->z`
+    /// with `i = j = 2`, `z = 10` it returns `(i ijz) j` (cost 60), while the
+    /// outer product first, `(i j) ijz`, costs 44.
+    Exhaustive,
     /// omeco `TreeSA` with the given configuration ([`crate::omeco::TreeSA`] and
     /// its field types are re-exported): a cold-path search for networks
     /// where greedy goes wrong.
@@ -69,7 +74,7 @@ impl DenseContractionOptimizer for OmecoOptimizer {
             .collect::<HashMap<_, _>>();
         let code = EinCode::new(ixs, iy);
         let tree = match self {
-            Self::Optimal => {
+            Self::Exhaustive => {
                 ::omeco::optimize_exhaustive(&code, &sizes, &::omeco::ExhaustiveSearch::default())
                     .map_err(|error| omeco_error(error.to_string()))?
             }
