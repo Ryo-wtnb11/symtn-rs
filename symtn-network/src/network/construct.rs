@@ -133,7 +133,9 @@ impl Network {
     /// A [`SlicedPlan`] is a chosen order with a slicing decision: its labels
     /// are lowered against these tensors' sector legs into the symmetric
     /// slices [`PlannedNetwork::execute`] runs one at a time
-    /// ([`PlannedNetwork::slices`]).
+    /// ([`PlannedNetwork::slices`]). When `optimizer` reports a
+    /// [`DenseContractionOptimizer::sliced_plan`], that plan's order is the
+    /// planned order and `optimize` is not called.
     ///
     /// # Errors
     ///
@@ -152,10 +154,15 @@ impl Network {
         D: TensorScalar,
         S: TensorStorage<D>,
     {
+        let sliced = optimizer.sliced_plan();
         let mut planned = self.plan_searched(tensors, |ir, cost| {
-            ContractionPlan::from_steps(ir, optimizer.optimize(ir, cost)?)
+            let steps = match sliced {
+                Some(sliced) => sliced.plan().optimize(ir, cost)?,
+                None => optimizer.optimize(ir, cost)?,
+            };
+            ContractionPlan::from_steps(ir, steps)
         })?;
-        if let Some(sliced) = optimizer.sliced_plan() {
+        if let Some(sliced) = sliced {
             let plan = self
                 .lower_symmetric_sliced_plan(tensors, sliced.clone())
                 .map_err(fold_lower_error)?;

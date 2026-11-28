@@ -2497,3 +2497,78 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
         expected.dense_data().unwrap()
     );
 }
+
+#[test]
+fn a_reported_sliced_plan_is_the_planned_order() {
+    struct Split {
+        sliced: SlicedPlan,
+    }
+    impl DenseContractionOptimizer for Split {
+        fn optimize(
+            &self,
+            _: &NetworkIR,
+            _: &DenseCostModel,
+        ) -> crate::Result<Vec<ContractionStep>> {
+            panic!("optimize ran although sliced_plan reported an order");
+        }
+        fn sliced_plan(&self) -> Option<&SlicedPlan> {
+            Some(&self.sliced)
+        }
+    }
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::new();
+    let provider = Arc::new(U1FusionRule);
+    let space =
+        |d| GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), d)]).unwrap();
+    let (a, b, c, d) = (space(2), space(3), space(4), space(5));
+    let x =
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&a], [&b], 41).unwrap();
+    let y = TensorMap::rand_with_seed(engine, &runtime, [&b], [&c], 42).unwrap();
+    let z = TensorMap::rand_with_seed(engine, &runtime, [&c], [&d], 43).unwrap();
+    let inputs = vec![
+        vec![label("a"), label("b")],
+        vec![label("b"), label("c")],
+        vec![label("c"), label("d")],
+    ];
+    let output = vec![label("a"), label("d")];
+    let network = Network::new(
+        inputs.clone(),
+        vec![false; 3],
+        vec![1; 3],
+        output.clone(),
+        Some(1),
+    )
+    .unwrap();
+    let ir = NetworkIR::from_labels(inputs, output).unwrap();
+    let cost = DenseCostModel::from_network(
+        &ir,
+        &[
+            DenseTensorInfo::new(vec![2, 3]),
+            DenseTensorInfo::new(vec![3, 4]),
+            DenseTensorInfo::new(vec![4, 5]),
+        ],
+    )
+    .unwrap();
+    // (y z) first: not the greedy (x y) order, so the two authorities differ.
+    let pairs = [crate::ActivePair::new(1, 2), crate::ActivePair::new(0, 1)];
+    let steps = crate::plan::dense_steps_from_active_pair_path(&ir, &pairs, &cost).unwrap();
+    let order = ContractionPlan::from_steps(&ir, steps).unwrap();
+    let slice = crate::greedy_slice(
+        &ir,
+        &order,
+        &cost,
+        usize::MAX,
+        crate::SliceLabels::IncludeOutput,
+    );
+    let tensors = [&x, &y, &z];
+    let planned = network
+        .plan(
+            &tensors,
+            &Split {
+                sliced: SlicedPlan::new(order.clone(), slice),
+            },
+        )
+        .unwrap();
+    assert_eq!(planned.plan(), &order);
+    assert_eq!(planned.plan().active_pair_path().unwrap(), pairs);
+}

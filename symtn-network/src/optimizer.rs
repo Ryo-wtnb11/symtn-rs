@@ -147,7 +147,9 @@ pub trait DenseContractionOptimizer {
         -> Result<Vec<ContractionStep>>;
 
     /// The slicing [`crate::Network::plan`] lowers into the planned network,
-    /// or `None` for an unsliced order (the default).
+    /// or `None` for an unsliced order (the default). When `Some`, its order
+    /// is the planned order: [`crate::Network::plan`] does not call
+    /// [`optimize`](Self::optimize).
     fn sliced_plan(&self) -> Option<&crate::SlicedPlan> {
         None
     }
