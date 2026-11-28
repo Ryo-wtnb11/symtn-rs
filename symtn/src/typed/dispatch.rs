@@ -16,8 +16,13 @@ pub type FacadeError<R> =
 /// contraction, trace, twist, flip, products, unit legs and truncation) is
 /// available, with errors of type [`FacadeError`]`<R>`.
 ///
-/// It holds for every built-in and adapted rule, multiplicity-free or checked
-/// Generic. It is blanket-implemented from the crate's sealed mode traits, so
+/// It holds for every rule, multiplicity-free or checked Generic, that has all
+/// the bundled capabilities, including canonical-unit admission
+/// ([`CanonicalUnitFusionRule`](crate::sector::CanonicalUnitFusionRule), or
+/// [`CheckedCanonicalUnitFusionRule`](crate::sector::CheckedCanonicalUnitFusionRule)
+/// for a checked Generic rule); an adapted rule whose codec uses
+/// [`UncertifiedUnitAdmission`](crate::sector::UncertifiedUnitAdmission)
+/// does not. It is blanket-implemented from the crate's sealed mode traits, so
 /// it cannot be implemented by hand and adds no operation of its own.
 /// Operations that need a capability beyond the mode keep their own bounds:
 /// factorizations need `D: FactorizationScalar`,
