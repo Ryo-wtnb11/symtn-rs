@@ -22,10 +22,9 @@ use symtn::typed::{Complex64, ContractSpec, Runtime, TensorScalar};
 #[cfg(feature = "opt-path")]
 use symtn_network::Optimizer;
 use symtn_network::{
-    configure_plan_cache, plan_cache_config, plan_cache_stats, slice_plan_for, DegeneracyRange,
-    DenseCostModel, DenseTensorInfo, GreedyDenseOptimizer, LabelOrderDenseOptimizer, Network,
-    NetworkExecutionWorkspace, NetworkIR, PlanCacheConfig, PlannedNetwork, SectorSlice, SlicedPlan,
-    SymmetricSliceExecutionError, SymmetricSlicePlan, SymmetricSliceSpec, SymmetricSlicedPlan,
+    configure_plan_cache, plan_cache_config, plan_cache_stats, slice_plan_for, DenseCostModel,
+    DenseTensorInfo, GreedyDenseOptimizer, LabelOrderDenseOptimizer, Network,
+    NetworkExecutionWorkspace, NetworkIR, PlanCacheConfig, PlannedNetwork, SlicedPlan,
     TemporaryLabel, TensorId,
 };
 
@@ -408,13 +407,10 @@ fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
             &["a", "x"].map(TemporaryLabel::from),
         ),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
-    let (actual, stats) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-        .unwrap();
-    assert!(stats.peak_total_bytes() > 0);
+    let sliced = network.plan(&tensors, &dense).unwrap();
+    let mut workspace = NetworkExecutionWorkspace::default();
+    let actual = sliced.execute(engine, &tensors, &mut workspace).unwrap();
+    assert!(workspace.last_slice_stats().unwrap().peak_total_bytes() > 0);
     assert_eq!(actual.provider() as *const _, provider.as_ref() as *const _);
     assert_same(&actual, &expected);
 }
@@ -998,69 +994,33 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
         planned.plan().clone(),
         slice_plan_for(&ir, planned.plan(), &cost, &[TemporaryLabel::from("a")]),
     );
-    let multi = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
-    let index = &multi.slices().indices()[0];
+    let multi = network.plan(&tensors, &dense).unwrap();
+    let index = &multi.slices().unwrap().indices()[0];
     assert_eq!(index.output_position(), Some(0));
     assert_eq!(index.pieces().len(), 2);
-    let sector = index.pieces()[0].sector();
-    assert!(index.pieces().iter().all(|piece| piece.sector() == sector));
-    let single_slice = SymmetricSlicePlan::try_new(
-        &ir,
-        multi.slices().rule_identity().clone(),
-        vec![SymmetricSliceSpec::new(
-            index.label().clone(),
-            index.authority(),
-            index.authority_leg().clone(),
-            vec![SectorSlice::new(
-                sector,
-                DegeneracyRange::new(0, 2).unwrap(),
-            )],
-        )],
-    )
-    .unwrap();
-    let single = SymmetricSlicedPlan::new(multi.plan().clone(), single_slice);
+    let mut workspace = NetworkExecutionWorkspace::default();
 
-    // Warm provider-owned catalogs, then use the one-job output execution to
-    // locate the first checked decode after a completed output rectangle. The
-    // two-rectangle run has the same bind/compile/first-job sequence and
-    // strictly more decode calls.
-    network
-        .execute_symmetric_sliced(engine, &tensors, multi.clone(), usize::MAX)
-        .unwrap();
+    // Warm provider-owned catalogs, then count the decodes of both output
+    // rectangles. The second rectangle decodes too, so failing the last
+    // decode fails after a completed rectangle.
+    multi.execute(engine, &tensors, &mut workspace).unwrap();
     provider.reset_decodes();
-    network
-        .execute_symmetric_sliced(engine, &tensors, single, usize::MAX)
-        .unwrap();
-    let first_rectangle_end = provider.decode_calls.load(Ordering::SeqCst);
-    provider.reset_decodes();
-    let (expected, _) = network
-        .execute_symmetric_sliced(engine, &tensors, multi.clone(), usize::MAX)
-        .unwrap();
+    let expected = multi.execute(engine, &tensors, &mut workspace).unwrap();
     let all_jobs_end = provider.decode_calls.load(Ordering::SeqCst);
-    assert!(first_rectangle_end > 0);
-    assert!(all_jobs_end > first_rectangle_end);
+    assert!(all_jobs_end > 0);
 
-    provider.arm_decode(first_rectangle_end + 1);
-    let error = network
-        .execute_symmetric_sliced(engine, &tensors, multi.clone(), usize::MAX)
-        .unwrap_err();
+    provider.arm_decode(all_jobs_end);
+    let error = multi.execute(engine, &tensors, &mut workspace).unwrap_err();
     assert!(matches!(
         error,
-        SymmetricSliceExecutionError::Tensor(GenericTensorError::Structure(
-            CheckedGenericStructureError::Provider(InjectedError::Decode)
+        GenericTensorError::Structure(CheckedGenericStructureError::Provider(
+            InjectedError::Decode
         ))
     ));
-    assert_eq!(
-        provider.decode_calls.load(Ordering::SeqCst),
-        first_rectangle_end + 1
-    );
+    assert_eq!(provider.decode_calls.load(Ordering::SeqCst), all_jobs_end);
 
     provider.reset_decodes();
-    let (recovered, _) = network
-        .execute_symmetric_sliced(engine, &tensors, multi, usize::MAX)
-        .unwrap();
+    let recovered = multi.execute(engine, &tensors, &mut workspace).unwrap();
     assert_eq!(
         recovered.dense_data().unwrap(),
         expected.dense_data().unwrap()

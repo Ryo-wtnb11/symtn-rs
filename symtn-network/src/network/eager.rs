@@ -124,6 +124,18 @@ where
         tensors: &[&TensorMap<R, D, Self>],
         contracts: bool,
     ) -> Result<(), FacadeError<R>>;
+
+    /// [`PlannedNetwork::execute`] of a sliced plan.
+    #[expect(
+        clippy::type_complexity,
+        reason = "sliced execution returns its tensor and measured statistics together"
+    )]
+    fn execute_sliced(
+        engine: &mut dyn symtn::typed::Engine,
+        planned: &PlannedNetwork,
+        tensors: &[&TensorMap<R, D, Self>],
+        payload_ceiling: usize,
+    ) -> Result<(TensorMap<R, D, Self>, SymmetricSliceStats), FacadeError<R>>;
 }
 
 impl<R, D> NetworkOperandStorage<R, D> for Vec<D>
@@ -138,6 +150,18 @@ where
         contracts: bool,
     ) -> Result<(), FacadeError<R>> {
         admit_network_braiding(tensors, contracts)
+    }
+
+    fn execute_sliced(
+        engine: &mut dyn symtn::typed::Engine,
+        planned: &PlannedNetwork,
+        tensors: &[&TensorMap<R, D>],
+        payload_ceiling: usize,
+    ) -> Result<(TensorMap<R, D>, SymmetricSliceStats), FacadeError<R>> {
+        let sliced = planned.sliced_execution();
+        sliced
+            .network
+            .execute_symmetric_sliced(engine, tensors, &sliced.plan, payload_ceiling)
     }
 }
 
@@ -159,6 +183,17 @@ where
         contracts: bool,
     ) -> Result<(), Error> {
         cuda_operand_admission(engine, tensors, contracts)
+    }
+
+    fn execute_sliced(
+        _engine: &mut dyn symtn::typed::Engine,
+        _planned: &PlannedNetwork,
+        _tensors: &[&TensorMap<R, D, Self>],
+        _payload_ceiling: usize,
+    ) -> Result<(TensorMap<R, D, Self>, SymmetricSliceStats), Error> {
+        Err(Error::UnsupportedOnDevice(
+            "sliced network execution has no device implementation".to_string(),
+        ))
     }
 }
 

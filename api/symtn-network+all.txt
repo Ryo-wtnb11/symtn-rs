@@ -339,40 +339,6 @@ impl core::fmt::Debug for symtn_network::SliceLabels
 pub fn symtn_network::SliceLabels::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for symtn_network::SliceLabels
 impl core::marker::StructuralPartialEq for symtn_network::SliceLabels
-pub enum symtn_network::SymmetricSliceExecutionError<E>
-pub symtn_network::SymmetricSliceExecutionError::Bind(symtn_network::SymmetricSliceLowerError<E>)
-pub symtn_network::SymmetricSliceExecutionError::Tensor(E)
-pub symtn_network::SymmetricSliceExecutionError::WorkspaceArithmeticOverflow
-pub symtn_network::SymmetricSliceExecutionError::WorkspaceLimitExceeded
-pub symtn_network::SymmetricSliceExecutionError::WorkspaceLimitExceeded::limit: usize
-pub symtn_network::SymmetricSliceExecutionError::WorkspaceLimitExceeded::required: usize
-impl<E: core::fmt::Debug> core::fmt::Debug for symtn_network::SymmetricSliceExecutionError<E>
-pub fn symtn_network::SymmetricSliceExecutionError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<E: core::fmt::Display> core::fmt::Display for symtn_network::SymmetricSliceExecutionError<E>
-pub fn symtn_network::SymmetricSliceExecutionError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<E> core::error::Error for symtn_network::SymmetricSliceExecutionError<E> where E: core::error::Error + 'static
-pub fn symtn_network::SymmetricSliceExecutionError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
-pub enum symtn_network::SymmetricSliceLowerError<E>
-pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch
-pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::actual: symtn_core::sector::SectorLeg
-pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::authority: symtn_network::TensorAxis
-pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::expected: symtn_core::sector::SectorLeg
-pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::label: symtn_network::TemporaryLabel
-pub symtn_network::SymmetricSliceLowerError::InvalidPlan(symtn_network::ContractError)
-pub symtn_network::SymmetricSliceLowerError::InvalidSlice(symtn_network::SliceError)
-pub symtn_network::SymmetricSliceLowerError::MissingAuthority
-pub symtn_network::SymmetricSliceLowerError::MissingAuthority::authority: symtn_network::TensorAxis
-pub symtn_network::SymmetricSliceLowerError::MissingAuthority::label: symtn_network::TemporaryLabel
-pub symtn_network::SymmetricSliceLowerError::RuleMismatch
-pub symtn_network::SymmetricSliceLowerError::RuleMismatch::actual: symtn_sectors::rule_identity::RuleIdentity
-pub symtn_network::SymmetricSliceLowerError::RuleMismatch::expected: symtn_sectors::rule_identity::RuleIdentity
-pub symtn_network::SymmetricSliceLowerError::Tensor(E)
-impl<E: core::fmt::Debug> core::fmt::Debug for symtn_network::SymmetricSliceLowerError<E>
-pub fn symtn_network::SymmetricSliceLowerError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<E: core::fmt::Display> core::fmt::Display for symtn_network::SymmetricSliceLowerError<E>
-pub fn symtn_network::SymmetricSliceLowerError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<E> core::error::Error for symtn_network::SymmetricSliceLowerError<E> where E: core::error::Error + 'static
-pub fn symtn_network::SymmetricSliceLowerError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 pub struct symtn_network::ActivePair
 impl symtn_network::ActivePair
 pub fn symtn_network::ActivePair::lhs_position(self) -> usize
@@ -416,6 +382,7 @@ pub fn symtn_network::ContractionPlan::fmt(&self, &mut core::fmt::Formatter<'_>)
 impl core::marker::StructuralPartialEq for symtn_network::ContractionPlan
 impl symtn_network::DenseContractionOptimizer for symtn_network::ContractionPlan
 pub fn symtn_network::ContractionPlan::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::ContractionPlan::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 pub struct symtn_network::ContractionStep
 impl symtn_network::ContractionStep
 pub fn symtn_network::ContractionStep::cost(&self) -> usize
@@ -480,6 +447,7 @@ pub fn symtn_network::CotengraPythonOptimizer::fmt(&self, &mut core::fmt::Format
 impl core::marker::StructuralPartialEq for symtn_network::CotengraPythonOptimizer
 impl symtn_network::DenseContractionOptimizer for symtn_network::CotengraPythonOptimizer
 pub fn symtn_network::CotengraPythonOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::CotengraPythonOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 pub struct symtn_network::DegeneracyRange
 impl symtn_network::DegeneracyRange
 pub fn symtn_network::DegeneracyRange::end(self) -> usize
@@ -563,6 +531,7 @@ impl core::marker::Copy for symtn_network::GreedyDenseOptimizer
 impl core::marker::StructuralPartialEq for symtn_network::GreedyDenseOptimizer
 impl symtn_network::DenseContractionOptimizer for symtn_network::GreedyDenseOptimizer
 pub fn symtn_network::GreedyDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::GreedyDenseOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 pub struct symtn_network::HyperEdge
 impl symtn_network::HyperEdge
 pub fn symtn_network::HyperEdge::is_output(&self) -> bool
@@ -610,15 +579,17 @@ pub fn symtn_network::LabelOrderDenseOptimizer::fmt(&self, &mut core::fmt::Forma
 impl core::marker::StructuralPartialEq for symtn_network::LabelOrderDenseOptimizer
 impl symtn_network::DenseContractionOptimizer for symtn_network::LabelOrderDenseOptimizer
 pub fn symtn_network::LabelOrderDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::LabelOrderDenseOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 pub struct symtn_network::Network
 impl symtn_network::Network
 pub fn symtn_network::Network::contract<T: symtn_network::NetworkOperand>(&self, &mut impl symtn::typed::exec_context::ExecContext + ?core::marker::Sized, &[&T]) -> core::result::Result<T, <T as symtn_network::NetworkOperand>::Error>
 impl symtn_network::Network
-pub fn symtn_network::Network::execute_symmetric_sliced<R, D>(&self, &mut impl symtn::typed::exec_context::ExecContext + ?core::marker::Sized, &[&symtn::typed::tensor_repr::TensorMap<R, D>], symtn_network::SymmetricSlicedPlan, usize) -> core::result::Result<(symtn::typed::tensor_repr::TensorMap<R, D>, symtn_network::SymmetricSliceStats), symtn_network::SymmetricSliceExecutionError<symtn::typed::dispatch::FacadeError<R>>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar
-pub fn symtn_network::Network::lower_symmetric_sliced_plan<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], symtn_network::SlicedPlan) -> core::result::Result<symtn_network::SymmetricSlicedPlan, symtn_network::SymmetricSliceLowerError<symtn::typed::dispatch::FacadeError<R>>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
 pub fn symtn_network::Network::new<I, L>(I, impl core::iter::traits::collect::IntoIterator<Item = bool>, impl core::iter::traits::collect::IntoIterator<Item = usize>, impl core::iter::traits::collect::IntoIterator<Item = L>, core::option::Option<usize>) -> core::result::Result<Self, symtn_network::ContractError> where I: core::iter::traits::collect::IntoIterator, <I as core::iter::traits::collect::IntoIterator>::Item: core::iter::traits::collect::IntoIterator<Item = L>, L: core::convert::Into<symtn_network::TemporaryLabel>
 pub fn symtn_network::Network::plan<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], &impl symtn_network::DenseContractionOptimizer + ?core::marker::Sized) -> core::result::Result<symtn_network::PlannedNetwork, symtn::typed::dispatch::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
 pub struct symtn_network::NetworkExecutionWorkspace<R, D, S> where S: symtn::typed::tensor_repr::NetworkPayloadStorage<D>
+impl<R, D, S> symtn_network::NetworkExecutionWorkspace<R, D, S> where S: symtn::typed::tensor_repr::NetworkPayloadStorage<D>
+pub fn symtn_network::NetworkExecutionWorkspace<R, D, S>::last_slice_stats(&self) -> core::option::Option<symtn_network::SymmetricSliceStats>
+pub fn symtn_network::NetworkExecutionWorkspace<R, D, S>::with_payload_ceiling(usize) -> Self
 impl<R, D, S> core::default::Default for symtn_network::NetworkExecutionWorkspace<R, D, S> where S: symtn::typed::tensor_repr::NetworkPayloadStorage<D>
 pub fn symtn_network::NetworkExecutionWorkspace<R, D, S>::default() -> Self
 pub struct symtn_network::NetworkIR
@@ -661,6 +632,7 @@ impl core::marker::Copy for symtn_network::OptEinsumPathOptimizer
 impl core::marker::StructuralPartialEq for symtn_network::OptEinsumPathOptimizer
 impl symtn_network::DenseContractionOptimizer for symtn_network::OptEinsumPathOptimizer
 pub fn symtn_network::OptEinsumPathOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::OptEinsumPathOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 pub struct symtn_network::PlanCacheConfig
 pub symtn_network::PlanCacheConfig::capacity: usize
 pub symtn_network::PlanCacheConfig::enabled: bool
@@ -707,6 +679,7 @@ impl symtn_network::PlannedNetwork
 pub fn symtn_network::PlannedNetwork::execute<R, D, S>(&self, &mut impl symtn::typed::exec_context::ExecContext + ?core::marker::Sized, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], &mut symtn_network::NetworkExecutionWorkspace<R, D, S>) -> core::result::Result<symtn::typed::tensor_repr::TensorMap<R, D, S>, symtn::typed::dispatch::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D, S>, D: symtn::typed::scalar::TensorScalar, S: symtn_network::network::eager::NetworkOperandStorage<R, D>
 impl symtn_network::PlannedNetwork
 pub fn symtn_network::PlannedNetwork::plan(&self) -> &symtn_network::ContractionPlan
+pub fn symtn_network::PlannedNetwork::slices(&self) -> core::option::Option<&symtn_network::SymmetricSlicePlan>
 pub struct symtn_network::SectorSlice
 impl symtn_network::SectorSlice
 pub fn symtn_network::SectorSlice::new(symtn_sectors::SectorId, symtn_network::DegeneracyRange) -> Self
@@ -762,6 +735,9 @@ pub fn symtn_network::SlicedPlan::eq(&self, &symtn_network::SlicedPlan) -> bool
 impl core::fmt::Debug for symtn_network::SlicedPlan
 pub fn symtn_network::SlicedPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for symtn_network::SlicedPlan
+impl symtn_network::DenseContractionOptimizer for symtn_network::SlicedPlan
+pub fn symtn_network::SlicedPlan::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::SlicedPlan::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 pub struct symtn_network::SymmetricIndexSlice
 impl symtn_network::SymmetricIndexSlice
 pub fn symtn_network::SymmetricIndexSlice::authority(&self) -> symtn_network::TensorAxis
@@ -831,20 +807,6 @@ impl core::fmt::Debug for symtn_network::SymmetricSliceStats
 pub fn symtn_network::SymmetricSliceStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for symtn_network::SymmetricSliceStats
 impl core::marker::StructuralPartialEq for symtn_network::SymmetricSliceStats
-pub struct symtn_network::SymmetricSlicedPlan
-impl symtn_network::SymmetricSlicedPlan
-pub fn symtn_network::SymmetricSlicedPlan::new(symtn_network::ContractionPlan, symtn_network::SymmetricSlicePlan) -> Self
-pub fn symtn_network::SymmetricSlicedPlan::plan(&self) -> &symtn_network::ContractionPlan
-pub fn symtn_network::SymmetricSlicedPlan::slices(&self) -> &symtn_network::SymmetricSlicePlan
-impl core::clone::Clone for symtn_network::SymmetricSlicedPlan
-pub fn symtn_network::SymmetricSlicedPlan::clone(&self) -> symtn_network::SymmetricSlicedPlan
-impl core::cmp::Eq for symtn_network::SymmetricSlicedPlan
-pub fn symtn_network::SymmetricSlicedPlan::assert_fields_are_eq(&self)
-impl core::cmp::PartialEq for symtn_network::SymmetricSlicedPlan
-pub fn symtn_network::SymmetricSlicedPlan::eq(&self, &symtn_network::SymmetricSlicedPlan) -> bool
-impl core::fmt::Debug for symtn_network::SymmetricSlicedPlan
-pub fn symtn_network::SymmetricSlicedPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for symtn_network::SymmetricSlicedPlan
 pub struct symtn_network::TemporaryLabel(_)
 impl symtn_network::TemporaryLabel
 pub fn symtn_network::TemporaryLabel::as_str(&self) -> &str
@@ -929,16 +891,25 @@ pub const symtn_network::DEFAULT_REPLAN_DRIFT_FACTOR: f64
 pub const symtn_network::DEFAULT_WORKSPACE_BUDGET_BYTES: usize
 pub trait symtn_network::DenseContractionOptimizer
 pub fn symtn_network::DenseContractionOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::DenseContractionOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 impl symtn_network::DenseContractionOptimizer for symtn_network::ContractionPlan
 pub fn symtn_network::ContractionPlan::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::ContractionPlan::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 impl symtn_network::DenseContractionOptimizer for symtn_network::CotengraPythonOptimizer
 pub fn symtn_network::CotengraPythonOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::CotengraPythonOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 impl symtn_network::DenseContractionOptimizer for symtn_network::GreedyDenseOptimizer
 pub fn symtn_network::GreedyDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::GreedyDenseOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 impl symtn_network::DenseContractionOptimizer for symtn_network::LabelOrderDenseOptimizer
 pub fn symtn_network::LabelOrderDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::LabelOrderDenseOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 impl symtn_network::DenseContractionOptimizer for symtn_network::OptEinsumPathOptimizer
 pub fn symtn_network::OptEinsumPathOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::OptEinsumPathOptimizer::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
+impl symtn_network::DenseContractionOptimizer for symtn_network::SlicedPlan
+pub fn symtn_network::SlicedPlan::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::SlicedPlan::sliced_plan(&self) -> core::option::Option<&symtn_network::SlicedPlan>
 pub trait symtn_network::NetworkOperand: symtn_network::network::eager::network_operand_sealed::Sealed + core::marker::Sized
 pub type symtn_network::NetworkOperand::Error
 pub fn symtn_network::NetworkOperand::__contract_operand(&self) -> &Self

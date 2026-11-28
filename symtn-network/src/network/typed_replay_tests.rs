@@ -14,6 +14,43 @@ use super::*;
 use crate::optimizer::ContractionStep;
 use crate::{plan_cache_stats, GreedyDenseOptimizer, Optimizer};
 
+/// The sliced path of [`PlannedNetwork::execute`] with its measured stats.
+fn execute_sliced<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    planned: &PlannedNetwork,
+    tensors: &[&TensorMap<R, D>],
+    payload_ceiling: usize,
+) -> std::result::Result<(TensorMap<R, D>, SymmetricSliceStats), FacadeError<R>>
+where
+    R: TypedSectorAdmission,
+    R::Mode: NetworkModeDispatch<R, D>,
+    D: TensorScalar + Send + Sync + 'static,
+{
+    let mut workspace = NetworkExecutionWorkspace::with_payload_ceiling(payload_ceiling);
+    let result = planned.execute(engine, tensors, &mut workspace)?;
+    Ok((result, workspace.last_slice_stats().expect("a sliced plan")))
+}
+
+/// A sliced plan over hand-built slices, which no public planner produces.
+fn hand_sliced<R, D>(
+    network: &Network,
+    tensors: &[&TensorMap<R, D>],
+    plan: ContractionPlan,
+    slices: SymmetricSlicePlan,
+) -> PlannedNetwork
+where
+    R: TypedSectorAdmission,
+    R::Mode: NetworkModeDispatch<R, D>,
+    D: TensorScalar,
+{
+    let mut planned = network.plan_with(tensors, plan.clone()).unwrap();
+    planned.sliced = Some(Box::new(SlicedExecution {
+        network: network.copy_topology(),
+        plan: SymmetricSlicedPlan::new(plan, slices),
+    }));
+    planned
+}
+
 fn label(name: &str) -> TemporaryLabel {
     TemporaryLabel::from(name)
 }
@@ -313,14 +350,12 @@ fn symmetric_slice_binding_checks_adjoint_orientation_leg_and_rule() {
             &[label("x")],
         ),
     );
-    let valid = network
-        .lower_symmetric_sliced_plan(&[&tensor], dense)
-        .unwrap();
+    let valid = network.plan(&[&tensor], &dense).unwrap();
     network
-        .bind_symmetric_sliced_plan(&[&tensor], valid.clone())
+        .bind_symmetric_sliced_plan(&[&tensor], valid.sliced_execution().plan.clone())
         .unwrap();
 
-    let index = &valid.slices().indices()[0];
+    let index = &valid.slices().unwrap().indices()[0];
     assert_eq!(
         index.authority_leg().sectors(),
         &[U1Irrep::new(-1).unwrap().into()]
@@ -426,20 +461,14 @@ fn internal_symmetric_slices_match_unsliced_multisector_and_meter_cold_warm() {
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("x"), label("y")]),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
-    assert_eq!(sliced.slices().nslices(), 16);
+    let sliced = network.plan(&tensors, &dense).unwrap();
+    assert_eq!(sliced.slices().unwrap().nslices(), 16);
 
     let ((cold, cold_stats), snapshot_calls) = intermediate_payload_snapshot_calls(|| {
-        network
-            .execute_symmetric_sliced(engine, &tensors, sliced.clone(), usize::MAX)
-            .unwrap()
+        execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap()
     });
     assert!(snapshot_calls > 0);
-    let (warm, warm_stats) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced.clone(), usize::MAX)
-        .unwrap();
+    let (warm, warm_stats) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
     for actual in [&cold, &warm] {
         assert_eq!(actual.subblock_count(), expected.subblock_count());
         for index in 0..actual.subblock_count() {
@@ -460,30 +489,18 @@ fn internal_symmetric_slices_match_unsliced_multisector_and_meter_cold_warm() {
             .unwrap()
     );
     assert!(cold_stats.peak_workspace_bytes() > 0);
-    network
-        .execute_symmetric_sliced(
-            engine,
-            &tensors,
-            sliced.clone(),
-            cold_stats.peak_total_bytes(),
-        )
-        .unwrap();
+    execute_sliced(engine, &sliced, &tensors, cold_stats.peak_total_bytes()).unwrap();
     assert!(matches!(
-        network.execute_symmetric_sliced(
-            engine,
-            &tensors,
-            sliced.clone(),
-            cold_stats.peak_total_bytes() - 1,
-        ),
-        Err(SymmetricSliceExecutionError::WorkspaceLimitExceeded { .. })
+        execute_sliced(engine, &sliced, &tensors, cold_stats.peak_total_bytes() - 1),
+        Err(Error::WorkspaceLimitExceeded { .. })
     ));
 
     let mut saw_late_limit = false;
     for ceiling in 0..cold_stats.peak_total_bytes() {
         let jobs = crate::probe::record();
         if matches!(
-            network.execute_symmetric_sliced(engine, &tensors, sliced.clone(), ceiling),
-            Err(SymmetricSliceExecutionError::WorkspaceLimitExceeded { .. })
+            execute_sliced(engine, &sliced, &tensors, ceiling),
+            Err(Error::WorkspaceLimitExceeded { .. })
         ) && jobs.get(crate::probe::Event::SliceJobCompleted) > 0
         {
             saw_late_limit = true;
@@ -542,12 +559,8 @@ fn output_and_mixed_slices_scatter_by_output_position() {
             planned.plan().clone(),
             crate::slice_plan_for(&ir, planned.plan(), &cost, &sliced_labels),
         );
-        let sliced = network
-            .lower_symmetric_sliced_plan(&tensors, dense)
-            .unwrap();
-        let (actual, stats) = network
-            .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-            .unwrap();
+        let sliced = network.plan(&tensors, &dense).unwrap();
+        let (actual, stats) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
         assert_eq!(actual.codomain(), expected.codomain());
         assert_eq!(actual.domain(), expected.domain());
         assert_eq!(actual.subblock_count(), expected.subblock_count());
@@ -618,14 +631,10 @@ fn mixed_output_slice_keeps_structural_zero_jobs() {
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("a"), label("x")]),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
+    let sliced = network.plan(&tensors, &dense).unwrap();
     // Two of the four Cartesian (a,x) sector jobs have no lhs block.
-    assert_eq!(sliced.slices().nslices(), 4);
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-        .unwrap();
+    assert_eq!(sliced.slices().unwrap().nslices(), 4);
+    let (actual, _) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert_eq!(actual.subblock_count(), expected.subblock_count());
 }
@@ -687,11 +696,9 @@ fn greedy_output_slice_plan_executes_end_to_end() {
     assert!(decision.has_output_slices());
     assert!(decision.sliced_width() <= 6);
     let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, SlicedPlan::new(planned.plan().clone(), decision))
+        .plan(&tensors, &SlicedPlan::new(planned.plan().clone(), decision))
         .unwrap();
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-        .unwrap();
+    let (actual, _) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert_eq!(actual.codomain(), expected.codomain());
     assert_eq!(actual.domain(), expected.domain());
@@ -782,10 +789,8 @@ fn mixed_slice_accumulator_uses_final_contraction_authority() {
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("c"), label("x")]),
     );
-    let sliced = network.lower_symmetric_sliced_plan(&refs, dense).unwrap();
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &refs, sliced, usize::MAX)
-        .unwrap();
+    let sliced = network.plan(&refs, &dense).unwrap();
+    let (actual, _) = execute_sliced(engine, &sliced, &refs, usize::MAX).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert!(std::ptr::eq(actual.provider(), providers[1].as_ref()));
     assert!(!std::ptr::eq(actual.provider(), providers[0].as_ref()));
@@ -847,14 +852,13 @@ fn mixed_symmetric_slice_legal_empty_returns_unsliced_zero_layout() {
     )
     .unwrap();
     assert_eq!(slices.nslices(), 0);
-    let (actual, stats) = network
-        .execute_symmetric_sliced(
-            engine,
-            &tensors,
-            SymmetricSlicedPlan::new(planned.plan().clone(), slices),
-            usize::MAX,
-        )
-        .unwrap();
+    let (actual, stats) = execute_sliced(
+        engine,
+        &hand_sliced(&network, &tensors, planned.plan().clone(), slices),
+        &tensors,
+        usize::MAX,
+    )
+    .unwrap();
     assert_eq!(actual.subblock_count(), expected.subblock_count());
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert_eq!(
@@ -907,17 +911,13 @@ fn internal_slice_maps_nonselfdual_partner_from_authority_leg() {
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("x")]),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
-    let authority = &sliced.slices().indices()[0];
+    let sliced = network.plan(&tensors, &dense).unwrap();
+    let authority = &sliced.slices().unwrap().indices()[0];
     assert_eq!(
         authority.authority_leg().sectors(),
         &[U1Irrep::new(-1).unwrap().into()]
     );
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-        .unwrap();
+    let (actual, _) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
 }
 
@@ -950,18 +950,14 @@ fn output_slice_scatter_uses_domain_side_nonselfdual_logical_leg() {
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("b")]),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&[&tensor], dense)
-        .unwrap();
-    let index = &sliced.slices().indices()[0];
+    let sliced = network.plan(&[&tensor], &dense).unwrap();
+    let index = &sliced.slices().unwrap().indices()[0];
     assert_eq!(index.output_position(), Some(1));
     assert_eq!(
         index.authority_leg().sectors(),
         &[U1Irrep::new(-1).unwrap().into()]
     );
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &[&tensor], sliced, usize::MAX)
-        .unwrap();
+    let (actual, _) = execute_sliced(engine, &sliced, &[&tensor], usize::MAX).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert_eq!(actual.codomain(), expected.codomain());
     assert_eq!(actual.domain(), expected.domain());
@@ -1000,13 +996,12 @@ fn zero_step_conjugated_output_slice_scatter_reads_lazy_adjoint() {
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("q")]),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
-    assert_eq!(sliced.slices().indices()[0].output_position(), Some(0));
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-        .unwrap();
+    let sliced = network.plan(&tensors, &dense).unwrap();
+    assert_eq!(
+        sliced.slices().unwrap().indices()[0].output_position(),
+        Some(0)
+    );
+    let (actual, _) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
     let expected = (0..2)
         .flat_map(|column| {
             (0..3).map(move |row| {
@@ -1064,23 +1059,28 @@ fn compact_input_preflight_applies_to_output_slices() {
     )
     .unwrap();
     assert!(matches!(
-        network.execute_symmetric_sliced(
+        execute_sliced(
             engine,
+            &hand_sliced(&network, &[&compact], plan, slices),
             &[&compact],
-            SymmetricSlicedPlan::new(plan, slices),
-            usize::MAX,
+            usize::MAX
         ),
-        Err(SymmetricSliceExecutionError::Tensor(_))
+        Err(Error::Unsupported { .. })
     ));
     let empty = SymmetricSlicePlan::try_new(&ir, U1FusionRule.rule_identity(), Vec::new()).unwrap();
     assert!(matches!(
-        network.execute_symmetric_sliced(
+        execute_sliced(
             engine,
+            &hand_sliced(
+                &network,
+                &[&compact],
+                ContractionPlan::from_steps(&ir, Vec::new()).unwrap(),
+                empty
+            ),
             &[&compact],
-            SymmetricSlicedPlan::new(ContractionPlan::from_steps(&ir, Vec::new()).unwrap(), empty,),
-            usize::MAX,
+            usize::MAX
         ),
-        Err(SymmetricSliceExecutionError::Tensor(_))
+        Err(Error::Unsupported { .. })
     ));
 }
 
@@ -1127,12 +1127,8 @@ where
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("a"), label("x")]),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-        .unwrap();
+    let sliced = network.plan(&tensors, &dense).unwrap();
+    let (actual, _) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
 }
 
@@ -1197,12 +1193,8 @@ fn fermionic_complex_conjugated_operand_mixed_slice_matches_unsliced() {
         planned.plan().clone(),
         crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("a"), label("x")]),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
-    let (actual, _) = network
-        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
-        .unwrap();
+    let sliced = network.plan(&tensors, &dense).unwrap();
+    let (actual, _) = execute_sliced(engine, &sliced, &tensors, usize::MAX).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert!(actual
         .dense_data()
@@ -1253,6 +1245,7 @@ fn crossed_plan() -> PlannedNetwork {
         conj: vec![false; 3],
         input_codomain_ranks: vec![1; 3],
         schedule,
+        sliced: None,
     }
 }
 

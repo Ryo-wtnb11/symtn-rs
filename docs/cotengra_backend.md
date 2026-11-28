@@ -39,9 +39,11 @@ see [`plancache/config.rs`](../symtn-network/src/plancache/config.rs).
 - Request transfer and search share a five-minute deadline by default.
   `.timeout(duration)` changes it; `.without_timeout()` explicitly disables
   it. On expiry, symtn terminates and reaps the process group.
-- Slicing requires explicit sliced-plan search, lowering and Host dense
-  execution. `Network::contract` uses path-only planning and does not
-  automatically execute slices.
+- Slicing is explicit: `CotengraPythonOptimizer::optimize_sliced` returns a
+  `SlicedPlan`, `Network::plan(&tensors, &sliced)` lowers it, and
+  `PlannedNetwork::execute` runs the slices on dense Host operands under the
+  workspace's payload ceiling. `Network::contract` uses path-only planning
+  and does not execute slices.
 - On Windows, `command-group` can fail after creating a suspended child but
   before returning its handle. Cleanup guarantees start after successful
   group creation; the dependency exposes no child handle for that error path.

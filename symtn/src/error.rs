@@ -98,6 +98,15 @@ pub enum Error {
         /// The explicit operation that makes the input consumable.
         alternative: Alternative,
     },
+    /// A metered execution observed more payload bytes than the ceiling its
+    /// caller set. `required` saturates at `usize::MAX` when the byte count
+    /// overflows.
+    WorkspaceLimitExceeded {
+        /// The caller's byte ceiling.
+        limit: usize,
+        /// The observed payload bytes.
+        required: usize,
+    },
 }
 
 /// The explicit remedy an [`Error::Unsupported`] names. Its `Display` is the
@@ -159,6 +168,10 @@ impl fmt::Display for Error {
             } => write!(
                 f,
                 "{operation} cannot consume this input without copying it; call `{alternative}` on it first"
+            ),
+            Self::WorkspaceLimitExceeded { limit, required } => write!(
+                f,
+                "observed {required} payload bytes, the workspace ceiling is {limit}"
             ),
         }
     }

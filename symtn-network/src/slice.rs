@@ -227,25 +227,24 @@ pub struct SymmetricSlicePlan {
 
 /// An unbound, bindable contraction order paired with symmetric slicing.
 ///
-/// This coefficient-free value is reconstructable without its planner, but is
-/// not tensor-proven or executable. It must be bound against actual typed
-/// tensors before execution.
+/// This coefficient-free value is not tensor-proven: every execution binds it
+/// against the actual typed tensors first.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SymmetricSlicedPlan {
+pub(crate) struct SymmetricSlicedPlan {
     plan: ContractionPlan,
     slices: SymmetricSlicePlan,
 }
 
 impl SymmetricSlicedPlan {
-    pub fn new(plan: ContractionPlan, slices: SymmetricSlicePlan) -> Self {
+    pub(crate) fn new(plan: ContractionPlan, slices: SymmetricSlicePlan) -> Self {
         Self { plan, slices }
     }
 
-    pub fn plan(&self) -> &ContractionPlan {
+    pub(crate) fn plan(&self) -> &ContractionPlan {
         &self.plan
     }
 
-    pub fn slices(&self) -> &SymmetricSlicePlan {
+    pub(crate) fn slices(&self) -> &SymmetricSlicePlan {
         &self.slices
     }
 }
@@ -920,8 +919,9 @@ const END_SLICE: &str = "END_SLICE_PLAN";
 ///
 /// This is a pure-structure type (order + slicing decision + serialization): it
 /// holds no tensor data and is produced by the path/slice search (the built-in
-/// [`greedy_slice`] or the optional cotengra backend). It has no executor;
-/// sliced execution runs a lowered [`SymmetricSlicedPlan`].
+/// [`greedy_slice`] or the optional cotengra backend). Pass it to
+/// [`crate::Network::plan`] as the optimizer: the planned network lowers the
+/// slicing against the tensors and [`crate::PlannedNetwork::execute`] runs it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SlicedPlan {
     plan: ContractionPlan,

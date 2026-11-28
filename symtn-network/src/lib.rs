@@ -33,9 +33,10 @@
 //!   while keeping execution in Rust. The optional `opt-path` feature wraps
 //!   the `opt-einsum-path` crate for optimal / dp / branch-and-bound searches.
 //! - **Sliced execution**: the slicing *decision* types ([`SlicePlan`],
-//!   [`greedy_slice`]) choose the sliced labels, and [`Network::lower_symmetric_sliced_plan`]
-//!   with [`Network::execute_symmetric_sliced`] runs a lowered plan under a
-//!   measured payload ceiling.
+//!   [`greedy_slice`]) choose the sliced labels; [`Network::plan`] given a
+//!   [`SlicedPlan`] lowers them, and [`PlannedNetwork::execute`] runs the
+//!   slices under the workspace's payload ceiling
+//!   ([`NetworkExecutionWorkspace::with_payload_ceiling`]).
 
 #[cfg(test)]
 #[path = "../../tests/support/su2.rs"]
@@ -70,10 +71,7 @@ mod tree;
 pub use cost::{DenseCostModel, DenseTensorInfo};
 #[cfg(feature = "cotengra-python")]
 pub use cotengra_python::CotengraPythonOptimizer;
-pub use error::{
-    ContractError, Result, SliceError, SliceResult, SymmetricSliceExecutionError,
-    SymmetricSliceLowerError,
-};
+pub use error::{ContractError, Result, SliceError, SliceResult};
 pub use ir::{HyperEdge, NetworkIR, TensorNode};
 pub use labels::{LabelOccurrence, TemporaryLabel, TensorAxis, TensorId};
 pub use network::{
@@ -99,7 +97,7 @@ pub use plancache::{
 };
 pub use slice::{
     greedy_slice, slice_plan_for, DegeneracyRange, SectorSlice, SliceKind, SliceLabels, SlicePlan,
-    SlicedPlan, SymmetricIndexSlice, SymmetricSlicePlan, SymmetricSliceSpec, SymmetricSlicedPlan,
+    SlicedPlan, SymmetricIndexSlice, SymmetricSlicePlan, SymmetricSliceSpec,
 };
 pub use tree::ContractionTree;
 

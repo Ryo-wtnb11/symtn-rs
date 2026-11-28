@@ -168,9 +168,7 @@ fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
         planned.plan().clone(),
         slice_plan_for(&ir, planned.plan(), &cost, &labels(&["a"])),
     );
-    let sliced = network
-        .lower_symmetric_sliced_plan(&tensors, dense)
-        .unwrap();
+    let sliced = network.plan(&tensors, &dense).unwrap();
 
     let (contract_count, contract) = allocations(|| {
         lhs.contract(
@@ -199,19 +197,11 @@ fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
     );
 
     let (count, error) = allocations(|| {
-        network
-            .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
+        sliced
+            .execute(engine, &tensors, &mut NetworkExecutionWorkspace::default())
             .map(drop)
     });
-    let error = error.unwrap_err();
-    assert!(
-        matches!(
-            &error,
-            symtn_network::SymmetricSliceExecutionError::Tensor(inner)
-                if inner.to_string() == contract
-        ),
-        "{error:?}"
-    );
+    assert_eq!(error.unwrap_err().to_string(), contract, "sliced");
     assert!(
         count <= contract_count,
         "sliced: {count} > {contract_count}"

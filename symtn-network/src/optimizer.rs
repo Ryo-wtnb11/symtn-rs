@@ -145,6 +145,29 @@ fn greedy_order(ir: &NetworkIR, cost_model: &DenseCostModel) -> Result<Vec<Contr
 pub trait DenseContractionOptimizer {
     fn optimize(&self, ir: &NetworkIR, cost_model: &DenseCostModel)
         -> Result<Vec<ContractionStep>>;
+
+    /// The slicing [`crate::Network::plan`] lowers into the planned network,
+    /// or `None` for an unsliced order (the default).
+    fn sliced_plan(&self) -> Option<&crate::SlicedPlan> {
+        None
+    }
+}
+
+/// An already chosen order with its slicing decision: the order is checked
+/// like a [`crate::ContractionPlan`], and the slicing is lowered by
+/// [`crate::Network::plan`].
+impl DenseContractionOptimizer for crate::SlicedPlan {
+    fn optimize(
+        &self,
+        ir: &NetworkIR,
+        cost_model: &DenseCostModel,
+    ) -> Result<Vec<ContractionStep>> {
+        DenseContractionOptimizer::optimize(self.plan(), ir, cost_model)
+    }
+
+    fn sliced_plan(&self) -> Option<&crate::SlicedPlan> {
+        Some(self)
+    }
 }
 
 /// An already chosen order: its steps, checked against the network.

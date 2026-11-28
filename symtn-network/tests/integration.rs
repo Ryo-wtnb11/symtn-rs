@@ -17,7 +17,6 @@ mod network_support;
 mod numerics;
 
 mod contract_macro;
-mod error_chain;
 mod itebd_smoke;
 mod mf_provider_conformance;
 mod network_construction_errors;

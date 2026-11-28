@@ -165,8 +165,8 @@ impl CotengraPythonOptimizer {
     }
 
     /// Search a cotengra path and, if configured, cotengra slicing decision,
-    /// then package both as a symtn [`SlicedPlan`]. This is planner-only: symtn's
-    /// ordinary tensor executor does not execute the slices yet.
+    /// then package both as a symtn [`SlicedPlan`], which
+    /// [`crate::Network::plan`] accepts as its optimizer.
     pub fn optimize_sliced(
         &self,
         ir: &NetworkIR,

@@ -366,6 +366,9 @@ pub symtn::typed::Error::UnsupportedBatchMember::representation: symtn::typed::P
 pub symtn::typed::Error::UnsupportedDestination
 pub symtn::typed::Error::UnsupportedDestination::representation: symtn::typed::PayloadRepresentation
 pub symtn::typed::Error::UnsupportedOnDevice(alloc::string::String)
+pub symtn::typed::Error::WorkspaceLimitExceeded
+pub symtn::typed::Error::WorkspaceLimitExceeded::limit: usize
+pub symtn::typed::Error::WorkspaceLimitExceeded::required: usize
 impl core::clone::Clone for symtn::typed::Error
 pub fn symtn::typed::Error::clone(&self) -> symtn::typed::Error
 impl core::cmp::PartialEq for symtn::typed::Error

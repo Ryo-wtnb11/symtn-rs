@@ -47,22 +47,19 @@ fn common_lowering_is_unchanged_by_a_dense_plan_text_roundtrip() {
     let network =
         Network::new(vec![labels.clone()], vec![false], vec![3], labels, Some(3)).unwrap();
 
-    let lowered = network
-        .lower_symmetric_sliced_plan(&[&tensor], dense.clone())
-        .unwrap();
+    let lowered = network.plan(&[&tensor], &dense).unwrap();
     let restored = SlicedPlan::from_text(&dense.to_text()).unwrap();
-    let reconstructed = network
-        .lower_symmetric_sliced_plan(&[&tensor], restored)
-        .unwrap();
+    let reconstructed = network.plan(&[&tensor], &restored).unwrap();
 
-    assert_eq!(lowered, reconstructed);
-    assert_eq!(lowered.slices().nslices(), 9);
-    let first = lowered.slices().indices()[0].pieces();
+    let lowered = lowered.slices().unwrap();
+    assert_eq!(Some(lowered), reconstructed.slices());
+    assert_eq!(lowered.nslices(), 9);
+    let first = lowered.indices()[0].pieces();
     assert_eq!((first[0].range().start(), first[0].range().end()), (0, 1));
     assert_eq!((first[1].range().start(), first[1].range().end()), (1, 2));
     let q1 = SectorId::from(U1Irrep::new(1).unwrap());
     let q0 = SectorId::from(U1Irrep::new(0).unwrap());
-    assert!(lowered.slices().combinations().any(|combination| {
+    assert!(lowered.combinations().any(|combination| {
         combination
             .iter()
             .map(|piece| piece.sector())
@@ -132,12 +129,10 @@ fn reconstruction_preserves_two_step_order_and_output_metadata() {
     let network = Network::new(inputs, vec![false; 3], vec![1; 3], output, Some(1)).unwrap();
     let refs = [&tensors[0], &tensors[1], &tensors[2]];
 
-    let original = network.lower_symmetric_sliced_plan(&refs, dense).unwrap();
-    let reconstructed = network
-        .lower_symmetric_sliced_plan(&refs, restored)
-        .unwrap();
+    let original = network.plan(&refs, &dense).unwrap();
+    let reconstructed = network.plan(&refs, &restored).unwrap();
 
-    assert_eq!(reconstructed, original);
+    assert_eq!(reconstructed.slices(), original.slices());
     assert_eq!(reconstructed.plan(), &order);
     assert_eq!(reconstructed.plan().steps(), order.steps());
     assert_eq!(

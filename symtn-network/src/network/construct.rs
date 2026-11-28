@@ -1,6 +1,5 @@
 use super::*;
 use crate::ContractError;
-use symtn::typed::ExecContext;
 
 struct LoweredTypedNetwork<R> {
     ir: NetworkIR,
@@ -131,12 +130,17 @@ impl Network {
     ///
     /// `optimizer` searches the order; a [`ContractionPlan`] passed here is
     /// an already chosen order and is checked against the network instead.
+    /// A [`SlicedPlan`] is a chosen order with a slicing decision: its labels
+    /// are lowered against these tensors' sector legs into the symmetric
+    /// slices [`PlannedNetwork::execute`] runs one at a time
+    /// ([`PlannedNetwork::slices`]).
     ///
     /// # Errors
     ///
     /// An invalid-argument error when a given [`ContractionPlan`] does not
-    /// describe this network: its tensor count, output labels, or step
-    /// result labels differ from the lowered inputs.
+    /// describe this network (its tensor count, output labels, or step
+    /// result labels differ from the lowered inputs), or when a
+    /// [`SlicedPlan`]'s slicing does not lower against these tensors.
     pub fn plan<R, D, S>(
         &self,
         tensors: &[&TensorMap<R, D, S>],
@@ -148,9 +152,31 @@ impl Network {
         D: TensorScalar,
         S: TensorStorage<D>,
     {
-        self.plan_searched(tensors, |ir, cost| {
+        let mut planned = self.plan_searched(tensors, |ir, cost| {
             ContractionPlan::from_steps(ir, optimizer.optimize(ir, cost)?)
-        })
+        })?;
+        if let Some(sliced) = optimizer.sliced_plan() {
+            let plan = self
+                .lower_symmetric_sliced_plan(tensors, sliced.clone())
+                .map_err(fold_lower_error)?;
+            planned.sliced = Some(Box::new(SlicedExecution {
+                network: self.copy_topology(),
+                plan,
+            }));
+        }
+        Ok(planned)
+    }
+
+    pub(super) fn copy_topology(&self) -> Self {
+        Self {
+            inputs: self.inputs.clone(),
+            conj: self.conj.clone(),
+            codomain_splits: self.codomain_splits.clone(),
+            output: self.output.clone(),
+            output_codomain_rank: self.output_codomain_rank,
+            contracted: self.contracted.clone(),
+            topology_hash: self.topology_hash,
+        }
     }
 
     #[cfg(feature = "opt-path")]
@@ -226,12 +252,10 @@ impl Network {
         self.finish_typed_plan(tensors, ir, plan)
     }
 
-    /// Lowers planner-selected labels into a reconstructable coefficient-free plan.
-    ///
-    /// The result is unbound: it records self-consistent authority-leg snapshots
-    /// but does not prove tensor provenance. [`Self::execute_symmetric_sliced`] binds
-    /// it again against the actual typed tensors before execution.
-    pub fn lower_symmetric_sliced_plan<R, D, S>(
+    /// Lowers planner-selected labels into a coefficient-free plan. The result
+    /// records self-consistent authority-leg snapshots but does not prove
+    /// tensor provenance: every sliced execution binds it again.
+    fn lower_symmetric_sliced_plan<R, D, S>(
         &self,
         tensors: &[&TensorMap<R, D, S>],
         sliced: SlicedPlan,
@@ -363,61 +387,14 @@ impl Network {
         })
     }
 
-    /// Executes coefficient-free symmetric slices just in time and returns the
-    /// result with named network-owned payload statistics.
-    ///
-    /// Counted payloads are compact sliced inputs, live planned contraction
-    /// and permutation destinations, the current partial, the private
-    /// accumulator, and path-owned dense buffers. Small metadata, external
-    /// backend scratch, and the eager contraction scratch the caller's CPU
-    /// engine keeps ([`symtn::scratch`]) are excluded. The latter includes
-    /// the output-sized `copyC` temporary used by
-    /// split-moving and in-split reorder contractions, so
-    /// [`SymmetricSliceStats::peak_total_bytes`] can be below the process peak
-    /// by that temporary's capacity. The ceiling is checked against observed
-    /// payloads after each tensor kernel returns and before publication; it is
-    /// not an allocator reservation or an out-of-memory prevention guarantee.
-    /// At every observation, total payload is checked as the full destination
-    /// bytes plus non-destination workspace bytes. A successful return proves
-    /// that [`SymmetricSliceStats::peak_total_bytes`] did not exceed the total
-    /// ceiling.
-    #[expect(
-        clippy::type_complexity,
-        reason = "the public sliced execution API returns its tensor and measured statistics together"
-    )]
-    pub fn execute_symmetric_sliced<R, D>(
-        &self,
-        cx: &mut (impl ExecContext + ?Sized),
-        tensors: &[&TensorMap<R, D>],
-        plan: SymmetricSlicedPlan,
-        measured_payload_ceiling: usize,
-    ) -> std::result::Result<
-        (TensorMap<R, D>, SymmetricSliceStats),
-        SymmetricSliceExecutionError<FacadeError<R>>,
-    >
-    where
-        R: TypedSectorAdmission,
-        R::Mode: NetworkModeDispatch<R, D>,
-        D: TensorScalar,
-    {
-        let engine = cx.engine();
-        self.execute_symmetric_sliced_impl(engine, tensors, plan, measured_payload_ceiling)
-    }
-
-    #[expect(
-        clippy::type_complexity,
-        reason = "the public sliced execution API returns its tensor and measured statistics together"
-    )]
-    fn execute_symmetric_sliced_impl<R, D>(
+    /// The sliced half of [`PlannedNetwork::execute`] on dense Host payloads.
+    pub(crate) fn execute_symmetric_sliced<R, D>(
         &self,
         engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D>],
-        plan: SymmetricSlicedPlan,
+        plan: &SymmetricSlicedPlan,
         measured_payload_ceiling: usize,
-    ) -> std::result::Result<
-        (TensorMap<R, D>, SymmetricSliceStats),
-        SymmetricSliceExecutionError<FacadeError<R>>,
-    >
+    ) -> Result<(TensorMap<R, D>, SymmetricSliceStats), FacadeError<R>>
     where
         R: TypedSectorAdmission,
         R::Mode: NetworkModeDispatch<R, D>,
@@ -431,19 +408,18 @@ impl Network {
             .iter()
             .any(|tensor| __network::network_has_compact_payload(tensor))
         {
-            return Err(SymmetricSliceExecutionError::Tensor(
-                invalid("symmetric sliced execution requires dense Host payloads").into(),
-            ));
+            return Err(Error::Unsupported {
+                operation: "sliced network execution",
+                alternative: symtn::typed::Alternative::Materialize,
+            }
+            .into());
         }
-        admit_network_braiding(tensors, self.inputs.len() > 1)
-            .map_err(SymmetricSliceExecutionError::Tensor)?;
+        admit_network_braiding(tensors, self.inputs.len() > 1)?;
 
         let bound = self
-            .bind_symmetric_sliced_plan(tensors, plan)
-            .map_err(SymmetricSliceExecutionError::Bind)?;
-        let planned = self
-            .plan_with(tensors, bound.plan.plan().clone())
-            .map_err(SymmetricSliceExecutionError::Tensor)?;
+            .bind_symmetric_sliced_plan(tensors, plan.clone())
+            .map_err(fold_lower_error)?;
+        let planned = self.plan_with(tensors, bound.plan.plan().clone())?;
         let mut workspace = NetworkExecutionWorkspace::default();
         let (codomain, domain) = bound.output_effective.split_at(bound.output_codomain_rank);
         let authority_input_slot = planned
@@ -455,14 +431,13 @@ impl Network {
             tensors[authority_input_slot],
             codomain,
             domain,
-        )
-        .map_err(SymmetricSliceExecutionError::Tensor)?;
-        let mut meter =
-            PayloadMeter::new(measured_payload_ceiling, &accumulator).map_err(map_payload_error)?;
+        )?;
+        let mut meter = PayloadMeter::new(measured_payload_ceiling, &accumulator)
+            .map_err(map_payload_error::<FacadeError<R>>)?;
         if bound.plan.slices().nslices() == 0 {
             meter
                 .observe::<R, D, Vec<D>>(&[], &[], &[])
-                .map_err(map_payload_error)?;
+                .map_err(map_payload_error::<FacadeError<R>>)?;
             return Ok((accumulator, meter.stats()));
         }
 
@@ -501,14 +476,11 @@ impl Network {
                         }
                     })
                     .collect::<Vec<_>>();
-                owned.push(
-                    __network::network_restrict_degeneracies(
-                        tensor,
-                        self.conj[operand],
-                        &restrictions,
-                    )
-                    .map_err(SymmetricSliceExecutionError::Tensor)?,
-                );
+                owned.push(__network::network_restrict_degeneracies(
+                    tensor,
+                    self.conj[operand],
+                    &restrictions,
+                )?);
             }
             let compact_inputs = owned
                 .iter()
@@ -518,7 +490,7 @@ impl Network {
             let payloads = intermediate_payloads(&workspace.intermediates);
             meter
                 .observe(&workspace.slots, &workspace.producers, &payloads)
-                .map_err(map_payload_error)?;
+                .map_err(map_payload_error::<FacadeError<R>>)?;
 
             let refs = owned.iter().collect::<Vec<_>>();
             let partial = planned
@@ -535,7 +507,7 @@ impl Network {
             let payloads = intermediate_payloads(&workspace.intermediates);
             meter
                 .observe(&workspace.slots, &workspace.producers, &payloads)
-                .map_err(map_payload_error)?;
+                .map_err(map_payload_error::<FacadeError<R>>)?;
 
             __network::network_scatter_add_assign(
                 engine,
@@ -543,7 +515,7 @@ impl Network {
                 &partial,
                 &scatter_ranges,
             )
-            .map_err(|error| SymmetricSliceExecutionError::Tensor(FacadeError::<R>::from(error)))?;
+            .map_err(FacadeError::<R>::from)?;
         }
         Ok((accumulator, meter.stats()))
     }
@@ -598,6 +570,7 @@ impl Network {
             conj: self.conj.clone(),
             input_codomain_ranks,
             schedule,
+            sliced: None,
         })
     }
 

@@ -2,14 +2,22 @@ use super::*;
 use symtn::typed::ExecContext;
 
 /// A [`Network`] with a resolved contraction order for concrete operand
-/// shapes. Inspect the order via [`Self::plan`], run it via
-/// [`Self::execute`].
+/// shapes. Inspect the order via [`Self::plan`] and its slicing via
+/// [`Self::slices`], run it via [`Self::execute`].
 pub struct PlannedNetwork {
     pub(super) owner_token: u64,
     pub(super) plan: ContractionPlan,
     pub(super) conj: Vec<bool>,
     pub(super) input_codomain_ranks: Vec<usize>,
     pub(super) schedule: CompiledSchedule,
+    pub(super) sliced: Option<Box<SlicedExecution>>,
+}
+
+/// A sliced plan's unbound slices and the network that binds them against
+/// every execution's tensors.
+pub(super) struct SlicedExecution {
+    pub(super) network: Network,
+    pub(super) plan: SymmetricSlicedPlan,
 }
 
 pub(super) struct CompiledSchedule {
@@ -49,10 +57,17 @@ pub struct CompiledStep {
 /// storage uses the same ownership, parking, quarantine and budget model; what
 /// may be reused is decided per `(mode, storage)` by the mode dispatch's
 /// `REUSE_DESTINATIONS`.
+///
+/// A sliced plan ([`PlannedNetwork::slices`]) is metered against the
+/// workspace's payload ceiling ([`Self::with_payload_ceiling`], unbounded by
+/// default), and its measured payload is read back with
+/// [`Self::last_slice_stats`]. An unsliced plan is not metered.
 pub struct NetworkExecutionWorkspace<R, D, S = Vec<D>>
 where
     S: NetworkPayloadStorage<D>,
 {
+    payload_ceiling: usize,
+    last_slice_stats: Option<SymmetricSliceStats>,
     pub(super) slots: Vec<Option<TensorMap<R, D, S>>>,
     pub(super) producers: Vec<Option<usize>>,
     pub(super) intermediates: Vec<TypedIntermediateBuffers<R, D, S>>,
@@ -80,10 +95,20 @@ pub(super) struct PayloadMeter {
     base: Vec<(usize, usize)>,
 }
 
+/// `required` saturates at `usize::MAX` when the byte count overflows.
 #[derive(Debug)]
-pub(super) enum PayloadMeterError {
-    Limit { limit: usize, required: usize },
-    ArithmeticOverflow,
+pub(super) struct PayloadMeterError {
+    limit: usize,
+    required: usize,
+}
+
+impl PayloadMeterError {
+    fn overflow(limit: usize) -> Self {
+        Self {
+            limit,
+            required: usize::MAX,
+        }
+    }
 }
 
 impl PayloadMeter {
@@ -92,7 +117,7 @@ impl PayloadMeter {
         destination: &TensorMap<R, D, S>,
     ) -> std::result::Result<Self, PayloadMeterError> {
         let destination = __network::network_owned_payload(destination)
-            .ok_or(PayloadMeterError::ArithmeticOverflow)?;
+            .ok_or(PayloadMeterError::overflow(limit))?;
         Ok(Self {
             limit,
             destination,
@@ -128,6 +153,7 @@ impl PayloadMeter {
         producers: &[Option<usize>],
         extra: &[Option<(usize, usize)>],
     ) -> std::result::Result<(), PayloadMeterError> {
+        let limit = self.limit;
         let mut seen = HashSet::from([self.destination.0]);
         let mut workspace = 0usize;
         let mut charge = |payload: Option<(usize, usize)>| {
@@ -137,7 +163,7 @@ impl PayloadMeter {
             if seen.insert(identity) {
                 workspace = workspace
                     .checked_add(bytes)
-                    .ok_or(PayloadMeterError::ArithmeticOverflow)?;
+                    .ok_or(PayloadMeterError::overflow(limit))?;
             }
             Ok(())
         };
@@ -156,12 +182,12 @@ impl PayloadMeter {
             .destination
             .1
             .checked_add(workspace)
-            .ok_or(PayloadMeterError::ArithmeticOverflow)?;
+            .ok_or(PayloadMeterError::overflow(limit))?;
         self.peak_workspace = self.peak_workspace.max(workspace);
         self.peak_total = self.peak_total.max(total);
         if total > self.limit {
-            return Err(PayloadMeterError::Limit {
-                limit: self.limit,
+            return Err(PayloadMeterError {
+                limit,
                 required: total,
             });
         }
@@ -192,22 +218,17 @@ impl<E> From<E> for MeteredNetworkError<E> {
     }
 }
 
-pub(super) fn map_payload_error<E>(error: PayloadMeterError) -> SymmetricSliceExecutionError<E> {
-    match error {
-        PayloadMeterError::Limit { limit, required } => {
-            SymmetricSliceExecutionError::WorkspaceLimitExceeded { limit, required }
-        }
-        PayloadMeterError::ArithmeticOverflow => {
-            SymmetricSliceExecutionError::WorkspaceArithmeticOverflow
-        }
+pub(super) fn map_payload_error<E: From<Error>>(error: PayloadMeterError) -> E {
+    Error::WorkspaceLimitExceeded {
+        limit: error.limit,
+        required: error.required,
     }
+    .into()
 }
 
-pub(super) fn map_metered_network_error<E>(
-    error: MeteredNetworkError<E>,
-) -> SymmetricSliceExecutionError<E> {
+pub(super) fn map_metered_network_error<E: From<Error>>(error: MeteredNetworkError<E>) -> E {
     match error {
-        MeteredNetworkError::Tensor(error) => SymmetricSliceExecutionError::Tensor(error),
+        MeteredNetworkError::Tensor(error) => error,
         MeteredNetworkError::Payload(error) => map_payload_error(error),
     }
 }
@@ -227,6 +248,8 @@ where
 {
     fn default() -> Self {
         Self {
+            payload_ceiling: usize::MAX,
+            last_slice_stats: None,
             slots: Vec::new(),
             producers: Vec::new(),
             intermediates: Vec::new(),
@@ -242,6 +265,37 @@ impl<R, D, S> NetworkExecutionWorkspace<R, D, S>
 where
     S: NetworkPayloadStorage<D>,
 {
+    /// An empty workspace whose sliced executions fail with
+    /// [`Error::WorkspaceLimitExceeded`] once their network-owned payload
+    /// exceeds `bytes`.
+    ///
+    /// Counted payloads are compact sliced inputs, live planned contraction
+    /// and permutation destinations, the current partial, the private
+    /// accumulator, and path-owned dense buffers. Small metadata, external
+    /// backend scratch, and the eager contraction scratch the caller's CPU
+    /// engine keeps ([`symtn::scratch`]) are excluded. The latter includes
+    /// the output-sized `copyC` temporary used by split-moving and in-split
+    /// reorder contractions, so [`SymmetricSliceStats::peak_total_bytes`] can
+    /// be below the process peak by that temporary's capacity. The ceiling
+    /// is checked against observed payloads after each tensor kernel returns
+    /// and before publication, as the full destination bytes plus
+    /// non-destination workspace bytes; it is not an allocator reservation
+    /// or an out-of-memory prevention guarantee. A successful execution
+    /// proves that [`SymmetricSliceStats::peak_total_bytes`] did not exceed
+    /// the ceiling.
+    pub fn with_payload_ceiling(bytes: usize) -> Self {
+        Self {
+            payload_ceiling: bytes,
+            ..Self::default()
+        }
+    }
+
+    /// The payload measured by the last successful [`PlannedNetwork::execute`]
+    /// of a sliced plan on this workspace; `None` after any other call.
+    pub fn last_slice_stats(&self) -> Option<SymmetricSliceStats> {
+        self.last_slice_stats
+    }
+
     #[cfg(test)]
     pub(crate) fn with_test_slot_capacity(capacity: usize) -> Self {
         Self {
@@ -397,6 +451,12 @@ impl PlannedNetwork {
     pub fn plan(&self) -> &ContractionPlan {
         &self.plan
     }
+
+    /// The symmetric slices a sliced plan executes, or `None` for an
+    /// unsliced plan.
+    pub fn slices(&self) -> Option<&SymmetricSlicePlan> {
+        self.sliced.as_ref().map(|sliced| sliced.plan.slices())
+    }
 }
 
 /// The device network preflight [`PlannedNetwork::execute`] and
@@ -476,6 +536,15 @@ impl PlannedNetwork {
     /// calls to reuse its intermediates; each step's Host execution scratch
     /// is kept in the caller's CPU engine ([`symtn::scratch`]).
     ///
+    /// A sliced plan ([`Self::slices`]) binds its slices against `tensors`,
+    /// runs one slice at a time and accumulates each partial into the
+    /// output, metered against the workspace's payload ceiling
+    /// ([`NetworkExecutionWorkspace::with_payload_ceiling`]); the measured
+    /// payload is [`NetworkExecutionWorkspace::last_slice_stats`]. It needs
+    /// dense Host operands: a compact (diagonal) operand returns
+    /// [`Error::Unsupported`], a device operand [`Error::UnsupportedOnDevice`].
+    /// A slicing that does not bind to `tensors` is an invalid argument.
+    ///
     /// This does not accept or preserve a caller-owned output destination;
     /// successful execution returns a new owned tensor.
     pub fn execute<R, D, S>(
@@ -491,7 +560,20 @@ impl PlannedNetwork {
         S: NetworkOperandStorage<R, D>,
     {
         let engine = cx.engine();
+        workspace.last_slice_stats = None;
+        if self.sliced.is_some() {
+            let (result, stats) =
+                S::execute_sliced(engine, self, tensors, workspace.payload_ceiling)?;
+            workspace.last_slice_stats = Some(stats);
+            return Ok(result);
+        }
         self.execute_impl(engine, tensors, workspace)
+    }
+
+    pub(super) fn sliced_execution(&self) -> &SlicedExecution {
+        self.sliced
+            .as_ref()
+            .expect("only a sliced plan dispatches sliced execution")
     }
 
     fn execute_impl<R, D, S>(
