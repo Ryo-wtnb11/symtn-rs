@@ -81,14 +81,12 @@ done
 # A type named by a public symtn signature, or by a public member of a type
 # symtn re-exports, must itself be exported by symtn; otherwise a caller has to
 # depend on an internal crate to name it. Ratchet: the names below already
-# violate this. CudaDenseContext, DenseOwned and DenseTensor belong to the
-# dense executor seam, which symtn deliberately does not export; the rest
-# predate the check. Remove a name once it is exported or no longer named.
+# violate this. Remove a name once it is exported or no longer named.
 UNEXPORTED_ALLOWED="
     AdjointBlockMap BlockStructure BoundDynamicFusionMapSpace
     CheckedGenericFactorPlanError CoefficientAlgebra ContractDestinationInit
-    CudaDenseContext DenseBlockScalar DenseOwned DenseRecouplingScalar
-    DenseTensor FactorMode FactorSpaceAuthority FusionProductSpace
+    CudaDenseContext DenseBlockScalar DenseRecouplingScalar
+    FactorMode FactorSpaceAuthority FusionProductSpace
     FusionTreeGroupRef FusionTreeHomSpace FusionTreePairRef FusionTreeRef
     LazyAdjointSpace PhysicalConversionError PlanarContractOrders
     RigidCoefficientAlgebra SectorSpectrum TensorTraceAxisSpec

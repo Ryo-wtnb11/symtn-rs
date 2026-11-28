@@ -83,7 +83,7 @@ impl TruncationSpace {
 /// # Tolerances and the payload's precision
 ///
 /// Every tolerance here is `f64` and every spectrum reaching a decision is
-/// `f64`, at *every* payload dtype: [`crate::FactorScalar::real_spectrum`]
+/// `f64`, at *every* payload dtype: the dense spectrum readback
 /// widens a single-precision spectrum rather than recomputing it. The `f64`
 /// type therefore says nothing about how accurate the values are. A spectrum
 /// produced by an `f32`/`Complex32` factorization carries a relative error of

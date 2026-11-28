@@ -544,74 +544,49 @@ impl<'a> core::clone::TrivialClone for symtn_matrixalgebra::truncation::Weighted
 impl<'a> core::fmt::Debug for symtn_matrixalgebra::truncation::WeightedSpectrum<'a>
 pub fn symtn_matrixalgebra::truncation::WeightedSpectrum<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl<'a> core::marker::Copy for symtn_matrixalgebra::truncation::WeightedSpectrum<'a>
-pub trait symtn_matrixalgebra::FactorScalar: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::owned_overwrite_buffer::ZeroBytes
+pub trait symtn_matrixalgebra::FactorScalar: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::owned_overwrite_buffer::ZeroBytes + symtn_matrixalgebra::factorize::scalar::sealed::DenseIo
 pub type symtn_matrixalgebra::FactorScalar::Eig: symtn_matrixalgebra::FactorScalar
 pub type symtn_matrixalgebra::FactorScalar::Real: symtn_operations::scalar::DenseRecouplingScalar + core::convert::Into<f64>
 pub fn symtn_matrixalgebra::FactorScalar::adjoint(self) -> Self
-pub fn symtn_matrixalgebra::FactorScalar::dense_into_owned(alloc::vec::Vec<Self>) -> core::result::Result<symtn_dense::executor::DenseOwned, alloc::vec::Vec<Self>>
-pub fn symtn_matrixalgebra::FactorScalar::dense_into_vec(symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<Self>, symtn_dense::error::DenseError>
-pub fn symtn_matrixalgebra::FactorScalar::dense_slice(&symtn_dense::tensor::DenseTensor) -> core::result::Result<&[Self], symtn_dense::error::DenseError>
 pub fn symtn_matrixalgebra::FactorScalar::epsilon() -> f64
 pub fn symtn_matrixalgebra::FactorScalar::from_complex64(num_complex::Complex64) -> Self
 pub fn symtn_matrixalgebra::FactorScalar::from_real(f64) -> Self
-pub fn symtn_matrixalgebra::FactorScalar::real_spectrum(&symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<f64>, symtn_dense::error::DenseError>
-pub fn symtn_matrixalgebra::FactorScalar::real_spectrum_into(&symtn_dense::tensor::DenseTensor, &mut alloc::vec::Vec<f64>) -> core::result::Result<(), symtn_dense::error::DenseError>
 pub fn symtn_matrixalgebra::FactorScalar::safe_minimum() -> f64
 pub fn symtn_matrixalgebra::FactorScalar::widen_complex(self) -> num_complex::Complex64
 impl symtn_matrixalgebra::FactorScalar for f32
 pub type f32::Eig = num_complex::Complex<f32>
 pub type f32::Real = f32
 pub fn f32::adjoint(self) -> Self
-pub fn f32::dense_into_owned(alloc::vec::Vec<Self>) -> core::result::Result<symtn_dense::executor::DenseOwned, alloc::vec::Vec<Self>>
-pub fn f32::dense_into_vec(symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<Self>, symtn_dense::error::DenseError>
-pub fn f32::dense_slice(&symtn_dense::tensor::DenseTensor) -> core::result::Result<&[Self], symtn_dense::error::DenseError>
 pub fn f32::epsilon() -> f64
 pub fn f32::from_complex64(num_complex::Complex64) -> Self
 pub fn f32::from_real(f64) -> Self
-pub fn f32::real_spectrum(&symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<f64>, symtn_dense::error::DenseError>
-pub fn f32::real_spectrum_into(&symtn_dense::tensor::DenseTensor, &mut alloc::vec::Vec<f64>) -> core::result::Result<(), symtn_dense::error::DenseError>
 pub fn f32::safe_minimum() -> f64
 pub fn f32::widen_complex(self) -> num_complex::Complex64
 impl symtn_matrixalgebra::FactorScalar for f64
 pub type f64::Eig = num_complex::Complex<f64>
 pub type f64::Real = f64
 pub fn f64::adjoint(self) -> Self
-pub fn f64::dense_into_owned(alloc::vec::Vec<Self>) -> core::result::Result<symtn_dense::executor::DenseOwned, alloc::vec::Vec<Self>>
-pub fn f64::dense_into_vec(symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<Self>, symtn_dense::error::DenseError>
-pub fn f64::dense_slice(&symtn_dense::tensor::DenseTensor) -> core::result::Result<&[Self], symtn_dense::error::DenseError>
 pub fn f64::epsilon() -> f64
 pub fn f64::from_complex64(num_complex::Complex64) -> Self
 pub fn f64::from_real(f64) -> Self
-pub fn f64::real_spectrum(&symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<f64>, symtn_dense::error::DenseError>
-pub fn f64::real_spectrum_into(&symtn_dense::tensor::DenseTensor, &mut alloc::vec::Vec<f64>) -> core::result::Result<(), symtn_dense::error::DenseError>
 pub fn f64::safe_minimum() -> f64
 pub fn f64::widen_complex(self) -> num_complex::Complex64
 impl symtn_matrixalgebra::FactorScalar for num_complex::Complex32
 pub type num_complex::Complex32::Eig = num_complex::Complex<f32>
 pub type num_complex::Complex32::Real = f32
 pub fn num_complex::Complex32::adjoint(self) -> Self
-pub fn num_complex::Complex32::dense_into_owned(alloc::vec::Vec<Self>) -> core::result::Result<symtn_dense::executor::DenseOwned, alloc::vec::Vec<Self>>
-pub fn num_complex::Complex32::dense_into_vec(symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<Self>, symtn_dense::error::DenseError>
-pub fn num_complex::Complex32::dense_slice(&symtn_dense::tensor::DenseTensor) -> core::result::Result<&[Self], symtn_dense::error::DenseError>
 pub fn num_complex::Complex32::epsilon() -> f64
 pub fn num_complex::Complex32::from_complex64(num_complex::Complex64) -> Self
 pub fn num_complex::Complex32::from_real(f64) -> Self
-pub fn num_complex::Complex32::real_spectrum(&symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<f64>, symtn_dense::error::DenseError>
-pub fn num_complex::Complex32::real_spectrum_into(&symtn_dense::tensor::DenseTensor, &mut alloc::vec::Vec<f64>) -> core::result::Result<(), symtn_dense::error::DenseError>
 pub fn num_complex::Complex32::safe_minimum() -> f64
 pub fn num_complex::Complex32::widen_complex(self) -> num_complex::Complex64
 impl symtn_matrixalgebra::FactorScalar for num_complex::Complex64
 pub type num_complex::Complex64::Eig = num_complex::Complex<f64>
 pub type num_complex::Complex64::Real = f64
 pub fn num_complex::Complex64::adjoint(self) -> Self
-pub fn num_complex::Complex64::dense_into_owned(alloc::vec::Vec<Self>) -> core::result::Result<symtn_dense::executor::DenseOwned, alloc::vec::Vec<Self>>
-pub fn num_complex::Complex64::dense_into_vec(symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<Self>, symtn_dense::error::DenseError>
-pub fn num_complex::Complex64::dense_slice(&symtn_dense::tensor::DenseTensor) -> core::result::Result<&[Self], symtn_dense::error::DenseError>
 pub fn num_complex::Complex64::epsilon() -> f64
 pub fn num_complex::Complex64::from_complex64(num_complex::Complex64) -> Self
 pub fn num_complex::Complex64::from_real(f64) -> Self
-pub fn num_complex::Complex64::real_spectrum(&symtn_dense::tensor::DenseTensor) -> core::result::Result<alloc::vec::Vec<f64>, symtn_dense::error::DenseError>
-pub fn num_complex::Complex64::real_spectrum_into(&symtn_dense::tensor::DenseTensor, &mut alloc::vec::Vec<f64>) -> core::result::Result<(), symtn_dense::error::DenseError>
 pub fn num_complex::Complex64::safe_minimum() -> f64
 pub fn num_complex::Complex64::widen_complex(self) -> num_complex::Complex64
 pub trait symtn_matrixalgebra::SpectrumMagnitude: core::marker::Copy

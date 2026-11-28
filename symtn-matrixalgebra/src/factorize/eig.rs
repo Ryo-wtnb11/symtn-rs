@@ -1096,10 +1096,10 @@ where
             }
             validate_dense_shape(outputs[0].shape(), &[n])?;
             validate_dense_shape(outputs[1].shape(), &[n, n])?;
-            let values = <D::Eig as FactorScalar>::dense_slice(&outputs[0])
-                .map_err(OperationError::Dense)?;
-            let vectors = <D::Eig as FactorScalar>::dense_slice(&outputs[1])
-                .map_err(OperationError::Dense)?;
+            let values =
+                <D::Eig as DenseIo>::dense_slice(&outputs[0]).map_err(OperationError::Dense)?;
+            let vectors =
+                <D::Eig as DenseIo>::dense_slice(&outputs[1]).map_err(OperationError::Dense)?;
             let complex_values: Vec<Complex64> =
                 values.iter().map(|&value| value.widen_complex()).collect();
             validate_complex_eigenvalues(&complex_values)?;
@@ -1211,8 +1211,8 @@ where
             let values_tensor = single_output(outcome, "eig_vals")?;
             let n = blocks[index].1;
             validate_dense_shape(values_tensor.shape(), &[n])?;
-            let values = <D::Eig as FactorScalar>::dense_slice(&values_tensor)
-                .map_err(OperationError::Dense)?;
+            let values =
+                <D::Eig as DenseIo>::dense_slice(&values_tensor).map_err(OperationError::Dense)?;
             let mut sorted: Vec<Complex64> =
                 values[..n].iter().map(|&v| v.widen_complex()).collect();
             validate_complex_eigenvalues(&sorted)?;
