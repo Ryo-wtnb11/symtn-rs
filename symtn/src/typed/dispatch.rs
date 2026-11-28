@@ -12,12 +12,18 @@ pub type FacadeError<R> =
 
 /// The one bound generic code over a fusion rule names: for
 /// `R: TensorRule<D>`, every Host [`TensorMap`]`<R, D>` and [`GradedSpace`]`<R>`
-/// operation is available, with errors of type [`FacadeError`]`<R>`.
+/// operation that dispatches on the rule's admission mode (construction,
+/// contraction, trace, twist, flip, products, unit legs and truncation) is
+/// available, with errors of type [`FacadeError`]`<R>`.
 ///
 /// It holds for every built-in and adapted rule, multiplicity-free or checked
 /// Generic. It is blanket-implemented from the crate's sealed mode traits, so
 /// it cannot be implemented by hand and adds no operation of its own.
-/// Factorizations also need `D: FactorizationScalar`.
+/// Operations that need a capability beyond the mode keep their own bounds:
+/// factorizations need `D: FactorizationScalar`,
+/// [`TensorMap::convert`] needs `D: PayloadConversion<To>`, and
+/// [`TensorMap::to_physical_dense`] needs a multiplicity-free rule with a
+/// [`PhysicalFusionBasis`](crate::sector::PhysicalFusionBasis).
 ///
 /// ```
 /// use std::sync::Arc;
