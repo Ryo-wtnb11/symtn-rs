@@ -938,21 +938,21 @@ pub fn symtn::typed::MaterializeExec::materialize(&mut dyn tenferro_tensor::back
 impl<R, D: symtn::typed::TensorScalar> symtn::typed::MaterializeExec<R, D> for alloc::vec::Vec<D>
 pub fn alloc::vec::Vec<D>::materialize(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, &Self, core::option::Option<&symtn_tensors::adjoint::AdjointBlockMap<'_>>) -> core::result::Result<Self, symtn::typed::Error>
 pub trait symtn::typed::PayloadConversion<To>: core::marker::Copy + symtn::typed::tensor_repr::typed_payload_conversion_private::Sealed<To>
-pub fn symtn::typed::PayloadConversion::convert_value(self) -> To
+pub fn symtn::typed::PayloadConversion::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> To
 impl symtn::typed::PayloadConversion<f32> for f64
-pub fn f64::convert_value(self) -> f32
+pub fn f64::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> f32
 impl symtn::typed::PayloadConversion<f64> for f32
-pub fn f32::convert_value(self) -> f64
+pub fn f32::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> f64
 impl symtn::typed::PayloadConversion<num_complex::Complex<f32>> for f32
-pub fn f32::convert_value(self) -> num_complex::Complex32
+pub fn f32::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> num_complex::Complex32
 impl symtn::typed::PayloadConversion<num_complex::Complex<f32>> for num_complex::Complex64
-pub fn num_complex::Complex64::convert_value(self) -> num_complex::Complex32
+pub fn num_complex::Complex64::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> num_complex::Complex32
 impl symtn::typed::PayloadConversion<num_complex::Complex<f64>> for f32
-pub fn f32::convert_value(self) -> num_complex::Complex64
+pub fn f32::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> num_complex::Complex64
 impl symtn::typed::PayloadConversion<num_complex::Complex<f64>> for f64
-pub fn f64::convert_value(self) -> num_complex::Complex64
+pub fn f64::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> num_complex::Complex64
 impl symtn::typed::PayloadConversion<num_complex::Complex<f64>> for num_complex::Complex32
-pub fn num_complex::Complex32::convert_value(self) -> num_complex::Complex64
+pub fn num_complex::Complex32::convert_value(self, symtn::typed::storage::sealed::ExecToken) -> num_complex::Complex64
 pub trait symtn::typed::PreparedExec<R, D>: symtn::typed::TypedStorage<R, D>
 pub type symtn::typed::PreparedExec::MembersLease<'e>
 pub fn symtn::typed::PreparedExec::contract_members(symtn::typed::storage::sealed::ExecToken, &symtn::typed::ContractPlan<R, D, Self>, &mut symtn::typed::ContractWorkspace<R, D, Self>, &mut Self::MembersLease, &mut Self, (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), usize, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn::typed::Error>

@@ -1087,7 +1087,7 @@ impl<R, D: Copy> TypedTensorBody<R, D> {
 /// Sealed: the pairs above are the whole contract.
 pub trait PayloadConversion<To>: Copy + typed_payload_conversion_private::Sealed<To> {
     #[doc(hidden)]
-    fn convert_value(self) -> To;
+    fn convert_value(self, _: ExecToken) -> To;
 }
 
 mod typed_payload_conversion_private {
@@ -1098,7 +1098,7 @@ macro_rules! payload_conversion {
     ($($from:ty => $to:ty, |$value:ident| $body:expr;)*) => {$(
         impl typed_payload_conversion_private::Sealed<$to> for $from {}
         impl PayloadConversion<$to> for $from {
-            fn convert_value(self) -> $to {
+            fn convert_value(self, _: ExecToken) -> $to {
                 let $value = self;
                 $body
             }
@@ -1225,6 +1225,6 @@ where
     where
         D: PayloadConversion<To>,
     {
-        self.convert_payload(engine, PayloadConversion::convert_value)
+        self.convert_payload(engine, |value| value.convert_value(EXEC))
     }
 }
