@@ -171,11 +171,3 @@ fn dense_data_borrows_dense_storage_and_never_materializes() {
     assert_eq!(entries, 0, "subblocks entered adjoint materialization");
     assert!(is_unsupported(&refused.unwrap_err(), "subblocks"));
 }
-
-#[cfg(feature = "cgc-gen")]
-fn su_irrep(labels: &[i64]) -> symtn_core::LieIrrep {
-    fusion_symbols::lie::LieGroup::new(fusion_symbols::lie::GroupId::su(labels.len() + 1).unwrap())
-        .unwrap()
-        .irrep(labels)
-        .unwrap()
-}

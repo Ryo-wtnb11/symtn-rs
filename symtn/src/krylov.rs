@@ -88,8 +88,8 @@ use num_complex::{Complex32, Complex64};
 use crate::sector::TypedSectorAdmission;
 // `Error` is not imported: it would shadow the re-exported `krylov::Error`.
 use crate::typed::{
-    Dest, ElementwiseExec, ExecContext, FacadeError, ReduceExec, TensorMap,
-    TypedAdjointSpace, TypedSpaceModeDispatch, TypedTensorModeDispatch,
+    Dest, ElementwiseExec, ExecContext, FacadeError, ReduceExec, TensorMap, TypedAdjointSpace,
+    TypedSpaceModeDispatch, TypedTensorModeDispatch,
 };
 
 // One impl per payload dtype: krylov's `Real<D>` comes from a sealed trait,
