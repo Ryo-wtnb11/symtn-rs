@@ -11,12 +11,16 @@
 
 /// Block views returned by `TensorMap::subblock(s)`, and the placement and
 /// storage contracts of a tensor's buffer.
-pub use symtn_core::{BlockRef, HostReadableStorage, Placement, SectorLeg, TensorStorage};
-/// The dense-kernel failure carried by `OperationError::Dense`.
-pub use symtn_dense::DenseError;
+pub use symtn_core::{
+    BlockLayout, BlockRef, BlockView, HostReadableStorage, Placement, SectorLeg,
+    SectorLegConstructionError, TensorStorage,
+};
 /// Per-thread CUDA boundary counters.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{cuda_transfer_stats, reset_cuda_transfer_stats, CudaTransferStats};
+/// The dense-kernel failure carried by `OperationError::Dense`, and the
+/// dtype and backend its variants name.
+pub use symtn_dense::{DenseBackend, DenseDType, DenseError};
 /// The tree-transform descriptor carried by `OperationError` variants.
 pub use symtn_tensors::{TreeTransformOperation, TreeTransformOperationKind};
 

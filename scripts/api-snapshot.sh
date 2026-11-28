@@ -78,6 +78,51 @@ for combo in "${COMBOS[@]}"; do
         cargo public-api "${args[@]}" >"$file"
 done
 
+# A type named by a public symtn signature, or by a public member of a type
+# symtn re-exports, must itself be exported by symtn; otherwise a caller has to
+# depend on an internal crate to name it. Ratchet: the names below already
+# violate this. CudaDenseContext, DenseOwned and DenseTensor belong to the
+# dense executor seam, which symtn deliberately does not export; the rest
+# predate the check. Remove a name once it is exported or no longer named.
+UNEXPORTED_ALLOWED="
+    AdjointBlockMap BlockStructure BoundDynamicFusionMapSpace
+    CheckedGenericFactorPlanError CoefficientAlgebra ContractDestinationInit
+    CudaDenseContext DenseBlockScalar DenseOwned DenseRecouplingScalar
+    DenseTensor FactorMode FactorSpaceAuthority FusionProductSpace
+    FusionTreeGroupRef FusionTreeHomSpace FusionTreePairRef FusionTreeRef
+    LazyAdjointSpace PhysicalConversionError PlanarContractOrders
+    RigidCoefficientAlgebra SectorSpectrum TensorTraceAxisSpec
+    TensorTraceFusionStructure Token TreeTransformOperationView
+    TreeTransformStructure TruncationDecision UnitLegInsertion
+"
+python3 - "$out_dir" "$UNEXPORTED_ALLOWED" <<'PY' || exit 1
+import re, sys, pathlib
+d = pathlib.Path(sys.argv[1]); allowed = set(sys.argv[2].split())
+PATH = re.compile(r"\bsymtn_[a-z_]+(?:::[a-z_0-9]+)*::[A-Z][A-Za-z0-9_]*")
+status = 0
+for suffix in ("", "+all"):
+    facade = (d / f"symtn{suffix}.txt").read_text().splitlines()
+    exported = {l.rsplit("::", 1)[1] for l in facade if l.startswith("pub use ")}
+    deps = [l for f in sorted(d.glob(f"symtn-*{suffix}.txt"))
+            if suffix or "+" not in f.name for l in f.read_text().splitlines()]
+    todo = {p for l in facade if not l.startswith("pub use ") for p in PATH.findall(l)}
+    seen = set()
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        name = path.rsplit("::", 1)[1]
+        if name not in exported:
+            continue
+        member = re.compile(r"^pub (?:(?:const |unsafe )?fn )?symtn_[a-z_]+(?:::[a-z_0-9]+)*::" + name + r"(?:<[^:]*>)?::")
+        todo |= {p for l in deps if member.match(l) for p in PATH.findall(l)}
+    for name in sorted({p.rsplit("::", 1)[1] for p in seen} - exported - allowed):
+        print(f"api-snapshot: symtn{suffix} names {name} in a public signature but does not export it", file=sys.stderr)
+        status = 1
+sys.exit(status)
+PY
+
 if [ "$mode" = --check ]; then
     status=0
     for file in "$out_dir"/*.txt; do

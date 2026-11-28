@@ -9,7 +9,7 @@ use symtn::typed::Side;
 #[cfg(feature = "cgc-gen")]
 use symtn::typed::{Lq, Qr};
 
-use symtn_dense::DenseBackend;
+use symtn::expert::DenseBackend;
 
 fn structure_cache_info(
     kind: symtn::cache::StructureCacheKind,
