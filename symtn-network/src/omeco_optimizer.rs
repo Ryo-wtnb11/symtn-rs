@@ -32,14 +32,15 @@ use crate::plan::{dense_steps_from_active_pair_path, orient_unordered_active_pai
 ///   [`crate::SlicedPlan`] over a fixed, validated order.
 #[derive(Debug, Clone)]
 pub enum OmecoOptimizer {
-    /// omeco `ExhaustiveSearch`: a dynamic program, exponential in the
-    /// network size (at most 128 tensors and 128 labels), over the trees in
-    /// which every contraction within a connected component joins two
-    /// subtrees sharing an open label; disconnected components are then
-    /// joined by outer products. It returns the least total pair cost among
-    /// those trees, which is not always the global minimum: for `i,j,ijz->z`
-    /// with `i = j = 2`, `z = 10` it returns `(i ijz) j` (cost 60), while the
-    /// outer product first, `(i j) ijz`, costs 44.
+    /// omeco `ExhaustiveSearch` (at most 128 tensors and 128 labels;
+    /// exponential in the component size). Within each connected component
+    /// it returns the least total pair cost among the trees whose every
+    /// join shares an open label; the components are then joined greedily
+    /// by outer products, the two smallest outputs first. No whole-network
+    /// optimality follows: for `i,j,ijz->z` with `i = j = 2`, `z = 10` it
+    /// returns `(i ijz) j` (cost 60) where `(i j) ijz` costs 44, and for
+    /// `i,j,k,l->ijkl` with dims 2, 3, 4, 5 it returns `(i j)(k l)` (146)
+    /// where `(i l)(j k)` costs 142.
     Exhaustive,
     /// omeco `TreeSA` with the given configuration ([`crate::omeco::TreeSA`] and
     /// its field types are re-exported): a cold-path search for networks

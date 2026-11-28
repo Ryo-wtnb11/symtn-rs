@@ -1,6 +1,7 @@
 //! `OmecoOptimizer` returns valid pairwise orders: the exhaustive search
 //! reaches the brute-force minimum of total pair cost when no outer product
-//! pays off, and stays above it when one does; TreeSA's order passes plan
+//! pays off, and returns omeco's documented order above it when one does;
+//! TreeSA's order passes plan
 //! validation, and both execute to the greedy plan's values.
 
 use std::collections::HashMap;
@@ -190,6 +191,23 @@ fn exhaustive_skips_an_outer_product_that_would_pay_off() {
         output: vec!["z"],
     };
     assert_eq!(exhaustive_and_minimum(&case), (60, 44));
+}
+
+/// `i,j,k,l->ijkl`, dims 2, 3, 4, 5: omeco joins the components greedily,
+/// smallest outputs first, giving `(i j)(k l)` = 6 + 20 + 120 = 146, while
+/// `(i l)(j k)` = 10 + 12 + 120 = 142.
+#[test]
+fn exhaustive_joins_disconnected_components_greedily() {
+    let case = Case {
+        tensors: vec![
+            vec![("i", 2)],
+            vec![("j", 3)],
+            vec![("k", 4)],
+            vec![("l", 5)],
+        ],
+        output: vec!["i", "j", "k", "l"],
+    };
+    assert_eq!(exhaustive_and_minimum(&case), (146, 142));
 }
 
 #[test]
