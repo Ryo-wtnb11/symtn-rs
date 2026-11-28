@@ -1022,7 +1022,8 @@ where
     let (values_tensor, vectors_tensor) = compact_eigh_outputs(engine, dense, matrix, n)?;
     let mut real = std::mem::take(&mut scratch.real);
     let result = (|| {
-        D::real_spectrum_into(&values_tensor, &mut real).map_err(OperationError::Dense)?;
+        D::real_spectrum_into(DENSE_IO, &values_tensor, &mut real)
+            .map_err(OperationError::Dense)?;
         check_contiguous_output("eigh_into", real.len(), values_tensor.shape(), &[n])
             .map_err(OperationError::Dense)?;
         let mut vectors = compact_factor_output_owned::<D>(vectors_tensor, &[n, n], "eigh_into")?;
@@ -1096,10 +1097,10 @@ where
             }
             validate_dense_shape(outputs[0].shape(), &[n])?;
             validate_dense_shape(outputs[1].shape(), &[n, n])?;
-            let values =
-                <D::Eig as DenseIo>::dense_slice(&outputs[0]).map_err(OperationError::Dense)?;
-            let vectors =
-                <D::Eig as DenseIo>::dense_slice(&outputs[1]).map_err(OperationError::Dense)?;
+            let values = <D::Eig as DenseIo>::dense_slice(DENSE_IO, &outputs[0])
+                .map_err(OperationError::Dense)?;
+            let vectors = <D::Eig as DenseIo>::dense_slice(DENSE_IO, &outputs[1])
+                .map_err(OperationError::Dense)?;
             let complex_values: Vec<Complex64> =
                 values.iter().map(|&value| value.widen_complex()).collect();
             validate_complex_eigenvalues(&complex_values)?;
@@ -1173,7 +1174,8 @@ where
         |index, outcome| {
             let values_tensor = single_output(outcome, "eigh_vals")?;
             let n = blocks[index].1;
-            let mut sorted = D::real_spectrum(&values_tensor).map_err(OperationError::Dense)?;
+            let mut sorted =
+                D::real_spectrum(DENSE_IO, &values_tensor).map_err(OperationError::Dense)?;
             sorted.truncate(n);
             validate_real_eigenvalues(&sorted)?;
             sort_spectrum(&mut sorted, f64::total_cmp);
@@ -1211,8 +1213,8 @@ where
             let values_tensor = single_output(outcome, "eig_vals")?;
             let n = blocks[index].1;
             validate_dense_shape(values_tensor.shape(), &[n])?;
-            let values =
-                <D::Eig as DenseIo>::dense_slice(&values_tensor).map_err(OperationError::Dense)?;
+            let values = <D::Eig as DenseIo>::dense_slice(DENSE_IO, &values_tensor)
+                .map_err(OperationError::Dense)?;
             let mut sorted: Vec<Complex64> =
                 values[..n].iter().map(|&v| v.widen_complex()).collect();
             validate_complex_eigenvalues(&sorted)?;

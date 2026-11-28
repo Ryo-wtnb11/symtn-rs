@@ -379,7 +379,7 @@ where
         |index, outcome| {
             let s_tensor = single_output(outcome, "svd_vals")?;
             let (_, rows, cols) = blocks[index];
-            let mut s = D::real_spectrum(&s_tensor).map_err(OperationError::Dense)?;
+            let mut s = D::real_spectrum(DENSE_IO, &s_tensor).map_err(OperationError::Dense)?;
             s.truncate(rows.min(cols));
             singular_values.push(SectorSpectrum {
                 sector: sectors[index],

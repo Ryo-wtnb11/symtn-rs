@@ -215,6 +215,7 @@
     not(feature = "cuda"),
     doc = "```compile_fail\nuse symtn::typed::TensorMap;\nfn no_cuda<R>(tensor: &TensorMap<R, f64>) { let _ = tensor.to_cuda(); }\n```"
 )]
+#![doc = "```compile_fail\nfn leak<D: symtn::typed::FactorScalar>(_: Vec<D>) { let _ = D::dense_into_vec(todo!()); }\n```"]
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;

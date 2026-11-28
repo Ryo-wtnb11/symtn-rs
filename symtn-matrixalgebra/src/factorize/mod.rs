@@ -16,8 +16,8 @@ use symtn_core::{
 };
 use symtn_dense::{
     arity_mismatch, check_contiguous_output, DenseBackend, DenseDotConfig, DenseError,
-    DenseExecutor, DenseFactorization, DenseOwned, DenseRead, DenseTensor, DenseView, DenseViewMut,
-    DenseWrite, FactorDest, FactorFailure,
+    DenseExecutor, DenseFactorization, DenseRead, DenseTensor, DenseView, DenseViewMut, DenseWrite,
+    FactorDest, FactorFailure,
 };
 
 use symtn_core::{CheckedGenericAdmissionMode, MultiplicityFreeAdmissionMode};
@@ -182,7 +182,7 @@ pub(crate) use polar::{
     right_polar_dyn_checked_generic,
 };
 pub use scalar::{nonfinite_factor_input, FactorFamily};
-pub(crate) use scalar::{require_finite_factor_input, DenseIo};
+pub(crate) use scalar::{require_finite_factor_input, DenseIo, DENSE_IO};
 pub use scalar::{FactorScalar, SectorSpectrum, SpectrumMagnitude};
 pub use svd::{
     axpby_axis_by_spectrum_into, decide_bond_truncation, diagonal_bond_data,
