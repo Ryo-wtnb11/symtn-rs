@@ -267,8 +267,7 @@ pub type PhysicalDenseError<E> = symtn_tensors::PhysicalConversionError<E>;
 
 /// Every fallible method here returns this error.
 pub use crate::error::{Alternative, Error};
-/// The runtime every constructor here takes (prepared structural state) and
-/// its builder.
+/// The runtime every constructor here takes (prepared structural state).
 pub use crate::runtime::Runtime;
 /// The complex payload scalars.
 pub use num_complex::{Complex32, Complex64};

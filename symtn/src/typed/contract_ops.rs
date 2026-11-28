@@ -195,8 +195,6 @@ where
     /// embedding or braid direction. The crossing-free case is exactly
     /// [`Self::compose`], which every braiding style admits; general planar
     /// contraction is [`Self::planar_contract`] (TensorKit `@planar`).
-    /// Behaviour change (#1372):
-    /// a canonical `NoBraiding` contraction was accepted before.
     ///
     /// Both admission modes support Bosonic and Fermionic providers. Checked
     /// contraction requires `CheckedGenericPivotal<Scalar = f64>` and Host
