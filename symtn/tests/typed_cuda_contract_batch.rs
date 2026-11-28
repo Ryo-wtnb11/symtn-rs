@@ -1974,7 +1974,9 @@ fn nonsymmetric_braiding_is_rejected_before_cuda_execution() {
 /// `alpha · op + beta · before` per member with `op` the eager Host
 /// contraction (or composition). A `beta = 0` destination starts as NaN, and
 /// `alpha = 0` drops the `op` term exactly, so a NaN operand must not reach
-/// the result.
+/// the result. Each mode runs once to warm the workspace and is measured on
+/// a second, already uploaded destination: the warm call transfers and
+/// allocates nothing. Returns each mode's warm GEMM and copy submissions.
 #[allow(clippy::too_many_arguments)]
 fn assert_dest_modes_on_device<R: DeviceRule, D: DevicePayload>(
     engine: &mut symtn::typed::CpuEngine,
@@ -1985,9 +1987,10 @@ fn assert_dest_modes_on_device<R: DeviceRule, D: DevicePayload>(
     rhs: &[TensorMap<R, D>],
     spec: Option<&ContractSpec<'_>>,
     modes: &[(D, D)],
-) {
+) -> Vec<(u64, u64)> {
     let (zero, one) = (D::entry(0.0, 0.0), D::entry(1.0, 0.0));
     let nan = D::entry(f64::NAN, f64::NAN);
+    let mut submissions = Vec::new();
     let pack = |cuda: &mut symtn::typed::CudaEngine, members: &[TensorMap<R, D>]| {
         StackedTensorMap::pack(&members.iter().collect::<Vec<_>>())
             .unwrap()
@@ -2028,28 +2031,48 @@ fn assert_dest_modes_on_device<R: DeviceRule, D: DevicePayload>(
         _ => unreachable!(),
     };
     for &(alpha, beta) in modes {
-        let mut dst = if beta == zero {
-            let poison: Vec<_> = before
+        let initial: Vec<_> = if beta == zero {
+            before
                 .iter()
                 .map(|t| t.scale(engine, nan).unwrap())
-                .collect();
-            pack(cuda, &poison)
+                .collect()
         } else {
-            pack(cuda, &before)
+            before.clone()
         };
-        let dest = if (alpha, beta) == (one, zero) {
-            Dest::overwrite(&mut dst)
-        } else if (alpha, beta) == (one, one) {
-            Dest::accumulate(&mut dst)
-        } else {
-            Dest::scaled(&mut dst, alpha, beta)
-        };
-        match (&contract, &compose) {
-            (Some(plan), _) => plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace),
-            (_, Some(plan)) => plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace),
-            _ => unreachable!(),
+        let mut warm_up = pack(cuda, &initial);
+        let mut dst = pack(cuda, &initial);
+        let mut stats = None;
+        for dst in [&mut warm_up, &mut dst] {
+            let dest = if (alpha, beta) == (one, zero) {
+                Dest::overwrite(dst)
+            } else if (alpha, beta) == (one, one) {
+                Dest::accumulate(dst)
+            } else {
+                Dest::scaled(dst, alpha, beta)
+            };
+            let start = cuda_transfer_stats();
+            match (&contract, &compose) {
+                (Some(plan), _) => plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace),
+                (_, Some(plan)) => plan.execute_into(cuda, &lhs, &rhs, dest, &mut workspace),
+                _ => unreachable!(),
+            }
+            .unwrap();
+            stats = Some((start, cuda_transfer_stats()));
         }
-        .unwrap();
+        let (start, end) = stats.unwrap();
+        assert_eq!(
+            (
+                end.h2d_calls - start.h2d_calls,
+                end.d2h_calls - start.d2h_calls,
+                end.device_allocs - start.device_allocs,
+            ),
+            (0, 0, 0),
+            "{what} ({alpha:?}, {beta:?}): a warm call transfers and allocates nothing"
+        );
+        submissions.push((
+            end.gemm_calls - start.gemm_calls,
+            end.copy_calls - start.copy_calls,
+        ));
         let dst = dst.to_host(cuda).unwrap();
         for (i, (op, before)) in eager.iter().zip(&before).enumerate() {
             let actual = dst.member(engine, i).unwrap();
@@ -2068,12 +2091,14 @@ fn assert_dest_modes_on_device<R: DeviceRule, D: DevicePayload>(
             }
         }
     }
+    submissions
 }
 
-/// Every `Dest` mode on device stacks over the Host test's geometry: the
-/// U(1) inactive-block routes, SU(2) recoupling with a multi-tree scatter,
-/// composition, real and complex dtypes, and a NaN operand under
-/// `alpha = 0`.
+/// Every `Dest` mode on device stacks over the Host test's geometry except
+/// its Multi scatter, which the CUDA member replay rejects: the U(1)
+/// inactive-block routes, SU(2) recoupling by Single moves, composition,
+/// real and complex dtypes, and a NaN operand under `alpha = 0`; warm calls
+/// transfer nothing and submit as many kernels at every member count.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn prepared_execute_into_applies_every_dest_mode_per_member_on_device() {
@@ -2098,12 +2123,14 @@ fn prepared_execute_into_applies_every_dest_mode_per_member_on_device() {
                     })
                     .collect::<Vec<_>>()
             };
-        // One member replays on the same member route as several.
+        // One member replays on the same member route as several, and the
+        // warm submissions of every mode do not grow with the member count.
+        let mut per_count = Vec::new();
         for count in [1, 3] {
             let lhs = members(engine, &case.lhs, 0.0, count);
             let rhs = members(engine, &case.rhs, 0.5, count);
             let spec = (!compose).then(|| case.spec());
-            assert_dest_modes_on_device(
+            per_count.push(assert_dest_modes_on_device(
                 engine,
                 cuda,
                 runtime,
@@ -2112,7 +2139,7 @@ fn prepared_execute_into_applies_every_dest_mode_per_member_on_device() {
                 &rhs,
                 spec.as_ref(),
                 modes,
-            );
+            ));
             let poisoned: Vec<_> = lhs.iter().map(|t| t.scale(engine, nan).unwrap()).collect();
             let zero_alpha: Vec<_> = modes
                 .iter()
@@ -2130,6 +2157,11 @@ fn prepared_execute_into_applies_every_dest_mode_per_member_on_device() {
                 &zero_alpha,
             );
         }
+        assert_eq!(
+            per_count[0], per_count[1],
+            "{}: warm (GEMM, copy) submissions per mode at B = 1 and B = 3",
+            case.name
+        );
     }
     fn run<D: DevicePayload>(cuda: &mut symtn::typed::CudaEngine, modes: &[(D, D)]) {
         let engine = &mut symtn::typed::CpuEngine::serial();

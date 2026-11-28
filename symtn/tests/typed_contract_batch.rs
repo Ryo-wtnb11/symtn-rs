@@ -1494,7 +1494,8 @@ fn assert_dest_modes<R, D>(
 /// Every `Dest` mode of `ContractPlan::execute_into` and
 /// `ComposePlan::execute_into` per member: the direct core and CopyC routes
 /// and composition, U(1) outputs with inactive blocks (`beta` zero-fills,
-/// scales or keeps them), SU(2) recoupling with a multi-tree scatter, real
+/// scales or keeps them), SU(2) recoupling by Single moves and by a Multi
+/// scatter (an inner-line change of a three-leg tree), real
 /// and complex dtypes with signed and complex coefficients, and a NaN
 /// operand under `alpha = 0`.
 #[test]
@@ -1559,8 +1560,23 @@ fn prepared_execute_into_applies_every_dest_mode_per_member() {
         for case in u1_inactive_cases::<D>(engine, &runtime) {
             check(engine, &runtime, &case, false, modes);
         }
-        let su2 = su2_reordered::<D>(engine, &runtime);
-        check(engine, &runtime, &su2, false, modes);
+        let reordered = su2_reordered::<D>(engine, &runtime);
+        check(engine, &runtime, &reordered, false, modes);
+        // Exchanging the second and third codomain legs of a three-leg SU(2)
+        // tree changes its inner line: the output transform recouples
+        // several source trees into each destination tree (a Multi scatter).
+        let s = su2();
+        let multi = Case {
+            name: "SU(2) inner-line recoupling (Multi scatter)",
+            lhs: TensorMap::from_subblock_fn(engine, &runtime, [&s, &s, &s], [&s], fill(311))
+                .unwrap(),
+            rhs: TensorMap::from_subblock_fn(engine, &runtime, [&s], [&s], fill(312)).unwrap(),
+            lhs_axes: vec![3],
+            rhs_axes: vec![0],
+            output_axes: vec![0, 2, 1, 3],
+            dense: false,
+        };
+        check(engine, &runtime, &multi, false, modes);
         let v = u1(&[(0, 2), (1, 2)]);
         let w = u1(&[(0, 1), (1, 3)]);
         let compose = Case {
