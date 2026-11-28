@@ -59,7 +59,9 @@ pub struct ContractPlan<R, D, S = Vec<D>> {
 /// overwrites; a CopyC or DynamicTree output transform overwrites the whole
 /// destination; and the caller never reaches the buffer mutably until
 /// `take_output` moves it out for good. `execute_into` cannot rely on any of
-/// this for a caller's destination and rewrites every inactive block.
+/// this for a caller's destination. `execute_into` instead zeroes inactive
+/// destination blocks when β = 0, scales them by β when β ∉ {0, 1}, and leaves
+/// them unchanged when β = 1 (`Dest::accumulate`).
 ///
 /// On Host with the faer provider, the dense GEMM plans of the grouped core
 /// submissions are not workspace state: the block GEMM kernel takes them
