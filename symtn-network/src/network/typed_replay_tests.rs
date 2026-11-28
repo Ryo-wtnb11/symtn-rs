@@ -2251,6 +2251,11 @@ fn plan_with_rejects_a_plan_that_does_not_cover_the_network() {
     // A plan for the same tensor count but another output is rejected.
     rejects(product.plan_with(&[&a, &b], matrix_product_plan(false, &["k", "i"])));
 
+    // A single operand needs no search, but a supplied plan is still checked.
+    let single = network(vec![vec!["i", "k"]], vec![1]);
+    rejects(single.plan(&[&a], &ab));
+    assert!(single.plan(&[&a], &GreedyDenseOptimizer).is_ok());
+
     // A matching plan still wraps and executes to the searched result.
     let supplied = with_pair
         .plan_with(&abcd, matrix_product_plan(true, &["i", "k"]))
