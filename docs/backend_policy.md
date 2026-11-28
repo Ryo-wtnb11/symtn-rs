@@ -529,48 +529,70 @@ extension store and fetched once per operation, before preparing all its
 movement decisions. Reference entry creation and completed online updates
 receive fresh process-wide generations, so a workspace cannot reuse widths
 from a different engine entry or an evicted entry's replacement.
-Online measurement is attempted once per retained entry and runs to
-completion: fixed sample counts, no deadline, and no row filled from another
-row. It measures, in order:
+Online measurement has no deadline: fixed sample counts, bounded attempts
+(below), and no row filled from another row. Every fixed-workload timing takes the minimum
+of its samples: the workload is the same in every sample and interference
+(preemption, a parked worker's wake-up) only adds time, so the minimum is the
+least-biased estimate of the workload's own cost, while a median can be a
+scheduler quantum. It measures, in order:
 
 - D_item(q) at every candidate width q <= p: the production `run_native` with
   a `Split` of q leaves over the whole token, as Singles, inactive fills,
-  pack, scatter and member ranges run it, with empty leaves; the median of 31
+  pack, scatter and member ranges run it, with empty leaves; the minimum of 31
   calls after one warm-up.
 - D_plan(s) at every leaf share s >= 2 that a candidate split gives
   (floor(p/q), ceil(p/q) and p): an empty `for_ranges` section of s parts on
   a token limited to s, the call Strided's planned update makes inside a leaf
   (`for_len` limits the token, `parallel_for_each` runs `for_ranges`); the
-  median of 31 calls after one warm-up. A real planned role is not timed:
+  minimum of 31 calls after one warm-up. A real planned role is not timed:
   Strided widens a role to all s slots only once its copy outweighs the extra
   sections, which takes millions of elements on a 96-slot pool, and the
   section is the same call.
 - The two element rows (contiguous and strided), through the real replay
-  writer on shared buffers, three samples per point.
-- B(q) at the powers of two among those candidate widths, and p (so every
-  point's D_item(q) is measured): q serial copy leaves of the item phases'
-  tree split over the whole token on the row buffers (about 8 MiB of
-  traffic), the median of three runs less D_item(q). The model reads widths
+  writer on shared buffers, each walk the minimum of five samples after one
+  untimed warm-up walk. A row is fit by least squares over all its walks,
+  t = a + r[W] runs + e[W] elements less the fixture's empty-walk overhead:
+  the setup and the first working set's terms from that set's four walks
+  (one run of 2, 16 and n0 elements, and 128 or 32 runs of n0), whose
+  (1, runs, elements) columns are independent because the runs take two
+  values and the one-run elements three; each further working set's terms
+  from its one-run and many-run walks given the setup. Those two walks
+  determine the set's terms exactly when its per-run term comes out
+  non-negative; otherwise that term is held at zero and the element term is
+  their least-squares fit, which leaves opposite residuals on the two walks.
+- B(q) at the powers of two among those candidate widths, and p: q serial
+  copy leaves of the item phases' tree split over the whole token on the row
+  buffers (about 8 MiB of traffic), each leaf timing its own copy, so B(q) is
+  the bytes moved over the slowest leaf's time and the fork is no part of it;
+  the minimum of that time over three sections. The model reads widths
   between these points by linear interpolation in q.
 
-A point fails when a fixture cannot be built, the lane runner refuses its
-supply, an element row stays non-physical after the refit below, or a
-bandwidth point's time less its D_item is not finite and positive. Any
-failure leaves the entry uncalibrated. An Auto region of more than one slot
+A point (one D_item or D_plan width, one whole element row, one B(q) width)
+is unusable when a fixture cannot be built, the lane runner refuses its
+supply, a timing is not a positive finite time, or an element row stays
+non-physical after the rule below. An unusable point is measured again, at
+most three attempts per point; only then does the calibration attempt fail,
+and it stops there: the points after it in the order above are not
+measured in that attempt. A failed
+calibration is retried at a later movement region, at most three
+calibrations per retained entry in all (each one calibration's time, below),
+after which the entry stays uncalibrated until eviction, `scratch::trim` or
+the engine's drop. A failed retry leaves the constants' generation, and so
+every retained decision, unchanged. An Auto region of more than one slot
 without calibrated constants fails closed: every modeled phase takes width
 one, and the token its movement runs on (inline Singles and inactive fills,
 and each chunk's scatter) is limited to one slot, so no planned role fans
 out inside it either; this is the replay's semantics on a one-slot engine.
 Pack columns run serial walks at width one, and plan groups keep their
 constant-free rule. Forced policies keep their widths and whole tokens.
-Failed entries are not retried before eviction or `scratch::trim`. An online
-element row must be physical (a >= 0, r >= 0, e > 0). A negative fitted setup
-or per-run term means that term is below the measurement's resolution, not
-that the host differs: it is fixed at zero and each one-run sample's total is
-attributed to the remaining terms (their least-squares fit on the same
-samples). Beyond its largest online working set (4 MiB) an element curve keeps
-the checked-in reference curve's shape, scaled to meet its last online knot;
-the reference table records the CI CPU, date and run provenance. The constants
+An online element row must be physical (a >= 0, r >= 0, e > 0). A negative
+fitted setup or per-run term means that term is below the measurement's
+resolution, not that the host differs: the fit is the exact least-squares
+solution under a >= 0 and r >= 0, taken as the least-residual feasible
+solution of the four active sets (neither term at zero, either one, both),
+so it does not depend on the order in which terms are examined. Beyond its largest online
+working set (4 MiB) an element curve keeps the checked-in reference curve's
+shape, scaled to meet its last online knot; the reference table records the CI CPU, date and run provenance. The constants
 depend on timing but not on how many points happened to fit a budget. On a
 96-thread Xeon Platinum 9242 the dispatch rows take 12 x 32 tree splits
 (2-10 µs each) and 11 x 32 sections (0.7-39 µs), about 5 ms together; the
@@ -593,11 +615,15 @@ below the smaller of the largest knee of the phase's active classes and the
 measured bandwidth fixture's working set: a mixed phase uses the memory cap
 only after every active curve has reached its plateau, unless a measured
 fixture already bounds its bandwidth. The knees are
-computed once per retained constants entry. Compiled counts supply the phase's
+recomputed from the rows after every calibration attempt, failed ones
+included (a failed entry's constants are not read: it fails closed). Compiled counts supply the phase's
 class weights directly, including member and cold-fill element counts, without
 extra cost preparations or allocations.
 
-Each ladder knot is measured once per retained entry. Measurements below the
+Each calibration attempt restarts measurement from the first point, and an
+entry makes at most three attempts; an attempt that completes has measured
+every ladder knot and every row afresh, while one that fails stops at its
+failing point. Measurements below the
 fixture's single-thread memory rate or below the previous accepted knot are
 rejected before linear interpolation in q within the same row. Missing widths
 use the nearest accepted endpoint outside the measured range; no accepted

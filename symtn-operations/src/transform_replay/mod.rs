@@ -36,7 +36,7 @@ mod entry;
 mod kernels;
 mod member;
 #[cfg(feature = "tenferro")]
-mod movement;
+pub(crate) mod movement;
 mod owned;
 #[cfg(test)]
 mod tests;

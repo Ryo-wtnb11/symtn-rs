@@ -85,7 +85,7 @@ pub use placement::ReportsPlacement;
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
 pub use probe::{
-    take_checked_block_passes, take_movement_model_evaluations, take_owned_block_prefills,
+    take_checked_block_passes, take_movement_decision_builds, take_owned_block_prefills,
     CheckedBlockPasses,
 };
 pub use replay_backend::*;
@@ -99,6 +99,9 @@ pub use transform_plan::{
     TreeTransformBlockSpec, TreeTransformGroupBlockSpec, TreeTransformGroupPlan,
     TreeTransformKeyBlockSpec,
 };
+#[cfg(all(feature = "tenferro", any(test, feature = "testing")))]
+#[doc(hidden)]
+pub use transform_replay::movement::movement_calibration_settled;
 pub use transform_replay::*;
 pub use transform_structure::*;
 pub use tree_profile::TreeTransformReplayProfile;
