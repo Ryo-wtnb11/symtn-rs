@@ -837,14 +837,8 @@ fn mixed_symmetric_slice_legal_empty_returns_unsliced_zero_layout() {
                 output_authority,
                 output_leg,
                 vec![
-                    crate::SectorSlice::new(
-                        output_sector,
-                        crate::DegeneracyRange::new(0, 1).unwrap(),
-                    ),
-                    crate::SectorSlice::new(
-                        output_sector,
-                        crate::DegeneracyRange::new(1, 2).unwrap(),
-                    ),
+                    crate::SectorSlice::new(output_sector, crate::DegeneracyRange::new(0, 1)),
+                    crate::SectorSlice::new(output_sector, crate::DegeneracyRange::new(1, 2)),
                 ],
             ),
             SymmetricSliceSpec::new(label("x"), authority, leg, Vec::new()),
@@ -1053,7 +1047,7 @@ fn compact_input_preflight_applies_to_output_slices() {
             authority_leg,
             vec![crate::SectorSlice::new(
                 sector,
-                crate::DegeneracyRange::new(0, 2).unwrap(),
+                crate::DegeneracyRange::new(0, 2),
             )],
         )],
     )
@@ -2398,4 +2392,108 @@ fn a_network_workspace_follows_the_engine_of_each_call() {
         .iter()
         .all(|buffers| buffers.output.is_none()));
     assert!(workspace.slots.iter().all(Option::is_none));
+}
+
+/// A provider failure after a completed slice is the typed provider error,
+/// and the next execution recovers. A one-slice plan over the same rectangle
+/// locates the decode that follows the first completed output slice.
+#[cfg(feature = "cgc-gen")]
+#[test]
+fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
+    use crate::injected_generic::{InjectedError, InjectedGeneric};
+    use std::sync::atomic::Ordering;
+    use symtn::typed::{CheckedGenericStructureError, GenericTensorError};
+
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::new();
+    let provider = Arc::new(InjectedGeneric::new());
+    let octet = symtn_core::testing::su_lie_rule(3)
+        .category()
+        .irrep(&[1, 1])
+        .unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(octet, 2)]).unwrap();
+    let lhs: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
+            (1 + ij[0] + 3 * ij[1]) as f64
+        })
+        .unwrap();
+    let rhs: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
+            (2 + 2 * ij[0] + ij[1]) as f64
+        })
+        .unwrap();
+    let inputs = vec![vec![label("a"), label("x")], vec![label("x"), label("c")]];
+    let output = vec![label("a"), label("c")];
+    let ir = NetworkIR::from_labels(inputs.clone(), output.clone()).unwrap();
+    let network = Network::new(inputs, vec![false; 2], vec![1; 2], output, Some(1)).unwrap();
+    let tensors = [&lhs, &rhs];
+    let planned = network.plan(&tensors, &GreedyDenseOptimizer).unwrap();
+    let cost = DenseCostModel::from_network(
+        &ir,
+        &[
+            DenseTensorInfo::new(vec![2, 2]),
+            DenseTensorInfo::new(vec![2, 2]),
+        ],
+    )
+    .unwrap();
+    let dense = SlicedPlan::new(
+        planned.plan().clone(),
+        crate::slice_plan_for(&ir, planned.plan(), &cost, &[label("a")]),
+    );
+    let multi = network.plan(&tensors, &dense).unwrap();
+    let slices = multi.slices().unwrap();
+    let index = &slices.indices()[0];
+    assert_eq!(index.output_position(), Some(0));
+    assert_eq!(index.pieces().len(), 2);
+    let sector = index.pieces()[0].sector();
+    assert!(index.pieces().iter().all(|piece| piece.sector() == sector));
+    let single_slice = SymmetricSlicePlan::try_new(
+        &ir,
+        slices.rule_identity().clone(),
+        vec![SymmetricSliceSpec::new(
+            index.label().clone(),
+            index.authority(),
+            index.authority_leg().clone(),
+            vec![crate::SectorSlice::new(
+                sector,
+                crate::DegeneracyRange::new(0, 2),
+            )],
+        )],
+    )
+    .unwrap();
+    let single = hand_sliced(&network, &tensors, multi.plan().clone(), single_slice);
+
+    // Warm provider-owned catalogs, then use the one-job output execution to
+    // locate the first checked decode after a completed output rectangle. The
+    // two-rectangle run has the same bind/compile/first-job sequence and
+    // strictly more decode calls.
+    execute_sliced(engine, &multi, &tensors, usize::MAX).unwrap();
+    provider.reset_decodes();
+    execute_sliced(engine, &single, &tensors, usize::MAX).unwrap();
+    let first_rectangle_end = provider.decode_calls.load(Ordering::SeqCst);
+    provider.reset_decodes();
+    let (expected, _) = execute_sliced(engine, &multi, &tensors, usize::MAX).unwrap();
+    let all_jobs_end = provider.decode_calls.load(Ordering::SeqCst);
+    assert!(first_rectangle_end > 0);
+    assert!(all_jobs_end > first_rectangle_end);
+
+    provider.arm_decode(first_rectangle_end + 1);
+    let error = execute_sliced(engine, &multi, &tensors, usize::MAX).unwrap_err();
+    assert!(matches!(
+        error,
+        GenericTensorError::Structure(CheckedGenericStructureError::Provider(
+            InjectedError::Decode
+        ))
+    ));
+    assert_eq!(
+        provider.decode_calls.load(Ordering::SeqCst),
+        first_rectangle_end + 1
+    );
+
+    provider.reset_decodes();
+    let (recovered, _) = execute_sliced(engine, &multi, &tensors, usize::MAX).unwrap();
+    assert_eq!(
+        recovered.dense_data().unwrap(),
+        expected.dense_data().unwrap()
+    );
 }

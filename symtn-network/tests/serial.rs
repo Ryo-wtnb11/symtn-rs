@@ -11,6 +11,9 @@ mod braiding_probe;
 mod counting_alloc;
 #[path = "../../tests/support/errors.rs"]
 mod errors;
+#[cfg(feature = "cgc-gen")]
+#[path = "support/injected_generic.rs"]
+mod injected_generic;
 #[path = "../../tests/support/network.rs"]
 mod network_support;
 #[path = "../../tests/support/numerics.rs"]

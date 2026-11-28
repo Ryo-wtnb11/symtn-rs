@@ -87,14 +87,11 @@ pub struct DegeneracyRange {
 }
 
 impl DegeneracyRange {
-    pub fn new(start: usize, end: usize) -> SliceResult<Self> {
-        if start == end {
-            return Err(SliceError::EmptyRange { at: start });
-        }
-        if start > end {
-            return Err(SliceError::ReversedRange { start, end });
-        }
-        Ok(Self { start, end })
+    /// Lowering builds its ranges directly; tests hand-build them here.
+    #[cfg(test)]
+    pub(crate) fn new(start: usize, end: usize) -> Self {
+        assert!(start < end, "a degeneracy range is nonempty");
+        Self { start, end }
     }
 
     pub fn start(self) -> usize {
@@ -114,7 +111,7 @@ pub struct SectorSlice {
 }
 
 impl SectorSlice {
-    pub fn new(sector: SectorId, range: DegeneracyRange) -> Self {
+    pub(crate) fn new(sector: SectorId, range: DegeneracyRange) -> Self {
         Self { sector, range }
     }
 
@@ -135,7 +132,7 @@ impl SectorSlice {
 /// is interpreted through the already-validated dual space; it is not a second
 /// raw sector id in this descriptor.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SymmetricSliceSpec {
+pub(crate) struct SymmetricSliceSpec {
     label: TemporaryLabel,
     authority: TensorAxis,
     authority_leg: SectorLeg,
@@ -143,7 +140,7 @@ pub struct SymmetricSliceSpec {
 }
 
 impl SymmetricSliceSpec {
-    pub fn new(
+    pub(crate) fn new(
         label: TemporaryLabel,
         authority: TensorAxis,
         authority_leg: SectorLeg,
@@ -215,9 +212,10 @@ impl SymmetricIndexSlice {
 /// process-local here and must not be serialized as a semantic sector label.
 /// The plan-wide [`RuleIdentity`] seals which rule gives those numeric ids
 /// meaning without retaining a fusion provider or any of its coefficients.
-/// Construction proves self-consistency against the supplied authority legs;
-/// it does not prove that those legs belong to later execution tensors. Bind
-/// this plan against the actual typed network before execution.
+/// [`crate::Network::plan`] lowers it from a [`SlicedPlan`]'s labels against
+/// the planning tensors' authority legs, and every
+/// [`crate::PlannedNetwork::execute`] binds it again against its own tensors.
+/// Read it through [`crate::PlannedNetwork::slices`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymmetricSlicePlan {
     rule_identity: RuleIdentity,
@@ -251,7 +249,7 @@ impl SymmetricSlicedPlan {
 
 impl SymmetricSlicePlan {
     /// Validate self-consistency against the supplied, unbound authority legs.
-    pub fn try_new(
+    pub(crate) fn try_new(
         ir: &NetworkIR,
         rule_identity: RuleIdentity,
         specs: Vec<SymmetricSliceSpec>,
@@ -1110,3 +1108,7 @@ mod tests {
         assert_eq!(restored, sp);
     }
 }
+
+#[cfg(test)]
+#[path = "slice_tests.rs"]
+mod symmetric_tests;

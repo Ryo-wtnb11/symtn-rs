@@ -2,18 +2,13 @@
 
 use crate::su2::{su2_irrep, su2_rule, Su2Rule};
 use std::collections::HashMap;
-use std::fmt::{self, Debug};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::fmt::Debug;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::LieGroupFusionRule;
-use symtn::sector::SectorId;
-use symtn::sector::{
-    BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericPivotal,
-    CheckedGenericRigidSymbols, FusionStyleKind, GenericFArray, GenericRMatrix, RuleIdentity,
-    SectorVec, TypedSectorAdmission,
-};
+#[cfg(feature = "opt-path")]
 use symtn::typed::CheckedGenericStructureError;
 use symtn::typed::{
     BlockFusionTrees, CheckedGenericPlanError, GenericTensorError, GradedSpace, TensorMap,
@@ -28,6 +23,7 @@ use symtn_network::{
     TemporaryLabel, TensorId,
 };
 
+use crate::injected_generic::{InjectedError, InjectedGeneric};
 use crate::network_support;
 use network_support::{net, op};
 
@@ -415,147 +411,6 @@ fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
     assert_same(&actual, &expected);
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum InjectedError {
-    Decode,
-    Encode,
-    Dual,
-    Symbol,
-    Provider,
-}
-
-impl fmt::Display for InjectedError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "injected {self:?} failure")
-    }
-}
-
-impl std::error::Error for InjectedError {}
-
-struct InjectedGeneric {
-    inner: LieGroupFusionRule,
-    fail_encode: AtomicBool,
-    fail_decode_at: AtomicUsize,
-    decode_calls: AtomicUsize,
-    fail_dual: AtomicBool,
-    dual_calls: AtomicUsize,
-    fail_symbol_at: AtomicUsize,
-    symbol_calls: AtomicUsize,
-    /// Reports a Fermionic braiding in place of the inner rule's.
-    fermionic: AtomicBool,
-}
-
-impl InjectedGeneric {
-    fn new() -> Self {
-        Self {
-            inner: symtn_core::testing::su_lie_rule(3),
-            fail_encode: AtomicBool::new(false),
-            fail_decode_at: AtomicUsize::new(0),
-            decode_calls: AtomicUsize::new(0),
-            fail_dual: AtomicBool::new(false),
-            dual_calls: AtomicUsize::new(0),
-            fail_symbol_at: AtomicUsize::new(0),
-            symbol_calls: AtomicUsize::new(0),
-            fermionic: AtomicBool::new(false),
-        }
-    }
-
-    fn reset_symbols(&self) {
-        self.fail_symbol_at.store(0, Ordering::SeqCst);
-        self.symbol_calls.store(0, Ordering::SeqCst);
-    }
-
-    fn arm_symbol(&self, ordinal: usize) {
-        self.symbol_calls.store(0, Ordering::SeqCst);
-        self.fail_symbol_at.store(ordinal, Ordering::SeqCst);
-    }
-
-    fn symbol(&self) -> Result<(), InjectedError> {
-        let ordinal = self.symbol_calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if self.fail_symbol_at.load(Ordering::SeqCst) == ordinal {
-            Err(InjectedError::Symbol)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn reset_decodes(&self) {
-        self.fail_decode_at.store(0, Ordering::SeqCst);
-        self.decode_calls.store(0, Ordering::SeqCst);
-    }
-
-    fn arm_decode(&self, ordinal: usize) {
-        self.decode_calls.store(0, Ordering::SeqCst);
-        self.fail_decode_at.store(ordinal, Ordering::SeqCst);
-    }
-}
-
-impl symtn_core::testing::Provider for InjectedGeneric {}
-
-impl CheckedGenericFusion for InjectedGeneric {
-    type Error = InjectedError;
-
-    fn rule_identity(&self) -> RuleIdentity {
-        CheckedGenericFusion::rule_identity(&self.inner)
-    }
-
-    fn fusion_style(&self) -> FusionStyleKind {
-        CheckedGenericFusion::fusion_style(&self.inner)
-    }
-
-    fn braiding_style(&self) -> BraidingStyleKind {
-        if self.fermionic.load(Ordering::SeqCst) {
-            BraidingStyleKind::Fermionic
-        } else {
-            CheckedGenericFusion::braiding_style(&self.inner)
-        }
-    }
-
-    fn vacuum(&self) -> SectorId {
-        CheckedGenericFusion::vacuum(&self.inner)
-    }
-
-    fn try_dual(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
-        self.dual_calls.fetch_add(1, Ordering::SeqCst);
-        if self.fail_dual.load(Ordering::SeqCst) {
-            Err(InjectedError::Dual)
-        } else {
-            CheckedGenericFusion::try_dual(&self.inner, sector).map_err(|_| InjectedError::Provider)
-        }
-    }
-
-    fn try_fusion_channels(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, Self::Error> {
-        self.symbol()?;
-        CheckedGenericFusion::try_fusion_channels(&self.inner, left, right)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_fusion_channels_in_table(
-        &self,
-        left: SectorId,
-        right: SectorId,
-    ) -> Result<SectorVec, Self::Error> {
-        self.symbol()?;
-        CheckedGenericFusion::try_fusion_channels_in_table(&self.inner, left, right)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_nsymbol(
-        &self,
-        left: SectorId,
-        right: SectorId,
-        coupled: SectorId,
-    ) -> Result<usize, Self::Error> {
-        self.symbol()?;
-        CheckedGenericFusion::try_nsymbol(&self.inner, left, right, coupled)
-            .map_err(|_| InjectedError::Provider)
-    }
-}
-
 #[cfg(feature = "opt-path")]
 #[derive(Clone, Copy)]
 enum PlanningFailure {
@@ -634,98 +489,6 @@ fn checked_generic_optimizer_fallback_never_retries_provider_failures() {
         for failure in [PlanningFailure::Dual, PlanningFailure::Dimension] {
             assert_optimizer_does_not_retry_provider_failure(optimizer.clone(), failure);
         }
-    }
-}
-
-impl CheckedGenericRigidSymbols for InjectedGeneric {
-    type Scalar = f64;
-
-    fn try_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        self.symbol()?;
-        CheckedGenericRigidSymbols::try_dim_scalar(&self.inner, sector)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_sqrt_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        self.symbol()?;
-        CheckedGenericRigidSymbols::try_sqrt_dim_scalar(&self.inner, sector)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_inv_sqrt_dim_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        self.symbol()?;
-        CheckedGenericRigidSymbols::try_inv_sqrt_dim_scalar(&self.inner, sector)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_frobenius_schur_phase_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        self.symbol()?;
-        CheckedGenericRigidSymbols::try_frobenius_schur_phase_scalar(&self.inner, sector)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_f_symbol_generic(
-        &self,
-        a: SectorId,
-        b: SectorId,
-        c: SectorId,
-        d: SectorId,
-        e: SectorId,
-        f: SectorId,
-    ) -> Result<GenericFArray<f64>, Self::Error> {
-        self.symbol()?;
-        CheckedGenericRigidSymbols::try_f_symbol_generic(&self.inner, a, b, c, d, e, f)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_r_symbol_generic(
-        &self,
-        a: SectorId,
-        b: SectorId,
-        c: SectorId,
-    ) -> Result<GenericRMatrix<f64>, Self::Error> {
-        self.symbol()?;
-        CheckedGenericRigidSymbols::try_r_symbol_generic(&self.inner, a, b, c)
-            .map_err(|_| InjectedError::Provider)
-    }
-}
-
-impl CheckedGenericPivotal for InjectedGeneric {
-    fn try_twist_scalar(&self, sector: SectorId) -> Result<f64, Self::Error> {
-        self.symbol()?;
-        CheckedGenericPivotal::try_twist_scalar(&self.inner, sector)
-            .map_err(|_| InjectedError::Provider)
-    }
-}
-
-impl TypedSectorAdmission for InjectedGeneric {
-    type Sector = symtn_core::LieIrrep;
-    type Error = InjectedError;
-    type Mode = CheckedGenericAdmissionMode;
-
-    fn typed_rule_identity(&self) -> RuleIdentity {
-        CheckedGenericFusion::rule_identity(self)
-    }
-
-    fn try_encode_label(&self, sector: &Self::Sector) -> Result<SectorId, Self::Error> {
-        if self.fail_encode.load(Ordering::SeqCst) {
-            return Err(InjectedError::Encode);
-        }
-        TypedSectorAdmission::try_encode_label(&self.inner, sector)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_decode_label(&self, sector: SectorId) -> Result<Self::Sector, Self::Error> {
-        let ordinal = self.decode_calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if self.fail_decode_at.load(Ordering::SeqCst) == ordinal {
-            return Err(InjectedError::Decode);
-        }
-        TypedSectorAdmission::try_decode_label(&self.inner, sector)
-            .map_err(|_| InjectedError::Provider)
-    }
-
-    fn try_dual_id(&self, sector: SectorId) -> Result<SectorId, Self::Error> {
-        self.try_dual(sector)
     }
 }
 
@@ -954,77 +717,6 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
         let case_refs = case_tensors.iter().take(operands).collect::<Vec<_>>();
         assert_injected_recovery(engine, &case_provider, &case_plan, &case_refs, ordinal);
     }
-}
-
-#[test]
-fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::new();
-    let provider = Arc::new(InjectedGeneric::new());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(su3_octet(), 2)]).unwrap();
-    let lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
-            (1 + ij[0] + 3 * ij[1]) as f64
-        })
-        .unwrap();
-    let rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
-            (2 + 2 * ij[0] + ij[1]) as f64
-        })
-        .unwrap();
-    let inputs = vec![
-        ["a", "x"].map(TemporaryLabel::from).to_vec(),
-        ["x", "c"].map(TemporaryLabel::from).to_vec(),
-    ];
-    let output = ["a", "c"].map(TemporaryLabel::from).to_vec();
-    let ir = NetworkIR::from_labels(inputs.clone(), output.clone()).unwrap();
-    let network = Network::new(inputs, vec![false; 2], vec![1; 2], output, Some(1)).unwrap();
-    let tensors = [&lhs, &rhs];
-    let planned = network.plan(&tensors, &GreedyDenseOptimizer).unwrap();
-    let cost = DenseCostModel::from_network(
-        &ir,
-        &[
-            DenseTensorInfo::new(vec![2, 2]),
-            DenseTensorInfo::new(vec![2, 2]),
-        ],
-    )
-    .unwrap();
-    let dense = SlicedPlan::new(
-        planned.plan().clone(),
-        slice_plan_for(&ir, planned.plan(), &cost, &[TemporaryLabel::from("a")]),
-    );
-    let multi = network.plan(&tensors, &dense).unwrap();
-    let index = &multi.slices().unwrap().indices()[0];
-    assert_eq!(index.output_position(), Some(0));
-    assert_eq!(index.pieces().len(), 2);
-    let mut workspace = NetworkExecutionWorkspace::default();
-
-    // Warm provider-owned catalogs, then count the decodes of both output
-    // rectangles. The second rectangle decodes too, so failing the last
-    // decode fails after a completed rectangle.
-    multi.execute(engine, &tensors, &mut workspace).unwrap();
-    provider.reset_decodes();
-    let expected = multi.execute(engine, &tensors, &mut workspace).unwrap();
-    let all_jobs_end = provider.decode_calls.load(Ordering::SeqCst);
-    assert!(all_jobs_end > 0);
-
-    provider.arm_decode(all_jobs_end);
-    let error = multi.execute(engine, &tensors, &mut workspace).unwrap_err();
-    assert!(matches!(
-        error,
-        GenericTensorError::Structure(CheckedGenericStructureError::Provider(
-            InjectedError::Decode
-        ))
-    ));
-    assert_eq!(provider.decode_calls.load(Ordering::SeqCst), all_jobs_end);
-
-    provider.reset_decodes();
-    let recovered = multi.execute(engine, &tensors, &mut workspace).unwrap();
-    assert_eq!(
-        recovered.dense_data().unwrap(),
-        expected.dense_data().unwrap()
-    );
 }
 
 #[test]

@@ -116,50 +116,6 @@ impl core::fmt::Debug for symtn_network::ReplanPolicy
 pub fn symtn_network::ReplanPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for symtn_network::ReplanPolicy
 impl core::marker::StructuralPartialEq for symtn_network::ReplanPolicy
-pub enum symtn_network::SliceError
-pub symtn_network::SliceError::DuplicateLabel(symtn_network::TemporaryLabel)
-pub symtn_network::SliceError::EmptyRange
-pub symtn_network::SliceError::EmptyRange::at: usize
-pub symtn_network::SliceError::IncompleteCoverage
-pub symtn_network::SliceError::IncompleteCoverage::actual_start: usize
-pub symtn_network::SliceError::IncompleteCoverage::expected_start: usize
-pub symtn_network::SliceError::IncompleteCoverage::label: symtn_network::TemporaryLabel
-pub symtn_network::SliceError::IncompleteCoverage::sector: symtn_sectors::SectorId
-pub symtn_network::SliceError::InvalidAuthority
-pub symtn_network::SliceError::InvalidAuthority::actual: symtn_network::TensorAxis
-pub symtn_network::SliceError::InvalidAuthority::expected: symtn_network::TensorAxis
-pub symtn_network::SliceError::InvalidAuthority::label: symtn_network::TemporaryLabel
-pub symtn_network::SliceError::OverlappingRanges
-pub symtn_network::SliceError::OverlappingRanges::label: symtn_network::TemporaryLabel
-pub symtn_network::SliceError::OverlappingRanges::next_start: usize
-pub symtn_network::SliceError::OverlappingRanges::previous_end: usize
-pub symtn_network::SliceError::OverlappingRanges::sector: symtn_sectors::SectorId
-pub symtn_network::SliceError::RangeOutOfBounds
-pub symtn_network::SliceError::RangeOutOfBounds::degeneracy: usize
-pub symtn_network::SliceError::RangeOutOfBounds::end: usize
-pub symtn_network::SliceError::RangeOutOfBounds::label: symtn_network::TemporaryLabel
-pub symtn_network::SliceError::RangeOutOfBounds::sector: symtn_sectors::SectorId
-pub symtn_network::SliceError::RangeOutOfBounds::start: usize
-pub symtn_network::SliceError::ReversedRange
-pub symtn_network::SliceError::ReversedRange::end: usize
-pub symtn_network::SliceError::ReversedRange::start: usize
-pub symtn_network::SliceError::SliceCountOverflow
-pub symtn_network::SliceError::UnknownLabel(symtn_network::TemporaryLabel)
-pub symtn_network::SliceError::UnknownSector
-pub symtn_network::SliceError::UnknownSector::label: symtn_network::TemporaryLabel
-pub symtn_network::SliceError::UnknownSector::sector: symtn_sectors::SectorId
-impl core::clone::Clone for symtn_network::SliceError
-pub fn symtn_network::SliceError::clone(&self) -> symtn_network::SliceError
-impl core::cmp::Eq for symtn_network::SliceError
-pub fn symtn_network::SliceError::assert_fields_are_eq(&self)
-impl core::cmp::PartialEq for symtn_network::SliceError
-pub fn symtn_network::SliceError::eq(&self, &symtn_network::SliceError) -> bool
-impl core::error::Error for symtn_network::SliceError
-impl core::fmt::Debug for symtn_network::SliceError
-pub fn symtn_network::SliceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for symtn_network::SliceError
-pub fn symtn_network::SliceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for symtn_network::SliceError
 pub enum symtn_network::SliceKind
 pub symtn_network::SliceKind::Internal
 pub symtn_network::SliceKind::Output
@@ -255,7 +211,6 @@ impl core::marker::StructuralPartialEq for symtn_network::ContractionStep
 pub struct symtn_network::DegeneracyRange
 impl symtn_network::DegeneracyRange
 pub fn symtn_network::DegeneracyRange::end(self) -> usize
-pub fn symtn_network::DegeneracyRange::new(usize, usize) -> symtn_network::SliceResult<Self>
 pub fn symtn_network::DegeneracyRange::start(self) -> usize
 impl core::clone::Clone for symtn_network::DegeneracyRange
 pub fn symtn_network::DegeneracyRange::clone(&self) -> symtn_network::DegeneracyRange
@@ -464,7 +419,6 @@ pub fn symtn_network::PlannedNetwork::plan(&self) -> &symtn_network::Contraction
 pub fn symtn_network::PlannedNetwork::slices(&self) -> core::option::Option<&symtn_network::SymmetricSlicePlan>
 pub struct symtn_network::SectorSlice
 impl symtn_network::SectorSlice
-pub fn symtn_network::SectorSlice::new(symtn_sectors::SectorId, symtn_network::DegeneracyRange) -> Self
 pub fn symtn_network::SectorSlice::range(&self) -> symtn_network::DegeneracyRange
 pub fn symtn_network::SectorSlice::sector(&self) -> symtn_sectors::SectorId
 impl core::clone::Clone for symtn_network::SectorSlice
@@ -547,7 +501,6 @@ pub fn symtn_network::SymmetricSlicePlan::indices(&self) -> &[symtn_network::Sym
 pub fn symtn_network::SymmetricSlicePlan::is_empty(&self) -> bool
 pub fn symtn_network::SymmetricSlicePlan::nslices(&self) -> u128
 pub fn symtn_network::SymmetricSlicePlan::rule_identity(&self) -> &symtn_sectors::rule_identity::RuleIdentity
-pub fn symtn_network::SymmetricSlicePlan::try_new(&symtn_network::NetworkIR, symtn_sectors::rule_identity::RuleIdentity, alloc::vec::Vec<symtn_network::SymmetricSliceSpec>) -> symtn_network::SliceResult<Self>
 impl core::clone::Clone for symtn_network::SymmetricSlicePlan
 pub fn symtn_network::SymmetricSlicePlan::clone(&self) -> symtn_network::SymmetricSlicePlan
 impl core::cmp::Eq for symtn_network::SymmetricSlicePlan
@@ -559,20 +512,6 @@ pub fn symtn_network::SymmetricSlicePlan::fmt(&self, &mut core::fmt::Formatter<'
 impl core::hash::Hash for symtn_network::SymmetricSlicePlan
 pub fn symtn_network::SymmetricSlicePlan::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::StructuralPartialEq for symtn_network::SymmetricSlicePlan
-pub struct symtn_network::SymmetricSliceSpec
-impl symtn_network::SymmetricSliceSpec
-pub fn symtn_network::SymmetricSliceSpec::new(symtn_network::TemporaryLabel, symtn_network::TensorAxis, symtn_core::sector::SectorLeg, alloc::vec::Vec<symtn_network::SectorSlice>) -> Self
-impl core::clone::Clone for symtn_network::SymmetricSliceSpec
-pub fn symtn_network::SymmetricSliceSpec::clone(&self) -> symtn_network::SymmetricSliceSpec
-impl core::cmp::Eq for symtn_network::SymmetricSliceSpec
-pub fn symtn_network::SymmetricSliceSpec::assert_fields_are_eq(&self)
-impl core::cmp::PartialEq for symtn_network::SymmetricSliceSpec
-pub fn symtn_network::SymmetricSliceSpec::eq(&self, &symtn_network::SymmetricSliceSpec) -> bool
-impl core::fmt::Debug for symtn_network::SymmetricSliceSpec
-pub fn symtn_network::SymmetricSliceSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for symtn_network::SymmetricSliceSpec
-pub fn symtn_network::SymmetricSliceSpec::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::StructuralPartialEq for symtn_network::SymmetricSliceSpec
 pub struct symtn_network::SymmetricSliceStats
 impl symtn_network::SymmetricSliceStats
 pub fn symtn_network::SymmetricSliceStats::destination_bytes(self) -> usize
@@ -703,4 +642,3 @@ pub fn symtn_network::plan_cache_stats(&symtn::runtime::Runtime) -> symtn_networ
 pub fn symtn_network::save_plan_cache(&symtn::runtime::Runtime) -> alloc::string::String
 pub fn symtn_network::slice_plan_for(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel, &[symtn_network::TemporaryLabel]) -> symtn_network::SlicePlan
 pub type symtn_network::Result<T> = core::result::Result<T, symtn_network::ContractError>
-pub type symtn_network::SliceResult<T> = core::result::Result<T, symtn_network::SliceError>

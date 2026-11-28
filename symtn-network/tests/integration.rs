@@ -26,7 +26,6 @@ mod plan_api_equivalence;
 mod plan_cache;
 mod plan_text_input;
 mod single_precision_network;
-mod symmetric_slice;
 mod symmetric_slice_lowering;
 mod tk_fermionic_correspondence;
 mod typed_cuda_network;

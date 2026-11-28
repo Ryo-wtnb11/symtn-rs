@@ -9,14 +9,7 @@ use crate::slice::SliceKind;
 
 /// Validation failures for coefficient-free symmetric slicing descriptors.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SliceError {
-    EmptyRange {
-        at: usize,
-    },
-    ReversedRange {
-        start: usize,
-        end: usize,
-    },
+pub(crate) enum SliceError {
     UnknownLabel(TemporaryLabel),
     DuplicateLabel(TemporaryLabel),
     InvalidAuthority {
@@ -50,7 +43,7 @@ pub enum SliceError {
     SliceCountOverflow,
 }
 
-pub type SliceResult<T> = std::result::Result<T, SliceError>;
+pub(crate) type SliceResult<T> = std::result::Result<T, SliceError>;
 
 /// Failure while lowering or binding a symmetric sliced plan; the network
 /// boundary folds it into the tensor error ([`fold_lower_error`]).
@@ -254,10 +247,6 @@ impl std::error::Error for ContractError {}
 impl Display for SliceError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EmptyRange { at } => write!(f, "empty degeneracy range at {at}"),
-            Self::ReversedRange { start, end } => {
-                write!(f, "reversed degeneracy range [{start}, {end})")
-            }
             Self::UnknownLabel(label) => write!(f, "unknown sliced label `{label}`"),
             Self::DuplicateLabel(label) => write!(f, "duplicate sliced label `{label}`"),
             Self::InvalidAuthority {

@@ -49,6 +49,9 @@ extern crate self as symtn_network;
 #[cfg(test)]
 #[path = "../../symtn/tests/braiding_probe/mod.rs"]
 mod braiding_probe;
+#[cfg(all(test, feature = "cgc-gen"))]
+#[path = "../tests/support/injected_generic.rs"]
+mod injected_generic;
 
 mod cost;
 #[cfg(feature = "cotengra-python")]
@@ -71,7 +74,7 @@ mod tree;
 pub use cost::{DenseCostModel, DenseTensorInfo};
 #[cfg(feature = "cotengra-python")]
 pub use cotengra_python::CotengraPythonOptimizer;
-pub use error::{ContractError, Result, SliceError, SliceResult};
+pub use error::{ContractError, Result};
 pub use ir::{HyperEdge, NetworkIR, TensorNode};
 pub use labels::{LabelOccurrence, TemporaryLabel, TensorAxis, TensorId};
 pub use network::{
@@ -97,7 +100,7 @@ pub use plancache::{
 };
 pub use slice::{
     greedy_slice, slice_plan_for, DegeneracyRange, SectorSlice, SliceKind, SliceLabels, SlicePlan,
-    SlicedPlan, SymmetricIndexSlice, SymmetricSlicePlan, SymmetricSliceSpec,
+    SlicedPlan, SymmetricIndexSlice, SymmetricSlicePlan,
 };
 pub use tree::ContractionTree;
 

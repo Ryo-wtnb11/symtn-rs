@@ -1,11 +1,13 @@
+use crate::error::SliceError;
+use crate::slice::SymmetricSliceSpec;
+use crate::{
+    DegeneracyRange, NetworkIR, SectorSlice, SliceKind, SymmetricSlicePlan, TemporaryLabel,
+    TensorAxis, TensorId,
+};
 use symtn::expert::SectorLeg;
 use symtn::sector::FusionRule;
 use symtn::sector::{
     FermionParityFusionRule, FermionParityIrrep, SectorId, U1FusionRule, U1Irrep, ZNFusionRule,
-};
-use symtn_network::{
-    DegeneracyRange, NetworkIR, SectorSlice, SliceError, SliceKind, SymmetricSlicePlan,
-    SymmetricSliceSpec, TemporaryLabel, TensorAxis, TensorId,
 };
 
 fn label(name: &str) -> TemporaryLabel {
@@ -13,7 +15,7 @@ fn label(name: &str) -> TemporaryLabel {
 }
 
 fn range(start: usize, end: usize) -> DegeneracyRange {
-    DegeneracyRange::new(start, end).unwrap()
+    DegeneracyRange::new(start, end)
 }
 
 fn piece(sector: usize, start: usize, end: usize) -> SectorSlice {
@@ -192,16 +194,7 @@ fn preserves_output_axis_order_separately_from_canonical_label_order() {
 }
 
 #[test]
-fn rejects_every_range_partition_and_authority_error() {
-    assert_eq!(
-        DegeneracyRange::new(2, 2),
-        Err(SliceError::EmptyRange { at: 2 })
-    );
-    assert_eq!(
-        DegeneracyRange::new(3, 2),
-        Err(SliceError::ReversedRange { start: 3, end: 2 })
-    );
-
+fn rejects_every_partition_and_authority_error() {
     let ir = internal_ir();
     let leg = SectorLeg::new([(SectorId::new(1), 3)], false);
     let make = |pieces| spec("x", axis(0), leg.clone(), pieces);
