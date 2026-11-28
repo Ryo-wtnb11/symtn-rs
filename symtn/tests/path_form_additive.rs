@@ -53,10 +53,9 @@ fn unified_methods_resolve_in_path_form() {
     let adjoint = TensorMap::adjoint(&t, engine).unwrap();
     let owned = TensorMap::materialize(&adjoint, engine).unwrap();
     assert_eq!(owned.dense_data().unwrap(), t.dense_data().unwrap());
-    let view = TensorMap::adjoint_view(&t);
     // `t` is the identity, so `t ∘ t^H` is `t`.
     assert_eq!(
-        t.compose(engine, view).unwrap().dense_data().unwrap(),
+        t.compose(engine, &adjoint).unwrap().dense_data().unwrap(),
         t.dense_data().unwrap()
     );
 

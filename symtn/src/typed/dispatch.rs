@@ -119,11 +119,6 @@ where
     #[doc(hidden)]
     fn braiding_style(_: ExecToken, provider: &R) -> symtn_core::BraidingStyleKind;
 
-    /// Lowers a facade error to [`Error`] for the provider-neutral
-    /// [`TensorRef`] adjoint constructor.
-    #[doc(hidden)]
-    fn facade_error_into_error(_: ExecToken, error: Self::FacadeError) -> Error;
-
     /// TensorKit `blockdim(P, c)`: the reduced dimension of coupled sector
     /// `coupled` in the product space `product`, zero when it does not occur.
     #[doc(hidden)]

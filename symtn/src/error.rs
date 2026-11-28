@@ -105,8 +105,7 @@ pub enum Error {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Alternative {
     /// Copy the input into an owned dense tensor with
-    /// [`crate::typed::TensorMap::materialize`] and pass that instead; for
-    /// an adjoint view of `t`, `&t.adjoint()?.materialize()?`.
+    /// [`crate::typed::TensorMap::materialize`] and pass that instead.
     Materialize,
 }
 

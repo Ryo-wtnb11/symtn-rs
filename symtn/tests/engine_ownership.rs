@@ -110,11 +110,12 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 1
     for entry in eigh.d.diagview(engine).unwrap() {
         eigh_out.extend_from_slice(&entry.values);
     }
+    let eigh_v_adjoint = eigh.v.adjoint(engine).unwrap();
     let reconstructed = eigh
         .v
         .compose(engine, &eigh.d)
         .unwrap()
-        .compose(engine, eigh.v.adjoint_view())
+        .compose(engine, &eigh_v_adjoint)
         .unwrap();
     eigh_out.extend_from_slice(reconstructed.dense_data().unwrap());
     let mut eigh_vals_out = Vec::new();
@@ -180,8 +181,9 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 1
         .unwrap()
         .to_vec();
     let null = t.left_null(engine, &[0, 1], &[2]).unwrap();
+    let null_adjoint = null.adjoint(engine).unwrap();
     let null_out = null
-        .compose(engine, null.adjoint_view())
+        .compose(engine, &null_adjoint)
         .unwrap()
         .dense_data()
         .unwrap()

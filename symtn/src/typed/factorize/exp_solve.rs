@@ -79,7 +79,6 @@ where
         let Some(spectrum) = self.spectrum() else {
             // Only a compact divisor reads a lazy `rhs` in place; the dense
             // route materializes both operands.
-            rhs.refuse_borrowed_view("solve")?;
             let output = self.factor_output_space(self.solve_homspace(rhs))?;
             return self.dense_solve(engine, rhs, output);
         };

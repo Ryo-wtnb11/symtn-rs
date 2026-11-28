@@ -111,11 +111,6 @@ where
                 (dense(body.data.as_ref())?, None)
             }
             TypedTensorRepr::Adjoint(view) => {
-                if view.borrowed {
-                    // Backstop: every refusing operation checks first, by
-                    // name, with `refuse_borrowed_view`.
-                    return Err(borrowed_view_unsupported("the operation"));
-                }
                 #[cfg(test)]
                 probe::hit(probe::Event::AdjointMaterialization);
                 (
@@ -253,9 +248,9 @@ where
         match &self.repr {
             TypedTensorRepr::Owned(body) => match &*body.data {
                 TypedData::Dense(data) => Ok(data.as_slice()),
-                TypedData::Diagonal(_) => Err(borrowed_view_unsupported("dense_data")),
+                TypedData::Diagonal(_) => Err(materialize_unsupported("dense_data")),
             },
-            TypedTensorRepr::Adjoint(_) => Err(borrowed_view_unsupported("dense_data")),
+            TypedTensorRepr::Adjoint(_) => Err(materialize_unsupported("dense_data")),
         }
     }
 }
@@ -689,7 +684,7 @@ where
     > {
         let data = self
             .dense_data()
-            .map_err(|_| borrowed_view_unsupported("subblocks"))
+            .map_err(|_| materialize_unsupported("subblocks"))
             .map_err(FacadeError::<R>::from)?;
         let structure = self.logical_space().space().structure();
         let mut labelled = Vec::with_capacity(structure.block_count());

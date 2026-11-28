@@ -903,7 +903,7 @@ fn twist_cuda_rows_match_host() {
     rows::<Complex64>(engine, cuda, &runtime, |x| x);
 }
 
-/// `adjoint`/`adjoint_view`/`materialize` Host rows on `[V, V*] <- [V]`:
+/// `adjoint`/`materialize` Host rows on `[V, V*] <- [V]`:
 /// dense, lazy adjoint and compact operands. The lazy materialization is
 /// checked through `inner(a^H, b^H) = conj(inner(a, b))`, which pins the
 /// conjugation, and through the exact round trip `(a^H)^H = a`.
@@ -975,15 +975,6 @@ macro_rules! materialize_rows {
                 .unwrap(),
             a.dense_data().unwrap(),
             "exact round trip"
-        );
-
-        // The borrowed view is the operand `adjoint` gives.
-        assert_eq!(
-            a.compose($engine, a.adjoint_view())
-                .unwrap()
-                .dense_data()
-                .unwrap(),
-            a.compose($engine, &lazy_a).unwrap().dense_data().unwrap()
         );
 
         // Compact: the adjoint stays compact; materialize densifies.

@@ -215,8 +215,9 @@ fn spectra_satisfy_weighted_trace_identities(case: &Case) {
         assert!(close(got, norm2, norm2), "{what}: {got} != ‖t‖² {norm2}");
     }
 
+    let t_adjoint = t.adjoint(engine).unwrap();
     let hermitian = t
-        .axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
+        .axpby(engine, Complex64::ONE, &t_adjoint, Complex64::ONE)
         .unwrap();
     let eigh = hermitian
         .eigh_vals(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
@@ -369,19 +370,21 @@ fn decompositions_reconstruct(case: &Case) {
         &wh.adjoint(engine).unwrap().materialize(engine).unwrap(),
     );
 
+    let t_adjoint = t.adjoint(engine).unwrap();
     let hermitian = t
-        .axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
+        .axpby(engine, Complex64::ONE, &t_adjoint, Complex64::ONE)
         .unwrap();
     let eigh = hermitian
         .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
+    let eigh_v_adjoint = eigh.v.adjoint(engine).unwrap();
     assert_near(
         "v d v^H",
         &eigh
             .v
             .compose(engine, &eigh.d)
             .unwrap()
-            .compose(engine, eigh.v.adjoint_view())
+            .compose(engine, &eigh_v_adjoint)
             .unwrap(),
         &hermitian,
     );
@@ -422,11 +425,12 @@ fn decompositions_reconstruct(case: &Case) {
         .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
     let exp_d = small_eigh.d.map_diagonal(engine, |x| x.exp()).unwrap();
+    let small_eigh_v_adjoint = small_eigh.v.adjoint(engine).unwrap();
     let spectral_exp = small_eigh
         .v
         .compose(engine, &exp_d)
         .unwrap()
-        .compose(engine, small_eigh.v.adjoint_view())
+        .compose(engine, &small_eigh_v_adjoint)
         .unwrap();
     assert_near(
         "exp",
@@ -475,8 +479,9 @@ fn decompositions_reconstruct(case: &Case) {
         runtime,
         &n.adjoint(engine).unwrap().materialize(engine).unwrap(),
     );
+    let n_adjoint = n.adjoint(engine).unwrap();
     assert!(
-        wide.compose(engine, n.adjoint_view())
+        wide.compose(engine, &n_adjoint)
             .unwrap()
             .norm(engine, 2.0)
             .unwrap()
@@ -855,8 +860,9 @@ fn planar_contraction_then_factorization(case: &Case, norm: f64, trace: Complex6
     let svd = c.svd_vals(engine, &[0, 1], &[2, 3]).unwrap();
     let got = case.weighted_sum(&svd, |s| s * s);
     assert!(close(got, norm * norm, norm * norm), "planar svd: Σ d σ²");
+    let c_adjoint = c.adjoint(engine).unwrap();
     let hermitian = c
-        .axpby(engine, Complex64::ONE, c.adjoint_view(), Complex64::ONE)
+        .axpby(engine, Complex64::ONE, &c_adjoint, Complex64::ONE)
         .unwrap();
     let eigh = hermitian
         .eigh_vals(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
@@ -1169,14 +1175,15 @@ fn a_real_complex_embedding_factorizes_exactly_as_the_real_symbol_rule() {
     );
     assert_eq!(cq.r.dense_data().unwrap(), rq.r.dense_data().unwrap());
     macro_rules! hermitian_spectrum {
-        ($engine:ident, $t:expr) => {
+        ($engine:ident, $t:expr) => {{
+            let t_adjoint = $t.adjoint($engine).unwrap();
             bits(
-                $t.axpby($engine, Complex64::ONE, $t.adjoint_view(), Complex64::ONE)
+                $t.axpby($engine, Complex64::ONE, &t_adjoint, Complex64::ONE)
                     .unwrap()
                     .eigh_vals($engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
                     .unwrap(),
             )
-        };
+        }};
     }
     assert_eq!(
         hermitian_spectrum!(engine, complex),
@@ -1211,7 +1218,8 @@ fn a_prepared_batched_eigh_equals_eager_on_table_rule_members() {
     let case = Case::ising();
     let members = ["t", "u"].map(|tag| {
         let t = case.filled(tag, 1, 1);
-        t.axpby(engine, Complex64::ONE, t.adjoint_view(), Complex64::ONE)
+        let t_adjoint = t.adjoint(engine).unwrap();
+        t.axpby(engine, Complex64::ONE, &t_adjoint, Complex64::ONE)
             .unwrap()
     });
     let stack = StackedTensorMap::pack(&members).unwrap();

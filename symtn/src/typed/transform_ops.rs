@@ -906,17 +906,4 @@ where
             },
         })
     }
-
-    /// Borrowed adjoint view: the operand [`Self::adjoint`] would give,
-    /// passed without building it. See [`TensorRef`].
-    pub fn adjoint_view(&self) -> TensorRef<'_, R, D, S> {
-        TensorRef {
-            base: self,
-            adjoint: Some(|tensor| {
-                tensor.lazy_adjoint().map_err(|error| {
-                    <R::Mode as TypedTensorModeDispatch<R>>::facade_error_into_error(EXEC, error)
-                })
-            }),
-        }
-    }
 }

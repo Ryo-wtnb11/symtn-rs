@@ -237,7 +237,7 @@ fn ising_lazy_adjoint_transforms_equal_transforms_of_the_materialized_adjoint() 
 }
 
 #[test]
-fn ising_compose_with_an_adjoint_view_equals_the_materialized_adjoint() {
+fn ising_compose_with_a_lazy_adjoint_equals_the_materialized_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let fixture = fixture();
     let t = parent(&fixture, 2);
@@ -245,9 +245,10 @@ fn ising_compose_with_an_adjoint_view_equals_the_materialized_adjoint() {
     // (V V V <- V) o (V <- V V V)
     let materialized = s.adjoint(engine).unwrap().materialize(engine).unwrap();
     let want = entries(&t.compose(engine, &materialized).unwrap());
+    let s_adjoint = s.adjoint(engine).unwrap();
     assert_close(
         "compose(t, s^H view)",
-        &entries(&t.compose(engine, s.adjoint_view()).unwrap()),
+        &entries(&t.compose(engine, &s_adjoint).unwrap()),
         &want,
     );
     // (V <- V V V) o (V V V <- V), the lazy operand on the left.
@@ -279,9 +280,8 @@ fn ising_axpby_with_lazy_adjoints_equals_the_materialized_combination() {
         &want,
     );
     // One lazy operand, read in its logical orientation.
-    let one = eager_t
-        .axpby(engine, alpha, s.adjoint_view(), beta)
-        .unwrap();
+    let s_adjoint = s.adjoint(engine).unwrap();
+    let one = eager_t.axpby(engine, alpha, &s_adjoint, beta).unwrap();
     assert_close("axpby(t^H, s^H view)", &entries(&one), &want);
 }
 

@@ -286,22 +286,20 @@ where
     /// device first (#1383). A lazy adjoint CUDA operand returns
     /// [`Error::UnsupportedOnDevice`].
     #[doc(alias = "dot")]
-    pub fn inner<'a>(
+    pub fn inner(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
     ) -> Result<D, FacadeError<R>> {
         let engine = cx.engine();
         self.inner_impl(engine, other)
     }
 
-    fn inner_impl<'a>(
+    fn inner_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D, S>>,
+        other: &TensorMap<R, D, S>,
     ) -> Result<D, FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
         super::linear_ops::require_same_runtime_and_space(self, other)?;
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
             if lhs.spectrum().is_some() || rhs.spectrum().is_some() {

@@ -250,11 +250,10 @@ fn geometries_match(case: &Case, rotated: &Rotated) {
     // `θ[l s1 s2; a] * conj(θ[l s1 s2; b])`: conj is the lazy adjoint.
     let theta = case.filled("t6", 3, 1);
     let g6 = spec(&[0, 1, 2], &[1, 2, 3], &[0], &[1]);
+    let theta_adjoint = theta.adjoint(engine).unwrap();
     case.assert_matches(
         "g6",
-        &theta
-            .planar_contract(engine, theta.adjoint_view(), &g6)
-            .unwrap(),
+        &theta.planar_contract(engine, &theta_adjoint, &g6).unwrap(),
         rotated.g6,
     );
 }
@@ -622,7 +621,7 @@ fn max_distance(lhs: &[f64], rhs: &[f64]) -> f64 {
 /// fℤ₂×U(1) (design §7.5): the cyclic geometry with an operand transposed
 /// on each side and a rotated output equals the explicit steps and differs
 /// from `contract`; a lazy-adjoint operand equals the steps over the same
-/// adjoint view.
+/// lazy adjoint.
 #[test]
 fn fermionic_u1_planar_contract_is_the_explicit_steps() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -653,9 +652,8 @@ fn fermionic_u1_planar_contract_is_the_explicit_steps() {
     let theta =
         TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v, &v], [&v], 23).unwrap();
     let g6 = spec(&[0, 1, 2], &[1, 2, 3], &[0], &[1]);
-    let planar = theta
-        .planar_contract(engine, theta.adjoint_view(), &g6)
-        .unwrap();
+    let theta_adjoint = theta.adjoint(engine).unwrap();
+    let planar = theta.planar_contract(engine, &theta_adjoint, &g6).unwrap();
     let materialized = theta.adjoint(engine).unwrap().materialize(engine).unwrap();
     let materialized_transpose = materialized.transpose(engine, &[3, 2, 1], &[0]).unwrap();
     let explicit = theta
@@ -669,7 +667,8 @@ fn fermionic_u1_planar_contract_is_the_explicit_steps() {
         max_distance(got, explicit.dense_data().unwrap()) <= 1e-12 * scale.max(1.0),
         "lazy adjoint steps"
     );
-    let ordinary = theta.contract(engine, theta.adjoint_view(), &g6).unwrap();
+    let theta_adjoint = theta.adjoint(engine).unwrap();
+    let ordinary = theta.contract(engine, &theta_adjoint, &g6).unwrap();
     assert!(
         max_distance(got, ordinary.dense_data().unwrap()) > 1e-3 * scale,
         "the supertrace twist distinguishes contract on the adjoint"

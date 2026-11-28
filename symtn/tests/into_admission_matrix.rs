@@ -1427,8 +1427,8 @@ const CONTRACT_ORDERS: [(&str, &[usize], &[usize]); 3] = [
 ];
 
 /// Every `contract_into` of `$lhs` (`[v, w'] ← [v, w']`) with the
-/// `[v, w'] ← [v]` operand: owned `$rhs`, and `$rhs_parent`'s lazy adjoint
-/// and adjoint view; `$lazy_lhs` (`[v, w'] ← [v, w']`) against the owned one.
+/// `[v, w'] ← [v]` operand: owned `$rhs`, and `$rhs_parent`'s lazy adjoint;
+/// `$lazy_lhs` (`[v, w'] ← [v, w']`) against the owned one.
 macro_rules! contract_cells {
     ($engine:ident, $runtime:expr, $lhs:expr, $lazy_lhs:expr, $rhs:expr, $rhs_parent:expr, $key:expr,
      $d:ty) => {{
@@ -1477,18 +1477,6 @@ macro_rules! contract_cells {
                 $d,
                 format!("contract O·L {order}")
             );
-            contract_cell!(
-                $engine,
-                rows,
-                $runtime,
-                $lhs,
-                lazy_rhs,
-                $rhs_parent.adjoint_view(),
-                spec,
-                $key,
-                $d,
-                format!("contract O·V {order}")
-            );
             // The composition order is planar: `planar_contract_into` on the
             // same operands (the fermionic rule takes its twist-free route).
             if order == "core" {
@@ -1498,9 +1486,6 @@ macro_rules! contract_cells {
                 contract_cell!(planar_contract, planar_contract_into;
                     $engine, rows, $runtime, $lazy_lhs, $rhs, &$rhs, spec, $key, $d,
                     "planar L·O".to_string());
-                contract_cell!(planar_contract, planar_contract_into;
-                    $engine, rows, $runtime, $lhs, lazy_rhs, $rhs_parent.adjoint_view(), spec,
-                    $key, $d, "planar O·V".to_string());
             }
         }
         rows

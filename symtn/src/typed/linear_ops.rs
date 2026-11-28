@@ -108,26 +108,25 @@ where
     ///     let _ = x.add(x, 1.0, 2.0);
     /// }
     /// ```
-    pub fn axpby<'a>(
+    pub fn axpby(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
         alpha: D,
-        y: impl Into<TensorRef<'a, R, D, S>>,
+        y: &TensorMap<R, D, S>,
         beta: D,
     ) -> Result<Self, FacadeError<R>> {
         let engine = cx.engine();
         self.axpby_impl(engine, alpha, y, beta)
     }
 
-    fn axpby_impl<'a>(
+    fn axpby_impl(
         &self,
         engine: &mut dyn Engine,
         alpha: D,
-        y: impl Into<TensorRef<'a, R, D, S>>,
+        y: &TensorMap<R, D, S>,
         beta: D,
     ) -> Result<Self, FacadeError<R>> {
-        let y = y.into().operand()?;
-        Ok(self.axpby_checked(engine, alpha, &y, beta)?)
+        Ok(self.axpby_checked(engine, alpha, y, beta)?)
     }
 
     /// The one body of [`Self::axpby`].

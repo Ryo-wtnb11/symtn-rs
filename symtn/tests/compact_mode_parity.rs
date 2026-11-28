@@ -896,25 +896,6 @@ where
         .collect()
 }
 
-/// Whether `error` is exactly the facade refusal of `expected` over the
-/// fixture's Anyonic braiding.
-fn is_checked_refusal(
-    error: &symtn::typed::GenericTensorError<InvalidSector>,
-    expected: symtn::typed::BraidingOp,
-) -> bool {
-    matches!(
-        error,
-        symtn::typed::GenericTensorError::Facade(symtn::typed::Error::Operation(operation))
-            if matches!(
-                **operation,
-                symtn::typed::OperationError::UnsupportedContractionBraiding {
-                    operation: actual,
-                    style: BraidingStyleKind::Anyonic,
-                } if actual == expected
-            )
-    )
-}
-
 fn assert_rows_close(mf: &[Option<Vec<Complex64>>], checked: &[Option<Vec<Complex64>>]) {
     assert_eq!(mf.len(), checked.len());
     for (row, (lhs, rhs)) in mf.iter().zip(checked).enumerate() {
@@ -1272,52 +1253,6 @@ fn checked_compose_arms_query_no_provider() {
         assert_eq!(result.dense_data().is_err(), compact, "{what}");
     }
     provider.fail_queries.store(false, Ordering::Relaxed);
-}
-
-#[test]
-fn checked_contraction_refuses_a_cold_borrowed_adjoint_before_resolving_it() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: every ordinary checked contraction entry decides braiding from the
-    // provider style before it resolves a borrowed adjoint view. The view
-    // of a dense `a: W ⊗ W ← W` on cold caches, whose resolution needs a
-    // fallible provider query, still gets the entry's typed refusal, and no
-    // query is made.
-    use symtn::typed::BraidingOp::Contraction;
-    let fixture = bond_fixture(
-        &z2_leg(CheckedZ2::new(BraidingStyleKind::Anyonic, -1.0)),
-        parity,
-        |x: f64| x,
-    );
-    let d = fixture.d.materialize(engine).unwrap();
-    // `d · a†` is `W ← W ⊗ W`, `b`'s space.
-    let ordinary_dst = &mut fixture.b.zeros_like(engine).unwrap();
-    let one_leg = spec(&[1], &[0], &[0], &[1, 2]);
-    let provider = fixture.a.provider();
-    symtn_core::clear_structure_caches();
-    provider.fail_queries.store(true, Ordering::Relaxed);
-    let queries = provider.queries.load(Ordering::Relaxed);
-    let view = || fixture.a.adjoint_view();
-    let cells = [
-        (
-            "contract",
-            Contraction,
-            d.contract(engine, view(), &one_leg).map(drop),
-        ),
-        (
-            "contract_into",
-            Contraction,
-            d.contract_into(engine, view(), &one_leg, Dest::overwrite(ordinary_dst)),
-        ),
-    ];
-    assert_eq!(provider.queries.load(Ordering::Relaxed), queries);
-    // The control: resolving the same view does query, and fails.
-    assert!(fixture.a.adjoint(engine).is_err());
-    provider.fail_queries.store(false, Ordering::Relaxed);
-    for (entry, operation, result) in cells {
-        let error = result.err().unwrap();
-        assert!(is_checked_refusal(&error, operation), "{entry}: {error:?}");
-    }
 }
 
 #[test]

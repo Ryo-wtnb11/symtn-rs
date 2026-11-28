@@ -73,24 +73,22 @@ where
     /// `SpaceMismatch` for mismatched product spaces on the other side or
     /// concatenated legs of opposite duality. Checked-Generic output-admission failures retain their typed
     /// provider error.
-    pub fn cat<'a>(
+    pub fn cat(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        other: impl Into<TensorRef<'a, R, D>>,
+        other: &TensorMap<R, D>,
         side: Side,
     ) -> Result<Self, FacadeError<R>> {
         let engine = cx.engine();
         self.cat_impl(engine, other, side)
     }
 
-    fn cat_impl<'a>(
+    fn cat_impl(
         &self,
         engine: &mut dyn Engine,
-        other: impl Into<TensorRef<'a, R, D>>,
+        other: &TensorMap<R, D>,
         side: Side,
     ) -> Result<Self, FacadeError<R>> {
-        let other = other.into().operand()?;
-        let other = &*other;
         let lhs_space = self.logical_space().space();
         let rhs_space = other.logical_space().space();
         if lhs_space.admission().rule_identity() != rhs_space.admission().rule_identity() {

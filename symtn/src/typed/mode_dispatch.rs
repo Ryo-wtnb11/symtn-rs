@@ -168,10 +168,6 @@ where
         symtn_core::FusionRule::braiding_style(provider)
     }
 
-    fn facade_error_into_error(_: ExecToken, error: Error) -> Error {
-        error
-    }
-
     fn sector_order_key(
         _: ExecToken,
         provider: &R,
@@ -288,18 +284,6 @@ where
 
     fn braiding_style(_: ExecToken, provider: &R) -> symtn_core::BraidingStyleKind {
         CheckedGenericFusion::braiding_style(provider)
-    }
-
-    // Why lossy: `TensorRef` is provider-neutral, so its adjoint constructor
-    // returns `Error`. The only non-facade failure of a checked-Generic
-    // adjoint is a broken invariant of an admitted layout. Carrying
-    // `GenericTensorError<E>` would need a provider-generic `Error` or a bound
-    // on the public `TensorRef`.
-    fn facade_error_into_error(_: ExecToken, error: Self::FacadeError) -> Error {
-        match error {
-            GenericTensorError::Facade(error) => error,
-            _ => Error::Internal("checked-Generic lazy adjoint of an admitted layout"),
-        }
     }
 
     fn sector_order_key(

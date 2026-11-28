@@ -71,9 +71,6 @@ pub(super) struct TypedAdjointView<R, D, S = Vec<D>> {
     pub(super) parent: Arc<TypedTensorBody<R, D, S>>,
     /// `parent`'s space and its adjoint, derived together.
     pub(super) adjoint: symtn_tensors::LazyAdjointSpace<R>,
-    /// Set only on the operation-local header a [`TensorRef`] resolves to:
-    /// the materialization path refuses it instead of copying.
-    pub(super) borrowed: bool,
 }
 
 impl<R, D, S> TypedAdjointView<R, D, S> {
@@ -104,11 +101,7 @@ impl<R, D, S> TypedAdjointView<R, D, S> {
             ) || adjoint.parent().space() == parent.space.space(),
             "a lazy adjoint's space pair belongs to its parent"
         );
-        Self {
-            parent,
-            adjoint,
-            borrowed: false,
-        }
+        Self { parent, adjoint }
     }
 
     /// The adjoint space the view reads as.
@@ -117,121 +110,10 @@ impl<R, D, S> TypedAdjointView<R, D, S> {
     }
 }
 
-/// Borrowed view of a [`TensorMap`], optionally as its adjoint.
-///
-/// `&t` converts into the plain view and [`TensorMap::adjoint_view`] gives
-/// the adjoint view (TensorKit `adjoint(t)`, TensorOperations' `conjA`
-/// flag). Operations take their second tensor as `impl Into<TensorRef>`, so
-/// both are passed the same way. The view copies nothing: it resolves, inside
-/// the call, to exactly the operand `&t.adjoint()?` would have been and runs
-/// the same code, so the result is the same.
-///
-/// An operation that would have to materialize the adjoint returns
-/// [`Error::Unsupported`] with [`crate::error::Alternative::Materialize`]
-/// instead of copying; pass `&t.adjoint()?.materialize()?` there.
-///
-/// ```
-/// use std::sync::Arc;
-///
-/// use symtn::sector::{U1FusionRule, U1Irrep};
-/// use symtn::typed::{GradedSpace, Runtime, TensorMap};
-///
-/// let engine = &mut symtn::typed::CpuEngine::serial();
-/// let runtime = Runtime::new();
-/// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
-/// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
-/// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 2)?;
-/// let b_adjoint = b.adjoint(engine)?;
-/// assert_eq!(a.inner(engine, b.adjoint_view())?, a.inner(engine, &b_adjoint)?);
-/// # Ok::<(), symtn::typed::Error>(())
-/// ```
-pub struct TensorRef<'a, R, D, S = Vec<D>> {
-    pub(super) base: &'a TensorMap<R, D, S>,
-    /// The base's own `adjoint`, captured where it exists; `None` for the
-    /// plain view. Why a `fn` pointer and not a bound on each operation:
-    /// `adjoint` needs the mode's adjoint space (`TypedAdjointSpace`), which
-    /// `contract` and `compose` do not.
-    pub(super) adjoint: Option<ViewAdjoint<R, D, S>>,
-}
-
-pub(super) type ViewAdjoint<R, D, S> = fn(&TensorMap<R, D, S>) -> Result<TensorMap<R, D, S>, Error>;
-
-// Why hand-written: the derives would demand `R`, `D`, `S: Clone`.
-impl<R, D, S> Clone for TensorRef<'_, R, D, S> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<R, D, S> Copy for TensorRef<'_, R, D, S> {}
-
-impl<'a, R, D, S> From<&'a TensorMap<R, D, S>> for TensorRef<'a, R, D, S> {
-    fn from(base: &'a TensorMap<R, D, S>) -> Self {
-        Self {
-            base,
-            adjoint: None,
-        }
-    }
-}
-
-impl<'a, R, D, S> TensorRef<'a, R, D, S> {
-    /// The operand's `(nout, rank)`, read without resolving it: an adjoint
-    /// exchanges codomain and domain.
-    pub(super) fn logical_shape(self) -> (usize, usize) {
-        let space = self.base.logical_space().space();
-        let nout = if self.adjoint.is_some() {
-            space.nin()
-        } else {
-            space.nout()
-        };
-        (nout, space.rank())
-    }
-
-    /// The operand an owned-lazy-adjoint call would have received. A plain
-    /// view is its base, unchanged, so `&t` behaves as the owned tensor, including
-    /// the owned lazy adjoint's implicit materialization (#1548). An
-    /// adjoint view is `adjoint(base)`, marked so that the materialization
-    /// path refuses it.
-    pub(super) fn operand(self) -> Result<std::borrow::Cow<'a, TensorMap<R, D, S>>, Error> {
-        let Some(adjoint) = self.adjoint else {
-            return Ok(std::borrow::Cow::Borrowed(self.base));
-        };
-        let resolved = adjoint(self.base)?;
-        Ok(std::borrow::Cow::Owned(resolved.into_borrowed_operand()))
-    }
-}
-
-pub(super) fn borrowed_view_unsupported(operation: &'static str) -> Error {
+pub(super) fn materialize_unsupported(operation: &'static str) -> Error {
     Error::Unsupported {
         operation,
         alternative: crate::error::Alternative::Materialize,
-    }
-}
-
-impl<R, D, S> TensorMap<R, D, S> {
-    /// Refuses a resolved adjoint view before `operation` does any work,
-    /// for operations whose only route for a lazy adjoint materializes it.
-    pub(super) fn refuse_borrowed_view(&self, operation: &'static str) -> Result<(), Error> {
-        match &self.repr {
-            TypedTensorRepr::Adjoint(view) if view.borrowed => {
-                Err(borrowed_view_unsupported(operation))
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn into_borrowed_operand(mut self) -> Self {
-        let TypedTensorRepr::Adjoint(view) = &mut self.repr else {
-            return self;
-        };
-        if let Some(unique) = Arc::get_mut(view) {
-            unique.borrowed = true;
-            return self;
-        }
-        let mut marked = TypedAdjointView::new(Arc::clone(&view.parent), view.adjoint.clone());
-        marked.borrowed = true;
-        *view = Arc::new(marked);
-        self
     }
 }
 
@@ -824,27 +706,20 @@ where
     /// already-admitted layouts carry differing rule-identity stamps,
     /// [`Error::RuntimeMismatch`] on differing runtimes, and
     /// [`Error::InvalidArgument`] when corresponding legs differ in duality.
-    ///
-    /// An adjoint view `source` (`t.adjoint_view()`) returns
-    /// [`Error::Unsupported`]: this operation would copy it. Pass
-    /// `&t.adjoint(engine)?.materialize(engine)?` instead.
-    pub fn absorb<'a>(
+    pub fn absorb(
         &self,
         cx: &mut (impl ExecContext + ?Sized),
-        source: impl Into<TensorRef<'a, R, D>>,
+        source: &TensorMap<R, D>,
     ) -> Result<Self, Error> {
         let engine = cx.engine();
         self.absorb_impl(engine, source)
     }
 
-    fn absorb_impl<'a>(
+    fn absorb_impl(
         &self,
         engine: &mut dyn Engine,
-        source: impl Into<TensorRef<'a, R, D>>,
+        source: &TensorMap<R, D>,
     ) -> Result<Self, Error> {
-        let source = source.into().operand()?;
-        let source = &*source;
-        source.refuse_borrowed_view("absorb")?;
         let destination_space = self.logical_space().space();
         let source_space = source.logical_space().space();
         if destination_space.nout() != source_space.nout()
